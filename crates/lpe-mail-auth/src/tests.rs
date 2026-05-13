@@ -14,6 +14,10 @@ fn env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn tenant_id(value: u128) -> Uuid {
+    Uuid::from_u128(value)
+}
+
 #[derive(Clone, Default)]
 struct FakeStore {
     session: Arc<Mutex<Option<AuthenticatedAccount>>>,
@@ -50,7 +54,7 @@ impl AccountAuthStore for FakeStore {
 
     fn append_audit_event<'a>(
         &'a self,
-        _tenant_id: &'a str,
+        _tenant_id: &'a Uuid,
         _entry: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move { Ok(()) })
@@ -66,9 +70,10 @@ fn password_hash(password: &str) -> String {
 
 #[tokio::test]
 async fn bearer_session_preserves_tenant_id() {
+    let expected_tenant_id = tenant_id(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa);
     let store = FakeStore {
         session: Arc::new(Mutex::new(Some(AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: expected_tenant_id,
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -84,16 +89,17 @@ async fn bearer_session_preserves_tenant_id() {
         .await
         .unwrap();
 
-    assert_eq!(principal.tenant_id, "tenant-a");
+    assert_eq!(principal.tenant_id, expected_tenant_id);
 }
 
 #[tokio::test]
 async fn basic_auth_preserves_tenant_id() {
+    let expected_tenant_id = tenant_id(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
     let encoded = base64::engine::general_purpose::STANDARD.encode("alice@example.test:secret");
     let store = FakeStore {
         session: Arc::default(),
         login: Arc::new(Mutex::new(Some(AccountLogin {
-            tenant_id: "tenant-b".to_string(),
+            tenant_id: expected_tenant_id,
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             password_hash: password_hash("secret"),
@@ -112,16 +118,17 @@ async fn basic_auth_preserves_tenant_id() {
         .await
         .unwrap();
 
-    assert_eq!(principal.tenant_id, "tenant-b");
+    assert_eq!(principal.tenant_id, expected_tenant_id);
 }
 
 #[tokio::test]
 async fn hinted_user_does_not_override_login_tenant() {
+    let expected_tenant_id = tenant_id(0xcccccccccccccccccccccccccccccccc);
     let encoded = base64::engine::general_purpose::STANDARD.encode("alice:secret");
     let store = FakeStore {
         session: Arc::default(),
         login: Arc::new(Mutex::new(Some(AccountLogin {
-            tenant_id: "tenant-c".to_string(),
+            tenant_id: expected_tenant_id,
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             password_hash: password_hash("secret"),
@@ -141,17 +148,18 @@ async fn hinted_user_does_not_override_login_tenant() {
         .unwrap();
 
     assert_eq!(principal.email, "alice@example.test");
-    assert_eq!(principal.tenant_id, "tenant-c");
+    assert_eq!(principal.tenant_id, expected_tenant_id);
 }
 
 #[tokio::test]
 async fn app_password_is_accepted_for_basic_auth() {
+    let expected_tenant_id = tenant_id(0xdddddddddddddddddddddddddddddddd);
     let encoded =
         base64::engine::general_purpose::STANDARD.encode("alice@example.test:device-secret");
     let store = FakeStore {
         session: Arc::default(),
         login: Arc::new(Mutex::new(Some(AccountLogin {
-            tenant_id: "tenant-d".to_string(),
+            tenant_id: expected_tenant_id,
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             password_hash: password_hash("primary-secret"),
@@ -173,7 +181,7 @@ async fn app_password_is_accepted_for_basic_auth() {
         .await
         .unwrap();
 
-    assert_eq!(principal.tenant_id, "tenant-d");
+    assert_eq!(principal.tenant_id, expected_tenant_id);
 }
 
 #[tokio::test]
@@ -185,7 +193,7 @@ async fn oauth_access_token_is_accepted_for_bearer_auth() {
         "0123456789abcdef0123456789abcdef",
     );
     let login = AccountLogin {
-        tenant_id: "tenant-e".to_string(),
+        tenant_id: tenant_id(0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee),
         account_id: Uuid::new_v4(),
         email: "alice@example.test".to_string(),
         password_hash: password_hash("secret"),
@@ -193,7 +201,7 @@ async fn oauth_access_token_is_accepted_for_bearer_auth() {
         display_name: "Alice".to_string(),
     };
     let principal = AccountPrincipal {
-        tenant_id: login.tenant_id.clone(),
+        tenant_id: login.tenant_id,
         account_id: login.account_id,
         email: login.email.clone(),
         display_name: login.display_name.clone(),
@@ -227,7 +235,7 @@ async fn oauth_access_token_rejects_surface_outside_scope() {
         "0123456789abcdef0123456789abcdef",
     );
     let login = AccountLogin {
-        tenant_id: "tenant-f".to_string(),
+        tenant_id: tenant_id(0xffffffffffffffffffffffffffffffff),
         account_id: Uuid::new_v4(),
         email: "alice@example.test".to_string(),
         password_hash: password_hash("secret"),
@@ -235,7 +243,7 @@ async fn oauth_access_token_rejects_surface_outside_scope() {
         display_name: "Alice".to_string(),
     };
     let principal = AccountPrincipal {
-        tenant_id: login.tenant_id.clone(),
+        tenant_id: login.tenant_id,
         account_id: login.account_id,
         email: login.email.clone(),
         display_name: login.display_name.clone(),

@@ -1327,7 +1327,7 @@ impl Storage {
 
     pub(crate) async fn ensure_default_contact_book_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         owner_account_id: Uuid,
     ) -> Result<Uuid> {
         sqlx::query_scalar::<_, Uuid>(
@@ -1350,7 +1350,7 @@ impl Storage {
 
     pub(crate) async fn ensure_default_calendar_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         owner_account_id: Uuid,
     ) -> Result<Uuid> {
         sqlx::query_scalar::<_, Uuid>(

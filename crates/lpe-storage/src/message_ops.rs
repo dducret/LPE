@@ -246,19 +246,13 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        self.fetch_jmap_emails(account_id, &[message_id])
-            .await?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("message not found"))?;
-
         let mut tx = self.pool.begin().await?;
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
             .await?;
         let source = sqlx::query(
             r#"
-            SELECT id, mailbox_id, thread_id, imap_uid, is_seen, is_flagged
+            SELECT id, mailbox_id, thread_id, imap_uid, is_seen, is_flagged, received_at::text AS received_at
             FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
@@ -276,6 +270,7 @@ impl Storage {
         .ok_or_else(|| anyhow::anyhow!("message not found"))?;
         let source_mailbox_id: Uuid = source.try_get("mailbox_id")?;
         if source_mailbox_id == target_mailbox_id {
+            tx.rollback().await?;
             return self
                 .fetch_jmap_emails(account_id, &[message_id])
                 .await?
@@ -297,6 +292,28 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("target mailbox not found"))?;
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailbox_messages
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mailbox_id = $3
+                  AND message_id = $4
+                  AND visibility <> 'expunged'
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(target_mailbox_id)
+        .bind(message_id)
+        .fetch_one(&mut *tx)
+        .await?
+        {
+            bail!("message already exists in target mailbox");
+        }
         let target_uid: i64 = sqlx::query_scalar(
             r#"
             UPDATE mailboxes
@@ -316,6 +333,52 @@ impl Storage {
         .bind(modseq)
         .fetch_one(&mut *tx)
         .await?;
+        let source_membership_id: Uuid = source.try_get("id")?;
+        let source_imap_uid: i64 = source.try_get("imap_uid")?;
+        let thread_id: Uuid = source.try_get("thread_id")?;
+        let target_membership_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_messages (
+                id, tenant_id, account_id, mailbox_id, message_id, thread_id,
+                imap_uid, modseq, is_seen, is_flagged, is_draft, received_at
+            )
+            VALUES (
+                $1, $2, $3, $4, $5, $6,
+                $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW())
+            )
+            "#,
+        )
+        .bind(target_membership_id)
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(target_mailbox_id)
+        .bind(message_id)
+        .bind(thread_id)
+        .bind(target_uid)
+        .bind(modseq)
+        .bind(source.try_get::<bool, _>("is_seen")?)
+        .bind(source.try_get::<bool, _>("is_flagged")?)
+        .bind(target_role == "drafts")
+        .bind(source.try_get::<String, _>("received_at")?)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE mailbox_messages
+            SET visibility = 'expunged',
+                expunged_at = NOW(),
+                modseq = $4,
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(source_membership_id)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
         sqlx::query(
             r#"
             UPDATE mailboxes
@@ -333,40 +396,48 @@ impl Storage {
         .bind(modseq)
         .execute(&mut *tx)
         .await?;
-        let moved = sqlx::query(
+        sqlx::query(
             r#"
-            UPDATE mailbox_messages
-            SET mailbox_id = $4,
-                imap_uid = $5,
-                modseq = $6,
-                is_draft = $7,
-                updated_at = NOW()
-            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            INSERT INTO mail_search_documents (
+                tenant_id, account_id, mailbox_message_id, message_id,
+                subject_text, participants_visible, body_text, attachment_text, search_vector
+            )
+            SELECT
+                tenant_id, account_id, $3, message_id,
+                subject_text, participants_visible, body_text, attachment_text, search_vector
+            FROM mail_search_documents
+            WHERE tenant_id = $1 AND message_id = $2
+            ORDER BY updated_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(target_membership_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM mail_search_documents
+            WHERE tenant_id = $1 AND account_id = $2 AND mailbox_message_id = $3
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .bind(source.try_get::<Uuid, _>("id")?)
-        .bind(target_mailbox_id)
-        .bind(target_uid)
-        .bind(modseq)
-        .bind(target_role == "drafts")
+        .bind(source_membership_id)
         .execute(&mut *tx)
         .await?;
-        if moved.rows_affected() == 0 {
-            bail!("message not found");
-        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
-        Self::insert_mail_change_log_in_tx(
+        let cursor = Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
             Some(account_id),
             Some(target_mailbox_id),
             "mailbox_message",
-            source.try_get("id")?,
+            target_membership_id,
             "moved",
             modseq,
             &principals,
@@ -374,10 +445,35 @@ impl Storage {
                 "messageId": message_id,
                 "sourceMailboxId": source_mailbox_id,
                 "targetMailboxId": target_mailbox_id,
-                "threadId": source.try_get::<Uuid, _>("thread_id")?,
-                "imapUid": target_uid
+                "sourceMailboxMessageId": source_membership_id,
+                "targetMailboxMessageId": target_membership_id,
+                "threadId": thread_id,
+                "imapUid": target_uid,
+                "sourceImapUid": source_imap_uid,
+                "targetImapUid": target_uid
             }),
         )
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, mailbox_id, object_kind, object_id,
+                message_id, mailbox_message_id, imap_uid, deleted_modseq,
+                change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, 'mailbox_message', $5, $6, $5, $7, $8, $9, 'move')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(source_mailbox_id)
+        .bind(source_membership_id)
+        .bind(message_id)
+        .bind(source_imap_uid)
+        .bind(modseq)
+        .bind(cursor)
+        .execute(&mut *tx)
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;

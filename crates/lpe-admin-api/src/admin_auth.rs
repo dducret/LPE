@@ -49,7 +49,7 @@ pub(crate) async fn login(
     {
         let _ = storage
             .append_audit_event(
-                &candidate.tenant_id,
+                candidate.tenant_id,
                 AuditEntryInput {
                     actor: email.clone(),
                     action: "admin-auth.login-failed".to_string(),
@@ -72,7 +72,7 @@ pub(crate) async fn login(
         if !totp::verify_code(&secret, code, totp::unix_time()) {
             let _ = storage
                 .append_audit_event(
-                    &candidate.tenant_id,
+                    candidate.tenant_id,
                     AuditEntryInput {
                         actor: email.clone(),
                         action: "admin-auth.totp-failed".to_string(),
@@ -91,7 +91,7 @@ pub(crate) async fn login(
     storage
         .create_admin_session(
             &token,
-            &candidate.tenant_id,
+            candidate.tenant_id,
             &email,
             admin_session_minutes(),
             auth_method,
@@ -100,7 +100,7 @@ pub(crate) async fn login(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &candidate.tenant_id,
+            candidate.tenant_id,
             AuditEntryInput {
                 actor: email.clone(),
                 action: "admin-auth.login-succeeded".to_string(),
@@ -128,7 +128,7 @@ pub(crate) async fn logout(
         if let Ok(Some(admin)) = storage.fetch_admin_session(&token).await {
             let _ = storage
                 .append_audit_event(
-                    &admin.tenant_id,
+                    admin.tenant_id,
                     AuditEntryInput {
                         actor: admin.email.clone(),
                         action: "admin-auth.logout".to_string(),
@@ -193,7 +193,7 @@ pub(crate) async fn enroll_totp(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &admin.tenant_id,
+            admin.tenant_id,
             AuditEntryInput {
                 actor: admin.email.clone(),
                 action: "admin-auth.totp-enrollment-started".to_string(),
@@ -236,7 +236,7 @@ pub(crate) async fn verify_totp_factor(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &admin.tenant_id,
+            admin.tenant_id,
             AuditEntryInput {
                 actor: admin.email.clone(),
                 action: "admin-auth.totp-enrollment-verified".to_string(),
@@ -266,7 +266,7 @@ pub(crate) async fn revoke_admin_factor(
     }
     let _ = storage
         .append_audit_event(
-            &admin.tenant_id,
+            admin.tenant_id,
             AuditEntryInput {
                 actor: admin.email.clone(),
                 action: "admin-auth.factor-revoked".to_string(),
@@ -375,18 +375,18 @@ pub(crate) async fn oidc_callback(
         .map_err(internal_error)?;
 
     let token = Uuid::new_v4().to_string();
+    let login = storage
+        .fetch_admin_login(&admin_email)
+        .await
+        .map_err(internal_error)?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "administrator not found".to_string(),
+        ))?;
     storage
         .create_admin_session(
             &token,
-            &storage
-                .fetch_admin_login(&admin_email)
-                .await
-                .map_err(internal_error)?
-                .ok_or((
-                    StatusCode::UNAUTHORIZED,
-                    "administrator not found".to_string(),
-                ))?
-                .tenant_id,
+            login.tenant_id,
             &admin_email,
             admin_session_minutes(),
             "oidc",

@@ -31,7 +31,7 @@ impl DurableBlobKind {
 
 #[derive(Debug)]
 pub(crate) struct PutBlobRequest<'a> {
-    pub(crate) tenant_id: &'a str,
+    pub(crate) tenant_id: &'a Uuid,
     pub(crate) domain_id: Uuid,
     pub(crate) kind: DurableBlobKind,
     pub(crate) media_type: &'a str,
@@ -74,7 +74,7 @@ pub(crate) struct StoredBlobStat {
 #[allow(dead_code)]
 pub(crate) struct BlobMigrationJob {
     pub(crate) id: Uuid,
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) domain_id: Uuid,
     pub(crate) blob_id: Uuid,
     pub(crate) blob_kind: String,
@@ -100,7 +100,7 @@ struct ActiveBlobPlacement {
     media_type: String,
     size_octets: i64,
     content_sha256: String,
-    blob_bytes: Vec<u8>,
+    blob_bytes: Option<Vec<u8>>,
 }
 
 #[derive(Debug)]
@@ -185,6 +185,10 @@ impl PostgresBlobStore {
         }
 
         let blob_id = Uuid::new_v4();
+        let database_bytes = match &write_pool.backend {
+            StorageBackendSelection::Postgres => Some(request.bytes),
+            StorageBackendSelection::S3Compatible(_) => None,
+        };
         sqlx::query(
             r#"
             INSERT INTO blobs (
@@ -202,10 +206,7 @@ impl PostgresBlobStore {
         .bind(&content_sha256)
         .bind(request.media_type)
         .bind(request.bytes.len() as i64)
-        .bind(match &write_pool.backend {
-            StorageBackendSelection::Postgres => request.bytes,
-            StorageBackendSelection::S3Compatible(_) => &[][..],
-        })
+        .bind(database_bytes)
         .bind(request.magika_status)
         .bind(request.extraction_status)
         .bind(request.validated)
@@ -236,8 +237,7 @@ impl PostgresBlobStore {
         tx: &mut sqlx::Transaction<'_, Postgres>,
         request: &PutBlobRequest<'_>,
     ) -> Result<WriteStoragePool> {
-        let tenant_id = Uuid::parse_str(request.tenant_id)
-            .map_err(|_| anyhow!("durable blob tenant id is invalid"))?;
+        let tenant_id = *request.tenant_id;
         let row = sqlx::query(
             r#"
             SELECT sp.id, sp.pool_kind, sp.config_json
@@ -367,7 +367,7 @@ impl PostgresBlobStore {
     pub(crate) async fn create_blob_migration_job(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         blob_kind: &str,
         blob_id: Uuid,
@@ -757,6 +757,41 @@ impl PostgresBlobStore {
             ));
         }
 
+        let target_pool = sqlx::query(
+            r#"
+            SELECT pool_kind, config_json
+            FROM storage_pools
+            WHERE id = $1
+            "#,
+        )
+        .bind(job.target_storage_pool_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let target_pool_kind: String = target_pool.try_get("pool_kind")?;
+        let target_config_json: serde_json::Value = target_pool.try_get("config_json")?;
+        if matches!(
+            select_storage_backend(&target_pool_kind, &target_config_json)?,
+            StorageBackendSelection::S3Compatible(_)
+        ) {
+            sqlx::query(
+                r#"
+                UPDATE blobs
+                SET blob_bytes = NULL,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND domain_id = $2
+                  AND id = $3
+                  AND blob_kind = $4
+                "#,
+            )
+            .bind(&job.tenant_id)
+            .bind(job.domain_id)
+            .bind(job.blob_id)
+            .bind(&job.blob_kind)
+            .execute(&mut *tx)
+            .await?;
+        }
+
         let switched = sqlx::query(
             r#"
             UPDATE blob_migration_jobs
@@ -934,7 +969,7 @@ impl PostgresBlobStore {
     async fn existing_open_migration_job(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         blob_id: Uuid,
         target_storage_pool_id: Uuid,
@@ -1307,7 +1342,7 @@ impl PostgresBlobStore {
         domain_id: Uuid,
         blob_id: Uuid,
     ) -> Result<Vec<String>> {
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         let mut blockers = Vec::new();
         if sqlx::query_scalar::<_, bool>(
             r#"
@@ -1430,7 +1465,7 @@ impl PostgresBlobStore {
         domain_id: Uuid,
         blob_id: Uuid,
     ) -> Result<Vec<String>> {
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         let row = sqlx::query(
             r#"
             SELECT
@@ -1503,7 +1538,7 @@ impl PostgresBlobStore {
     pub(crate) async fn read_durable_blob(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         kind: DurableBlobKind,
         blob_id: Uuid,
@@ -1520,7 +1555,10 @@ impl PostgresBlobStore {
         };
 
         let bytes = match &placement.backend {
-            StorageBackendSelection::Postgres => placement.blob_bytes.clone(),
+            StorageBackendSelection::Postgres => placement
+                .blob_bytes
+                .clone()
+                .ok_or_else(|| anyhow!("database storage placement has no database blob bytes"))?,
             StorageBackendSelection::S3Compatible(config) => {
                 let bytes = s3_read_object(config, placement.placement_id).await?;
                 let actual_hash = format!("{:x}", Sha256::digest(&bytes));
@@ -1546,7 +1584,7 @@ impl PostgresBlobStore {
     pub(crate) async fn stat_durable_blob(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         kind: DurableBlobKind,
         blob_id: Uuid,
@@ -1648,7 +1686,10 @@ impl PostgresBlobStore {
         placement: &ActiveBlobPlacement,
     ) -> Result<StoredBlobBytes> {
         let bytes = match &placement.backend {
-            StorageBackendSelection::Postgres => placement.blob_bytes.clone(),
+            StorageBackendSelection::Postgres => placement
+                .blob_bytes
+                .clone()
+                .ok_or_else(|| anyhow!("database storage placement has no database blob bytes"))?,
             StorageBackendSelection::S3Compatible(config) => {
                 s3_read_object(config, placement.placement_id).await?
             }
@@ -1696,7 +1737,7 @@ impl PostgresBlobStore {
                     return Err(anyhow!("target database blob row could not be updated"));
                 }
 
-                let stored_bytes = sqlx::query_scalar::<_, Vec<u8>>(
+                let stored_bytes = sqlx::query_scalar::<_, Option<Vec<u8>>>(
                     r#"
                     SELECT blob_bytes
                     FROM blobs
@@ -1711,7 +1752,8 @@ impl PostgresBlobStore {
                 .bind(&job.blob_kind)
                 .bind(job.blob_id)
                 .fetch_one(pool)
-                .await?;
+                .await?
+                .ok_or_else(|| anyhow!("target database blob row has no database bytes"))?;
                 let stored_hash = format!("{:x}", Sha256::digest(&stored_bytes));
                 if stored_hash != blob.content_sha256
                     || stored_bytes.len() as i64 != blob.size_octets
@@ -1745,7 +1787,7 @@ impl PostgresBlobStore {
     async fn load_active_blob_placement(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         kind: DurableBlobKind,
         blob_id: Uuid,
@@ -1806,7 +1848,7 @@ impl PostgresBlobStore {
     async fn error_if_durable_blob_lacks_active_placement(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         kind: DurableBlobKind,
         blob_id: Uuid,
@@ -1842,7 +1884,7 @@ impl PostgresBlobStore {
     pub(crate) async fn verify_durable_blob(
         &self,
         pool: &PgPool,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         kind: DurableBlobKind,
         blob_id: Uuid,
@@ -1859,9 +1901,12 @@ impl PostgresBlobStore {
         };
         match &placement.backend {
             StorageBackendSelection::Postgres => {
-                let actual_hash = format!("{:x}", Sha256::digest(&placement.blob_bytes));
+                let Some(blob_bytes) = placement.blob_bytes.as_ref() else {
+                    return Ok(false);
+                };
+                let actual_hash = format!("{:x}", Sha256::digest(blob_bytes));
                 Ok(actual_hash == placement.content_sha256
-                    && placement.blob_bytes.len() as i64 == placement.size_octets)
+                    && blob_bytes.len() as i64 == placement.size_octets)
             }
             StorageBackendSelection::S3Compatible(config) => {
                 let stat = s3_stat_object(config, placement.placement_id).await?;
@@ -1896,7 +1941,7 @@ fn durable_blob_kind_from_str(blob_kind: &str) -> Result<DurableBlobKind> {
 fn blob_migration_job_from_row(row: sqlx::postgres::PgRow) -> Result<BlobMigrationJob> {
     Ok(BlobMigrationJob {
         id: row.try_get("id")?,
-        tenant_id: row.try_get::<Uuid, _>("tenant_id")?.to_string(),
+        tenant_id: row.try_get::<Uuid, _>("tenant_id")?,
         domain_id: row.try_get("domain_id")?,
         blob_id: row.try_get("blob_id")?,
         blob_kind: row.try_get("blob_kind")?,
@@ -2084,7 +2129,7 @@ mod tests {
         logical_size_octets: i64,
         attachment_bytes: &[u8],
     ) -> Uuid {
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         let message_id = Uuid::new_v4();
         let mailbox_message_id = Uuid::new_v4();
         let raw_message = format!("Subject: quota-{imap_uid}\r\n\r\nbody").into_bytes();
@@ -2195,7 +2240,7 @@ mod tests {
             .await
             .expect("fetch mailbox quota");
         let domain_used = storage
-            .fetch_domain_logical_quota_used_octets(&tenant_id.to_string(), domain_id)
+            .fetch_domain_logical_quota_used_octets(&tenant_id, domain_id)
             .await
             .expect("fetch domain quota");
         (account_used, mailbox_used, domain_used)
@@ -2292,7 +2337,7 @@ mod tests {
         let blob = PostgresBlobStore
             .read_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob_id,
@@ -2361,6 +2406,25 @@ mod tests {
         .expect("load active storage pool")
     }
 
+    async fn database_blob_bytes_len(
+        storage: &Storage,
+        tenant_id: Uuid,
+        blob_id: Uuid,
+    ) -> Option<i64> {
+        sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT octet_length(blob_bytes)::bigint
+            FROM blobs
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("load database blob byte length")
+    }
+
     async fn insert_secondary_storage_pool(storage: &Storage) -> Uuid {
         let pool_id = Uuid::from_u128(2);
         sqlx::query(
@@ -2384,7 +2448,7 @@ mod tests {
         bytes: &[u8],
     ) -> StoredBlobRef {
         let blob_store = PostgresBlobStore;
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         let mut tx = storage.pool().begin().await.expect("begin blob tx");
         let blob = blob_store
             .put_durable_blob_in_tx(
@@ -2417,7 +2481,7 @@ mod tests {
         blob_store
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob_id,
@@ -2459,7 +2523,7 @@ mod tests {
         )
         .await;
         let blob_store = PostgresBlobStore;
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
 
         let attachment_job = blob_store
             .create_blob_migration_job(
@@ -2517,7 +2581,7 @@ mod tests {
         let job = PostgresBlobStore
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -2551,7 +2615,7 @@ mod tests {
         )
         .await;
         let blob_store = PostgresBlobStore;
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
 
         let first = blob_store
             .create_blob_migration_job(
@@ -2606,7 +2670,7 @@ mod tests {
         let error = PostgresBlobStore
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "raw_message",
                 Uuid::new_v4(),
@@ -2654,7 +2718,7 @@ mod tests {
         let error = PostgresBlobStore
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -2690,7 +2754,7 @@ mod tests {
         let error = PostgresBlobStore
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -2716,7 +2780,7 @@ mod tests {
         insert_tenant_domain(&storage, tenant_id, domain_id).await;
         let target_pool_id = insert_secondary_storage_pool(&storage).await;
         let blob_store = PostgresBlobStore;
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
 
         let future = put_test_blob(
             &storage,
@@ -2827,7 +2891,7 @@ mod tests {
         let job = blob_store
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -2906,7 +2970,7 @@ mod tests {
         blob_store
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -2950,7 +3014,7 @@ mod tests {
         let read = blob_store
             .read_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob.id,
@@ -2983,7 +3047,7 @@ mod tests {
         let job = blob_store
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -3160,7 +3224,7 @@ mod tests {
         let before = blob_store
             .read_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob.id,
@@ -3176,7 +3240,7 @@ mod tests {
         let during = blob_store
             .read_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob.id,
@@ -3202,7 +3266,7 @@ mod tests {
         let after = blob_store
             .read_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob.id,
@@ -3214,7 +3278,7 @@ mod tests {
         let stat = blob_store
             .stat_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob.id,
@@ -3226,7 +3290,7 @@ mod tests {
         assert!(blob_store
             .verify_durable_blob(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 DurableBlobKind::Attachment,
                 blob.id,
@@ -3900,7 +3964,7 @@ mod tests {
         let pending = PostgresBlobStore
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob.id,
@@ -3944,7 +4008,7 @@ mod tests {
 
         let blob_store = PostgresBlobStore;
         let bytes = b"attachment-bytes";
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         let mut tx = storage.pool().begin().await.expect("begin transaction");
         let first = blob_store
             .put_durable_blob_in_tx(
@@ -4179,7 +4243,7 @@ mod tests {
 
         let tenant_id = Uuid::new_v4();
         let domain_id = Uuid::new_v4();
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         insert_tenant_domain(&storage, tenant_id, domain_id).await;
         let s3_pool_id = configure_s3_platform_pool(&storage, config).await;
 
@@ -4208,19 +4272,10 @@ mod tests {
             active_storage_pool_id(&storage, tenant_id, stored.id).await,
             s3_pool_id
         );
-        let database_bytes_len = sqlx::query_scalar::<_, i64>(
-            r#"
-            SELECT octet_length(blob_bytes)::bigint
-            FROM blobs
-            WHERE tenant_id = $1 AND id = $2
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(stored.id)
-        .fetch_one(storage.pool())
-        .await
-        .expect("load database blob byte length");
-        assert_eq!(database_bytes_len, 0);
+        assert_eq!(
+            database_blob_bytes_len(&storage, tenant_id, stored.id).await,
+            None
+        );
 
         let read = blob_store
             .read_durable_blob(
@@ -4281,7 +4336,7 @@ mod tests {
         };
         let tenant_id = Uuid::new_v4();
         let domain_id = Uuid::new_v4();
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         insert_tenant_domain(&storage, tenant_id, domain_id).await;
         let blob_store = PostgresBlobStore;
 
@@ -4353,6 +4408,10 @@ mod tests {
             first_s3_pool_id
         );
         assert_eq!(
+            database_blob_bytes_len(&storage, tenant_id, db_blob.id).await,
+            None
+        );
+        assert_eq!(
             placement_status_by_id(&storage, db_to_s3_switched.source_placement_id).await,
             "retiring"
         );
@@ -4388,6 +4447,10 @@ mod tests {
             active_storage_pool_id(&storage, tenant_id, s3_blob.id).await,
             first_s3_pool_id
         );
+        assert_eq!(
+            database_blob_bytes_len(&storage, tenant_id, s3_blob.id).await,
+            None
+        );
         let s3_to_db_job = blob_store
             .create_blob_migration_job(
                 storage.pool(),
@@ -4415,6 +4478,10 @@ mod tests {
             active_storage_pool_id(&storage, tenant_id, s3_blob.id).await,
             POSTGRES_PRIMARY_STORAGE_POOL_ID
         );
+        assert_eq!(
+            database_blob_bytes_len(&storage, tenant_id, s3_blob.id).await,
+            Some(b"s3-to-db-migration".len() as i64)
+        );
         assert_active_blob_read(
             &storage,
             tenant_id,
@@ -4436,6 +4503,10 @@ mod tests {
         assert_eq!(
             active_storage_pool_id(&storage, tenant_id, s3_to_s3_blob.id).await,
             first_s3_pool_id
+        );
+        assert_eq!(
+            database_blob_bytes_len(&storage, tenant_id, s3_to_s3_blob.id).await,
+            None
         );
         let s3_to_s3_job = blob_store
             .create_blob_migration_job(
@@ -4463,6 +4534,10 @@ mod tests {
         assert_eq!(
             active_storage_pool_id(&storage, tenant_id, s3_to_s3_blob.id).await,
             second_s3_pool_id
+        );
+        assert_eq!(
+            database_blob_bytes_len(&storage, tenant_id, s3_to_s3_blob.id).await,
+            None
         );
         assert_active_blob_read(
             &storage,
@@ -4497,7 +4572,7 @@ mod tests {
         let message_id = Uuid::new_v4();
         let raw_blob_id = Uuid::new_v4();
         let mailbox_message_id = Uuid::new_v4();
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         insert_tenant_domain(&storage, tenant_id, domain_id).await;
         sqlx::query(
             r#"

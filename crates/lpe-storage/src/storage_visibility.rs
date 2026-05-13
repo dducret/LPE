@@ -1151,6 +1151,62 @@ mod tests {
         placement_id
     }
 
+    async fn insert_external_blob_with_active_placement(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+    ) {
+        let pool_id = Uuid::new_v4();
+        let blob_id = Uuid::new_v4();
+        let placement_id = Uuid::new_v4();
+        let content_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        sqlx::query(
+            r#"
+            INSERT INTO storage_pools (id, name, pool_kind, status, config_json)
+            VALUES ($1, $2, 's3_compatible', 'active', '{}'::jsonb)
+            "#,
+        )
+        .bind(pool_id)
+        .bind(format!("external-vis-{}", pool_id.simple()))
+        .execute(storage.pool())
+        .await
+        .expect("insert external pool");
+        sqlx::query(
+            r#"
+            INSERT INTO blobs (
+                id, tenant_id, domain_id, blob_kind, content_sha256, media_type,
+                size_octets, blob_bytes, magika_status, extraction_status, validated_at
+            )
+            VALUES ($1, $2, $3, 'attachment', $4, 'text/plain', 5, NULL, 'valid', 'not_requested', NOW())
+            "#,
+        )
+        .bind(blob_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(content_hash)
+        .execute(storage.pool())
+        .await
+        .expect("insert externally placed blob metadata");
+        sqlx::query(
+            r#"
+            INSERT INTO blob_placements (
+                id, tenant_id, domain_id, blob_id, blob_kind, storage_pool_id,
+                placement_status, verified_content_sha256, verified_size_octets, verified_at
+            )
+            VALUES ($1, $2, $3, $4, 'attachment', $5, 'active', $6, 5, NOW())
+            "#,
+        )
+        .bind(placement_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(blob_id)
+        .bind(pool_id)
+        .bind(content_hash)
+        .execute(storage.pool())
+        .await
+        .expect("insert active external placement");
+    }
+
     async fn insert_failed_migration(
         storage: &Storage,
         tenant_id: Uuid,
@@ -1474,6 +1530,24 @@ mod tests {
         assert_eq!(diagnostics.status, "ok");
         assert!(!diagnostics.critical);
         assert_eq!(diagnostics.active_pools, 1);
+    }
+
+    #[tokio::test]
+    async fn storage_metadata_diagnostics_accepts_external_active_blob_without_db_bytes() {
+        let Some(storage) = test_storage().await else {
+            return;
+        };
+        let (tenant_id, domain_id) = insert_tenant_domain(&storage, "vis-external-null").await;
+        insert_external_blob_with_active_placement(&storage, tenant_id, domain_id).await;
+
+        let diagnostics = storage
+            .fetch_storage_metadata_diagnostics()
+            .await
+            .expect("metadata diagnostics");
+
+        assert_eq!(diagnostics.status, "ok");
+        assert!(!diagnostics.critical);
+        assert_eq!(diagnostics.missing_active_placements, 0);
     }
 
     #[test]

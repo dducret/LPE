@@ -1,8 +1,11 @@
 # Installation
 
-These installation instructions are aligned with the current repository schema `0.2.0`.
+These installation instructions are aligned with the current repository schema `0.3.0-sql-v2`.
 
 Fresh installs initialize the database from the canonical schema. In-place schema migrations are not supported for this release; rebuild the database from `crates/lpe-storage/sql/schema.sql` for a new deployment.
+The schema initializer creates the real platform tenant row
+`00000000-0000-0000-0000-000000000001` and the default storage pool/policy
+metadata; runtime bootstrap must not create string pseudo-tenants.
 
 ### Debian Trixie
 
@@ -339,7 +342,7 @@ Files:
 - `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical schema; use it only for fresh installs or intentional resets
+- `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical `0.3.0-sql-v2` schema, including the platform tenant UUID row and default storage pool/policy metadata; use it only for fresh installs or intentional resets
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -360,7 +363,7 @@ Recommended order:
 
 The web client requires user authentication. First create an account and its password from the administration domain page, then sign in to `/mail/` with the full email address and that password.
 
-The administration console stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, anti-spam objects, and audit events in `PostgreSQL`. Initialize a fresh database with `init-schema.sh`.
+The administration console stores its accounts, account passwords, mailboxes, `PST` import/export requests, domains, aliases, settings, delegated administrators, storage policy and migration metadata, and audit events in `PostgreSQL`. Initialize a fresh database with `init-schema.sh`. Perimeter anti-spam and quarantine state belongs to `LPE-CT`, not the core `LPE` schema.
 
 `PST` imports can be uploaded from the browser. The service validates each incoming file with Google `Magika` before storing it in `LPE_PST_IMPORT_DIR`, defaulting to `/var/lib/lpe/imports`, and then creates the `PST` import request with the resulting server path. The maximum accepted API upload size is configured through `LPE_PST_UPLOAD_MAX_BYTES`, defaulting to `21474836480` bytes. The `nginx` reverse proxy is aligned through `LPE_NGINX_CLIENT_MAX_BODY_SIZE`, defaulting to `20g`. The binary path is configured through `LPE_MAGIKA_BIN`, defaulting to `/opt/lpe/bin/magika`, and the minimum confidence threshold through `LPE_MAGIKA_MIN_SCORE`.
 

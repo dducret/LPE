@@ -11,6 +11,7 @@ use std::{
     env,
     time::{SystemTime, UNIX_EPOCH},
 };
+use uuid::Uuid;
 
 use crate::auth::normalize_login_name;
 
@@ -23,8 +24,8 @@ pub const DEFAULT_OAUTH_ACCESS_TOKEN_SECONDS: u32 = 3600;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountPrincipal {
-    pub tenant_id: String,
-    pub account_id: uuid::Uuid,
+    pub tenant_id: Uuid,
+    pub account_id: Uuid,
     pub email: String,
     pub display_name: String,
 }
@@ -33,8 +34,8 @@ pub struct AccountPrincipal {
 struct OAuthAccessTokenClaims {
     kind: String,
     version: u8,
-    tenant_id: String,
-    account_id: uuid::Uuid,
+    tenant_id: Uuid,
+    account_id: Uuid,
     email: String,
     scope: String,
     exp: u64,
@@ -50,7 +51,7 @@ pub fn issue_oauth_access_token(
     let claims = OAuthAccessTokenClaims {
         kind: "lpe-mail-oauth-access".to_string(),
         version: 1,
-        tenant_id: principal.tenant_id.clone(),
+        tenant_id: principal.tenant_id,
         account_id: principal.account_id,
         email: principal.email.trim().to_lowercase(),
         scope,
@@ -159,8 +160,8 @@ pub(crate) fn decode_oauth_access_token(token: &str) -> Result<AccountPrincipalC
 }
 
 pub(crate) struct AccountPrincipalClaims {
-    pub(crate) tenant_id: String,
-    pub(crate) account_id: uuid::Uuid,
+    pub(crate) tenant_id: Uuid,
+    pub(crate) account_id: Uuid,
     pub(crate) email: String,
     pub(crate) scope: String,
 }

@@ -216,6 +216,12 @@ pub trait ExchangeStore: AccountAuthStore {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>>;
 
+    fn fetch_jmap_emails_with_protected_bcc<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JmapEmail>>;
+
     fn fetch_message_attachments<'a>(
         &'a self,
         account_id: Uuid,
@@ -720,6 +726,17 @@ impl ExchangeStore for Storage {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<JmapEmail>> {
         Box::pin(async move { self.fetch_jmap_emails(account_id, ids).await })
+    }
+
+    fn fetch_jmap_emails_with_protected_bcc<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JmapEmail>> {
+        Box::pin(async move {
+            self.fetch_jmap_emails_with_protected_bcc(account_id, ids)
+                .await
+        })
     }
 
     fn fetch_message_attachments<'a>(

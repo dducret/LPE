@@ -100,30 +100,53 @@ impl Storage {
             SELECT
                 m.id,
                 mb.role AS mailbox_role,
-                COALESCE(NULLIF(m.from_display, ''), m.from_address) AS from_name,
-                m.from_address,
+                COALESCE(NULLIF(fr.display_name, ''), fr.address, '') AS from_name,
+                COALESCE(fr.address, '') AS from_address,
                 COALESCE((
                     SELECT string_agg(r.address, ', ' ORDER BY r.ordinal)
                     FROM message_recipients r
-                    WHERE r.message_id = m.id AND r.kind = 'to'
+                    WHERE r.tenant_id = m.tenant_id
+                      AND r.message_id = m.id
+                      AND r.role = 'to'
                 ), '') AS to_recipients,
                 COALESCE((
                     SELECT string_agg(r.address, ', ' ORDER BY r.ordinal)
                     FROM message_recipients r
-                    WHERE r.message_id = m.id AND r.kind = 'cc'
+                    WHERE r.tenant_id = m.tenant_id
+                      AND r.message_id = m.id
+                      AND r.role = 'cc'
                 ), '') AS cc_recipients,
                 m.subject_normalized AS subject,
-                m.preview_text AS preview,
+                COALESCE(left(b.body_text, 160), '') AS preview,
                 to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS received_at,
                 to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'HH24:MI') AS time_label,
-                m.unread,
-                m.flagged,
-                m.delivery_status,
+                NOT mm.is_seen AS unread,
+                mm.is_flagged AS flagged,
+                COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END) AS delivery_status,
                 COALESCE(b.body_text, '') AS body_text
             FROM messages m
-            JOIN mailboxes mb ON mb.id = m.mailbox_id
-            LEFT JOIN message_bodies b ON b.message_id = m.id
-            WHERE m.tenant_id = $1 AND m.account_id = $2
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+             AND mm.account_id = $2
+             AND mm.visibility <> 'expunged'
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id
+             AND fr.message_id = m.id
+             AND fr.role = 'from'
+            LEFT JOIN message_bodies b
+              ON b.tenant_id = m.tenant_id
+             AND b.message_id = m.id
+             AND b.body_kind = 'text'
+            LEFT JOIN submission_queue sq
+              ON sq.tenant_id = mm.tenant_id
+             AND sq.account_id = mm.account_id
+             AND sq.sent_mailbox_message_id = mm.id
+            WHERE m.tenant_id = $1
             ORDER BY COALESCE(m.sent_at, m.received_at) DESC
             LIMIT 250
             "#,
@@ -142,8 +165,12 @@ impl Storage {
                 a.media_type,
                 a.size_octets
             FROM attachments a
-            JOIN messages m ON m.id = a.message_id
-            WHERE a.tenant_id = $1 AND m.account_id = $2
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = a.tenant_id
+             AND mm.message_id = a.message_id
+             AND mm.account_id = $2
+             AND mm.visibility <> 'expunged'
+            WHERE a.tenant_id = $1
             ORDER BY a.file_name ASC
             "#,
         )

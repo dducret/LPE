@@ -6,11 +6,11 @@ use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientTask,
-    CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    SieveScriptDocument, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress,
+    JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, SavedDraftMessage, SieveScriptDocument, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::{
     collections::HashMap,
@@ -114,7 +114,7 @@ impl Detector for FakeDetector {
 impl FakeStore {
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
             account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -176,12 +176,22 @@ impl FakeStore {
 
     fn email(id: &str, mailbox_id: &str, mailbox_role: &str, subject: &str) -> JmapEmail {
         let account = Self::account();
+        let mailbox_id = Uuid::parse_str(mailbox_id).unwrap();
         JmapEmail {
             id: Uuid::parse_str(id).unwrap(),
             thread_id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
-            mailbox_id: Uuid::parse_str(mailbox_id).unwrap(),
+            mailbox_id,
             mailbox_role: mailbox_role.to_string(),
             mailbox_name: "RCA Sync".to_string(),
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: mailbox_role.to_string(),
+                name: "RCA Sync".to_string(),
+                unread: false,
+                flagged: false,
+                draft: mailbox_role == "drafts",
+            }],
             received_at: "2026-05-03T12:00:00Z".to_string(),
             sent_at: None,
             from_address: account.email,
@@ -272,7 +282,7 @@ impl AccountAuthStore for FakeStore {
 
     fn append_audit_event<'a>(
         &'a self,
-        _tenant_id: &'a str,
+        _tenant_id: &'a Uuid,
         _entry: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move { Ok(()) })
@@ -887,6 +897,26 @@ impl ExchangeStore for FakeStore {
     }
 
     fn fetch_jmap_emails<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JmapEmail>> {
+        let emails = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| ids.contains(&email.id))
+            .cloned()
+            .map(|mut email| {
+                email.bcc.clear();
+                email
+            })
+            .collect();
+        Box::pin(async move { Ok(emails) })
+    }
+
+    fn fetch_jmap_emails_with_protected_bcc<'a>(
         &'a self,
         _account_id: Uuid,
         ids: &'a [Uuid],
@@ -7154,7 +7184,7 @@ async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_read_recipients_exposes_sent_message_bcc() {
+async fn mapi_over_http_read_recipients_hides_sent_message_bcc_by_default() {
     let message_id = "23232323-2323-2323-2323-232323232323";
     let mut sent = FakeStore::mailbox("77777777-7777-7777-7777-777777777777", "sent", "Sent");
     sent.total_emails = 1;
@@ -7225,8 +7255,8 @@ async fn mapi_over_http_read_recipients_exposes_sent_message_bcc() {
     let response_rops = &rop_buffer[2..2 + response_rop_size];
 
     assert!(contains_bytes(response_rops, &utf16z("bob@example.test")));
-    assert!(contains_bytes(response_rops, &utf16z("erin@example.test")));
-    assert!(contains_bytes(response_rops, &utf16z("Erin")));
+    assert!(!contains_bytes(response_rops, &utf16z("erin@example.test")));
+    assert!(!contains_bytes(response_rops, &utf16z("Erin")));
 }
 
 #[tokio::test]
@@ -11715,7 +11745,7 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     same_tenant.display_name = "Bob".to_string();
 
     let mut other_tenant = FakeStore::account();
-    other_tenant.tenant_id = "tenant-b".to_string();
+    other_tenant.tenant_id = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
     other_tenant.account_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
     other_tenant.email = "mallory@other.test".to_string();
     other_tenant.display_name = "Mallory".to_string();
@@ -16798,7 +16828,7 @@ async fn get_item_returns_requested_mime_content_without_leaking_bcc_for_normal_
 }
 
 #[tokio::test]
-async fn get_item_mime_content_preserves_bcc_for_sent_message() {
+async fn get_item_mime_content_hides_bcc_for_sent_message_default_fetch() {
     let mut email = FakeStore::email(
         "99999999-9999-9999-9999-999999999999",
         "44444444-4444-4444-4444-444444444444",
@@ -16827,7 +16857,8 @@ async fn get_item_mime_content_preserves_bcc_for_sent_message() {
     let body = response_text(response).await;
     let mime = decoded_mime_content(&body);
     assert!(mime.contains("Subject: Sent folder item"));
-    assert!(mime.contains("Bcc: Hidden <hidden@example.test>"));
+    assert!(!mime.contains("Bcc:"));
+    assert!(!mime.contains("hidden@example.test"));
 }
 
 #[tokio::test]

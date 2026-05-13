@@ -68,6 +68,8 @@ pub struct JmapEmailAddress {
 pub struct JmapEmail {
     pub id: Uuid,
     pub thread_id: Uuid,
+    pub mailbox_ids: Vec<Uuid>,
+    pub mailbox_states: Vec<JmapEmailMailboxState>,
     pub mailbox_id: Uuid,
     pub mailbox_role: String,
     pub mailbox_name: String,
@@ -93,6 +95,16 @@ pub struct JmapEmail {
     pub internet_message_id: Option<String>,
     pub mime_blob_ref: Option<String>,
     pub delivery_status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JmapEmailMailboxState {
+    pub mailbox_id: Uuid,
+    pub role: String,
+    pub name: String,
+    pub unread: bool,
+    pub flagged: bool,
+    pub draft: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -253,6 +265,7 @@ impl Storage {
             FROM mail_change_log
             WHERE tenant_id = $1
               AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
             "#,
         )
         .bind(tenant_id)
@@ -276,6 +289,7 @@ impl Storage {
             FROM mail_change_log
             WHERE tenant_id = $1
               AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
             "#,
         )
         .bind(&tenant_id)
@@ -293,6 +307,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND cursor > $2
               AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
             ORDER BY cursor ASC
             LIMIT $4
             "#,
@@ -402,6 +417,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND object_kind = ANY($3)
               AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
             "#,
         )
         .bind(&tenant_id)
@@ -433,6 +449,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND object_kind = ANY($3)
               AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
             "#,
         )
         .bind(&tenant_id)
@@ -452,6 +469,7 @@ impl Storage {
               AND cursor > $2
               AND object_kind = ANY($4)
               AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
             ORDER BY cursor ASC
             LIMIT $5
             "#,
@@ -1020,20 +1038,27 @@ impl Storage {
             .map(ToString::to_string);
         let ids = sqlx::query(
             r#"
-            SELECT s.message_id AS id
-            FROM mail_search_documents s
-            JOIN mailbox_messages mm
-              ON mm.tenant_id = s.tenant_id
-             AND mm.account_id = s.account_id
-             AND mm.id = s.mailbox_message_id
-            WHERE s.account_id = $1
-              AND mm.visibility = 'visible'
-              AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
-              AND (
-                $3::text IS NULL
-                OR s.search_vector @@ websearch_to_tsquery('simple', $3)
-              )
-            ORDER BY mm.received_at DESC, s.message_id DESC
+            WITH matched_messages AS (
+                SELECT
+                    s.message_id AS id,
+                    MAX(mm.received_at) AS latest_received_at
+                FROM mail_search_documents s
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = s.tenant_id
+                 AND mm.account_id = s.account_id
+                 AND mm.id = s.mailbox_message_id
+                WHERE s.account_id = $1
+                  AND mm.visibility = 'visible'
+                  AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
+                  AND (
+                    $3::text IS NULL
+                    OR s.search_vector @@ websearch_to_tsquery('simple', $3)
+                  )
+                GROUP BY s.message_id
+            )
+            SELECT id
+            FROM matched_messages
+            ORDER BY latest_received_at DESC, id DESC
             OFFSET $4
             LIMIT $5
             "#,
@@ -1052,18 +1077,22 @@ impl Storage {
         let total: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
-            FROM mail_search_documents s
-            JOIN mailbox_messages mm
-              ON mm.tenant_id = s.tenant_id
-             AND mm.account_id = s.account_id
-             AND mm.id = s.mailbox_message_id
-            WHERE s.account_id = $1
-              AND mm.visibility = 'visible'
-              AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
-              AND (
-                $3::text IS NULL
-                OR s.search_vector @@ websearch_to_tsquery('simple', $3)
-              )
+            FROM (
+                SELECT s.message_id
+                FROM mail_search_documents s
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = s.tenant_id
+                 AND mm.account_id = s.account_id
+                 AND mm.id = s.mailbox_message_id
+                WHERE s.account_id = $1
+                  AND mm.visibility = 'visible'
+                  AND ($2::uuid IS NULL OR mm.mailbox_id = $2)
+                  AND (
+                    $3::text IS NULL
+                    OR s.search_vector @@ websearch_to_tsquery('simple', $3)
+                  )
+                GROUP BY s.message_id
+            ) matched_messages
             "#,
         )
         .bind(account_id)
@@ -1225,13 +1254,56 @@ impl Storage {
 
         let rows = sqlx::query_as::<_, JmapEmailRow>(
             r#"
+            WITH visible_memberships AS (
+                SELECT
+                    mm.id,
+                    mm.account_id,
+                    mm.message_id,
+                    mm.thread_id,
+                    mm.is_seen,
+                    mm.is_flagged,
+                    mm.is_draft,
+                    mm.updated_at,
+                    mb.id AS mailbox_id,
+                    mb.role AS mailbox_role,
+                    mb.display_name AS mailbox_name,
+                    mb.sort_order AS mailbox_sort_order
+                FROM mailbox_messages mm
+                JOIN mailboxes mb
+                  ON mb.tenant_id = mm.tenant_id
+                 AND mb.account_id = mm.account_id
+                 AND mb.id = mm.mailbox_id
+                WHERE mm.tenant_id = $1
+                  AND mm.account_id = $2
+                  AND mm.message_id = ANY($3)
+                  AND mm.visibility = 'visible'
+            ),
+            membership_rollup AS (
+                SELECT
+                    message_id,
+                    COALESCE((array_agg(thread_id ORDER BY updated_at DESC))[1], message_id) AS thread_id,
+                    array_agg(mailbox_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_ids,
+                    array_agg(mailbox_role ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_roles,
+                    array_agg(mailbox_name ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_names,
+                    array_agg(NOT is_seen ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_unreads,
+                    array_agg(is_flagged ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_flaggeds,
+                    array_agg(is_draft ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_drafts,
+                    array_agg(id) AS mailbox_message_ids,
+                    BOOL_OR(NOT is_seen) AS unread,
+                    BOOL_OR(is_flagged) AS flagged,
+                    BOOL_OR(is_draft) AS draft
+                FROM visible_memberships
+                GROUP BY message_id
+            )
             SELECT
-                DISTINCT ON (m.id)
                 m.id,
-                COALESCE(mm.thread_id, m.id) AS thread_id,
-                mm.mailbox_id,
-                mb.role AS mailbox_role,
-                mb.display_name AS mailbox_name,
+                rollup.thread_id,
+                rollup.mailbox_ids,
+                rollup.mailbox_roles,
+                rollup.mailbox_names,
+                rollup.mailbox_unreads,
+                rollup.mailbox_flaggeds,
+                rollup.mailbox_drafts,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
                 CASE
                     WHEN m.sent_at IS NULL THEN NULL
@@ -1242,27 +1314,24 @@ impl Storage {
                 NULLIF(sr.address, '') AS sender_address,
                 NULLIF(sr.display_name, '') AS sender_display,
                 'self' AS sender_authorization_kind,
-                mm.account_id AS submitted_by_account_id,
+                account.id AS submitted_by_account_id,
                 m.normalized_subject AS subject,
                 LEFT(COALESCE(tb.body_text, hb.body_text, ''), 160) AS preview,
                 COALESCE(tb.body_text, '') AS body_text,
                 hb.sanitized_html AS body_html_sanitized,
-                NOT mm.is_seen AS unread,
-                mm.is_flagged AS flagged,
+                rollup.unread,
+                rollup.flagged,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
                 ('message:' || m.id::text) AS mime_blob_ref,
-                COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END) AS delivery_status
+                COALESCE(sq.status, CASE WHEN rollup.draft THEN 'draft' ELSE 'stored' END) AS delivery_status
             FROM messages m
-            JOIN mailbox_messages mm
-              ON mm.tenant_id = m.tenant_id
-             AND mm.message_id = m.id
-             AND mm.visibility = 'visible'
-            JOIN mailboxes mb
-              ON mb.tenant_id = mm.tenant_id
-             AND mb.account_id = mm.account_id
-             AND mb.id = mm.mailbox_id
+            JOIN membership_rollup rollup
+              ON rollup.message_id = m.id
+            JOIN accounts account
+              ON account.tenant_id = m.tenant_id
+             AND account.id = $2
             LEFT JOIN message_recipients fr
               ON fr.tenant_id = m.tenant_id AND fr.message_id = m.id AND fr.role = 'from'
             LEFT JOIN message_recipients sr
@@ -1281,14 +1350,18 @@ impl Storage {
                 ORDER BY id ASC
                 LIMIT 1
             ) hb ON TRUE
-            LEFT JOIN submission_queue sq
-              ON sq.tenant_id = mm.tenant_id
-             AND sq.account_id = mm.account_id
-             AND sq.sent_mailbox_message_id = mm.id
+            LEFT JOIN LATERAL (
+                SELECT status
+                FROM submission_queue q
+                WHERE q.tenant_id = m.tenant_id
+                  AND q.account_id = $2
+                  AND q.sent_mailbox_message_id = ANY(rollup.mailbox_message_ids)
+                ORDER BY q.created_at DESC
+                LIMIT 1
+            ) sq ON TRUE
             WHERE m.tenant_id = $1
-              AND mm.account_id = $2
               AND m.id = ANY($3)
-            ORDER BY m.id, mm.updated_at DESC
+            ORDER BY m.received_at DESC, m.id DESC
             "#,
         )
         .bind(&tenant_id)
@@ -1344,31 +1417,34 @@ impl Storage {
                         display_name: recipient.display_name.clone(),
                     })
                     .collect();
-                let bcc = sqlx::query(
-                    r#"
-                    SELECT address, display_name
-                    FROM protected_bcc_recipients
-                    WHERE tenant_id = $1 AND message_id = $2
-                    ORDER BY ordinal ASC
-                    "#,
-                )
-                .bind(&tenant_id)
-                .bind(*id)
-                .fetch_all(&self.pool)
-                .await?
-                .into_iter()
-                .map(|row| JmapEmailAddress {
-                    address: row.try_get("address").unwrap_or_default(),
-                    display_name: row.try_get("display_name").ok(),
-                })
-                .collect();
+                let mailbox_states = row
+                    .mailbox_ids
+                    .iter()
+                    .enumerate()
+                    .map(|(index, mailbox_id)| JmapEmailMailboxState {
+                        mailbox_id: *mailbox_id,
+                        role: row.mailbox_roles.get(index).cloned().unwrap_or_default(),
+                        name: row.mailbox_names.get(index).cloned().unwrap_or_default(),
+                        unread: row.mailbox_unreads.get(index).copied().unwrap_or(false),
+                        flagged: row.mailbox_flaggeds.get(index).copied().unwrap_or(false),
+                        draft: row.mailbox_drafts.get(index).copied().unwrap_or(false),
+                    })
+                    .collect::<Vec<_>>();
+                let primary_mailbox = mailbox_states
+                    .first()
+                    .ok_or_else(|| anyhow!("JMAP email row has no visible mailbox"))?;
+                let primary_mailbox_id = primary_mailbox.mailbox_id;
+                let primary_mailbox_role = primary_mailbox.role.clone();
+                let primary_mailbox_name = primary_mailbox.name.clone();
 
                 emails.push(JmapEmail {
                     id: row.id,
                     thread_id: row.thread_id,
-                    mailbox_id: row.mailbox_id,
-                    mailbox_role: row.mailbox_role.clone(),
-                    mailbox_name: row.mailbox_name.clone(),
+                    mailbox_ids: row.mailbox_ids.clone(),
+                    mailbox_states,
+                    mailbox_id: primary_mailbox_id,
+                    mailbox_role: primary_mailbox_role,
+                    mailbox_name: primary_mailbox_name,
                     received_at: row.received_at.clone(),
                     sent_at: row.sent_at.clone(),
                     from_address: row.from_address.clone(),
@@ -1379,7 +1455,7 @@ impl Storage {
                     submitted_by_account_id: row.submitted_by_account_id,
                     to,
                     cc,
-                    bcc,
+                    bcc: Vec::new(),
                     subject: row.subject.clone(),
                     preview: row.preview.clone(),
                     body_text: row.body_text.clone(),
@@ -1396,6 +1472,71 @@ impl Storage {
         }
 
         Ok(emails)
+    }
+
+    pub async fn fetch_jmap_emails_with_protected_bcc(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JmapEmail>> {
+        let mut emails = self.fetch_jmap_emails(account_id, ids).await?;
+        if emails.is_empty() {
+            return Ok(emails);
+        }
+
+        let visible_ids = emails.iter().map(|email| email.id).collect::<Vec<_>>();
+        let protected_bcc = self
+            .fetch_visible_protected_bcc_recipients(account_id, &visible_ids)
+            .await?;
+        for email in &mut emails {
+            email.bcc = protected_bcc.get(&email.id).cloned().unwrap_or_default();
+        }
+        Ok(emails)
+    }
+
+    async fn fetch_visible_protected_bcc_recipients(
+        &self,
+        account_id: Uuid,
+        message_ids: &[Uuid],
+    ) -> Result<HashMap<Uuid, Vec<JmapEmailAddress>>> {
+        if message_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query_as::<_, MessageBccRecipientRecordRow>(
+            r#"
+            SELECT r.message_id, r.address, r.display_name
+            FROM protected_bcc_recipients r
+            WHERE r.tenant_id = $1
+              AND r.message_id = ANY($3)
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = r.tenant_id
+                    AND mm.account_id = $2
+                    AND mm.message_id = r.message_id
+                    AND mm.visibility = 'visible'
+              )
+            ORDER BY r.message_id ASC, r.ordinal ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut recipients: HashMap<Uuid, Vec<JmapEmailAddress>> = HashMap::new();
+        for row in rows {
+            recipients
+                .entry(row.message_id)
+                .or_default()
+                .push(JmapEmailAddress {
+                    address: row.address,
+                    display_name: row.display_name,
+                });
+        }
+        Ok(recipients)
     }
 
     pub async fn fetch_imap_emails(
@@ -1506,19 +1647,6 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        let bcc_rows = sqlx::query_as::<_, MessageBccRecipientRecordRow>(
-            r#"
-            SELECT message_id, address, display_name
-            FROM protected_bcc_recipients
-            WHERE tenant_id = $1 AND message_id = ANY($2)
-            ORDER BY message_id ASC, ordinal ASC
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(&message_ids)
-        .fetch_all(&self.pool)
-        .await?;
-
         let part_rows = sqlx::query(
             r#"
             SELECT
@@ -1590,15 +1718,6 @@ impl Storage {
                         display_name: recipient.display_name.clone(),
                     })
                     .collect();
-                let bcc = bcc_rows
-                    .iter()
-                    .filter(|recipient| recipient.message_id == row.id)
-                    .map(|recipient| JmapEmailAddress {
-                        address: recipient.address.clone(),
-                        display_name: recipient.display_name.clone(),
-                    })
-                    .collect();
-
                 Ok(ImapEmail {
                     id: row.id,
                     uid,
@@ -1613,7 +1732,7 @@ impl Storage {
                     from_display: row.from_display,
                     to,
                     cc,
-                    bcc,
+                    bcc: Vec::new(),
                     subject: row.subject,
                     preview: row.preview,
                     body_text: row.body_text,
@@ -1702,7 +1821,7 @@ impl Storage {
               AND message_id = ANY($8)
               AND visibility = 'visible'
               AND ($9::bigint IS NULL OR modseq <= $9)
-            RETURNING id, message_id, thread_id
+            RETURNING id, message_id, thread_id, imap_uid
             "#,
         )
         .bind(&tenant_id)
@@ -1736,6 +1855,7 @@ impl Storage {
                     serde_json::json!({
                         "messageId": message_id,
                         "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                        "imapUid": row.try_get::<i64, _>("imap_uid")?,
                         "flagsChanged": true
                     }),
                 )
@@ -2038,9 +2158,12 @@ impl Storage {
 
     pub async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {
         let emails = self.fetch_jmap_emails(account_id, &[id]).await?;
-        Ok(emails
-            .into_iter()
-            .find(|email| email.mailbox_role == "drafts"))
+        Ok(emails.into_iter().find(|email| {
+            email
+                .mailbox_states
+                .iter()
+                .any(|state| state.role == "drafts")
+        }))
     }
 
     pub async fn fetch_jmap_email_submissions(
@@ -2218,7 +2341,7 @@ impl Storage {
     #[allow(dead_code)]
     pub(crate) async fn fetch_domain_logical_quota_used_octets(
         &self,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
     ) -> Result<u64> {
         let used = sqlx::query_scalar::<_, i64>(
@@ -2247,6 +2370,55 @@ impl Storage {
     }
 
     pub async fn fetch_jmap_message_blob(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> Result<Option<JmapUploadBlob>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT b.media_type, b.size_octets, b.blob_bytes
+            FROM messages m
+            JOIN blobs b
+              ON b.tenant_id = m.tenant_id
+             AND b.domain_id = m.domain_id
+             AND b.id = m.blob_id
+             AND b.blob_kind = 'raw_message'
+            WHERE m.tenant_id = $1
+              AND m.id = $2
+              AND EXISTS (
+                  SELECT 1
+                  FROM mailbox_messages mm
+                  WHERE mm.tenant_id = m.tenant_id
+                    AND mm.account_id = $3
+                    AND mm.message_id = m.id
+                    AND mm.visibility = 'visible'
+              )
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(message_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|row| {
+            let raw_bytes: Vec<u8> = row.try_get("blob_bytes").unwrap_or_default();
+            let blob_bytes = strip_protected_bcc_headers(&raw_bytes);
+            JmapUploadBlob {
+                id: message_id,
+                account_id,
+                media_type: row
+                    .try_get("media_type")
+                    .unwrap_or_else(|_| "message/rfc822".to_string()),
+                octet_size: blob_bytes.len() as u64,
+                blob_bytes,
+            }
+        }))
+    }
+
+    pub async fn fetch_jmap_message_blob_with_protected_headers(
         &self,
         account_id: Uuid,
         message_id: Uuid,
@@ -2465,36 +2637,51 @@ impl Storage {
                 concat_ws(
                     '|',
                     m.subject_normalized,
-                    m.preview_text,
+                    COALESCE(left(b.body_text, 160), ''),
                     COALESCE(b.content_hash, ''),
                     to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-                    CASE WHEN m.unread THEN '1' ELSE '0' END,
-                    CASE WHEN m.flagged THEN '1' ELSE '0' END,
-                    COALESCE(m.from_display, ''),
-                    m.from_address,
+                    CASE WHEN NOT mm.is_seen THEN '1' ELSE '0' END,
+                    CASE WHEN mm.is_flagged THEN '1' ELSE '0' END,
+                    COALESCE(fr.display_name, ''),
+                    COALESCE(fr.address, ''),
                     COALESCE(recipients.to_recipients, ''),
                     COALESCE(recipients.cc_recipients, ''),
-                    m.delivery_status
+                    COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END)
                 ) AS fingerprint
             FROM messages m
-            LEFT JOIN message_bodies b ON b.message_id = m.id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+             AND mm.account_id = $2
+             AND mm.mailbox_id = $3
+             AND mm.visibility <> 'expunged'
+            LEFT JOIN message_bodies b
+              ON b.tenant_id = m.tenant_id
+             AND b.message_id = m.id
+             AND b.body_kind = 'text'
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id
+             AND fr.message_id = m.id
+             AND fr.role = 'from'
+            LEFT JOIN submission_queue sq
+              ON sq.tenant_id = mm.tenant_id
+             AND sq.account_id = mm.account_id
+             AND sq.sent_mailbox_message_id = mm.id
             LEFT JOIN LATERAL (
                 SELECT
                     string_agg(
                         lower(r.address) || ':' || COALESCE(r.display_name, ''),
                         ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.kind = 'to') AS to_recipients,
+                    ) FILTER (WHERE r.role = 'to') AS to_recipients,
                     string_agg(
                         lower(r.address) || ':' || COALESCE(r.display_name, ''),
                         ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.kind = 'cc') AS cc_recipients
+                    ) FILTER (WHERE r.role = 'cc') AS cc_recipients
                 FROM message_recipients r
                 WHERE r.tenant_id = $1
                   AND r.message_id = m.id
             ) recipients ON TRUE
             WHERE m.tenant_id = $1
-              AND m.account_id = $2
-              AND m.mailbox_id = $3
             ORDER BY COALESCE(m.sent_at, m.received_at) DESC, m.id DESC
             OFFSET $4
             LIMIT $5
@@ -2536,36 +2723,51 @@ impl Storage {
                 concat_ws(
                     '|',
                     m.subject_normalized,
-                    m.preview_text,
+                    COALESCE(left(b.body_text, 160), ''),
                     COALESCE(b.content_hash, ''),
                     to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
-                    CASE WHEN m.unread THEN '1' ELSE '0' END,
-                    CASE WHEN m.flagged THEN '1' ELSE '0' END,
-                    COALESCE(m.from_display, ''),
-                    m.from_address,
+                    CASE WHEN NOT mm.is_seen THEN '1' ELSE '0' END,
+                    CASE WHEN mm.is_flagged THEN '1' ELSE '0' END,
+                    COALESCE(fr.display_name, ''),
+                    COALESCE(fr.address, ''),
                     COALESCE(recipients.to_recipients, ''),
                     COALESCE(recipients.cc_recipients, ''),
-                    m.delivery_status
+                    COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END)
                 ) AS fingerprint
             FROM messages m
-            LEFT JOIN message_bodies b ON b.message_id = m.id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+             AND mm.account_id = $2
+             AND mm.mailbox_id = $3
+             AND mm.visibility <> 'expunged'
+            LEFT JOIN message_bodies b
+              ON b.tenant_id = m.tenant_id
+             AND b.message_id = m.id
+             AND b.body_kind = 'text'
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id
+             AND fr.message_id = m.id
+             AND fr.role = 'from'
+            LEFT JOIN submission_queue sq
+              ON sq.tenant_id = mm.tenant_id
+             AND sq.account_id = mm.account_id
+             AND sq.sent_mailbox_message_id = mm.id
             LEFT JOIN LATERAL (
                 SELECT
                     string_agg(
                         lower(r.address) || ':' || COALESCE(r.display_name, ''),
                         ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.kind = 'to') AS to_recipients,
+                    ) FILTER (WHERE r.role = 'to') AS to_recipients,
                     string_agg(
                         lower(r.address) || ':' || COALESCE(r.display_name, ''),
                         ',' ORDER BY r.ordinal
-                    ) FILTER (WHERE r.kind = 'cc') AS cc_recipients
+                    ) FILTER (WHERE r.role = 'cc') AS cc_recipients
                 FROM message_recipients r
                 WHERE r.tenant_id = $1
                   AND r.message_id = m.id
             ) recipients ON TRUE
             WHERE m.tenant_id = $1
-              AND m.account_id = $2
-              AND m.mailbox_id = $3
               AND m.id = ANY($4)
             "#,
         )
@@ -3143,6 +3345,54 @@ fn is_system_mailbox_role(role: &str) -> bool {
     !role.is_empty() && !role.eq_ignore_ascii_case("custom")
 }
 
+fn strip_protected_bcc_headers(raw: &[u8]) -> Vec<u8> {
+    let (header_end, separator_len) =
+        if let Some(position) = raw.windows(4).position(|window| window == b"\r\n\r\n") {
+            (position, 4)
+        } else if let Some(position) = raw.windows(2).position(|window| window == b"\n\n") {
+            (position, 2)
+        } else {
+            return raw.to_vec();
+        };
+
+    let header = &raw[..header_end];
+    let mut stripped = Vec::with_capacity(raw.len());
+    let mut offset = 0;
+    let mut skipping_bcc = false;
+    while offset < header.len() {
+        let relative_line_end = header[offset..]
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map(|position| offset + position + 1)
+            .unwrap_or(header.len());
+        let line = &header[offset..relative_line_end];
+        let line_without_eol = line
+            .strip_suffix(b"\r\n")
+            .or_else(|| line.strip_suffix(b"\n"))
+            .unwrap_or(line);
+        let is_continuation = matches!(line_without_eol.first(), Some(b' ' | b'\t'));
+
+        if !is_continuation {
+            skipping_bcc = header_name_is_bcc(line_without_eol);
+        }
+        if !skipping_bcc {
+            stripped.extend_from_slice(line);
+        }
+        offset = relative_line_end;
+    }
+
+    stripped.extend_from_slice(&raw[header_end..header_end + separator_len]);
+    stripped.extend_from_slice(&raw[header_end + separator_len..]);
+    stripped
+}
+
+fn header_name_is_bcc(line: &[u8]) -> bool {
+    let Some(colon) = line.iter().position(|byte| *byte == b':') else {
+        return false;
+    };
+    line[..colon].trim_ascii().eq_ignore_ascii_case(b"bcc")
+}
+
 pub(crate) fn activesync_collection_kind(collection_id: &str) -> &'static str {
     match collection_id.trim() {
         "__folders__" => "folders",
@@ -3212,7 +3462,7 @@ fn jmap_object_replay_kinds(data_type: &str) -> Option<Vec<&'static str>> {
 mod tests {
     use super::{
         activesync_collection_kind, is_system_mailbox_role, jmap_exact_object_kind,
-        jmap_object_replay_kinds, jmap_replay_object_id,
+        jmap_object_replay_kinds, jmap_replay_object_id, strip_protected_bcc_headers,
     };
     use serde_json::json;
     use uuid::Uuid;
@@ -3305,5 +3555,19 @@ mod tests {
         assert!(is_system_mailbox_role("sent"));
         assert!(is_system_mailbox_role("drafts"));
         assert!(is_system_mailbox_role("trash"));
+    }
+
+    #[test]
+    fn protected_bcc_headers_are_stripped_from_default_message_blobs() {
+        let raw = b"From: a@example.test\r\nBcc: hidden@example.test\r\n\tfolded@example.test\r\nTo: b@example.test\r\n\r\nbody";
+        let stripped = strip_protected_bcc_headers(raw);
+        let rendered = String::from_utf8(stripped).unwrap();
+
+        assert!(!rendered.contains("Bcc:"));
+        assert!(!rendered.contains("hidden@example.test"));
+        assert!(!rendered.contains("folded@example.test"));
+        assert!(rendered.contains("From: a@example.test"));
+        assert!(rendered.contains("To: b@example.test"));
+        assert!(rendered.ends_with("\r\n\r\nbody"));
     }
 }

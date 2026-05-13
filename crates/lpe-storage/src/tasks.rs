@@ -1382,7 +1382,7 @@ impl Storage {
 
     pub(crate) async fn ensure_default_task_list(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<ClientTaskListRow> {
         sqlx::query_as::<_, ClientTaskListRow>(
@@ -1419,7 +1419,7 @@ impl Storage {
 
     pub(crate) async fn load_task_list_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         task_list_id: Uuid,
     ) -> Result<ClientTaskListRow> {

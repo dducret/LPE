@@ -21,10 +21,10 @@ use lpe_storage::{
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
     CanonicalChangeCategory, CanonicalChangeReplay, CanonicalPushChangeSet, ClientContact,
     ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights, CreateTaskListInput,
-    JmapEmailAddress, JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
-    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, UpdateTaskListInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    JmapEmailAddress, JmapEmailMailboxState, JmapEmailSubmission, JmapImportedEmailInput,
+    JmapMailObjectChange, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
+    JmapStoredQueryState, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
+    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -145,6 +145,32 @@ fn validator_error(message: &str) -> Validator<FakeDetector> {
     )
 }
 
+fn strip_bcc_headers_for_test(raw: &[u8]) -> Vec<u8> {
+    let Some(header_end) = raw.windows(4).position(|window| window == b"\r\n\r\n") else {
+        return raw.to_vec();
+    };
+    let header = String::from_utf8_lossy(&raw[..header_end]);
+    let mut output = String::new();
+    let mut skipping_bcc = false;
+    for line in header.split_inclusive("\r\n") {
+        let is_continuation = line.starts_with(' ') || line.starts_with('\t');
+        if !is_continuation {
+            skipping_bcc = line
+                .split_once(':')
+                .is_some_and(|(name, _)| name.trim().eq_ignore_ascii_case("bcc"));
+        }
+        if !skipping_bcc {
+            output.push_str(line);
+        }
+    }
+    output.push_str("\r\n\r\n");
+    output
+        .into_bytes()
+        .into_iter()
+        .chain(raw[header_end + 4..].iter().copied())
+        .collect()
+}
+
 impl JmapPushListener for FakePushListener {
     async fn wait_for_change(
         &mut self,
@@ -244,12 +270,16 @@ impl FakeStore {
 
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Self::tenant_id(),
             account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
             expires_at: "2099-01-01T00:00:00Z".to_string(),
         }
+    }
+
+    fn tenant_id() -> Uuid {
+        Uuid::from_u128(0x11111111111111111111111111111111)
     }
 
     fn draft_mailbox() -> JmapMailbox {
@@ -263,13 +293,32 @@ impl FakeStore {
         }
     }
 
+    fn mailbox_state(
+        mailbox: &JmapMailbox,
+        unread: bool,
+        flagged: bool,
+        draft: bool,
+    ) -> JmapEmailMailboxState {
+        JmapEmailMailboxState {
+            mailbox_id: mailbox.id,
+            role: mailbox.role.clone(),
+            name: mailbox.name.clone(),
+            unread,
+            flagged,
+            draft,
+        }
+    }
+
     fn draft_email() -> JmapEmail {
+        let mailbox = Self::draft_mailbox();
         JmapEmail {
             id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
             thread_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
-            mailbox_id: Self::draft_mailbox().id,
-            mailbox_role: "drafts".to_string(),
-            mailbox_name: "Drafts".to_string(),
+            mailbox_ids: vec![mailbox.id],
+            mailbox_states: vec![Self::mailbox_state(&mailbox, false, false, true)],
+            mailbox_id: mailbox.id,
+            mailbox_role: mailbox.role,
+            mailbox_name: mailbox.name,
             received_at: "2026-04-18T10:00:00Z".to_string(),
             sent_at: None,
             from_address: "alice@example.test".to_string(),
@@ -313,12 +362,15 @@ impl FakeStore {
     }
 
     fn inbox_email() -> JmapEmail {
+        let mailbox = Self::inbox_mailbox();
         JmapEmail {
             id: Uuid::parse_str("edededed-eded-eded-eded-edededededed").unwrap(),
             thread_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
-            mailbox_id: Self::inbox_mailbox().id,
-            mailbox_role: "inbox".to_string(),
-            mailbox_name: "Inbox".to_string(),
+            mailbox_ids: vec![mailbox.id],
+            mailbox_states: vec![Self::mailbox_state(&mailbox, true, false, false)],
+            mailbox_id: mailbox.id,
+            mailbox_role: mailbox.role,
+            mailbox_name: mailbox.name,
             received_at: "2026-04-19T08:00:00Z".to_string(),
             sent_at: Some("2026-04-19T07:59:00Z".to_string()),
             from_address: "carol@example.test".to_string(),
@@ -439,7 +491,7 @@ impl FakeStore {
 
     fn shared_account() -> AuthenticatedAccount {
         AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Self::tenant_id(),
             account_id: Uuid::parse_str("bbbbbbbb-1111-2222-3333-444444444444").unwrap(),
             email: "shared@example.test".to_string(),
             display_name: "Shared Mailbox".to_string(),
@@ -450,6 +502,7 @@ impl FakeStore {
     fn mailbox_access() -> MailboxAccountAccess {
         let account = Self::account();
         MailboxAccountAccess {
+            tenant_id: account.tenant_id,
             account_id: account.account_id,
             email: account.email,
             display_name: account.display_name,
@@ -464,6 +517,7 @@ impl FakeStore {
     fn shared_mailbox_access(may_send_as: bool, may_send_on_behalf: bool) -> MailboxAccountAccess {
         let account = Self::shared_account();
         MailboxAccountAccess {
+            tenant_id: account.tenant_id,
             account_id: account.account_id,
             email: account.email,
             display_name: account.display_name,
@@ -685,7 +739,10 @@ impl JmapStore for FakeStore {
         let mut ids = self
             .emails
             .iter()
-            .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
+            .filter(|email| {
+                mailbox_id.is_none()
+                    || mailbox_id.is_some_and(|mailbox_id| email.mailbox_ids.contains(&mailbox_id))
+            })
             .map(|email| email.id)
             .collect::<Vec<_>>();
         let total = ids.len() as u64;
@@ -722,7 +779,10 @@ impl JmapStore for FakeStore {
         let mut ids = self
             .emails
             .iter()
-            .filter(|email| mailbox_id.is_none() || Some(email.mailbox_id) == mailbox_id)
+            .filter(|email| {
+                mailbox_id.is_none()
+                    || mailbox_id.is_some_and(|mailbox_id| email.mailbox_ids.contains(&mailbox_id))
+            })
             .map(|email| email.thread_id)
             .collect::<HashSet<_>>()
             .into_iter()
@@ -778,6 +838,26 @@ impl JmapStore for FakeStore {
     }
 
     async fn fetch_jmap_emails(&self, _account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
+        Ok(ids
+            .iter()
+            .filter_map(|id| {
+                self.emails
+                    .iter()
+                    .find(|email| email.id == *id)
+                    .cloned()
+                    .map(|mut email| {
+                        email.bcc.clear();
+                        email
+                    })
+            })
+            .collect())
+    }
+
+    async fn fetch_jmap_emails_with_protected_bcc(
+        &self,
+        _account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JmapEmail>> {
         Ok(ids
             .iter()
             .filter_map(|id| self.emails.iter().find(|email| email.id == *id).cloned())
@@ -913,7 +993,14 @@ impl JmapStore for FakeStore {
             .lock()
             .unwrap()
             .get(&message_id)
-            .cloned())
+            .cloned()
+            .map(|mut blob| {
+                if blob.media_type.eq_ignore_ascii_case("message/rfc822") {
+                    blob.blob_bytes = strip_bcc_headers_for_test(&blob.blob_bytes);
+                    blob.octet_size = blob.blob_bytes.len() as u64;
+                }
+                blob
+            }))
     }
 
     async fn save_draft_message(
@@ -978,8 +1065,17 @@ impl JmapStore for FakeStore {
         let mut email = FakeStore::draft_email();
         email.id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
         email.mailbox_id = target_mailbox_id;
+        email.mailbox_ids = vec![target_mailbox_id];
         email.mailbox_role = "".to_string();
         email.mailbox_name = "Archive".to_string();
+        email.mailbox_states = vec![JmapEmailMailboxState {
+            mailbox_id: target_mailbox_id,
+            role: "".to_string(),
+            name: "Archive".to_string(),
+            unread: email.unread,
+            flagged: email.flagged,
+            draft: false,
+        }];
         Ok(email)
     }
 
@@ -989,9 +1085,19 @@ impl JmapStore for FakeStore {
         _audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
         self.imported_emails.lock().unwrap().push(input.clone());
+        let mailbox_state = JmapEmailMailboxState {
+            mailbox_id: input.mailbox_id,
+            role: "".to_string(),
+            name: "Imported".to_string(),
+            unread: false,
+            flagged: false,
+            draft: false,
+        };
         Ok(JmapEmail {
             id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
             thread_id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+            mailbox_ids: vec![input.mailbox_id],
+            mailbox_states: vec![mailbox_state],
             mailbox_id: input.mailbox_id,
             mailbox_role: "".to_string(),
             mailbox_name: "Imported".to_string(),
@@ -2640,6 +2746,87 @@ async fn email_get_only_returns_bcc_for_explicit_owner_draft_request() {
         Value::String("hidden@example.test".to_string())
     );
     assert_eq!(list[1]["bcc"], Value::Null);
+}
+
+#[tokio::test]
+async fn email_get_and_query_preserve_multiple_mailbox_ids_for_one_email() {
+    let inbox = FakeStore::inbox_mailbox();
+    let archive = JmapMailbox {
+        id: Uuid::parse_str("acacacac-acac-acac-acac-acacacacacac").unwrap(),
+        role: "custom".to_string(),
+        name: "Archive".to_string(),
+        sort_order: 20,
+        total_emails: 1,
+        unread_emails: 0,
+    };
+    let mut email = FakeStore::inbox_email();
+    email.mailbox_ids = vec![inbox.id, archive.id];
+    email.mailbox_states = vec![
+        FakeStore::mailbox_state(&inbox, true, false, false),
+        FakeStore::mailbox_state(&archive, false, true, false),
+    ];
+    email.unread = true;
+    email.flagged = true;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone(), archive.clone()],
+        emails: vec![email.clone()],
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({
+                            "ids": [email.id.to_string()],
+                            "properties": ["id", "mailboxIds", "keywords"]
+                        }),
+                        "c1".to_string(),
+                    ),
+                    JmapMethodCall("Email/query".to_string(), json!({}), "c2".to_string()),
+                    JmapMethodCall(
+                        "Email/query".to_string(),
+                        json!({"filter": {"inMailbox": archive.id.to_string()}}),
+                        "c3".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    let email_object = &response.method_responses[0].1["list"][0];
+    let mailbox_ids = email_object["mailboxIds"].as_object().unwrap();
+    assert_eq!(
+        mailbox_ids.get(&inbox.id.to_string()),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(
+        mailbox_ids.get(&archive.id.to_string()),
+        Some(&Value::Bool(true))
+    );
+    assert_eq!(email_object["keywords"]["$flagged"], Value::Bool(true));
+    assert_eq!(email_object["keywords"].get("$seen"), None);
+    assert_eq!(
+        response.method_responses[1].1["ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        response.method_responses[2].1["ids"][0],
+        Value::String(email.id.to_string())
+    );
 }
 
 #[tokio::test]
@@ -5081,12 +5268,13 @@ async fn email_get_exposes_canonical_blob_ids_and_download_accepts_upload_prefix
     assert_eq!(draft_blob.media_type, "message/rfc822");
     assert!(draft_message.contains("Subject: Draft subject\r\n"));
     assert!(draft_message.contains("To: Bob <bob@example.test>\r\n"));
-    assert!(draft_message.contains("Bcc: hidden@example.test\r\n"));
+    assert!(!draft_message.contains("Bcc:"));
+    assert!(!draft_message.contains("hidden@example.test"));
     assert!(draft_message.contains("\r\nDraft body\r\n"));
 }
 
 #[tokio::test]
-async fn owned_message_download_prefers_stored_raw_mime_blob() {
+async fn owned_message_download_prefers_sanitized_stored_raw_mime_blob() {
     let email = FakeStore::draft_email();
     let raw_blob = JmapUploadBlob {
         id: email.id,
@@ -5126,10 +5314,10 @@ async fn owned_message_download_prefers_stored_raw_mime_blob() {
         .await
         .unwrap();
 
-    assert_eq!(blob.blob_bytes, raw_blob.blob_bytes);
-    assert!(String::from_utf8(blob.blob_bytes)
-        .unwrap()
-        .contains("X-Custom: yes\r\n"));
+    let message = String::from_utf8(blob.blob_bytes).unwrap();
+    assert!(message.contains("X-Custom: yes\r\n"));
+    assert!(!message.contains("Bcc:"));
+    assert!(!message.contains("hidden@example.test"));
 }
 
 #[tokio::test]
@@ -6553,6 +6741,7 @@ async fn websocket_push_states_include_shared_mailbox_accounts() {
         accessible_mailbox_accounts: vec![
             FakeStore::mailbox_access(),
             MailboxAccountAccess {
+                tenant_id: shared.tenant_id,
                 account_id: shared.account_id,
                 email: shared.email,
                 display_name: shared.display_name,
@@ -6636,6 +6825,7 @@ async fn websocket_push_enable_sends_full_state_for_missing_or_stale_push_state(
         accessible_mailbox_accounts: vec![
             FakeStore::mailbox_access(),
             MailboxAccountAccess {
+                tenant_id: shared.tenant_id,
                 account_id: shared.account_id,
                 email: shared.email,
                 display_name: shared.display_name,
@@ -8866,6 +9056,7 @@ async fn benchmark_mailbox_listing_and_push_paths() {
         mailboxes: mailboxes.clone(),
         accessible_mailbox_accounts: std::iter::once(FakeStore::mailbox_access())
             .chain((0..32).map(|index| MailboxAccountAccess {
+                tenant_id: account.tenant_id,
                 account_id: Uuid::from_u128(
                     0x3000_0000_0000_0000_0000_0000_0000_0000 + index as u128,
                 ),

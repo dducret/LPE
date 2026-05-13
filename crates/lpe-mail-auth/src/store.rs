@@ -3,6 +3,7 @@ use lpe_storage::{
     AccountLogin, AuditEntryInput, AuthenticatedAccount, Storage, StoredAccountAppPassword,
 };
 use std::{future::Future, pin::Pin};
+use uuid::Uuid;
 
 pub type StoreFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T>> + Send + 'a>>;
 
@@ -23,7 +24,7 @@ pub trait AccountAuthStore: Clone + Send + Sync + 'static {
     ) -> StoreFuture<'a, ()>;
     fn append_audit_event<'a>(
         &'a self,
-        tenant_id: &'a str,
+        tenant_id: &'a Uuid,
         entry: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 }
@@ -60,9 +61,9 @@ impl AccountAuthStore for Storage {
 
     fn append_audit_event<'a>(
         &'a self,
-        tenant_id: &'a str,
+        tenant_id: &'a Uuid,
         entry: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
-        Box::pin(async move { self.append_audit_event(tenant_id, entry).await })
+        Box::pin(async move { self.append_audit_event(*tenant_id, entry).await })
     }
 }

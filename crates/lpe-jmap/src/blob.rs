@@ -269,9 +269,8 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
 
         for blob_id in arguments.blob_ids {
             let resolved_blob_id = resolve_creation_reference(&blob_id, created_ids);
-            let include_bcc = source_account.is_owned && target_account.is_owned;
             match self
-                .resolve_download_blob_with_bcc(&source_account, &resolved_blob_id, include_bcc)
+                .resolve_download_blob_with_bcc(&source_account, &resolved_blob_id, false)
                 .await
             {
                 Ok(blob) => {
@@ -415,7 +414,9 @@ fn blob_lookup_index(emails: &[JmapEmail]) -> HashMap<String, BlobLookupEntry> {
             .or_insert_with(BlobLookupEntry::default);
         entry.email_ids.insert(email.id.to_string());
         entry.thread_ids.insert(email.thread_id.to_string());
-        entry.mailbox_ids.insert(email.mailbox_id.to_string());
+        for mailbox_id in &email.mailbox_ids {
+            entry.mailbox_ids.insert(mailbox_id.to_string());
+        }
     }
     lookup
 }

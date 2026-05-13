@@ -40,7 +40,7 @@ impl CanonicalChangeCategory {
 
 pub struct CanonicalChangeListener {
     principal_account_id: Uuid,
-    tenant_id: String,
+    tenant_id: Uuid,
     listener: PgListener,
 }
 
@@ -147,7 +147,7 @@ impl CanonicalChangeListener {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CanonicalChangeNotification {
-    tenant_id: String,
+    tenant_id: Uuid,
     category: String,
     journal_sequence: i64,
     principal_account_ids: Vec<String>,
@@ -171,7 +171,7 @@ impl Storage {
 
     pub(crate) async fn emit_canonical_change(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         category: CanonicalChangeCategory,
         principal_account_ids: &[Uuid],
         account_ids: &[Uuid],
@@ -197,7 +197,7 @@ impl Storage {
         .fetch_one(&mut **tx)
         .await?;
         let payload = serde_json::to_string(&CanonicalChangeNotification {
-            tenant_id: tenant_id.to_string(),
+            tenant_id: *tenant_id,
             category: category.as_str().to_string(),
             journal_sequence,
             principal_account_ids: principal_account_ids.iter().map(Uuid::to_string).collect(),
@@ -213,7 +213,7 @@ impl Storage {
 
     pub(crate) async fn emit_mail_change(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<()> {
         let mut principal_account_ids = HashSet::from([account_id]);
@@ -246,7 +246,7 @@ impl Storage {
 
     pub(crate) async fn emit_mail_delegation_change(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         owner_account_id: Uuid,
         grantee_account_id: Uuid,
     ) -> Result<()> {
@@ -273,7 +273,7 @@ impl Storage {
 
     pub(crate) async fn emit_collaboration_change(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         category: CanonicalChangeCategory,
         owner_account_id: Uuid,
     ) -> Result<()> {
@@ -358,7 +358,7 @@ impl Storage {
 
     pub(crate) async fn emit_collaboration_grant_change(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         kind: CollaborationResourceKind,
         owner_account_id: Uuid,
         grantee_account_id: Uuid,
@@ -392,7 +392,7 @@ impl Storage {
 
     pub(crate) async fn emit_task_access_change(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         owner_account_id: Uuid,
         task_list_ids: &[Uuid],
         extra_principal_account_ids: &[Uuid],
@@ -435,7 +435,7 @@ impl Storage {
     pub(crate) async fn insert_collaboration_tombstone_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         category: CanonicalChangeCategory,
         owner_account_id: Uuid,
         collection_id: Option<Uuid>,
@@ -601,6 +601,34 @@ impl Storage {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+
+    pub async fn purge_expired_replay_rows(&self) -> Result<u64> {
+        let tombstones = sqlx::query(
+            r#"
+            DELETE FROM tombstones
+            WHERE retained_until IS NOT NULL
+              AND retained_until <= NOW()
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        let change_rows = sqlx::query(
+            r#"
+            DELETE FROM mail_change_log log
+            WHERE log.retained_until IS NOT NULL
+              AND log.retained_until <= NOW()
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM tombstones tombstone
+                  WHERE tombstone.tenant_id = log.tenant_id
+                    AND tombstone.change_cursor = log.cursor
+              )
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(tombstones.rows_affected() + change_rows.rows_affected())
     }
 }
 

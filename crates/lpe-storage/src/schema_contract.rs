@@ -1,9 +1,13 @@
 const SCHEMA: &str = include_str!("../sql/schema.sql");
+const ATTACHMENTS_STORAGE: &str = include_str!("attachments.rs");
+const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
+const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
 const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
+const PST_STORAGE: &str = include_str!("pst.rs");
 const SHARED_STORAGE: &str = include_str!("shared.rs");
 const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
 const TASKS_STORAGE: &str = include_str!("tasks.rs");
@@ -222,6 +226,59 @@ fn collaboration_changes_and_tombstones_are_object_level() {
 }
 
 #[test]
+fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
+    let change_log = table_definition("mail_change_log");
+    for required in [
+        "UNIQUE (tenant_id, cursor, object_kind, object_id)",
+        "CHECK (jsonb_typeof(summary_json) = 'object')",
+        "CHECK (array_position(affected_principal_ids, NULL) IS NULL)",
+        "object_kind = 'mailbox_message'",
+        "summary_json ? 'messageId'",
+        "summary_json ? 'threadId'",
+        "summary_json ? 'imapUid'",
+        "object_kind = 'submission'",
+        "summary_json ? 'status'",
+    ] {
+        assert!(
+            change_log.contains(required),
+            "mail_change_log must enforce replay row shape: {required}"
+        );
+    }
+
+    let tombstones = table_definition("tombstones");
+    assert!(
+        tombstones.contains("FOREIGN KEY (tenant_id, change_cursor, object_kind, object_id)")
+            && tombstones
+                .contains("REFERENCES mail_change_log (tenant_id, cursor, object_kind, object_id)"),
+        "tombstones must point at a matching change-log object row"
+    );
+
+    let mapi = table_definition("mapi_sync_checkpoints");
+    assert!(
+        mapi.contains("CHECK (jsonb_typeof(cursor_json) = 'object')")
+            && mapi.contains("(checkpoint_kind = 'hierarchy' AND mailbox_id IS NULL)")
+            && mapi
+                .contains("(checkpoint_kind IN ('content', 'read_state') AND mailbox_id IS NOT NULL)"),
+        "MAPI checkpoints must encode hierarchy as account-wide and content/read-state as mailbox-scoped"
+    );
+
+    assert!(
+        CHANGE_STORAGE.contains("pub async fn purge_expired_replay_rows")
+            && CHANGE_STORAGE.contains("DELETE FROM tombstones")
+            && CHANGE_STORAGE.contains("DELETE FROM mail_change_log")
+            && PROTOCOLS_STORAGE.contains("retained_until IS NULL OR retained_until > NOW()"),
+        "retained replay cleanup must remove expired tombstone/log rows and replay must ignore unretained rows"
+    );
+    assert!(
+        PROTOCOLS_STORAGE.contains("FROM mail_change_log")
+            && PROTOCOLS_STORAGE.contains("fetch_canonical_change_cursor(account_id)")
+            && SCHEMA.contains("CREATE TABLE mapi_sync_checkpoints")
+            && table_definition("mapi_sync_checkpoints").contains("last_change_sequence"),
+        "JMAP, ActiveSync, and MAPI cursors must store positions and replay from canonical logs instead of protocol-owned content snapshots"
+    );
+}
+
+#[test]
 fn collaboration_deletes_write_tombstones() {
     assert!(
         CHANGE_STORAGE.contains("pub(crate) async fn insert_collaboration_tombstone_in_tx")
@@ -343,8 +400,24 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
         !blob_placements.contains("'raw_message'"),
         "raw RFC 5322 blobs must not require placement metadata in Milestone 2"
     );
+    let blobs = table_definition("blobs");
+    for required in [
+        "blob_bytes BYTEA",
+        "CHECK (blob_kind <> 'raw_message' OR blob_bytes IS NOT NULL)",
+    ] {
+        assert!(
+            blobs.contains(required),
+            "blobs must keep raw messages DB-backed while allowing externally placed durable bytes: {required}"
+        );
+    }
+    assert!(
+        !blobs.contains("blob_bytes BYTEA NOT NULL"),
+        "externally placed durable attachment and MIME blobs must not require database bytes"
+    );
 
     assert_schema_contains_all(&[
+        "UNIQUE (tenant_id, id, blob_kind)",
+        "UNIQUE (tenant_id, domain_id, id, blob_kind)",
         "UNIQUE (tenant_id, domain_id, id, blob_kind, content_sha256, size_octets)",
         "INSERT INTO storage_pools (id, name, pool_kind)",
         "'postgres-primary', 'postgres'",
@@ -373,6 +446,75 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
             "Milestone 6 schema must not introduce provider-specific backend config for {unsupported_backend}"
         );
     }
+}
+
+#[test]
+fn blob_references_enforce_kind_and_attachment_ownership() {
+    let messages = table_definition("messages");
+    for required in [
+        "blob_kind TEXT NOT NULL DEFAULT 'raw_message' CHECK (blob_kind = 'raw_message')",
+        "FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)",
+        "REFERENCES blobs (tenant_id, domain_id, id, blob_kind)",
+    ] {
+        assert!(
+            messages.contains(required),
+            "messages must constrain raw RFC 5322 blob references by kind and domain: {required}"
+        );
+    }
+
+    let mime_parts = table_definition("mime_parts");
+    for required in [
+        "blob_kind TEXT CHECK (blob_kind IS NULL OR blob_kind IN ('mime_part', 'attachment'))",
+        "UNIQUE (tenant_id, message_id, domain_id, id, blob_id, blob_kind)",
+        "CHECK ((blob_id IS NULL AND blob_kind IS NULL) OR (blob_id IS NOT NULL AND blob_kind IS NOT NULL))",
+        "FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)",
+        "REFERENCES blobs (tenant_id, domain_id, id, blob_kind)",
+    ] {
+        assert!(
+            mime_parts.contains(required),
+            "mime_parts must constrain durable MIME/attachment blob references: {required}"
+        );
+    }
+
+    let attachments = table_definition("attachments");
+    for required in [
+        "blob_kind TEXT NOT NULL DEFAULT 'attachment' CHECK (blob_kind = 'attachment')",
+        "FOREIGN KEY (tenant_id, account_id, mailbox_message_id, message_id)",
+        "REFERENCES mailbox_messages (tenant_id, account_id, id, message_id)",
+        "FOREIGN KEY (tenant_id, message_id, domain_id) REFERENCES messages (tenant_id, id, domain_id)",
+        "FOREIGN KEY (tenant_id, message_id, domain_id, mime_part_id, blob_id, blob_kind)",
+        "REFERENCES mime_parts (tenant_id, message_id, domain_id, id, blob_id, blob_kind)",
+        "FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)",
+        "REFERENCES blobs (tenant_id, domain_id, id, blob_kind)",
+    ] {
+        assert!(
+            attachments.contains(required),
+            "attachments must prove tenant/domain/account/message/membership/blob consistency: {required}"
+        );
+    }
+
+    let extraction_jobs = table_definition("attachment_extraction_jobs");
+    let attachment_texts = table_definition("attachment_texts");
+    for (name, source) in [
+        ("attachment_extraction_jobs", extraction_jobs),
+        ("attachment_texts", attachment_texts),
+    ] {
+        assert!(
+            source.contains(
+                "blob_kind TEXT NOT NULL DEFAULT 'attachment' CHECK (blob_kind = 'attachment')"
+            ) && source.contains("FOREIGN KEY (tenant_id, blob_id, blob_kind)")
+                && source.contains("REFERENCES blobs (tenant_id, id, blob_kind)"),
+            "{name} must only reference attachment blobs"
+        );
+    }
+
+    assert!(
+        ATTACHMENTS_STORAGE.contains("blob_kind, status")
+            && ATTACHMENTS_STORAGE.contains("'attachment', 'queued'")
+            && ATTACHMENTS_STORAGE.contains("blob_id, blob_kind")
+            && ATTACHMENTS_STORAGE.contains("'attachment', $8"),
+        "attachment ingestion must bind attachment blob kind explicitly"
+    );
 }
 
 #[test]
@@ -421,18 +563,95 @@ fn storage_policy_assignments_capture_milestone_five_scope_contract() {
 fn audit_events_support_platform_and_tenant_admin_policy_events() {
     let audit = table_definition("audit_events");
     for required in [
-        "tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> '')",
+        "tenant_id UUID NOT NULL",
         "actor TEXT NOT NULL CHECK (btrim(actor) <> '')",
         "action TEXT NOT NULL CHECK (btrim(action) <> '')",
         "subject TEXT NOT NULL CHECK (btrim(subject) <> '')",
         "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
         "UNIQUE (tenant_id, id)",
+        "FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE",
     ] {
         assert!(
             audit.contains(required),
             "audit_events is missing required admin policy audit fragment: {required}"
         );
     }
+}
+
+#[test]
+fn platform_administration_uses_real_tenant_uuid_not_string_pseudo_tenant() {
+    assert!(
+        SCHEMA.contains(
+            "INSERT INTO tenants (id, slug, display_name)\nVALUES ('00000000-0000-0000-0000-000000000001', 'platform', 'LPE Platform')"
+        ),
+        "schema.sql must seed the real platform tenant row"
+    );
+    assert!(
+        !SCHEMA.contains("__platform__")
+            && !SHARED_STORAGE.contains("__platform__")
+            && !ADMIN_STORAGE.contains("__platform__"),
+        "platform state must not use the retired __platform__ pseudo-tenant string"
+    );
+    assert!(
+        SHARED_STORAGE.contains("pub(crate) const PLATFORM_TENANT_ID: Uuid = Uuid::from_u128(1)")
+            && SHARED_STORAGE
+                .contains("tenant_id_for_domain_name(&self, domain_name: &str) -> Result<Uuid>")
+            && SHARED_STORAGE
+                .contains("tenant_id_for_account_email(&self, email: &str) -> Result<Uuid>")
+            && SHARED_STORAGE
+                .contains("tenant_id_for_admin_email(&self, email: &str) -> Result<Uuid>"),
+        "tenant lookup helpers must return real UUID tenant ids"
+    );
+}
+
+#[test]
+fn admin_domain_account_and_audit_paths_bind_uuid_tenant_ids() {
+    assert!(
+        ADMIN_STORAGE.contains("let tenant_id = PLATFORM_TENANT_ID;")
+            && ADMIN_STORAGE.contains("INSERT INTO domains (\n                id, tenant_id, name")
+            && ADMIN_STORAGE.contains(
+                "INSERT INTO accounts (\n                id, tenant_id, primary_domain_id"
+            )
+            && SHARED_STORAGE
+                .contains("INSERT INTO audit_events (id, tenant_id, actor, action, subject)")
+            && SHARED_STORAGE.contains("tenant_id: &Uuid"),
+        "admin domain creation, account creation, and audit writes must bind UUID tenant ids"
+    );
+}
+
+#[test]
+fn admin_workspace_and_pst_use_v2_mailbox_membership_schema() {
+    assert_schema_contains_all(&[
+        "retention_days INTEGER NOT NULL DEFAULT 365 CHECK (retention_days >= 0)",
+        "jmap_push_journal_retention_days INTEGER NOT NULL DEFAULT 30",
+        "CREATE TABLE mailbox_pst_jobs",
+        "FOREIGN KEY (tenant_id, account_id, mailbox_id)\n        REFERENCES mailboxes (tenant_id, account_id, id)",
+    ]);
+
+    for (name, source) in [
+        ("admin.rs", ADMIN_STORAGE),
+        ("protocols.rs", PROTOCOLS_STORAGE),
+        ("workspace.rs", WORKSPACE_STORAGE),
+        ("pst.rs", PST_STORAGE),
+    ] {
+        assert!(
+            !source.contains("messages m ON m.mailbox_id")
+                && !source.contains("JOIN mailboxes mb ON mb.id = m.mailbox_id")
+                && !source.contains("m.delivery_status")
+                && !source.contains("m.from_address"),
+            "{name} must not query retired v1 message projection columns"
+        );
+        assert!(
+            source.contains("mailbox_messages"),
+            "{name} must use mailbox_messages for mailbox membership"
+        );
+    }
+
+    assert!(
+        !ADMIN_STORAGE.contains("outbound_message_queue")
+            && ADMIN_STORAGE.contains("submission_queue"),
+        "admin mail flow views must use the v2 submission queue"
+    );
 }
 
 #[test]
@@ -588,6 +807,80 @@ fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
             && !INBOUND_STORAGE.contains("fn mailbox_uid_validity")
             && !PROTOCOLS_STORAGE.contains("fn mailbox_uid_validity"),
         "new mailbox paths must not carry protocol-local UIDVALIDITY helpers"
+    );
+}
+
+#[test]
+fn mailbox_moves_create_target_membership_and_tombstone_source_uid() {
+    let move_body = function_body(MESSAGE_OPS_STORAGE, "pub async fn move_jmap_email");
+    assert!(
+        move_body.contains("INSERT INTO mailbox_messages")
+            && move_body.contains("UPDATE mailboxes\n            SET uid_next = uid_next + 1")
+            && move_body.contains("visibility = 'expunged'")
+            && move_body.contains("'move'")
+            && move_body.contains("sourceImapUid")
+            && move_body.contains("targetImapUid"),
+        "mailbox moves must create a target membership from target UIDNEXT and tombstone the source membership with the original IMAP UID"
+    );
+    assert!(
+        !move_body.contains("SET mailbox_id = $4"),
+        "mailbox moves must not rewrite the source membership mailbox_id in place"
+    );
+}
+
+#[test]
+fn jmap_email_projection_preserves_multi_mailbox_memberships() {
+    let fetch_body = function_body(PROTOCOLS_STORAGE, "pub async fn fetch_jmap_emails");
+    let query_body = function_body(PROTOCOLS_STORAGE, "pub async fn query_jmap_email_ids");
+    assert!(
+        fetch_body.contains("array_agg(mailbox_id")
+            && fetch_body.contains("mailbox_ids: row.mailbox_ids.clone()")
+            && fetch_body.contains("mailbox_states")
+            && !fetch_body.contains("DISTINCT ON (m.id)"),
+        "JMAP Email/get must aggregate all visible mailbox memberships instead of choosing one"
+    );
+    assert!(
+        query_body.contains("GROUP BY s.message_id")
+            && query_body.contains("COUNT(*)\n            FROM (\n                SELECT s.message_id"),
+        "JMAP Email/query must deduplicate unscoped results by canonical message id while preserving mailbox-scoped membership filters"
+    );
+}
+
+#[test]
+fn runtime_access_paths_have_scaling_indexes() {
+    assert_schema_contains_all(&[
+        "CREATE INDEX mailbox_messages_visible_uid_idx",
+        "ON mailbox_messages (tenant_id, account_id, mailbox_id, imap_uid)",
+        "WHERE visibility = 'visible'",
+        "CREATE INDEX mailbox_messages_visible_account_message_idx",
+        "ON mailbox_messages (tenant_id, account_id, message_id, mailbox_id)",
+        "CREATE INDEX mail_search_documents_account_message_idx",
+        "ON mail_search_documents (account_id, message_id, mailbox_message_id)",
+        "CREATE INDEX mail_change_log_account_cursor_idx",
+        "ON mail_change_log (tenant_id, account_id, cursor)",
+        "CREATE INDEX submission_queue_worker_due_idx",
+        "ON submission_queue (next_attempt_at, created_at, id)",
+        "WHERE status IN ('queued', 'ready', 'deferred')",
+        "CREATE INDEX attachment_extraction_jobs_blob_idx",
+        "ON attachment_extraction_jobs (tenant_id, blob_id)",
+        "CREATE INDEX blob_placements_fetch_idx",
+        "ON blob_placements (tenant_id, domain_id, blob_id, blob_kind)",
+    ]);
+    assert!(
+        PROTOCOLS_STORAGE.contains("ORDER BY mm.imap_uid ASC")
+            && PROTOCOLS_STORAGE.contains("GROUP BY s.message_id")
+            && PROTOCOLS_STORAGE.contains("ORDER BY cursor ASC"),
+        "protocol runtime SQL must retain the mailbox UID, JMAP query, and change replay paths covered by scaling indexes"
+    );
+    assert!(
+        OUTBOUND_STORAGE.contains("q.status IN ('queued', 'ready', 'deferred')")
+            && OUTBOUND_STORAGE.contains("ORDER BY q.created_at ASC, q.id ASC"),
+        "submission worker SQL must match the due-queue access path covered by submission_queue_worker_due_idx"
+    );
+    assert!(
+        ATTACHMENTS_STORAGE.contains("INSERT INTO attachment_extraction_jobs")
+            && BLOB_STORE_STORAGE.contains("FROM attachment_extraction_jobs"),
+        "attachment extraction and blob cleanup blocker SQL must keep the access paths covered by extraction indexes"
     );
 }
 

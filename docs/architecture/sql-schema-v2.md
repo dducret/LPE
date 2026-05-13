@@ -41,6 +41,21 @@ canonical ownership.
 Domain names are globally unique because Internet mail routing cannot assign the
 same domain to two tenants at once.
 
+Tenant identity is a UUID identity in both SQL and Rust. The bootstrap platform
+tenant row is:
+
+- `00000000-0000-0000-0000-000000000001`
+- slug `platform`
+- display name `LPE Platform`
+
+Runtime code refers to that row through `PLATFORM_TENANT_ID` as a `Uuid`.
+Tenant-scoped tables must never receive string pseudo-tenants such as
+`__platform__`. Platform/global operations that need to write into
+tenant-scoped tables, including audit events and bootstrap administrator state,
+use the real platform tenant UUID. Tables that model truly platform-wide scope,
+such as storage policy assignment scope rows, may be tenantless only when their
+schema explicitly allows that null tenant scope.
+
 Exceptions are intentionally limited:
 
 - `schema_metadata` is a singleton.
@@ -66,6 +81,7 @@ one or more mailbox memberships through `mailbox_messages`.
 - `uid_validity`
 - `uid_next`
 - `modseq`
+- mailbox-level retention policy in `retention_days`
 - special-use role
 - hierarchy fields
 
@@ -83,9 +99,43 @@ for hierarchy sync and folder-list projections.
 - membership timestamps
 - soft-delete / expunge state while visible to sync logic
 
+`domains` owns domain defaults that affect mailbox runtime behavior, including
+`default_sieve_script` for newly created or defaulted mailbox filtering and
+`jmap_push_journal_retention_days` for tenant-domain JMAP push replay cleanup.
+Those fields are schema fields, not admin-only view state.
+
 UID allocation must update the mailbox row and insert membership rows in the
 same transaction. Expunge removes the live membership row only after writing a
 tombstone row.
+
+Mailbox copy and move semantics are membership semantics, not message-row
+rewrites. Copy creates another visible `mailbox_messages` row for the same
+canonical `messages.id` and allocates a new UID from the target mailbox.
+Move creates the target membership the same way, then marks the source
+membership `visibility = 'expunged'`, preserves the original source
+`imap_uid`, and writes a `tombstones` row with reason `move`. The target
+membership receives a new UID from the target mailbox `uid_next`. Protocol
+replay uses the move change row plus tombstone to report JMAP `Email/changes`,
+mailbox count changes, IMAP QRESYNC-style expunge state, and MAPI checkpoint
+replay without rewriting historical UIDs.
+
+JMAP `Email/get` must expose all visible mailbox memberships for an email.
+`mailboxIds` is derived from all visible `mailbox_messages` rows for the
+requesting account. The storage projection also returns per-mailbox membership
+state so compatibility adapters can distinguish mailbox-specific unread,
+flagged, and draft values; the top-level unread/flagged/draft projection is a
+rollup over visible memberships. `Email/query` deduplicates unscoped results by
+canonical message id while mailbox-scoped queries still filter through the
+selected membership.
+
+Schema v2 keeps thread identity lightweight until the product needs first-class
+thread lifecycle. `mailbox_messages.thread_id` and durable change-log
+`threadId` summaries are enough for current JMAP thread projection and replay.
+If thread creation/deletion state, MAPI conversation IDs, conversation indexes,
+or retained JMAP `Thread/changes` need stable identity beyond message and
+mailbox-message summaries, add a real `threads` table with tenant/account
+ownership and make messages or memberships reference it. Do not stretch
+mailbox-message summary fields into an implicit thread store.
 
 Protocol adapters and tests must treat `uid_validity` and `uid_next` as mailbox
 state. They must not derive `UIDNEXT` from the maximum currently visible
@@ -110,6 +160,14 @@ They may carry `retained_until` so cleanup jobs can prune old replay data only
 after the configured protocol replay windows have passed. Tombstones capture
 deleted message and mailbox-membership identifiers as historical facts rather
 than foreign-keying back to rows that deletion or expunge may remove.
+
+Replay rows are structurally constrained. `mail_change_log.summary_json` must
+be a JSON object, affected-principal arrays must not contain nulls, and
+mailbox-message rows must contain durable `messageId`, `threadId`, and
+`imapUid` summary fields. Submission rows must carry `messageId` and `status`.
+Tombstones reference the matching `(tenant_id, cursor, object_kind, object_id)`
+change-log row so destroyed-object replay cannot point at an unrelated cursor.
+Retained replay queries ignore rows whose `retained_until` has expired.
 
 JMAP `Mailbox/changes`, `Email/changes`, `Thread/changes`,
 `EmailSubmission/changes`, and collaboration object changes use
@@ -138,6 +196,10 @@ Protocol adapters store only cursor rows:
   calendar, task, attachment, `Sent`, draft, outbox, search, rights, or
   quarantine data.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS folder or hierarchy cursor state.
+  Hierarchy checkpoints are account-wide and must have `mailbox_id IS NULL`.
+  Content and read-state checkpoints are mailbox-scoped and must have a real
+  mailbox id. MAPI checkpoints store positions over canonical change rows, not
+  mailbox or message replicas.
 
 None of these tables stores canonical messages, folders, contacts, calendars,
 tasks, attachments, `Sent`, drafts, or outbox state.
@@ -155,12 +217,17 @@ points to the raw message blob.
 Export and protocol body fetches reconstruct from this canonical MIME plus
 parsed part metadata. The raw blob reference is domain-bound so a message cannot
 point at a raw MIME blob deduplicated under another domain in the same tenant.
+The schema enforces this with `blob_kind`: `messages` may reference only
+`raw_message` blobs, and raw-message blobs must keep non-null
+`blobs.blob_bytes`.
 
 `mime_parts` records MIME tree structure, headers, content IDs, file
 names, transfer encodings, byte offsets where available, and links to durable
 attachment blobs when the part is an attachment or inline binary body part.
 Part-to-blob references are domain-bound so a message in one tenant domain
 cannot point at a deduplicated blob owned by another domain in the same tenant.
+MIME part blob references may point only at durable `mime_part` or `attachment`
+blobs, with the blob kind included in the foreign key.
 
 `message_bodies` records Bcc-safe text and HTML body projections. Sanitized
 HTML can be stored for client rendering; raw MIME remains the fidelity source.
@@ -174,16 +241,18 @@ remain downloadable but not indexed.
 MIME-part blobs are stored. Database-backed pools read bytes from
 `blobs.blob_bytes`. S3-compatible pools store bytes in provider-neutral object
 storage using object keys derived from placement metadata rather than tenant,
-domain, mailbox, message, or provider-specific identifiers. S3-compatible pool
-configuration records endpoint, bucket, signing-region or region-like value,
-addressing style, optional object prefix, and deployment secret reference; it
-must not store inline credentials. Raw RFC 5322 message blobs remain
-database-backed initially and do not require placement rows. Durable attachment
-and MIME-part `BlobStore` read/stat/verify paths require an active placement row
-on an active supported pool; a missing active placement is a storage-layer
-failure, not a missing mailbox or message. Schema v2 still treats PostgreSQL as
-the authoritative metadata store. Policy changes record intent for future
-writes only and do not implicitly migrate existing blobs.
+domain, mailbox, message, or provider-specific identifiers, and externally
+placed durable attachment/MIME-part blobs may have `blobs.blob_bytes = NULL`.
+S3-compatible pool configuration records endpoint, bucket, signing-region or
+region-like value, addressing style, optional object prefix, and deployment
+secret reference; it must not store inline credentials. Raw RFC 5322 message
+blobs remain database-backed initially, must keep non-null `blob_bytes`, and do
+not require placement rows. Durable attachment and MIME-part `BlobStore`
+read/stat/verify paths require an active placement row on an active supported
+pool; a missing active placement is a storage-layer failure, not a missing
+mailbox or message. Schema v2 still treats PostgreSQL as the authoritative
+metadata store. Policy changes record intent for future writes only and do not
+implicitly migrate existing blobs.
 `storage_policy_assignments` stores admin-managed platform, tenant, domain, and
 account policy assignments. Mailbox-level policy is not part of schema v2.
 `blob_migration_jobs` records explicit online migration work for durable
@@ -216,6 +285,10 @@ terminal extraction jobs have a completion time.
 file name, disposition, content ID, ordinal, size, and `blob_id`.
 Attachment metadata must prove the mailbox membership, canonical message, MIME
 part, and attachment blob belong to the same tenant and domain.
+`attachments`, `attachment_extraction_jobs`, and `attachment_texts` may
+reference only `attachment` blobs. Composite foreign keys include `tenant_id`,
+domain/message/membership identifiers where needed, `blob_id`, and `blob_kind`
+so a row cannot silently cross domains or attach a raw-message blob.
 
 `attachment_extraction_jobs` records async extraction attempts and results.
 `attachment_texts` stores extracted Bcc-safe text and search vectors after a
@@ -240,6 +313,15 @@ The following tables must never include `Bcc` addresses or display names:
 Audit/compliance access to `protected_bcc_recipients` must be explicit and
 separate from user search, snippets, shared mailbox projections, and AI-facing
 pipelines.
+
+Storage APIs follow the same boundary. Default mail fetches, IMAP fetch/search,
+shared JMAP mailbox access, search documents, AI projections, and normal MIME
+exports exclude protected `Bcc`. JMAP may include protected `Bcc` only through
+the named protected fetch path and only for owned-account access requesting the
+`bcc` property. Compliance or owner-only export paths must opt in through a
+method name that makes protected metadata access explicit; accidental access
+through generic fetch helpers is not allowed. Raw-message blob reads used by
+default protocol paths strip `Bcc` headers before returning bytes.
 
 ## Submission and Draft Model
 
@@ -289,6 +371,13 @@ must use the primary address kind.
 
 Aliases route inbound recipient resolution to accounts or groups but do not
 become independent mailbox owners unless backed by an account/shared mailbox.
+
+Schema v2 currently treats mailbox addresses as simple normalized text values
+with lower-case checks. If internationalized mailbox addresses become in-scope,
+the schema should add generated normalized helpers for the full address, domain,
+and local part before widening runtime behavior. Those helpers should centralize
+EAI/IDNA comparison and indexing rules so account, alias, identity, session,
+recipient, and lookup paths do not each grow their own string normalization.
 
 ## Collaboration Model
 
@@ -405,6 +494,7 @@ collaboration, rights, or user-visible state.
 - `mime_parts`
 - `message_bodies`
 - `mailbox_messages`
+- `mailbox_pst_jobs`
 - `attachments`
 - `attachment_extraction_jobs`
 - `attachment_texts`
@@ -454,10 +544,22 @@ compatible. They do not replace canonical mail or collaboration tables.
 ## Implementation Notes
 
 - `schema.sql` v2 should create a fresh `0.3.0-sql-v2` schema.
+- Fresh schema initialization inserts the real platform tenant UUID row and the
+  default PostgreSQL storage pool/policy rows. Runtime bootstrap must not
+  synthesize pseudo-tenants.
 - Use composite foreign keys containing `tenant_id`, and include account or
   domain ownership columns where same-tenant is not precise enough.
-- Prefer table-level `CHECK` constraints for bounded state values until the
-  schema needs PostgreSQL enum migration semantics.
+- Add a first-class `threads` table only when thread lifecycle, MAPI
+  conversation IDs, or retained JMAP `Thread/changes` need stable durable
+  thread identity beyond message-level `thread_id` summaries.
+- Add generated normalized email/domain/local-part helper columns or functions
+  only when internationalized mailbox addresses become in-scope. Do that before
+  relaxing address checks so EAI/IDNA comparison, uniqueness, and lookup
+  semantics stay centralized.
+- Prefer ad hoc text state columns with table-level `CHECK` constraints for
+  bounded state values while those state machines are still changing. Replace
+  them with PostgreSQL enums only after state churn settles and the stricter
+  migration semantics are worth the added rigidity.
 - Do not add an LPE-core `antispam_quarantine` table. Quarantine custody is
   represented only as LPE-CT result history against submission or inbound
   delivery receipts.

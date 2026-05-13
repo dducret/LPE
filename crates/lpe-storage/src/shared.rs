@@ -4,7 +4,7 @@ use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{domain_from_email, normalize_email, sha256_hex, AuditEntryInput, Storage};
-pub(crate) const PLATFORM_TENANT_ID: &str = "__platform__";
+pub(crate) const PLATFORM_TENANT_ID: Uuid = Uuid::from_u128(1);
 pub(crate) const MAX_SIEVE_SCRIPT_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_SIEVE_SCRIPTS_PER_ACCOUNT: i64 = 16;
 pub(crate) const DEFAULT_COLLECTION_ID: &str = "default";
@@ -17,7 +17,7 @@ impl Storage {
     pub(crate) async fn allocate_mail_modseq_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<i64> {
         self.allocate_account_modseq_in_tx(tx, tenant_id, account_id, "mail")
@@ -27,7 +27,7 @@ impl Storage {
     pub(crate) async fn allocate_account_modseq_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         category: &str,
     ) -> Result<i64> {
@@ -54,7 +54,7 @@ impl Storage {
     pub(crate) async fn ensure_account_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<()> {
         let account_exists = sqlx::query(
@@ -80,7 +80,7 @@ impl Storage {
     pub(crate) async fn ensure_mailbox(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         role: &str,
         display_name: &str,
@@ -135,7 +135,7 @@ impl Storage {
 
     pub(crate) async fn insert_mail_change_log_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Option<Uuid>,
         mailbox_id: Option<Uuid>,
         object_kind: &str,
@@ -145,19 +145,24 @@ impl Storage {
         affected_principal_ids: &[Uuid],
         summary_json: Value,
     ) -> Result<i64> {
+        let collection_id = summary_json
+            .get("collectionId")
+            .and_then(Value::as_str)
+            .and_then(|value| Uuid::parse_str(value).ok());
         sqlx::query_scalar::<_, i64>(
             r#"
             INSERT INTO mail_change_log (
-                tenant_id, account_id, mailbox_id, object_kind, object_id, change_kind,
+                tenant_id, account_id, mailbox_id, collection_id, object_kind, object_id, change_kind,
                 modseq, affected_principal_ids, summary_json
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING cursor
             "#,
         )
         .bind(tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
+        .bind(collection_id)
         .bind(object_kind)
         .bind(object_id)
         .bind(change_kind)
@@ -171,7 +176,7 @@ impl Storage {
 
     pub(crate) async fn affected_mail_principals_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<Vec<Uuid>> {
         let mut principals = vec![account_id];
@@ -195,7 +200,7 @@ impl Storage {
     pub(crate) async fn allocate_mailbox_membership_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         mailbox_id: Uuid,
         message_id: Uuid,
@@ -287,7 +292,7 @@ impl Storage {
     pub(crate) async fn load_account_domain_id_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<Uuid> {
         sqlx::query_scalar::<_, Uuid>(
@@ -308,7 +313,7 @@ impl Storage {
     pub(crate) async fn store_message_blob_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         blob_kind: &str,
         media_type: &str,
@@ -363,7 +368,7 @@ impl Storage {
     pub(crate) async fn upsert_message_body_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         message_id: Uuid,
         body_text: &str,
@@ -458,7 +463,7 @@ impl Storage {
     pub(crate) async fn replace_message_headers_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         message_id: Uuid,
         raw_message: &[u8],
     ) -> Result<usize> {
@@ -494,7 +499,7 @@ impl Storage {
     pub(crate) async fn assign_message_attachments_membership_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         message_id: Uuid,
         mailbox_message_id: Uuid,
@@ -520,7 +525,7 @@ impl Storage {
 
     pub(crate) async fn upsert_mail_search_document_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         mailbox_message_id: Uuid,
         message_id: Uuid,
@@ -565,7 +570,7 @@ impl Storage {
     pub(crate) async fn insert_audit(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         audit: AuditEntryInput,
     ) -> Result<()> {
         sqlx::query(
@@ -585,13 +590,13 @@ impl Storage {
         Ok(())
     }
 
-    pub(crate) async fn tenant_id_for_domain_name(&self, domain_name: &str) -> Result<String> {
+    pub(crate) async fn tenant_id_for_domain_name(&self, domain_name: &str) -> Result<Uuid> {
         let domain_name = domain_name.trim().to_lowercase();
         if domain_name.is_empty() {
             bail!("domain name is required");
         }
 
-        let existing = sqlx::query_scalar::<_, String>(
+        let existing = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM domains
@@ -604,11 +609,11 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(existing.unwrap_or(domain_name))
+        existing.ok_or_else(|| anyhow!("domain not found"))
     }
 
-    pub(crate) async fn tenant_id_for_domain_id(&self, domain_id: Uuid) -> Result<String> {
-        sqlx::query_scalar::<_, String>(
+    pub(crate) async fn tenant_id_for_domain_id(&self, domain_id: Uuid) -> Result<Uuid> {
+        sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM domains
@@ -622,8 +627,8 @@ impl Storage {
         .ok_or_else(|| anyhow!("domain not found"))
     }
 
-    pub(crate) async fn tenant_id_for_account_id(&self, account_id: Uuid) -> Result<String> {
-        sqlx::query_scalar::<_, String>(
+    pub(crate) async fn tenant_id_for_account_id(&self, account_id: Uuid) -> Result<Uuid> {
+        sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM accounts
@@ -637,13 +642,13 @@ impl Storage {
         .ok_or_else(|| anyhow!("account not found"))
     }
 
-    pub(crate) async fn tenant_id_for_account_email(&self, email: &str) -> Result<String> {
+    pub(crate) async fn tenant_id_for_account_email(&self, email: &str) -> Result<Uuid> {
         let email = normalize_email(email);
         if email.is_empty() {
             bail!("account email is required");
         }
 
-        if let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+        if let Some(tenant_id) = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM accounts
@@ -663,13 +668,13 @@ impl Storage {
         self.tenant_id_for_domain_name(&domain).await
     }
 
-    pub(crate) async fn tenant_id_for_admin_email(&self, email: &str) -> Result<String> {
+    pub(crate) async fn tenant_id_for_admin_email(&self, email: &str) -> Result<Uuid> {
         let email = normalize_email(email);
         if email.is_empty() {
             bail!("admin email is required");
         }
 
-        if let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+        if let Some(tenant_id) = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM server_administrators
@@ -685,7 +690,7 @@ impl Storage {
             return Ok(tenant_id);
         }
 
-        if let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+        if let Some(tenant_id) = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM admin_credentials
@@ -701,7 +706,7 @@ impl Storage {
             return Ok(tenant_id);
         }
 
-        Ok(PLATFORM_TENANT_ID.to_string())
+        Ok(PLATFORM_TENANT_ID)
     }
 }
 

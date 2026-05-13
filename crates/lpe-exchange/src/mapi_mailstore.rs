@@ -374,7 +374,7 @@ fn uuid_global_counter(id: &Uuid) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpe_storage::JmapEmailAddress;
+    use lpe_storage::{JmapEmailAddress, JmapEmailMailboxState};
 
     #[test]
     fn message_change_number_excludes_bcc_recipients() {
@@ -462,6 +462,15 @@ mod tests {
             mailbox_id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
             mailbox_role: "inbox".to_string(),
             mailbox_name: "Inbox".to_string(),
+            mailbox_ids: vec![Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap()],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                unread: true,
+                flagged: false,
+                draft: false,
+            }],
             received_at: "2026-05-06T12:00:00Z".to_string(),
             sent_at: None,
             from_address: "alice@example.test".to_string(),

@@ -132,6 +132,7 @@ impl SenderDelegationRight {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxAccountAccess {
+    pub tenant_id: Uuid,
     pub account_id: Uuid,
     pub email: String,
     pub display_name: String,
@@ -502,11 +503,11 @@ impl Storage {
             &input.attachments,
         )
         .await?;
-        let (membership_id, membership_thread_id, existing_draft_update) =
+        let (membership_id, membership_thread_id, membership_imap_uid, existing_draft_update) =
             if input.draft_message_id.is_some() {
                 let row = sqlx::query(
                     r#"
-                    SELECT id, thread_id
+                    SELECT id, thread_id, imap_uid
                     FROM mailbox_messages
                     WHERE tenant_id = $1
                       AND account_id = $2
@@ -525,6 +526,7 @@ impl Storage {
                 (
                     row.try_get::<Uuid, _>("id")?,
                     row.try_get::<Uuid, _>("thread_id")?,
+                    row.try_get::<i64, _>("imap_uid")?,
                     true,
                 )
             } else {
@@ -543,7 +545,7 @@ impl Storage {
                         "created",
                     )
                     .await?;
-                (membership_id, thread_id, false)
+                (membership_id, thread_id, 0, false)
             };
         if existing_draft_update {
             let principals =
@@ -560,7 +562,8 @@ impl Storage {
                 &principals,
                 serde_json::json!({
                     "messageId": message_id,
-                    "threadId": membership_thread_id
+                    "threadId": membership_thread_id,
+                    "imapUid": membership_imap_uid
                 }),
             )
             .await?;
@@ -602,6 +605,7 @@ impl Storage {
     pub async fn fetch_account_identity(&self, account_id: Uuid) -> Result<MailboxAccountAccess> {
         let account = self.account_identity_for_id(account_id).await?;
         Ok(MailboxAccountAccess {
+            tenant_id: self.tenant_id_for_account_id(account.id).await?,
             account_id: account.id,
             email: account.email,
             display_name: account.display_name,
@@ -1037,6 +1041,7 @@ impl Storage {
         let principal = self.account_identity_for_id(principal_account_id).await?;
         let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
         let mut accounts = vec![MailboxAccountAccess {
+            tenant_id,
             account_id: principal.id,
             email: principal.email,
             display_name: principal.display_name,
@@ -1085,6 +1090,7 @@ impl Storage {
         .await?;
 
         accounts.extend(rows.into_iter().map(|row| MailboxAccountAccess {
+            tenant_id,
             account_id: row.account_id,
             email: row.email,
             display_name: row.display_name,
@@ -1663,7 +1669,7 @@ impl Storage {
     pub(crate) async fn load_account_identity_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<AccountIdentity> {
         let row = sqlx::query(
@@ -1690,7 +1696,7 @@ impl Storage {
     pub(crate) async fn load_account_identity_by_email_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         email: &str,
     ) -> Result<AccountIdentity> {
         let row = sqlx::query(
@@ -1717,7 +1723,7 @@ impl Storage {
     async fn ensure_same_tenant_account_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
     ) -> Result<()> {
         self.load_account_identity_in_tx(tx, tenant_id, account_id)
@@ -1728,7 +1734,7 @@ impl Storage {
     async fn has_sender_right_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         owner_account_id: Uuid,
         grantee_account_id: Uuid,
         sender_right: SenderDelegationRight,
@@ -1758,7 +1764,7 @@ impl Storage {
     async fn resolve_submission_authorization_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         input: &SubmitMessageInput,
     ) -> Result<ResolvedSubmissionAuthorization> {
         let owner = self
@@ -1890,7 +1896,7 @@ impl Storage {
     async fn delete_draft_message_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         message_id: Uuid,
     ) -> Result<()> {

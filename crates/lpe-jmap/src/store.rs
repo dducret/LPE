@@ -147,6 +147,11 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         limit: u64,
     ) -> Result<JmapThreadQuery>;
     async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>>;
+    async fn fetch_jmap_emails_with_protected_bcc(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JmapEmail>>;
     async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>>;
     async fn fetch_jmap_email_submissions(
         &self,
@@ -494,6 +499,15 @@ impl JmapStore for Storage {
 
     async fn fetch_jmap_emails(&self, account_id: Uuid, ids: &[Uuid]) -> Result<Vec<JmapEmail>> {
         self.fetch_jmap_emails(account_id, ids).await
+    }
+
+    async fn fetch_jmap_emails_with_protected_bcc(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JmapEmail>> {
+        self.fetch_jmap_emails_with_protected_bcc(account_id, ids)
+            .await
     }
 
     async fn fetch_jmap_draft(&self, account_id: Uuid, id: Uuid) -> Result<Option<JmapEmail>> {

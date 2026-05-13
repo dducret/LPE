@@ -85,7 +85,9 @@ impl JmapMailboxObject {
 impl JmapEmailObject {
     pub fn from_canonical(email: &JmapEmail, include_bcc: bool) -> Self {
         let mut mailbox_ids = HashMap::new();
-        mailbox_ids.insert(email.mailbox_id.to_string(), true);
+        for mailbox_id in &email.mailbox_ids {
+            mailbox_ids.insert(mailbox_id.to_string(), true);
+        }
 
         let mut keywords = HashMap::new();
         if !email.unread {
@@ -94,7 +96,7 @@ impl JmapEmailObject {
         if email.flagged {
             keywords.insert("$flagged".to_string(), true);
         }
-        if email.mailbox_role == "drafts" {
+        if email.mailbox_states.iter().any(|state| state.draft) {
             keywords.insert("$draft".to_string(), true);
         }
 

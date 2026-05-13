@@ -55,7 +55,7 @@ pub(crate) async fn client_login(
     {
         let _ = storage
             .append_audit_event(
-                &candidate.tenant_id,
+                candidate.tenant_id,
                 AuditEntryInput {
                     actor: email.clone(),
                     action: "mail-auth.password-login-failed".to_string(),
@@ -78,7 +78,7 @@ pub(crate) async fn client_login(
         if !totp::verify_code(&secret, code, totp::unix_time()) {
             let _ = storage
                 .append_audit_event(
-                    &candidate.tenant_id,
+                    candidate.tenant_id,
                     AuditEntryInput {
                         actor: email.clone(),
                         action: "mail-auth.totp-failed".to_string(),
@@ -97,7 +97,7 @@ pub(crate) async fn client_login(
     storage
         .create_account_session(
             &token,
-            &candidate.tenant_id,
+            candidate.tenant_id,
             &candidate.email,
             client_session_minutes(),
         )
@@ -105,7 +105,7 @@ pub(crate) async fn client_login(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &candidate.tenant_id,
+            candidate.tenant_id,
             AuditEntryInput {
                 actor: email.clone(),
                 action: "mail-auth.login-succeeded".to_string(),
@@ -186,7 +186,7 @@ pub(crate) async fn enroll_account_totp(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.totp-enrollment-started".to_string(),
@@ -229,7 +229,7 @@ pub(crate) async fn verify_account_totp_factor(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.totp-enrollment-verified".to_string(),
@@ -259,7 +259,7 @@ pub(crate) async fn revoke_account_factor(
     }
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.factor-revoked".to_string(),
@@ -307,7 +307,7 @@ pub(crate) async fn create_account_app_password(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.app-password-created".to_string(),
@@ -337,7 +337,7 @@ pub(crate) async fn revoke_account_app_password(
     }
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.app-password-revoked".to_string(),
@@ -379,7 +379,7 @@ pub(crate) async fn create_client_oauth_access_token(
     .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.oauth-access-token-created".to_string(),
@@ -495,7 +495,7 @@ pub(crate) async fn client_oidc_callback(
     storage
         .create_account_session(
             &token,
-            &account.tenant_id,
+            account.tenant_id,
             &account.email,
             client_session_minutes(),
         )
@@ -503,7 +503,7 @@ pub(crate) async fn client_oidc_callback(
         .map_err(internal_error)?;
     let _ = storage
         .append_audit_event(
-            &account.tenant_id,
+            account.tenant_id,
             AuditEntryInput {
                 actor: account.email.clone(),
                 action: "mail-auth.login-succeeded".to_string(),

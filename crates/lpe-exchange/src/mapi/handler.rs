@@ -95,7 +95,7 @@ enum MapiRequestType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MapiSession {
     endpoint: MapiEndpoint,
-    tenant_id: String,
+    tenant_id: Uuid,
     account_id: Uuid,
     email: String,
     last_seen_at: SystemTime,
@@ -1882,7 +1882,7 @@ fn create_session(endpoint: MapiEndpoint, principal: &AccountPrincipal) -> Strin
     let now = SystemTime::now();
     let session = MapiSession {
         endpoint,
-        tenant_id: principal.tenant_id.clone(),
+        tenant_id: principal.tenant_id,
         account_id: principal.account_id,
         email: principal.email.clone(),
         last_seen_at: now,
@@ -3941,7 +3941,27 @@ where
                             ));
                             continue;
                         }
-                        mapi_submit_from_email(principal, email)
+                        let protected_emails = match store
+                            .fetch_jmap_emails_with_protected_bcc(principal.account_id, &[email.id])
+                            .await
+                        {
+                            Ok(emails) => emails,
+                            Err(error) => {
+                                warn!(
+                                    error = %error,
+                                    "failed to load protected Bcc recipients for MAPI draft submit"
+                                );
+                                responses.extend_from_slice(&rop_error_response(
+                                    request.rop_id,
+                                    request.response_handle_index(),
+                                    0x8004_010F,
+                                ));
+                                continue;
+                            }
+                        };
+                        let protected_email =
+                            protected_emails.iter().find(|loaded| loaded.id == email.id);
+                        mapi_submit_from_email(principal, protected_email.unwrap_or(email))
                     }
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
@@ -11977,7 +11997,7 @@ mod tests {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10_000);
         let fresh = MapiSession {
             endpoint: MapiEndpoint::Emsmdb,
-            tenant_id: "tenant".to_string(),
+            tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
             account_id: Uuid::nil(),
             email: "user@example.test".to_string(),
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS)),

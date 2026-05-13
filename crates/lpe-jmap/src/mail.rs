@@ -294,7 +294,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
         };
 
-        let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+        let emails = if account_access.is_owned && properties.contains("bcc") {
+            self.store
+                .fetch_jmap_emails_with_protected_bcc(account_id, &ids)
+                .await?
+        } else {
+            self.store.fetch_jmap_emails(account_id, &ids).await?
+        };
         let not_found = ids
             .iter()
             .filter(|id| !emails.iter().any(|email| email.id == **id))
@@ -313,7 +319,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         &properties,
                         &body_options,
                         account_access.is_owned
-                            && matches!(email.mailbox_role.as_str(), "drafts" | "sent"),
+                            && email
+                                .mailbox_states
+                                .iter()
+                                .any(|state| matches!(state.role.as_str(), "drafts" | "sent")),
                     )
                 })
                 .collect::<Vec<_>>(),
@@ -1352,8 +1361,15 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         let message_id = parse_uuid(id)?;
         let existing = self
             .store
-            .fetch_jmap_draft(account_access.account_id, message_id)
+            .fetch_jmap_emails_with_protected_bcc(account_access.account_id, &[message_id])
             .await?
+            .into_iter()
+            .find(|email| {
+                email
+                    .mailbox_states
+                    .iter()
+                    .any(|state| state.role == "drafts")
+            })
             .ok_or_else(|| anyhow!("draft not found"))?;
         let mutation = parse_draft_mutation(value)?;
         let (from, sender) =
@@ -1828,7 +1844,9 @@ pub(crate) fn email_to_value(
     );
     if properties.contains("mailboxIds") {
         let mut mailbox_ids = Map::new();
-        mailbox_ids.insert(email.mailbox_id.to_string(), Value::Bool(true));
+        for mailbox_id in &email.mailbox_ids {
+            mailbox_ids.insert(mailbox_id.to_string(), Value::Bool(true));
+        }
         object.insert("mailboxIds".to_string(), Value::Object(mailbox_ids));
     }
     if properties.contains("keywords") {
@@ -2161,7 +2179,7 @@ pub(crate) fn quota_to_value(quota: &JmapQuota) -> Value {
 
 pub(crate) fn email_keywords(email: &JmapEmail) -> Value {
     let mut keywords = Map::new();
-    if email.mailbox_role == "drafts" {
+    if email.mailbox_states.iter().any(|state| state.draft) {
         keywords.insert("$draft".to_string(), Value::Bool(true));
     }
     if !email.unread {

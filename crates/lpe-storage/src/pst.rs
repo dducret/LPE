@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::{
     blob_store::{DurableBlobKind, PostgresBlobStore},
-    preview_text, AttachmentUploadInput, Storage,
+    normalize_email, AttachmentUploadInput, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,7 +61,7 @@ pub(crate) struct PstTransferJobRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct PendingPstJobRow {
     pub(crate) id: Uuid,
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) mailbox_id: Uuid,
     pub(crate) account_id: Uuid,
     pub(crate) direction: String,
@@ -86,12 +86,15 @@ impl Storage {
                 j.id,
                 j.tenant_id,
                 j.mailbox_id,
-                mb.account_id,
+                j.account_id,
                 j.direction,
                 j.server_path,
                 j.requested_by
             FROM mailbox_pst_jobs j
-            JOIN mailboxes mb ON mb.id = j.mailbox_id
+            JOIN mailboxes mb
+              ON mb.tenant_id = j.tenant_id
+             AND mb.account_id = j.account_id
+             AND mb.id = j.mailbox_id
             WHERE j.status IN ('requested', 'failed')
             ORDER BY j.created_at ASC
             LIMIT 10
@@ -143,11 +146,11 @@ impl Storage {
         Ok(summary)
     }
 
-    async fn mark_pst_job_running(&self, tenant_id: &str, job_id: Uuid) -> Result<()> {
+    async fn mark_pst_job_running(&self, tenant_id: &Uuid, job_id: Uuid) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE mailbox_pst_jobs
-            SET status = 'running', error_message = NULL
+            SET status = 'running', error_message = NULL, completed_at = NULL
             WHERE tenant_id = $1 AND id = $2
             "#,
         )
@@ -161,7 +164,7 @@ impl Storage {
 
     async fn mark_pst_job_completed(
         &self,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         job_id: Uuid,
         processed_messages: u32,
     ) -> Result<()> {
@@ -186,7 +189,7 @@ impl Storage {
 
     async fn mark_pst_job_failed(
         &self,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         job_id: Uuid,
         error_message: &str,
     ) -> Result<()> {
@@ -385,72 +388,121 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(job.account_id).await?;
         let message_id = Uuid::new_v4();
-        let preview_text = preview_text(&message.body_text);
-        let modseq = self
-            .allocate_mail_modseq_in_tx(tx, &tenant_id, job.account_id)
-            .await?;
-        let size_octets = message.body_text.len().saturating_add(
+        let thread_id = Uuid::new_v4();
+        let subject = message.subject.trim().to_string();
+        let body_text = message.body_text;
+        let size_octets = body_text.len().saturating_add(
             message
                 .attachments
                 .iter()
                 .map(|attachment| attachment.blob_bytes.len())
                 .sum::<usize>(),
         ) as i64;
+        let domain_id = self
+            .load_account_domain_id_in_tx(tx, &tenant_id, job.account_id)
+            .await?;
+        let raw_message = format!(
+            "From: {}\r\nSubject: {}\r\n\r\n{}",
+            message.from_address, subject, body_text
+        )
+        .into_bytes();
+        let blob_id = self
+            .store_message_blob_in_tx(
+                tx,
+                &tenant_id,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                &raw_message,
+            )
+            .await?;
 
         sqlx::query(
             r#"
             INSERT INTO messages (
-                id, tenant_id, account_id, mailbox_id, thread_id, internet_message_id,
-                imap_modseq, received_at, sent_at, from_display, from_address, sender_display,
-                sender_address, sender_authorization_kind, submitted_by_account_id, subject_normalized,
-                preview_text, unread, flagged, has_attachments, size_octets, mime_blob_ref,
-                submission_source, delivery_status
+                id, tenant_id, domain_id, blob_id, internet_message_id, message_hash,
+                normalized_subject, sent_at, received_at, size_octets, has_attachments
             )
             VALUES (
-                $1, $2, $3, $4, $5, NULLIF($6, ''),
-                $7, NOW(), NULL, NULL, $8, NULL,
-                NULL, 'self', $3, $9, $10, TRUE, FALSE, FALSE, $11, $12,
-                'pst-import', 'stored'
+                $1, $2, $3, $4, NULLIF($5, ''), $6,
+                $7, NULL, NOW(), $8, $9
             )
             "#,
         )
         .bind(message_id)
         .bind(&tenant_id)
-        .bind(job.account_id)
-        .bind(job.mailbox_id)
-        .bind(Uuid::new_v4())
+        .bind(domain_id)
+        .bind(blob_id)
         .bind(message.internet_message_id)
-        .bind(modseq)
-        .bind(message.from_address)
-        .bind(message.subject.clone())
-        .bind(preview_text)
+        .bind(crate::sha256_hex(&raw_message))
+        .bind(&subject)
         .bind(size_octets.max(0))
-        .bind(format!("pst-import:{message_id}"))
+        .bind(!message.attachments.is_empty())
         .execute(&mut **tx)
         .await?;
 
-        sqlx::query(
-            r#"
-            INSERT INTO message_bodies (
-                message_id, body_text, body_html_sanitized, participants_normalized,
-                language_code, content_hash, search_vector
+        let from_address = normalize_email(&message.from_address);
+        if !from_address.is_empty() {
+            sqlx::query(
+                r#"
+                INSERT INTO message_recipients (
+                    id, tenant_id, message_id, role, address, display_name, ordinal
+                )
+                VALUES ($1, $2, $3, 'from', $4, NULL, 0)
+                "#,
             )
-            VALUES ($1, $2, NULL, '', NULL, $3, to_tsvector('simple', $4))
-            "#,
-        )
-        .bind(message_id)
-        .bind(message.body_text.clone())
-        .bind(format!("pst-import:{message_id}"))
-        .bind(format!("{} {}", message.subject, message.body_text))
-        .execute(&mut **tx)
-        .await?;
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(message_id)
+            .bind(&from_address)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        self.upsert_message_body_in_tx(tx, &tenant_id, domain_id, message_id, &body_text, None)
+            .await?;
 
         self.ingest_message_attachments_in_tx(
             tx,
-            &self.tenant_id_for_account_id(job.account_id).await?,
+            &tenant_id,
             job.account_id,
             message_id,
             &message.attachments,
+        )
+        .await?;
+        let membership_id = self
+            .allocate_mailbox_membership_in_tx(
+                tx,
+                &tenant_id,
+                job.account_id,
+                job.mailbox_id,
+                message_id,
+                thread_id,
+                "",
+                false,
+                false,
+                false,
+                "created",
+            )
+            .await?;
+        self.assign_message_attachments_membership_in_tx(
+            tx,
+            &tenant_id,
+            job.account_id,
+            message_id,
+            membership_id,
+        )
+        .await?;
+        Self::upsert_mail_search_document_in_tx(
+            tx,
+            &tenant_id,
+            job.account_id,
+            membership_id,
+            message_id,
+            &subject,
+            &from_address,
+            &body_text,
+            "",
         )
         .await?;
 
@@ -636,7 +688,7 @@ mod tests {
         account_id: Uuid,
         mailbox_id: Uuid,
     ) -> (Uuid, Uuid) {
-        let tenant = tenant_id.to_string();
+        let tenant = tenant_id;
         let message_id = Uuid::new_v4();
         let mailbox_message_id = Uuid::new_v4();
         let raw_message =
@@ -773,7 +825,7 @@ mod tests {
         PostgresBlobStore
             .create_blob_migration_job(
                 storage.pool(),
-                &tenant_id.to_string(),
+                &tenant_id,
                 domain_id,
                 "attachment",
                 blob_id,
@@ -833,7 +885,7 @@ mod tests {
         let output_path = std::env::temp_dir().join(format!("lpe-pst-export-{job_id}.pst"));
         let job = PendingPstJobRow {
             id: job_id,
-            tenant_id: tenant_id.to_string(),
+            tenant_id,
             mailbox_id,
             account_id,
             direction: "export".to_string(),

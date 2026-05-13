@@ -721,7 +721,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         match data_type {
             "Email" => {
                 let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
-                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+                let emails = if include_bcc {
+                    self.store
+                        .fetch_jmap_emails_with_protected_bcc(account_id, &ids)
+                        .await?
+                } else {
+                    self.store.fetch_jmap_emails(account_id, &ids).await?
+                };
                 Ok(emails
                     .into_iter()
                     .map(|email| StateEntry {
@@ -732,7 +738,13 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             }
             "Thread" => {
                 let ids = self.store.fetch_all_jmap_email_ids(account_id).await?;
-                let emails = self.store.fetch_jmap_emails(account_id, &ids).await?;
+                let emails = if include_bcc {
+                    self.store
+                        .fetch_jmap_emails_with_protected_bcc(account_id, &ids)
+                        .await?
+                } else {
+                    self.store.fetch_jmap_emails(account_id, &ids).await?
+                };
                 let mut threads: HashMap<Uuid, Vec<String>> = HashMap::new();
                 for email in emails {
                     threads.entry(email.thread_id).or_default().push(format!(
@@ -913,7 +925,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         requested_account: &MailboxAccountAccess,
         blob_id: &str,
     ) -> Result<JmapUploadBlob> {
-        self.resolve_download_blob_with_bcc(requested_account, blob_id, requested_account.is_owned)
+        self.resolve_download_blob_with_bcc(requested_account, blob_id, false)
             .await
     }
 
@@ -931,7 +943,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 .await?
                 .ok_or_else(|| anyhow!("blob not found")),
             JmapBlobId::Message(message_id) => {
-                if include_bcc {
+                if !include_bcc {
                     if let Some(blob) = self
                         .store
                         .fetch_jmap_message_blob(requested_account_id, message_id)
@@ -940,10 +952,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         return Ok(blob);
                     }
                 }
-                let email = self
-                    .store
-                    .fetch_jmap_emails(requested_account_id, &[message_id])
-                    .await?
+                let emails = if include_bcc {
+                    self.store
+                        .fetch_jmap_emails_with_protected_bcc(requested_account_id, &[message_id])
+                        .await?
+                } else {
+                    self.store
+                        .fetch_jmap_emails(requested_account_id, &[message_id])
+                        .await?
+                };
+                let email = emails
                     .into_iter()
                     .next()
                     .ok_or_else(|| anyhow!("blob not found"))?;
@@ -1359,11 +1377,10 @@ fn task_list_state_fingerprint(task_list: &ClientTaskList) -> String {
 fn email_state_fingerprint(email: &JmapEmail, include_bcc: bool) -> String {
     opaque_state_fingerprint(
         &(format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             email.thread_id,
-            email.mailbox_id,
-            email.mailbox_role,
-            email.mailbox_name,
+            format_mailbox_ids(&email.mailbox_ids),
+            format_mailbox_states(&email.mailbox_states),
             email.received_at,
             email.sent_at.as_deref().unwrap_or_default(),
             email.from_display.as_deref().unwrap_or_default(),
@@ -1387,6 +1404,26 @@ fn email_state_fingerprint(email: &JmapEmail, include_bcc: bool) -> String {
             email.internet_message_id.as_deref().unwrap_or_default(),
         )),
     )
+}
+
+fn format_mailbox_ids(mailbox_ids: &[Uuid]) -> String {
+    let mut values = mailbox_ids.iter().map(Uuid::to_string).collect::<Vec<_>>();
+    values.sort();
+    values.join(",")
+}
+
+fn format_mailbox_states(states: &[lpe_storage::JmapEmailMailboxState]) -> String {
+    let mut values = states
+        .iter()
+        .map(|state| {
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                state.mailbox_id, state.role, state.name, state.unread, state.flagged, state.draft
+            )
+        })
+        .collect::<Vec<_>>();
+    values.sort();
+    values.join("|")
 }
 
 pub(crate) fn opaque_state_fingerprint(value: &str) -> String {

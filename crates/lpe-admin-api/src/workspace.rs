@@ -585,7 +585,7 @@ mod tests {
 
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
             account_id: Uuid::new_v4(),
             email: "delegate@example.test".to_string(),
             display_name: "Delegate".to_string(),

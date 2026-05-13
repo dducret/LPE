@@ -428,7 +428,7 @@ fn stable_text_counter(value: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpe_storage::JmapEmailAddress;
+    use lpe_storage::{JmapEmailAddress, JmapEmailMailboxState};
 
     #[test]
     fn snapshot_projects_canonical_mailbox_message_and_attachment_ids() {
@@ -449,6 +449,15 @@ mod tests {
             mailbox_id,
             mailbox_role: "custom".to_string(),
             mailbox_name: "RCA Sync".to_string(),
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: "custom".to_string(),
+                name: "RCA Sync".to_string(),
+                unread: false,
+                flagged: false,
+                draft: false,
+            }],
             received_at: "2026-05-03T12:00:00Z".to_string(),
             sent_at: None,
             from_address: "alice@example.test".to_string(),

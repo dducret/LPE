@@ -557,7 +557,7 @@ mod tests {
     #[test]
     fn smtp_submission_builds_canonical_submit_input() {
         let principal = AccountPrincipal {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
             account_id: Uuid::nil(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -624,7 +624,7 @@ mod tests {
     #[test]
     fn smtp_submission_builds_send_as_input_for_delegated_mailbox() {
         let principal = AccountPrincipal {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
             account_id: Uuid::new_v4(),
             email: "delegate@example.test".to_string(),
             display_name: "Delegate".to_string(),
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn smtp_submission_builds_send_on_behalf_input_for_delegated_mailbox() {
         let principal = AccountPrincipal {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
             account_id: Uuid::new_v4(),
             email: "delegate@example.test".to_string(),
             display_name: "Delegate".to_string(),

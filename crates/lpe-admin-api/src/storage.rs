@@ -382,12 +382,7 @@ fn ensure_tenant_storage_admin(
 }
 
 fn admin_tenant_id(admin: &AuthenticatedAdmin) -> std::result::Result<Uuid, (StatusCode, String)> {
-    Uuid::parse_str(&admin.tenant_id).map_err(|_| {
-        (
-            StatusCode::FORBIDDEN,
-            "admin tenant scope is invalid".to_string(),
-        )
-    })
+    Ok(admin.tenant_id)
 }
 
 fn storage_policy_error(error: anyhow::Error) -> (StatusCode, String) {
@@ -414,7 +409,7 @@ mod tests {
 
     fn admin(role: &str, tenant_id: Uuid, permissions: Vec<&str>) -> AuthenticatedAdmin {
         AuthenticatedAdmin {
-            tenant_id: tenant_id.to_string(),
+            tenant_id,
             email: "admin@example.test".to_string(),
             display_name: "Admin".to_string(),
             role: role.to_string(),

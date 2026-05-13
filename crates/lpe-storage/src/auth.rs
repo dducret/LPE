@@ -11,7 +11,7 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthenticatedAdmin {
-    pub tenant_id: String,
+    pub tenant_id: Uuid,
     pub email: String,
     pub display_name: String,
     pub role: String,
@@ -46,7 +46,7 @@ pub struct AccountCredentialInput {
 
 #[derive(Debug, Clone)]
 pub struct AdminLogin {
-    pub tenant_id: String,
+    pub tenant_id: Uuid,
     pub email: String,
     pub password_hash: String,
     pub status: String,
@@ -114,7 +114,7 @@ pub struct StoredAccountAppPassword {
 
 #[derive(Debug, Clone)]
 pub struct AccountLogin {
-    pub tenant_id: String,
+    pub tenant_id: Uuid,
     pub account_id: Uuid,
     pub email: String,
     pub password_hash: String,
@@ -124,7 +124,7 @@ pub struct AccountLogin {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AuthenticatedAccount {
-    pub tenant_id: String,
+    pub tenant_id: Uuid,
     pub account_id: Uuid,
     pub email: String,
     pub display_name: String,
@@ -194,7 +194,7 @@ impl Storage {
         issuer_url: &str,
         subject: &str,
     ) -> Result<Option<String>> {
-        let tenant_id = sqlx::query_scalar::<_, String>(
+        let tenant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM admin_oidc_identities
@@ -206,7 +206,7 @@ impl Storage {
         .bind(subject.trim())
         .fetch_optional(&self.pool)
         .await?
-        .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
+        .unwrap_or(PLATFORM_TENANT_ID);
         let email = sqlx::query_scalar::<_, String>(
             r#"
             SELECT admin_email
@@ -429,7 +429,7 @@ impl Storage {
         issuer_url: &str,
         subject: &str,
     ) -> Result<Option<String>> {
-        let tenant_id = sqlx::query_scalar::<_, String>(
+        let tenant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM account_oidc_identities
@@ -961,7 +961,7 @@ impl Storage {
     pub async fn create_admin_session(
         &self,
         token: &str,
-        tenant_id: &str,
+        tenant_id: Uuid,
         email: &str,
         session_timeout_minutes: u32,
         auth_method: &str,
@@ -1022,7 +1022,7 @@ impl Storage {
     pub async fn create_account_session(
         &self,
         token: &str,
-        tenant_id: &str,
+        tenant_id: Uuid,
         account_email: &str,
         session_timeout_minutes: u32,
     ) -> Result<()> {
@@ -1044,7 +1044,7 @@ impl Storage {
     }
 
     pub async fn fetch_admin_session(&self, token: &str) -> Result<Option<AuthenticatedAdmin>> {
-        let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+        let Some(tenant_id) = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM admin_sessions
@@ -1116,7 +1116,7 @@ impl Storage {
     }
 
     pub async fn delete_admin_session(&self, token: &str) -> Result<()> {
-        let tenant_id = sqlx::query_scalar::<_, String>(
+        let tenant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM admin_sessions
@@ -1127,7 +1127,7 @@ impl Storage {
         .bind(token)
         .fetch_optional(&self.pool)
         .await?
-        .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
+        .unwrap_or(PLATFORM_TENANT_ID);
         sqlx::query(
             r#"
             DELETE FROM admin_sessions
@@ -1143,7 +1143,7 @@ impl Storage {
     }
 
     pub async fn fetch_account_session(&self, token: &str) -> Result<Option<AuthenticatedAccount>> {
-        let Some(tenant_id) = sqlx::query_scalar::<_, String>(
+        let Some(tenant_id) = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM account_sessions
@@ -1194,7 +1194,7 @@ impl Storage {
     }
 
     pub async fn delete_account_session(&self, token: &str) -> Result<()> {
-        let tenant_id = sqlx::query_scalar::<_, String>(
+        let tenant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT tenant_id
             FROM account_sessions
@@ -1205,7 +1205,7 @@ impl Storage {
         .bind(token)
         .fetch_optional(&self.pool)
         .await?
-        .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
+        .unwrap_or(PLATFORM_TENANT_ID);
         sqlx::query(
             r#"
             DELETE FROM account_sessions

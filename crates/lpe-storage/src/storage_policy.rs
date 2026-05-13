@@ -103,7 +103,7 @@ impl Storage {
         .fetch_one(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+        self.insert_audit(&mut tx, &PLATFORM_TENANT_ID, audit)
             .await?;
         tx.commit().await?;
         storage_pool_summary_from_row(row)
@@ -159,7 +159,7 @@ impl Storage {
         .await?
         .ok_or_else(|| anyhow!("storage pool not found"))?;
 
-        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+        self.insert_audit(&mut tx, &PLATFORM_TENANT_ID, audit)
             .await?;
         tx.commit().await?;
         storage_pool_summary_from_row(row)
@@ -672,9 +672,7 @@ impl Storage {
             .await?;
         }
 
-        let audit_tenant = tenant_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| PLATFORM_TENANT_ID.to_string());
+        let audit_tenant = tenant_id.unwrap_or(PLATFORM_TENANT_ID);
         self.insert_audit(&mut tx, &audit_tenant, audit).await?;
         tx.commit().await?;
         Ok(())

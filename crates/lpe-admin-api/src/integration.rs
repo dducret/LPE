@@ -311,7 +311,7 @@ async fn load_authenticated_submission_principal(
     }
 
     Ok(AccountPrincipal {
-        tenant_id: String::new(),
+        tenant_id: identity.tenant_id,
         account_id: identity.account_id,
         email: identity.email,
         display_name: identity.display_name,

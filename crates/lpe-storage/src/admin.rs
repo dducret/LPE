@@ -60,10 +60,14 @@ impl Storage {
                 mb.account_id,
                 mb.display_name,
                 mb.role,
-                COALESCE(COUNT(m.id), 0)::BIGINT AS message_count,
+                COALESCE(COUNT(mm.id), 0)::BIGINT AS message_count,
                 mb.retention_days
             FROM mailboxes mb
-            LEFT JOIN messages m ON m.mailbox_id = mb.id
+            LEFT JOIN mailbox_messages mm
+              ON mm.tenant_id = mb.tenant_id
+             AND mm.account_id = mb.account_id
+             AND mm.mailbox_id = mb.id
+             AND mm.visibility <> 'expunged'
             WHERE mb.tenant_id = $1
             GROUP BY mb.id, mb.account_id, mb.display_name, mb.role, mb.retention_days, mb.created_at
             ORDER BY mb.created_at ASC
@@ -231,9 +235,9 @@ impl Storage {
         let pending_queue_items = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(*)
-            FROM outbound_message_queue
+            FROM submission_queue
             WHERE tenant_id = $1
-              AND status IN ('queued', 'deferred')
+              AND status IN ('queued', 'ready', 'handed_off', 'deferred')
             "#,
         )
         .bind(tenant_id)
@@ -506,9 +510,9 @@ impl Storage {
         let direction = input.direction.trim().to_lowercase();
         let server_path = input.server_path.trim();
         let requested_by = input.requested_by.trim().to_lowercase();
-        let tenant_id = sqlx::query_scalar::<_, String>(
+        let mailbox = sqlx::query(
             r#"
-            SELECT tenant_id
+            SELECT tenant_id, account_id
             FROM mailboxes
             WHERE id = $1
             LIMIT 1
@@ -518,6 +522,8 @@ impl Storage {
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| anyhow!("mailbox not found"))?;
+        let tenant_id: Uuid = mailbox.try_get("tenant_id")?;
+        let account_id: Uuid = mailbox.try_get("account_id")?;
 
         let mailbox_exists = sqlx::query(
             r#"
@@ -540,13 +546,14 @@ impl Storage {
             sqlx::query(
                 r#"
                 INSERT INTO mailbox_pst_jobs (
-                    id, tenant_id, mailbox_id, direction, server_path, status, requested_by
+                    id, tenant_id, account_id, mailbox_id, direction, server_path, status, requested_by
                 )
-                VALUES ($1, $2, $3, $4, $5, 'requested', $6)
+                VALUES ($1, $2, $3, $4, $5, $6, 'requested', $7)
                 "#,
             )
             .bind(Uuid::new_v4())
             .bind(&tenant_id)
+            .bind(account_id)
             .bind(input.mailbox_id)
             .bind(direction)
             .bind(server_path)
@@ -621,7 +628,7 @@ impl Storage {
             bail!("domain not found");
         }
 
-        self.insert_audit(&mut tx, tenant_id, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -662,7 +669,7 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let tenant_id = match input.domain_id {
             Some(domain_id) => self.tenant_id_for_domain_id(domain_id).await?,
-            None => PLATFORM_TENANT_ID.to_string(),
+            None => PLATFORM_TENANT_ID,
         };
         let normalized_permissions =
             normalize_admin_permissions(&input.role, &input.rights_summary, &input.permissions);
@@ -739,9 +746,9 @@ impl Storage {
         }))
     }
 
-    pub async fn append_audit_event(&self, tenant_id: &str, audit: AuditEntryInput) -> Result<()> {
+    pub async fn append_audit_event(&self, tenant_id: Uuid, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        self.insert_audit(&mut tx, tenant_id, audit).await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1261,7 +1268,7 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
-        self.insert_audit(&mut tx, PLATFORM_TENANT_ID, audit)
+        self.insert_audit(&mut tx, &PLATFORM_TENANT_ID, audit)
             .await?;
         tx.commit().await?;
         Ok(())
@@ -1277,7 +1284,7 @@ impl Storage {
                 m.subject_normalized AS subject,
                 m.internet_message_id,
                 q.status,
-                m.delivery_status,
+                q.status AS delivery_status,
                 TRUE AS was_submitted,
                 (mb.role = 'sent' AND m.sent_at IS NOT NULL) AS in_sent_mailbox,
                 q.attempts,
@@ -1297,15 +1304,26 @@ impl Storage {
                 q.last_trace_id AS trace_id,
                 q.remote_message_ref,
                 q.last_error,
-                q.retry_after_seconds,
-                q.retry_policy,
-                q.last_dsn_status,
-                q.last_smtp_code,
-                q.last_enhanced_status
-            FROM outbound_message_queue q
-            JOIN messages m ON m.id = q.message_id
-            JOIN mailboxes mb ON mb.id = m.mailbox_id
-            JOIN accounts a ON a.id = m.account_id
+                NULL::integer AS retry_after_seconds,
+                NULL::text AS retry_policy,
+                NULL::text AS last_dsn_status,
+                NULL::integer AS last_smtp_code,
+                NULL::text AS last_enhanced_status
+            FROM submission_queue q
+            JOIN mailbox_messages smm
+              ON smm.tenant_id = q.tenant_id
+             AND smm.account_id = q.account_id
+             AND smm.id = q.sent_mailbox_message_id
+            JOIN messages m
+              ON m.tenant_id = q.tenant_id
+             AND m.id = smm.message_id
+            JOIN mailboxes mb
+              ON mb.tenant_id = smm.tenant_id
+             AND mb.account_id = smm.account_id
+             AND mb.id = smm.mailbox_id
+            JOIN accounts a
+              ON a.tenant_id = q.tenant_id
+             AND a.id = q.account_id
             WHERE q.tenant_id = $1
             ORDER BY q.created_at DESC
             LIMIT 100
@@ -1329,11 +1347,11 @@ impl Storage {
                 m.id AS message_id,
                 m.internet_message_id,
                 m.subject_normalized AS subject,
-                m.from_address AS sender,
+                COALESCE(fr.address, '') AS sender,
                 a.primary_email AS account_email,
                 mb.display_name AS mailbox,
-                m.delivery_status,
-                (m.submitted_by_account_id IS NOT NULL OR q.queue_status IS NOT NULL) AS was_submitted,
+                COALESCE(q.queue_status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END) AS delivery_status,
+                (q.queue_status IS NOT NULL) AS was_submitted,
                 (mb.role = 'sent' AND m.sent_at IS NOT NULL) AS in_sent_mailbox,
                 CASE
                     WHEN m.sent_at IS NULL THEN NULL
@@ -1350,8 +1368,21 @@ impl Storage {
                 q.last_enhanced_status,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at
             FROM messages m
-            JOIN accounts a ON a.id = m.account_id
-            JOIN mailboxes mb ON mb.id = m.mailbox_id
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+             AND mm.visibility <> 'expunged'
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            JOIN accounts a
+              ON a.tenant_id = mm.tenant_id
+             AND a.id = mm.account_id
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id
+             AND fr.message_id = m.id
+             AND fr.role = 'from'
             LEFT JOIN LATERAL (
                 SELECT
                     q.status AS queue_status,
@@ -1366,18 +1397,22 @@ impl Storage {
                         ELSE to_char(q.next_attempt_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                     END AS next_attempt_at,
                     q.last_error,
-                    q.last_dsn_status,
-                    q.last_smtp_code,
-                    q.last_enhanced_status
-                FROM outbound_message_queue q
+                    NULL::text AS last_dsn_status,
+                    NULL::integer AS last_smtp_code,
+                    NULL::text AS last_enhanced_status
+                FROM submission_queue q
+                JOIN mailbox_messages qmm
+                  ON qmm.tenant_id = q.tenant_id
+                 AND qmm.account_id = q.account_id
+                 AND qmm.id = q.sent_mailbox_message_id
                 WHERE q.tenant_id = m.tenant_id
-                  AND q.message_id = m.id
+                  AND qmm.message_id = m.id
                 ORDER BY q.created_at DESC
                 LIMIT 1
             ) q ON TRUE
             WHERE m.tenant_id = $1
               AND (
-                lower(m.from_address) LIKE $2
+                lower(COALESCE(fr.address, '')) LIKE $2
                 OR lower(m.subject_normalized) LIKE $2
                 OR lower(COALESCE(m.internet_message_id, '')) LIKE $2
                 OR lower(a.primary_email) LIKE $2

@@ -21,7 +21,7 @@ impl Storage {
     pub(crate) async fn ingest_message_attachments_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         message_id: Uuid,
         attachments: &[AttachmentUploadInput],
@@ -54,9 +54,10 @@ impl Storage {
                 r#"
                 INSERT INTO mime_parts (
                     id, tenant_id, message_id, domain_id, part_path, ordinal,
-                    content_type, content_disposition, content_id, file_name, size_octets, blob_id
+                    content_type, content_disposition, content_id, file_name,
+                    size_octets, blob_id, blob_kind
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'attachment')
                 "#,
             )
             .bind(mime_part_id)
@@ -78,9 +79,9 @@ impl Storage {
                 r#"
                 INSERT INTO attachments (
                     id, tenant_id, account_id, message_id, domain_id, mime_part_id,
-                    blob_id, file_name, disposition, content_id, ordinal, size_octets
+                    blob_id, blob_kind, file_name, disposition, content_id, ordinal, size_octets
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'attachment', $8, $9, $10, $11, $12)
                 "#,
             )
             .bind(attachment_id)
@@ -118,7 +119,7 @@ impl Storage {
     async fn store_attachment_blob_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         domain_id: Uuid,
         media_type: &str,
         file_name: &str,
@@ -148,8 +149,8 @@ impl Storage {
         if blob.created && extraction_status == "queued" {
             sqlx::query(
                 r#"
-                INSERT INTO attachment_extraction_jobs (id, tenant_id, blob_id, status)
-                VALUES ($1, $2, $3, 'queued')
+                INSERT INTO attachment_extraction_jobs (id, tenant_id, blob_id, blob_kind, status)
+                VALUES ($1, $2, $3, 'attachment', 'queued')
                 "#,
             )
             .bind(Uuid::new_v4())

@@ -68,9 +68,12 @@ pub(crate) struct JmapMailboxRow {
 pub(crate) struct JmapEmailRow {
     pub(crate) id: Uuid,
     pub(crate) thread_id: Uuid,
-    pub(crate) mailbox_id: Uuid,
-    pub(crate) mailbox_role: String,
-    pub(crate) mailbox_name: String,
+    pub(crate) mailbox_ids: Vec<Uuid>,
+    pub(crate) mailbox_roles: Vec<String>,
+    pub(crate) mailbox_names: Vec<String>,
+    pub(crate) mailbox_unreads: Vec<bool>,
+    pub(crate) mailbox_flaggeds: Vec<bool>,
+    pub(crate) mailbox_drafts: Vec<bool>,
     pub(crate) received_at: String,
     pub(crate) sent_at: Option<String>,
     pub(crate) from_address: String,
@@ -198,7 +201,7 @@ pub(crate) struct PendingOutboundQueueRow {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct OutboundQueueStateRow {
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) account_id: Uuid,
     pub(crate) message_id: Uuid,
     pub(crate) status: String,
@@ -252,7 +255,7 @@ pub(crate) struct ServerAdministratorRow {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct AdminLoginRow {
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) email: String,
     pub(crate) password_hash: String,
     pub(crate) status: String,
@@ -266,7 +269,7 @@ pub(crate) struct AdminLoginRow {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct AccountLoginRow {
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) account_id: Uuid,
     pub(crate) email: String,
     pub(crate) password_hash: String,
@@ -276,7 +279,7 @@ pub(crate) struct AccountLoginRow {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct AuthenticatedAdminRow {
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) email: String,
     pub(crate) display_name: Option<String>,
     pub(crate) role: Option<String>,
@@ -320,7 +323,7 @@ pub(crate) struct AccountAppPasswordRow {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct AuthenticatedAccountRow {
-    pub(crate) tenant_id: String,
+    pub(crate) tenant_id: Uuid,
     pub(crate) account_id: Uuid,
     pub(crate) email: String,
     pub(crate) display_name: String,

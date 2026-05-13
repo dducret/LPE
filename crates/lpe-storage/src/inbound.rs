@@ -123,7 +123,7 @@ impl Storage {
             };
 
             let account_id: Uuid = row.try_get("id")?;
-            let tenant_id: String = row.try_get("tenant_id")?;
+            let tenant_id: Uuid = row.try_get("tenant_id")?;
             let account_email: String = row.try_get("primary_email")?;
             let account_display_name: String = row.try_get("display_name")?;
             let sieve_outcome = self
@@ -215,7 +215,7 @@ impl Storage {
         };
         self.insert_audit(
             &mut tx,
-            crate::PLATFORM_TENANT_ID,
+            &crate::PLATFORM_TENANT_ID,
             AuditEntryInput {
                 actor: "lpe-ct".to_string(),
                 action: audit_action.to_string(),
@@ -430,7 +430,7 @@ impl Storage {
     async fn store_inbound_message_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         mailbox_id: Uuid,
         thread_id: Uuid,
@@ -571,7 +571,7 @@ impl Storage {
     async fn ensure_named_mailbox(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
-        tenant_id: &str,
+        tenant_id: &Uuid,
         account_id: Uuid,
         display_name: &str,
         _retention_days: i32,
