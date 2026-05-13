@@ -71,9 +71,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let mut matched = 0usize;
         for mailbox in mailboxes {
             let mailbox_name = render_mailbox_name(&mailbox);
-            if !mailbox_pattern_matches(&mailbox_name, &pattern)
-                && !mailbox_pattern_matches(&mailbox.name, &pattern)
-            {
+            if !mailbox_matches_pattern(&mailbox, &pattern) {
                 continue;
             }
             matched += 1;
@@ -120,9 +118,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let mut matched = 0usize;
         for mailbox in mailboxes {
             let mailbox_name = render_mailbox_name(&mailbox);
-            if !mailbox_pattern_matches(&mailbox_name, &pattern)
-                && !mailbox_pattern_matches(&mailbox.name, &pattern)
-            {
+            if !mailbox_matches_pattern(&mailbox, &pattern) {
                 continue;
             }
             matched += 1;
@@ -668,6 +664,27 @@ fn mailbox_pattern_matches(name: &str, pattern: &str) -> bool {
         &name.to_ascii_uppercase(),
         &pattern.replace('%', "*").to_ascii_uppercase(),
     )
+}
+
+fn mailbox_matches_pattern(mailbox: &JmapMailbox, pattern: &str) -> bool {
+    if mailbox_pattern_matches(&render_mailbox_name(mailbox), pattern)
+        || mailbox_pattern_matches(&mailbox.name, pattern)
+    {
+        return true;
+    }
+
+    special_mailbox_aliases(&mailbox.role)
+        .iter()
+        .any(|alias| mailbox_pattern_matches(alias, pattern))
+}
+
+fn special_mailbox_aliases(role: &str) -> &'static [&'static str] {
+    match role {
+        "drafts" => &["Draft", "Drafts"],
+        "sent" => &["Sent", "Sent Items", "Sent Messages"],
+        "trash" => &["Deleted", "Deleted Items", "Trash"],
+        _ => &[],
+    }
 }
 
 fn wildcard_match(value: &str, pattern: &str) -> bool {

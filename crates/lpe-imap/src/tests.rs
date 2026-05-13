@@ -1066,6 +1066,104 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 }
 
 #[tokio::test]
+async fn mailbox_aliases_discover_and_select_canonical_special_folders() {
+    let store = FakeStore::new();
+    let trash_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+    {
+        let mut emails = store.emails.lock().unwrap();
+        emails.push(email(
+            "33333333-3333-3333-3333-333333333333",
+            1,
+            4,
+            trash_id,
+            "trash",
+            "Deleted",
+            "Deleted unread",
+            true,
+            false,
+        ));
+        emails.push(email(
+            "44444444-4444-4444-4444-444444444444",
+            4,
+            5,
+            trash_id,
+            "trash",
+            "Deleted",
+            "Deleted seen",
+            false,
+            false,
+        ));
+    }
+    store
+        .mailbox_uid_next
+        .lock()
+        .unwrap()
+        .insert(Uuid::parse_str(trash_id).unwrap(), 9);
+    *store.highest_modseq.lock().unwrap() = 5;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let login = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    assert!(login.contains("A1 OK LOGIN completed"));
+
+    let list_trash = send_command(&mut stream, "A2 LIST \"\" \"Trash\"\r\n", "A2").await;
+    assert_eq!(list_trash.matches("* LIST ").count(), 1);
+    assert!(list_trash.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+
+    let xlist_deleted_items =
+        send_command(&mut stream, "A3 XLIST \"\" \"Deleted Items\"\r\n", "A3").await;
+    assert_eq!(xlist_deleted_items.matches("* XLIST ").count(), 1);
+    assert!(xlist_deleted_items.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+
+    let status = send_command(
+        &mut stream,
+        "A4 STATUS Trash (MESSAGES RECENT UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)\r\n",
+        "A4",
+    )
+    .await;
+    assert!(status.contains(
+        "* STATUS \"Deleted\" (MESSAGES 2 RECENT 0 UIDNEXT 9 UIDVALIDITY 444 UNSEEN 1 HIGHESTMODSEQ 5)"
+    ));
+
+    let select_deleted_items =
+        send_command(&mut stream, "A5 SELECT \"Deleted Items\"\r\n", "A5").await;
+    assert!(select_deleted_items.contains("* 2 EXISTS"));
+    assert!(select_deleted_items.contains("* 0 RECENT"));
+    assert!(select_deleted_items.contains("* OK [UNSEEN 1]"));
+    assert!(select_deleted_items.contains("* OK [UIDVALIDITY 444]"));
+    assert!(select_deleted_items.contains("* OK [UIDNEXT 9]"));
+    assert!(select_deleted_items.contains("* OK [HIGHESTMODSEQ 5]"));
+    assert!(select_deleted_items.contains("A5 OK [READ-WRITE] SELECT completed"));
+
+    let examine_trash = send_command(&mut stream, "A6 EXAMINE Trash\r\n", "A6").await;
+    assert!(examine_trash.contains("* 2 EXISTS"));
+    assert!(examine_trash.contains("* 0 RECENT"));
+    assert!(examine_trash.contains("* OK [UNSEEN 1]"));
+    assert!(examine_trash.contains("* OK [UIDVALIDITY 444]"));
+    assert!(examine_trash.contains("* OK [UIDNEXT 9]"));
+    assert!(examine_trash.contains("A6 OK [READ-ONLY] EXAMINE completed"));
+
+    let readonly_store = send_command(&mut stream, "A7 STORE 1 +FLAGS (\\Seen)\r\n", "A7").await;
+    assert!(readonly_store.contains("A7 NO mailbox is read-only"));
+
+    let examine_fetch = send_command(&mut stream, "A8 FETCH 1 (BODY[])\r\n", "A8").await;
+    assert!(examine_fetch.contains("A8 OK FETCH completed"));
+    assert!(store
+        .emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.subject == "Deleted unread" && email.unread));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn outlook_first_login_list_select_sync_transcript() {
     let store = FakeStore::new();
     {
