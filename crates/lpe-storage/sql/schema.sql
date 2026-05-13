@@ -273,10 +273,15 @@ CREATE INDEX mailboxes_hierarchy_idx
 CREATE TABLE storage_pools (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL CHECK (name = lower(btrim(name)) AND name <> ''),
-    pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres')),
+    pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres', 's3_compatible')),
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+        (pool_kind = 'postgres' AND config_json = '{}'::jsonb)
+        OR (pool_kind = 's3_compatible' AND jsonb_typeof(config_json) = 'object')
+    ),
     UNIQUE (name)
 );
 

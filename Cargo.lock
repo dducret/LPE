@@ -1583,9 +1583,11 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "base64",
+ "hmac",
  "lpe-core",
  "lpe-domain",
  "lpe-magika",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2",

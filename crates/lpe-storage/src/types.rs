@@ -204,9 +204,21 @@ pub struct StoragePoolSummary {
     pub pool_kind: String,
     pub status: String,
     pub assignable: bool,
+    pub config: Option<StoragePoolConfigSummary>,
     pub is_platform_default: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePoolConfigSummary {
+    pub endpoint_url: Option<String>,
+    pub bucket: Option<String>,
+    pub signing_region: Option<String>,
+    pub addressing_style: Option<String>,
+    pub object_prefix: Option<String>,
+    pub credentials_configured: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -254,6 +266,7 @@ pub struct NewStoragePool {
     pub name: String,
     pub pool_kind: String,
     pub status: String,
+    pub config: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -261,6 +274,7 @@ pub struct UpdateStoragePool {
     pub pool_id: Uuid,
     pub name: String,
     pub status: String,
+    pub config: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +309,9 @@ pub struct StorageHealthResponse {
 pub struct StoragePoolHealth {
     pub pool: StoragePoolReference,
     pub health: String,
+    pub readiness: String,
+    pub backend_state: String,
+    pub backend_detail: Option<String>,
     pub active_placements: u64,
     pub retiring_placements: u64,
     pub failed_placements: u64,

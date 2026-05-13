@@ -13,6 +13,9 @@
 - `PST` import and export must preserve canonical messages and attachments.
 - Attachment blobs are deduplicated per domain.
 - Export must reconstruct every message with its blobs.
+- PostgreSQL remains the metadata authority for blob identity, placement state,
+  hashes, lifecycle fields, and policy references. Protocol adapters use the
+  `BlobStore` boundary and remain backend-agnostic.
 - Retention and legal hold must apply before destructive deletion.
 - Old placement cleanup is not canonical message/blob deletion. It applies only
   to non-active placement rows that have passed their rollback window and have
@@ -22,10 +25,15 @@
   `attachment_texts` rows.
 - Raw RFC 5322 message blobs remain database-backed initially and are outside
   old-placement cleanup scope.
+- Durable attachment and MIME-part blobs can use database-backed or
+  S3-compatible placements. S3-compatible storage is provider-neutral object
+  storage, not AWS-specific or Azure-specific support.
 - Storage policy changes affect future writes only; they do not implicitly
   create migration jobs for existing blobs.
 - Storage policy can be assigned at platform, tenant, domain, and account
   scope. Mailbox-level storage policy remains deferred.
+- S3-compatible credentials use deployment secret references and must not be
+  stored inline in normal storage-pool database rows.
 - Admin policy and visibility surfaces must expose only summarized pool,
   placement, migration, and cleanup state. They must not expose object keys,
   secrets, provider credentials, or provider-specific backend internals.
@@ -45,6 +53,7 @@
 | primary store | `PostgreSQL` |
 | search default | `PostgreSQL` |
 | attachment dedupe | per domain |
+| durable attachment/MIME-part placements | database-backed or provider-neutral S3-compatible |
 | quota accounting | canonical logical size, not placement count |
 | old placement cleanup | rollback-window, live-reference, retention, and legal-hold guarded |
 | canonical blob/message deletion | not performed by placement cleanup |

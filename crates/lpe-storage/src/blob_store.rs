@@ -3,7 +3,13 @@ use sha2::{Digest, Sha256};
 use sqlx::{PgPool, Postgres, Row};
 use uuid::Uuid;
 
-use crate::sha256_hex;
+use crate::{
+    sha256_hex,
+    storage_backend::{
+        s3_put_object, s3_read_object, s3_stat_object, select_storage_backend,
+        StorageBackendSelection,
+    },
+};
 
 const POSTGRES_PRIMARY_STORAGE_POOL_ID: Uuid = Uuid::from_u128(1);
 
@@ -80,6 +86,29 @@ pub(crate) struct BlobMigrationJob {
     pub(crate) attempts: i32,
 }
 
+#[derive(Debug)]
+struct WriteStoragePool {
+    id: Uuid,
+    backend: StorageBackendSelection,
+}
+
+#[derive(Debug)]
+struct ActiveBlobPlacement {
+    placement_id: Uuid,
+    backend: StorageBackendSelection,
+    id: Uuid,
+    media_type: String,
+    size_octets: i64,
+    content_sha256: String,
+    blob_bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct MigrationTargetPlacement {
+    placement_id: Uuid,
+    backend: StorageBackendSelection,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)]
 pub(crate) struct PlacementCleanupEligibility {
@@ -114,6 +143,9 @@ impl PostgresBlobStore {
         request: PutBlobRequest<'_>,
     ) -> Result<StoredBlobRef> {
         let content_sha256 = sha256_hex(request.bytes);
+        let write_pool = self
+            .effective_write_storage_pool_in_tx(tx, &request)
+            .await?;
         if let Some(row) = sqlx::query(
             r#"
             SELECT id, size_octets
@@ -134,12 +166,13 @@ impl PostgresBlobStore {
         {
             let blob_id = row.try_get("id")?;
             let size_octets = row.try_get("size_octets")?;
-            self.ensure_database_placement_in_tx(
+            self.ensure_backend_placement_in_tx(
                 tx,
                 &request,
                 blob_id,
                 &content_sha256,
                 size_octets,
+                &write_pool,
             )
             .await?;
             return Ok(StoredBlobRef {
@@ -169,19 +202,23 @@ impl PostgresBlobStore {
         .bind(&content_sha256)
         .bind(request.media_type)
         .bind(request.bytes.len() as i64)
-        .bind(request.bytes)
+        .bind(match &write_pool.backend {
+            StorageBackendSelection::Postgres => request.bytes,
+            StorageBackendSelection::S3Compatible(_) => &[][..],
+        })
         .bind(request.magika_status)
         .bind(request.extraction_status)
         .bind(request.validated)
         .execute(&mut **tx)
         .await?;
 
-        self.ensure_database_placement_in_tx(
+        self.ensure_backend_placement_in_tx(
             tx,
             &request,
             blob_id,
             &content_sha256,
             request.bytes.len() as i64,
+            &write_pool,
         )
         .await?;
 
@@ -194,14 +231,87 @@ impl PostgresBlobStore {
         })
     }
 
-    async fn ensure_database_placement_in_tx(
+    async fn effective_write_storage_pool_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        request: &PutBlobRequest<'_>,
+    ) -> Result<WriteStoragePool> {
+        let tenant_id = Uuid::parse_str(request.tenant_id)
+            .map_err(|_| anyhow!("durable blob tenant id is invalid"))?;
+        let row = sqlx::query(
+            r#"
+            SELECT sp.id, sp.pool_kind, sp.config_json
+            FROM storage_policy_assignments spa
+            JOIN storage_pools sp
+              ON sp.id = spa.storage_pool_id
+             AND sp.status = 'active'
+            WHERE spa.scope_kind = 'platform'
+               OR (spa.scope_kind = 'tenant' AND spa.tenant_id = $1)
+               OR (spa.scope_kind = 'domain' AND spa.tenant_id = $1 AND spa.domain_id = $2)
+            ORDER BY CASE spa.scope_kind
+                WHEN 'domain' THEN 1
+                WHEN 'tenant' THEN 2
+                WHEN 'platform' THEN 3
+                ELSE 4
+            END
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(request.domain_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(WriteStoragePool {
+                id: POSTGRES_PRIMARY_STORAGE_POOL_ID,
+                backend: StorageBackendSelection::Postgres,
+            });
+        };
+        let pool_kind: String = row.try_get("pool_kind")?;
+        let config_json: serde_json::Value = row.try_get("config_json")?;
+        Ok(WriteStoragePool {
+            id: row.try_get("id")?,
+            backend: select_storage_backend(&pool_kind, &config_json)?,
+        })
+    }
+
+    async fn ensure_backend_placement_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,
         request: &PutBlobRequest<'_>,
         blob_id: Uuid,
         content_sha256: &str,
         size_octets: i64,
+        write_pool: &WriteStoragePool,
     ) -> Result<()> {
+        if self
+            .active_blob_placement_exists_in_tx(tx, request, blob_id)
+            .await?
+        {
+            return Ok(());
+        }
+
+        let placement_id = Uuid::new_v4();
+        if let StorageBackendSelection::S3Compatible(config) = &write_pool.backend {
+            let stat = s3_put_object(
+                config,
+                placement_id,
+                request.bytes,
+                content_sha256,
+                size_octets,
+            )
+            .await?;
+            if stat.content_sha256 != content_sha256 {
+                return Err(anyhow!(
+                    "storage backend upload checksum verification failed"
+                ));
+            }
+            if stat.size_octets != size_octets {
+                return Err(anyhow!("storage backend upload size verification failed"));
+            }
+        }
+
         sqlx::query(
             r#"
             INSERT INTO blob_placements (
@@ -212,17 +322,45 @@ impl PostgresBlobStore {
             ON CONFLICT DO NOTHING
             "#,
         )
-        .bind(Uuid::new_v4())
+        .bind(placement_id)
         .bind(request.tenant_id)
         .bind(request.domain_id)
         .bind(blob_id)
         .bind(request.kind.as_str())
-        .bind(POSTGRES_PRIMARY_STORAGE_POOL_ID)
+        .bind(write_pool.id)
         .bind(content_sha256)
         .bind(size_octets)
         .execute(&mut **tx)
         .await?;
         Ok(())
+    }
+
+    async fn active_blob_placement_exists_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        request: &PutBlobRequest<'_>,
+        blob_id: Uuid,
+    ) -> Result<bool> {
+        sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM blob_placements
+                WHERE tenant_id = $1
+                  AND domain_id = $2
+                  AND blob_id = $3
+                  AND blob_kind = $4
+                  AND placement_status = 'active'
+            )
+            "#,
+        )
+        .bind(request.tenant_id)
+        .bind(request.domain_id)
+        .bind(blob_id)
+        .bind(request.kind.as_str())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into)
     }
 
     #[allow(dead_code)]
@@ -261,7 +399,6 @@ impl PostgresBlobStore {
              AND bp.placement_status = 'active'
             JOIN storage_pools sp
               ON sp.id = bp.storage_pool_id
-             AND sp.pool_kind = 'postgres'
              AND sp.status = 'active'
             WHERE b.tenant_id = $1
               AND b.domain_id = $2
@@ -279,7 +416,7 @@ impl PostgresBlobStore {
 
         let Some(source) = source else {
             return Err(anyhow!(
-                "durable blob {blob_id} has no active database source placement"
+                "durable blob {blob_id} has no active source storage placement"
             ));
         };
         let source_placement_id: Uuid = source.try_get("id")?;
@@ -290,25 +427,26 @@ impl PostgresBlobStore {
             ));
         }
 
-        let target_pool_exists = sqlx::query_scalar::<_, bool>(
+        let target_pool = sqlx::query(
             r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM storage_pools
-                WHERE id = $1
-                  AND pool_kind = 'postgres'
-                  AND status = 'active'
-            )
+            SELECT pool_kind, config_json
+            FROM storage_pools
+            WHERE id = $1
+              AND status = 'active'
             "#,
         )
         .bind(target_storage_pool_id)
-        .fetch_one(pool)
+        .fetch_optional(pool)
         .await?;
-        if !target_pool_exists {
+
+        let Some(target_pool) = target_pool else {
             return Err(anyhow!(
-                "target storage pool {target_storage_pool_id} is not an active database pool"
+                "target storage pool {target_storage_pool_id} is not active or is unsupported"
             ));
-        }
+        };
+        let target_pool_kind: String = target_pool.try_get("pool_kind")?;
+        let target_config_json: serde_json::Value = target_pool.try_get("config_json")?;
+        select_storage_backend(&target_pool_kind, &target_config_json)?;
 
         let job_id = Uuid::new_v4();
         let inserted = sqlx::query(
@@ -387,17 +525,23 @@ impl PostgresBlobStore {
             return Ok(None);
         };
         let kind = durable_blob_kind_from_str(&job.blob_kind)?;
-        let blob = match self
-            .read_durable_blob(pool, &job.tenant_id, job.domain_id, kind, job.blob_id)
-            .await
-        {
-            Ok(Some(blob)) => blob,
+        let source = match self.load_migration_source_placement(pool, &job, kind).await {
+            Ok(Some(source)) => source,
             Ok(None) => {
                 let failed = self
-                    .record_blob_migration_failure(pool, job.id, "source blob is missing")
+                    .record_blob_migration_failure(pool, job.id, "source placement is missing")
                     .await?;
                 return Ok(Some(failed));
             }
+            Err(error) => {
+                let failed = self
+                    .record_blob_migration_failure(pool, job.id, &error.to_string())
+                    .await?;
+                return Ok(Some(failed));
+            }
+        };
+        let blob = match self.read_placement_bytes(&source).await {
+            Ok(blob) => blob,
             Err(error) => {
                 let failed = self
                     .record_blob_migration_failure(pool, job.id, &error.to_string())
@@ -418,10 +562,29 @@ impl PostgresBlobStore {
             return Ok(Some(failed));
         }
 
-        let mut tx = pool.begin().await?;
         let target_placement_id = self
-            .ensure_copying_target_placement_in_tx(&mut tx, &job, &blob)
-            .await?;
+            .ensure_copying_target_placement(pool, &job, &blob)
+            .await;
+        let target = match target_placement_id {
+            Ok(target) => target,
+            Err(error) => {
+                let failed = self
+                    .record_blob_migration_failure(pool, job.id, &error.to_string())
+                    .await?;
+                return Ok(Some(failed));
+            }
+        };
+        if let Err(error) = self
+            .write_migration_target_placement(pool, &job, &target, &blob)
+            .await
+        {
+            let failed = self
+                .record_blob_migration_failure(pool, job.id, &error.to_string())
+                .await?;
+            return Ok(Some(failed));
+        }
+
+        let mut tx = pool.begin().await?;
         sqlx::query(
             r#"
             UPDATE blob_placements
@@ -438,7 +601,7 @@ impl PostgresBlobStore {
         .bind(&job.tenant_id)
         .bind(&blob.content_sha256)
         .bind(blob.size_octets)
-        .bind(target_placement_id)
+        .bind(target.placement_id)
         .execute(&mut *tx)
         .await?;
 
@@ -461,7 +624,7 @@ impl PostgresBlobStore {
             "#,
         )
         .bind(&job.tenant_id)
-        .bind(target_placement_id)
+        .bind(target.placement_id)
         .bind(job.id)
         .fetch_one(&mut *tx)
         .await?;
@@ -511,7 +674,6 @@ impl PostgresBlobStore {
                 FROM blob_placements bp
                 JOIN storage_pools sp
                   ON sp.id = bp.storage_pool_id
-                 AND sp.pool_kind = 'postgres'
                  AND sp.status = 'active'
                 WHERE bp.tenant_id = $1
                   AND bp.domain_id = $2
@@ -657,12 +819,33 @@ impl PostgresBlobStore {
         .transpose()
     }
 
-    async fn ensure_copying_target_placement_in_tx(
+    async fn ensure_copying_target_placement(
         &self,
-        tx: &mut sqlx::Transaction<'_, Postgres>,
+        pool: &PgPool,
         job: &BlobMigrationJob,
         blob: &StoredBlobBytes,
-    ) -> Result<Uuid> {
+    ) -> Result<MigrationTargetPlacement> {
+        let pool_row = sqlx::query(
+            r#"
+            SELECT pool_kind, config_json
+            FROM storage_pools
+            WHERE id = $1
+              AND status = 'active'
+            "#,
+        )
+        .bind(job.target_storage_pool_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| {
+            anyhow!(
+                "target storage pool {} is not active or is unsupported",
+                job.target_storage_pool_id
+            )
+        })?;
+        let pool_kind: String = pool_row.try_get("pool_kind")?;
+        let config_json: serde_json::Value = pool_row.try_get("config_json")?;
+        let backend = select_storage_backend(&pool_kind, &config_json)?;
+
         if let Some(placement_id) = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT id
@@ -682,10 +865,13 @@ impl PostgresBlobStore {
         .bind(job.blob_id)
         .bind(&job.blob_kind)
         .bind(job.target_storage_pool_id)
-        .fetch_optional(&mut **tx)
+        .fetch_optional(pool)
         .await?
         {
-            return Ok(placement_id);
+            return Ok(MigrationTargetPlacement {
+                placement_id,
+                backend,
+            });
         }
 
         let placement_id = Uuid::new_v4();
@@ -707,9 +893,12 @@ impl PostgresBlobStore {
         .bind(job.target_storage_pool_id)
         .bind(&blob.content_sha256)
         .bind(blob.size_octets)
-        .fetch_one(&mut **tx)
+        .fetch_one(pool)
         .await?;
-        Ok(placement_id)
+        Ok(MigrationTargetPlacement {
+            placement_id,
+            backend,
+        })
     }
 
     #[allow(dead_code)]
@@ -1319,51 +1508,39 @@ impl PostgresBlobStore {
         kind: DurableBlobKind,
         blob_id: Uuid,
     ) -> Result<Option<StoredBlobBytes>> {
-        let row = sqlx::query(
-            r#"
-            SELECT b.id, b.media_type, b.size_octets, b.content_sha256, b.blob_bytes
-            FROM blobs b
-            JOIN blob_placements bp
-              ON bp.tenant_id = b.tenant_id
-             AND bp.domain_id = b.domain_id
-             AND bp.blob_id = b.id
-             AND bp.blob_kind = b.blob_kind
-             AND bp.verified_content_sha256 = b.content_sha256
-             AND bp.verified_size_octets = b.size_octets
-             AND bp.placement_status = 'active'
-            JOIN storage_pools sp
-              ON sp.id = bp.storage_pool_id
-             AND sp.pool_kind = 'postgres'
-             AND sp.status = 'active'
-            WHERE b.tenant_id = $1
-              AND b.domain_id = $2
-              AND b.blob_kind = $3
-              AND b.id = $4
-            LIMIT 1
-            "#,
-        )
-        .bind(tenant_id)
-        .bind(domain_id)
-        .bind(kind.as_str())
-        .bind(blob_id)
-        .fetch_optional(pool)
-        .await?;
+        let Some(placement) = self
+            .load_active_blob_placement(pool, tenant_id, domain_id, kind, blob_id)
+            .await?
+        else {
+            self.error_if_durable_blob_lacks_active_placement(
+                pool, tenant_id, domain_id, kind, blob_id,
+            )
+            .await?;
+            return Ok(None);
+        };
 
-        if let Some(row) = row {
-            return Ok(Some(StoredBlobBytes {
-                id: row.try_get("id")?,
-                media_type: row.try_get("media_type")?,
-                size_octets: row.try_get("size_octets")?,
-                content_sha256: row.try_get("content_sha256")?,
-                bytes: row.try_get("blob_bytes")?,
-            }));
-        }
+        let bytes = match &placement.backend {
+            StorageBackendSelection::Postgres => placement.blob_bytes.clone(),
+            StorageBackendSelection::S3Compatible(config) => {
+                let bytes = s3_read_object(config, placement.placement_id).await?;
+                let actual_hash = format!("{:x}", Sha256::digest(&bytes));
+                if actual_hash != placement.content_sha256 {
+                    return Err(anyhow!("storage backend read checksum verification failed"));
+                }
+                if bytes.len() as i64 != placement.size_octets {
+                    return Err(anyhow!("storage backend read size verification failed"));
+                }
+                bytes
+            }
+        };
 
-        self.error_if_durable_blob_lacks_active_placement(
-            pool, tenant_id, domain_id, kind, blob_id,
-        )
-        .await?;
-        Ok(None)
+        Ok(Some(StoredBlobBytes {
+            id: placement.id,
+            media_type: placement.media_type,
+            size_octets: placement.size_octets,
+            content_sha256: placement.content_sha256,
+            bytes,
+        }))
     }
 
     pub(crate) async fn stat_durable_blob(
@@ -1374,9 +1551,52 @@ impl PostgresBlobStore {
         kind: DurableBlobKind,
         blob_id: Uuid,
     ) -> Result<Option<StoredBlobStat>> {
+        let Some(placement) = self
+            .load_active_blob_placement(pool, tenant_id, domain_id, kind, blob_id)
+            .await?
+        else {
+            self.error_if_durable_blob_lacks_active_placement(
+                pool, tenant_id, domain_id, kind, blob_id,
+            )
+            .await?;
+            return Ok(None);
+        };
+
+        if let StorageBackendSelection::S3Compatible(config) = &placement.backend {
+            let stat = s3_stat_object(config, placement.placement_id).await?;
+            if stat.content_sha256 != placement.content_sha256 {
+                return Err(anyhow!("storage backend stat checksum verification failed"));
+            }
+            if stat.size_octets != placement.size_octets {
+                return Err(anyhow!("storage backend stat size verification failed"));
+            }
+        }
+
+        Ok(Some(StoredBlobStat {
+            id: placement.id,
+            media_type: placement.media_type,
+            size_octets: placement.size_octets,
+            content_sha256: placement.content_sha256,
+        }))
+    }
+
+    async fn load_migration_source_placement(
+        &self,
+        pool: &PgPool,
+        job: &BlobMigrationJob,
+        kind: DurableBlobKind,
+    ) -> Result<Option<ActiveBlobPlacement>> {
         let row = sqlx::query(
             r#"
-            SELECT b.id, b.media_type, b.size_octets, b.content_sha256
+            SELECT
+                b.id,
+                b.media_type,
+                b.size_octets,
+                b.content_sha256,
+                b.blob_bytes,
+                bp.id AS placement_id,
+                sp.pool_kind,
+                sp.config_json
             FROM blobs b
             JOIN blob_placements bp
               ON bp.tenant_id = b.tenant_id
@@ -1388,7 +1608,170 @@ impl PostgresBlobStore {
              AND bp.placement_status = 'active'
             JOIN storage_pools sp
               ON sp.id = bp.storage_pool_id
-             AND sp.pool_kind = 'postgres'
+             AND sp.status = 'active'
+            WHERE b.tenant_id = $1
+              AND b.domain_id = $2
+              AND b.blob_kind = $3
+              AND b.id = $4
+              AND bp.id = $5
+              AND bp.storage_pool_id = $6
+            LIMIT 1
+            "#,
+        )
+        .bind(&job.tenant_id)
+        .bind(job.domain_id)
+        .bind(kind.as_str())
+        .bind(job.blob_id)
+        .bind(job.source_placement_id)
+        .bind(job.source_storage_pool_id)
+        .fetch_optional(pool)
+        .await?;
+
+        row.map(|row| {
+            let pool_kind: String = row.try_get("pool_kind")?;
+            let config_json: serde_json::Value = row.try_get("config_json")?;
+            Ok(ActiveBlobPlacement {
+                placement_id: row.try_get("placement_id")?,
+                backend: select_storage_backend(&pool_kind, &config_json)?,
+                id: row.try_get("id")?,
+                media_type: row.try_get("media_type")?,
+                size_octets: row.try_get("size_octets")?,
+                content_sha256: row.try_get("content_sha256")?,
+                blob_bytes: row.try_get("blob_bytes")?,
+            })
+        })
+        .transpose()
+    }
+
+    async fn read_placement_bytes(
+        &self,
+        placement: &ActiveBlobPlacement,
+    ) -> Result<StoredBlobBytes> {
+        let bytes = match &placement.backend {
+            StorageBackendSelection::Postgres => placement.blob_bytes.clone(),
+            StorageBackendSelection::S3Compatible(config) => {
+                s3_read_object(config, placement.placement_id).await?
+            }
+        };
+        Ok(StoredBlobBytes {
+            id: placement.id,
+            media_type: placement.media_type.clone(),
+            size_octets: placement.size_octets,
+            content_sha256: placement.content_sha256.clone(),
+            bytes,
+        })
+    }
+
+    async fn write_migration_target_placement(
+        &self,
+        pool: &PgPool,
+        job: &BlobMigrationJob,
+        target: &MigrationTargetPlacement,
+        blob: &StoredBlobBytes,
+    ) -> Result<()> {
+        match &target.backend {
+            StorageBackendSelection::Postgres => {
+                let updated = sqlx::query(
+                    r#"
+                    UPDATE blobs
+                    SET blob_bytes = $5
+                    WHERE tenant_id = $1
+                      AND domain_id = $2
+                      AND blob_kind = $3
+                      AND id = $4
+                      AND content_sha256 = $6
+                      AND size_octets = $7
+                    "#,
+                )
+                .bind(&job.tenant_id)
+                .bind(job.domain_id)
+                .bind(&job.blob_kind)
+                .bind(job.blob_id)
+                .bind(&blob.bytes)
+                .bind(&blob.content_sha256)
+                .bind(blob.size_octets)
+                .execute(pool)
+                .await?;
+                if updated.rows_affected() != 1 {
+                    return Err(anyhow!("target database blob row could not be updated"));
+                }
+
+                let stored_bytes = sqlx::query_scalar::<_, Vec<u8>>(
+                    r#"
+                    SELECT blob_bytes
+                    FROM blobs
+                    WHERE tenant_id = $1
+                      AND domain_id = $2
+                      AND blob_kind = $3
+                      AND id = $4
+                    "#,
+                )
+                .bind(&job.tenant_id)
+                .bind(job.domain_id)
+                .bind(&job.blob_kind)
+                .bind(job.blob_id)
+                .fetch_one(pool)
+                .await?;
+                let stored_hash = format!("{:x}", Sha256::digest(&stored_bytes));
+                if stored_hash != blob.content_sha256
+                    || stored_bytes.len() as i64 != blob.size_octets
+                {
+                    return Err(anyhow!(
+                        "target database placement checksum or size verification failed"
+                    ));
+                }
+            }
+            StorageBackendSelection::S3Compatible(config) => {
+                let stat = s3_put_object(
+                    config,
+                    target.placement_id,
+                    &blob.bytes,
+                    &blob.content_sha256,
+                    blob.size_octets,
+                )
+                .await?;
+                if stat.content_sha256 != blob.content_sha256
+                    || stat.size_octets != blob.size_octets
+                {
+                    return Err(anyhow!(
+                        "target storage placement checksum or size verification failed"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    async fn load_active_blob_placement(
+        &self,
+        pool: &PgPool,
+        tenant_id: &str,
+        domain_id: Uuid,
+        kind: DurableBlobKind,
+        blob_id: Uuid,
+    ) -> Result<Option<ActiveBlobPlacement>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                b.id,
+                b.media_type,
+                b.size_octets,
+                b.content_sha256,
+                b.blob_bytes,
+                bp.id AS placement_id,
+                sp.pool_kind,
+                sp.config_json
+            FROM blobs b
+            JOIN blob_placements bp
+              ON bp.tenant_id = b.tenant_id
+             AND bp.domain_id = b.domain_id
+             AND bp.blob_id = b.id
+             AND bp.blob_kind = b.blob_kind
+             AND bp.verified_content_sha256 = b.content_sha256
+             AND bp.verified_size_octets = b.size_octets
+             AND bp.placement_status = 'active'
+            JOIN storage_pools sp
+              ON sp.id = bp.storage_pool_id
              AND sp.status = 'active'
             WHERE b.tenant_id = $1
               AND b.domain_id = $2
@@ -1404,20 +1787,20 @@ impl PostgresBlobStore {
         .fetch_optional(pool)
         .await?;
 
-        if let Some(row) = row {
-            return Ok(Some(StoredBlobStat {
+        row.map(|row| {
+            let pool_kind: String = row.try_get("pool_kind")?;
+            let config_json: serde_json::Value = row.try_get("config_json")?;
+            Ok(ActiveBlobPlacement {
+                placement_id: row.try_get("placement_id")?,
+                backend: select_storage_backend(&pool_kind, &config_json)?,
                 id: row.try_get("id")?,
                 media_type: row.try_get("media_type")?,
                 size_octets: row.try_get("size_octets")?,
                 content_sha256: row.try_get("content_sha256")?,
-            }));
-        }
-
-        self.error_if_durable_blob_lacks_active_placement(
-            pool, tenant_id, domain_id, kind, blob_id,
-        )
-        .await?;
-        Ok(None)
+                blob_bytes: row.try_get("blob_bytes")?,
+            })
+        })
+        .transpose()
     }
 
     async fn error_if_durable_blob_lacks_active_placement(
@@ -1449,7 +1832,7 @@ impl PostgresBlobStore {
 
         if exists {
             return Err(anyhow!(
-                "durable blob {blob_id} has no active database placement"
+                "durable blob {blob_id} has no active storage placement"
             ));
         }
         Ok(())
@@ -1464,14 +1847,28 @@ impl PostgresBlobStore {
         kind: DurableBlobKind,
         blob_id: Uuid,
     ) -> Result<bool> {
-        let Some(blob) = self
-            .read_durable_blob(pool, tenant_id, domain_id, kind, blob_id)
+        let Some(placement) = self
+            .load_active_blob_placement(pool, tenant_id, domain_id, kind, blob_id)
             .await?
         else {
+            self.error_if_durable_blob_lacks_active_placement(
+                pool, tenant_id, domain_id, kind, blob_id,
+            )
+            .await?;
             return Ok(false);
         };
-        let actual_hash = format!("{:x}", Sha256::digest(&blob.bytes));
-        Ok(actual_hash == blob.content_sha256 && blob.bytes.len() as i64 == blob.size_octets)
+        match &placement.backend {
+            StorageBackendSelection::Postgres => {
+                let actual_hash = format!("{:x}", Sha256::digest(&placement.blob_bytes));
+                Ok(actual_hash == placement.content_sha256
+                    && placement.blob_bytes.len() as i64 == placement.size_octets)
+            }
+            StorageBackendSelection::S3Compatible(config) => {
+                let stat = s3_stat_object(config, placement.placement_id).await?;
+                Ok(stat.content_sha256 == placement.content_sha256
+                    && stat.size_octets == placement.size_octets)
+            }
+        }
     }
 }
 
@@ -1525,6 +1922,7 @@ fn is_constraint_error(error: &sqlx::Error, constraint: &str) -> bool {
 mod tests {
     use super::*;
     use crate::{AttachmentUploadInput, Storage};
+    use serde_json::{json, Value};
     use sqlx::postgres::PgPoolOptions;
 
     const SCHEMA: &str = include_str!("../sql/schema.sql");
@@ -1572,6 +1970,75 @@ mod tests {
         .execute(storage.pool())
         .await
         .expect("insert domain");
+    }
+
+    fn s3_test_config() -> Option<Value> {
+        let endpoint_url = std::env::var("LPE_S3_TEST_ENDPOINT_URL").ok()?;
+        let bucket = std::env::var("LPE_S3_TEST_BUCKET").ok()?;
+        let signing_region = std::env::var("LPE_S3_TEST_SIGNING_REGION")
+            .or_else(|_| std::env::var("LPE_S3_TEST_REGION"))
+            .ok()?;
+        if std::env::var("LPE_S3_TEST_ACCESS_KEY_ID").is_err()
+            || std::env::var("LPE_S3_TEST_SECRET_ACCESS_KEY").is_err()
+        {
+            return None;
+        }
+        let addressing_style =
+            std::env::var("LPE_S3_TEST_ADDRESSING_STYLE").unwrap_or_else(|_| "path".to_string());
+        let object_prefix = std::env::var("LPE_S3_TEST_OBJECT_PREFIX")
+            .map(|prefix| format!("{}/{}", prefix.trim_matches('/'), Uuid::new_v4()))
+            .unwrap_or_else(|_| format!("lpe-storage-tests/{}", Uuid::new_v4()));
+        Some(json!({
+            "endpointUrl": endpoint_url,
+            "bucket": bucket,
+            "signingRegion": signing_region,
+            "addressingStyle": addressing_style,
+            "objectPrefix": object_prefix,
+            "credentialsRef": "env:LPE_S3_TEST"
+        }))
+    }
+
+    fn s3_placeholder_config() -> Value {
+        json!({
+            "endpointUrl": "http://127.0.0.1:9000",
+            "bucket": "lpe-test",
+            "signingRegion": "test-region",
+            "addressingStyle": "path",
+            "credentialsRef": "env:LPE_S3_PLACEHOLDER"
+        })
+    }
+
+    async fn insert_s3_storage_pool(storage: &Storage, config: Value) -> Uuid {
+        let pool_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO storage_pools (id, name, pool_kind, status, config_json)
+            VALUES ($1, $2, 's3_compatible', 'active', $3)
+            "#,
+        )
+        .bind(pool_id)
+        .bind(format!("object-{}", pool_id.simple()))
+        .bind(config)
+        .execute(storage.pool())
+        .await
+        .expect("insert s3-compatible pool");
+        pool_id
+    }
+
+    async fn configure_s3_platform_pool(storage: &Storage, config: Value) -> Uuid {
+        let pool_id = insert_s3_storage_pool(storage, config).await;
+        sqlx::query(
+            r#"
+            UPDATE storage_policy_assignments
+            SET storage_pool_id = $1, updated_at = NOW()
+            WHERE scope_kind = 'platform'
+            "#,
+        )
+        .bind(pool_id)
+        .execute(storage.pool())
+        .await
+        .expect("set platform storage policy");
+        pool_id
     }
 
     async fn insert_account_mailbox(
@@ -2029,6 +2496,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn create_blob_migration_job_accepts_s3_compatible_target_pool() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let target_pool_id = insert_s3_storage_pool(&storage, s3_placeholder_config()).await;
+        let blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"create-s3-migration",
+        )
+        .await;
+
+        let job = PostgresBlobStore
+            .create_blob_migration_job(
+                storage.pool(),
+                &tenant_id.to_string(),
+                domain_id,
+                "attachment",
+                blob.id,
+                target_pool_id,
+            )
+            .await
+            .expect("create s3-compatible migration job");
+
+        assert_eq!(job.source_storage_pool_id, POSTGRES_PRIMARY_STORAGE_POOL_ID);
+        assert_eq!(job.target_storage_pool_id, target_pool_id);
+        assert_eq!(job.status, "pending");
+        assert!(job.target_placement_id.is_none());
+    }
+
+    #[tokio::test]
     async fn duplicate_blob_migration_job_create_returns_existing_open_job() {
         let Some(storage) = test_storage().await else {
             eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
@@ -2160,7 +2664,7 @@ mod tests {
             .expect_err("missing source placement must fail")
             .to_string();
         assert!(
-            error.contains("no active database source placement"),
+            error.contains("no active source storage placement"),
             "unexpected error: {error}"
         );
     }
@@ -3654,10 +4158,330 @@ mod tests {
                 .to_string(),
         ] {
             assert!(
-                error.contains("active database placement"),
+                error.contains("active storage placement"),
                 "unexpected storage error: {error}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn s3_compatible_backend_put_read_stat_and_verify_round_trip() {
+        let Some(config) = s3_test_config() else {
+            eprintln!(
+                "skipping S3-compatible integration test; set LPE_S3_TEST_ENDPOINT_URL, LPE_S3_TEST_BUCKET, LPE_S3_TEST_SIGNING_REGION or LPE_S3_TEST_REGION, LPE_S3_TEST_ACCESS_KEY_ID, and LPE_S3_TEST_SECRET_ACCESS_KEY"
+            );
+            return;
+        };
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping S3-compatible integration test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        let tenant = tenant_id.to_string();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let s3_pool_id = configure_s3_platform_pool(&storage, config).await;
+
+        let blob_store = PostgresBlobStore;
+        let bytes = b"s3-compatible-put-read-stat-verify";
+        let mut tx = storage.pool().begin().await.expect("begin s3 tx");
+        let stored = blob_store
+            .put_durable_blob_in_tx(
+                &mut tx,
+                PutBlobRequest {
+                    tenant_id: &tenant,
+                    domain_id,
+                    kind: DurableBlobKind::Attachment,
+                    media_type: "application/octet-stream",
+                    bytes,
+                    magika_status: "valid",
+                    extraction_status: "unsupported",
+                    validated: true,
+                },
+            )
+            .await
+            .expect("store s3-compatible blob");
+        tx.commit().await.expect("commit s3 blob");
+
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, stored.id).await,
+            s3_pool_id
+        );
+        let database_bytes_len = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT octet_length(blob_bytes)::bigint
+            FROM blobs
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(stored.id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("load database blob byte length");
+        assert_eq!(database_bytes_len, 0);
+
+        let read = blob_store
+            .read_durable_blob(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                DurableBlobKind::Attachment,
+                stored.id,
+            )
+            .await
+            .expect("read s3-compatible blob")
+            .expect("s3-compatible blob exists");
+        assert_eq!(read.bytes, bytes);
+
+        let stat = blob_store
+            .stat_durable_blob(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                DurableBlobKind::Attachment,
+                stored.id,
+            )
+            .await
+            .expect("stat s3-compatible blob")
+            .expect("s3-compatible blob exists");
+        assert_eq!(stat.size_octets, bytes.len() as i64);
+        assert_eq!(stat.content_sha256, sha256_hex(bytes));
+
+        assert!(blob_store
+            .verify_durable_blob(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                DurableBlobKind::Attachment,
+                stored.id,
+            )
+            .await
+            .expect("verify s3-compatible blob"));
+    }
+
+    #[tokio::test]
+    async fn s3_compatible_migration_paths_copy_verify_and_switch() {
+        let Some(first_config) = s3_test_config() else {
+            eprintln!(
+                "skipping S3-compatible integration test; set LPE_S3_TEST_ENDPOINT_URL, LPE_S3_TEST_BUCKET, LPE_S3_TEST_SIGNING_REGION or LPE_S3_TEST_REGION, LPE_S3_TEST_ACCESS_KEY_ID, and LPE_S3_TEST_SECRET_ACCESS_KEY"
+            );
+            return;
+        };
+        let Some(second_config) = s3_test_config() else {
+            eprintln!(
+                "skipping S3-compatible integration test; set LPE_S3_TEST_ENDPOINT_URL, LPE_S3_TEST_BUCKET, LPE_S3_TEST_SIGNING_REGION or LPE_S3_TEST_REGION, LPE_S3_TEST_ACCESS_KEY_ID, and LPE_S3_TEST_SECRET_ACCESS_KEY"
+            );
+            return;
+        };
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping S3-compatible integration test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        let tenant = tenant_id.to_string();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let blob_store = PostgresBlobStore;
+
+        let first_s3_pool_id = insert_s3_storage_pool(&storage, first_config).await;
+        let db_blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"db-to-s3-migration",
+        )
+        .await;
+        let db_to_s3_job = blob_store
+            .create_blob_migration_job(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                "attachment",
+                db_blob.id,
+                first_s3_pool_id,
+            )
+            .await
+            .expect("create db-to-s3 migration job");
+        let db_to_s3_verified = blob_store
+            .copy_and_verify_one_blob_migration_job(storage.pool())
+            .await
+            .expect("copy db-to-s3 migration")
+            .expect("db-to-s3 job claimed");
+        assert_eq!(db_to_s3_verified.status, "verified");
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, db_blob.id).await,
+            POSTGRES_PRIMARY_STORAGE_POOL_ID
+        );
+
+        sqlx::query(
+            r#"
+            UPDATE blob_migration_jobs
+            SET status = 'pending',
+                target_placement_id = NULL,
+                verified_at = NULL,
+                next_attempt_at = NOW(),
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(db_to_s3_job.id)
+        .execute(storage.pool())
+        .await
+        .expect("simulate interrupted s3 target metadata");
+        let db_to_s3_repeated = blob_store
+            .copy_and_verify_one_blob_migration_job(storage.pool())
+            .await
+            .expect("repeat db-to-s3 migration")
+            .expect("db-to-s3 job reclaimed");
+        assert_eq!(
+            db_to_s3_repeated.target_placement_id,
+            db_to_s3_verified.target_placement_id
+        );
+
+        let db_to_s3_switched = blob_store
+            .switch_verified_blob_migration_job(storage.pool(), db_to_s3_job.id)
+            .await
+            .expect("switch db-to-s3 migration")
+            .expect("db-to-s3 switched");
+        assert_eq!(db_to_s3_switched.status, "switched");
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, db_blob.id).await,
+            first_s3_pool_id
+        );
+        assert_eq!(
+            placement_status_by_id(&storage, db_to_s3_switched.source_placement_id).await,
+            "retiring"
+        );
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            db_blob.id,
+            b"db-to-s3-migration",
+        )
+        .await;
+
+        sqlx::query(
+            r#"
+            UPDATE storage_policy_assignments
+            SET storage_pool_id = $1, updated_at = NOW()
+            WHERE scope_kind = 'platform'
+            "#,
+        )
+        .bind(first_s3_pool_id)
+        .execute(storage.pool())
+        .await
+        .expect("set platform policy to first s3 pool");
+        let s3_blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"s3-to-db-migration",
+        )
+        .await;
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, s3_blob.id).await,
+            first_s3_pool_id
+        );
+        let s3_to_db_job = blob_store
+            .create_blob_migration_job(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                "attachment",
+                s3_blob.id,
+                POSTGRES_PRIMARY_STORAGE_POOL_ID,
+            )
+            .await
+            .expect("create s3-to-db migration job");
+        let s3_to_db_verified = blob_store
+            .copy_and_verify_one_blob_migration_job(storage.pool())
+            .await
+            .expect("copy s3-to-db migration")
+            .expect("s3-to-db job claimed");
+        assert_eq!(s3_to_db_verified.status, "verified");
+        let s3_to_db_switched = blob_store
+            .switch_verified_blob_migration_job(storage.pool(), s3_to_db_job.id)
+            .await
+            .expect("switch s3-to-db migration")
+            .expect("s3-to-db switched");
+        assert_eq!(s3_to_db_switched.status, "switched");
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, s3_blob.id).await,
+            POSTGRES_PRIMARY_STORAGE_POOL_ID
+        );
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            s3_blob.id,
+            b"s3-to-db-migration",
+        )
+        .await;
+
+        let second_s3_pool_id = insert_s3_storage_pool(&storage, second_config).await;
+        let s3_to_s3_blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"s3-to-s3-migration",
+        )
+        .await;
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, s3_to_s3_blob.id).await,
+            first_s3_pool_id
+        );
+        let s3_to_s3_job = blob_store
+            .create_blob_migration_job(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                "attachment",
+                s3_to_s3_blob.id,
+                second_s3_pool_id,
+            )
+            .await
+            .expect("create s3-to-s3 migration job");
+        let s3_to_s3_verified = blob_store
+            .copy_and_verify_one_blob_migration_job(storage.pool())
+            .await
+            .expect("copy s3-to-s3 migration")
+            .expect("s3-to-s3 job claimed");
+        assert_eq!(s3_to_s3_verified.status, "verified");
+        let s3_to_s3_switched = blob_store
+            .switch_verified_blob_migration_job(storage.pool(), s3_to_s3_job.id)
+            .await
+            .expect("switch s3-to-s3 migration")
+            .expect("s3-to-s3 switched");
+        assert_eq!(s3_to_s3_switched.status, "switched");
+        assert_eq!(
+            active_storage_pool_id(&storage, tenant_id, s3_to_s3_blob.id).await,
+            second_s3_pool_id
+        );
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            s3_to_s3_blob.id,
+            b"s3-to-s3-migration",
+        )
+        .await;
+        assert!(blob_store
+            .verify_durable_blob(
+                storage.pool(),
+                &tenant,
+                domain_id,
+                DurableBlobKind::Attachment,
+                s3_to_s3_blob.id,
+            )
+            .await
+            .expect("verify s3-to-s3 active blob"));
     }
 
     #[tokio::test]

@@ -1,8 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
+    storage_backend::{
+        s3_probe_pool, s3_stat_object, select_storage_backend, StorageBackendError,
+        StorageBackendSelection,
+    },
     Storage, StorageCleanupCounts, StorageCleanupPlacementSummary,
     StorageCleanupVisibilityResponse, StorageHealthResponse, StorageMetadataDiagnostics,
     StorageMigrationCounts, StorageMigrationJobSummary, StorageMigrationVisibilityResponse,
@@ -15,10 +19,25 @@ struct PoolHealthRow {
     name: String,
     pool_kind: String,
     status: String,
+    config_json: serde_json::Value,
+    policy_references: u64,
     active_placements: u64,
     retiring_placements: u64,
     failed_placements: u64,
     cleanup_failed_placements: u64,
+}
+
+#[derive(Debug, Clone)]
+struct PoolBackendHealth {
+    state: String,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PoolProbePlacement {
+    placement_id: Uuid,
+    content_sha256: String,
+    size_octets: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -80,7 +99,7 @@ impl Storage {
             r#"
             SELECT COUNT(*)
             FROM storage_pools
-            WHERE pool_kind = 'postgres'
+            WHERE pool_kind IN ('postgres', 's3_compatible')
               AND status = 'active'
             "#,
         )
@@ -95,7 +114,7 @@ impl Storage {
                 FROM storage_policy_assignments spa
                 JOIN storage_pools sp ON sp.id = spa.storage_pool_id
                 WHERE spa.scope_kind = 'platform'
-                  AND sp.pool_kind = 'postgres'
+                  AND sp.pool_kind IN ('postgres', 's3_compatible')
                   AND sp.status = 'active'
             )
             "#,
@@ -109,7 +128,7 @@ impl Storage {
             FROM storage_policy_assignments spa
             LEFT JOIN storage_pools sp ON sp.id = spa.storage_pool_id
             WHERE sp.id IS NULL
-               OR sp.pool_kind <> 'postgres'
+               OR sp.pool_kind NOT IN ('postgres', 's3_compatible')
                OR sp.status <> 'active'
             "#,
         )
@@ -123,7 +142,7 @@ impl Storage {
             FROM blob_placements bp
             JOIN storage_pools sp ON sp.id = bp.storage_pool_id
             WHERE bp.placement_status = 'active'
-              AND (sp.pool_kind <> 'postgres' OR sp.status <> 'active')
+              AND (sp.pool_kind NOT IN ('postgres', 's3_compatible') OR sp.status <> 'active')
             "#,
         )
         .fetch_one(&self.pool)
@@ -149,16 +168,20 @@ impl Storage {
         let placements = self.load_placement_counts(tenant_filter).await?;
         let migrations = self.load_migration_counts(tenant_filter).await?;
         let cleanup = self.load_cleanup_counts(tenant_filter).await?;
+        let pool_summaries = self.pool_health_summaries(pools).await?;
         let degraded = placements.missing_active > 0
             || placements.degraded > 0
             || migrations.failed > 0
             || migrations.expired_leases > 0
             || cleanup.cleanup_failed > 0
-            || cleanup.blocked_by_missing_active_replacement > 0;
+            || cleanup.blocked_by_missing_active_replacement > 0
+            || pool_summaries
+                .iter()
+                .any(|pool| pool.readiness == "required" && pool.health == "degraded");
 
         Ok(StorageHealthResponse {
             status: if degraded { "degraded" } else { "ok" }.to_string(),
-            pools: pools.into_iter().map(pool_health_summary).collect(),
+            pools: pool_summaries,
             placements,
             migrations,
             cleanup,
@@ -268,15 +291,23 @@ impl Storage {
                 sp.name,
                 sp.pool_kind,
                 sp.status,
+                sp.config_json,
+                COUNT(DISTINCT spa.id) FILTER (
+                    WHERE $1::uuid IS NULL
+                       OR spa.scope_kind = 'platform'
+                       OR spa.tenant_id = $1
+                ) AS policy_references,
                 COUNT(bp.id) FILTER (WHERE bp.placement_status = 'active') AS active_placements,
                 COUNT(bp.id) FILTER (WHERE bp.placement_status = 'retiring') AS retiring_placements,
                 COUNT(bp.id) FILTER (WHERE bp.placement_status = 'failed') AS failed_placements,
                 COUNT(bp.id) FILTER (WHERE bp.placement_status = 'cleanup_failed') AS cleanup_failed_placements
             FROM storage_pools sp
+            LEFT JOIN storage_policy_assignments spa
+              ON spa.storage_pool_id = sp.id
             LEFT JOIN blob_placements bp
               ON bp.storage_pool_id = sp.id
              AND ($1::uuid IS NULL OR bp.tenant_id = $1)
-            GROUP BY sp.id, sp.name, sp.pool_kind, sp.status, sp.created_at
+            GROUP BY sp.id, sp.name, sp.pool_kind, sp.status, sp.config_json, sp.created_at
             ORDER BY sp.created_at ASC, sp.name ASC
             "#,
         )
@@ -291,6 +322,8 @@ impl Storage {
                     name: row.try_get("name")?,
                     pool_kind: row.try_get("pool_kind")?,
                     status: row.try_get("status")?,
+                    config_json: row.try_get("config_json")?,
+                    policy_references: row.try_get::<i64, _>("policy_references")?.max(0) as u64,
                     active_placements: row.try_get::<i64, _>("active_placements")?.max(0) as u64,
                     retiring_placements: row.try_get::<i64, _>("retiring_placements")?.max(0)
                         as u64,
@@ -352,7 +385,7 @@ impl Storage {
                   FROM blob_placements bp
                   JOIN storage_pools sp
                     ON sp.id = bp.storage_pool_id
-                   AND sp.pool_kind = 'postgres'
+                   AND sp.pool_kind IN ('postgres', 's3_compatible')
                    AND sp.status = 'active'
                   WHERE bp.tenant_id = b.tenant_id
                     AND bp.domain_id = b.domain_id
@@ -496,7 +529,7 @@ impl Storage {
                   FROM blob_placements active
                   JOIN storage_pools sp
                     ON sp.id = active.storage_pool_id
-                   AND sp.pool_kind = 'postgres'
+                   AND sp.pool_kind IN ('postgres', 's3_compatible')
                    AND sp.status = 'active'
                   WHERE active.tenant_id = old.tenant_id
                     AND active.domain_id = old.domain_id
@@ -626,7 +659,7 @@ impl Storage {
                     FROM blob_placements active
                     JOIN storage_pools sp
                       ON sp.id = active.storage_pool_id
-                     AND sp.pool_kind = 'postgres'
+                     AND sp.pool_kind IN ('postgres', 's3_compatible')
                      AND sp.status = 'active'
                     WHERE active.tenant_id = bp.tenant_id
                       AND active.domain_id = bp.domain_id
@@ -708,6 +741,91 @@ impl Storage {
         }))
     }
 
+    async fn pool_health_summaries(
+        &self,
+        rows: Vec<PoolHealthRow>,
+    ) -> Result<Vec<StoragePoolHealth>> {
+        let mut summaries = Vec::with_capacity(rows.len());
+        for row in rows {
+            let backend = self.check_pool_backend_health(&row).await?;
+            summaries.push(pool_health_summary(row, backend));
+        }
+        Ok(summaries)
+    }
+
+    async fn check_pool_backend_health(&self, row: &PoolHealthRow) -> Result<PoolBackendHealth> {
+        if row.status != "active" {
+            return Ok(PoolBackendHealth {
+                state: "disabled".to_string(),
+                detail: None,
+            });
+        }
+
+        match select_storage_backend(&row.pool_kind, &row.config_json)? {
+            StorageBackendSelection::Postgres => Ok(PoolBackendHealth {
+                state: "ok".to_string(),
+                detail: None,
+            }),
+            StorageBackendSelection::S3Compatible(config) => {
+                let probe = self.load_pool_probe_placement(row.id).await?;
+                let result = if let Some(probe) = probe {
+                    match s3_stat_object(&config, probe.placement_id).await {
+                        Ok(stat)
+                            if stat.content_sha256 == probe.content_sha256
+                                && stat.size_octets == probe.size_octets =>
+                        {
+                            Ok(())
+                        }
+                        Ok(stat) if stat.content_sha256 != probe.content_sha256 => {
+                            Err(StorageBackendError::ChecksumMismatch(
+                                "storage backend checksum mismatch".to_string(),
+                            )
+                            .into())
+                        }
+                        Ok(_) => Err(StorageBackendError::SizeMismatch(
+                            "storage backend size mismatch".to_string(),
+                        )
+                        .into()),
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    s3_probe_pool(&config).await
+                };
+                Ok(pool_backend_health_from_result(result))
+            }
+        }
+    }
+
+    async fn load_pool_probe_placement(&self, pool_id: Uuid) -> Result<Option<PoolProbePlacement>> {
+        sqlx::query(
+            r#"
+            SELECT bp.id, b.content_sha256, b.size_octets
+            FROM blob_placements bp
+            JOIN blobs b
+              ON b.tenant_id = bp.tenant_id
+             AND b.domain_id = bp.domain_id
+             AND b.id = bp.blob_id
+             AND b.blob_kind = bp.blob_kind
+            WHERE bp.storage_pool_id = $1
+              AND bp.placement_status = 'active'
+              AND b.blob_kind IN ('attachment', 'mime_part')
+            ORDER BY bp.updated_at DESC, bp.created_at DESC, bp.id ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(pool_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .map(|row| {
+            Ok(PoolProbePlacement {
+                placement_id: row.try_get("id")?,
+                content_sha256: row.try_get("content_sha256")?,
+                size_octets: row.try_get("size_octets")?,
+            })
+        })
+        .transpose()
+    }
+
     async fn ensure_visibility_tenant_exists(&self, tenant_id: Uuid) -> Result<()> {
         let exists = sqlx::query_scalar::<_, bool>(
             r#"
@@ -729,10 +847,18 @@ impl Storage {
     }
 }
 
-fn pool_health_summary(row: PoolHealthRow) -> StoragePoolHealth {
+fn pool_health_summary(row: PoolHealthRow, backend: PoolBackendHealth) -> StoragePoolHealth {
+    let readiness = if row.active_placements > 0 || row.policy_references > 0 {
+        "required"
+    } else {
+        "optional"
+    };
     let health = if row.status == "disabled" {
         "disabled"
-    } else if row.failed_placements > 0 || row.cleanup_failed_placements > 0 {
+    } else if row.failed_placements > 0
+        || row.cleanup_failed_placements > 0
+        || backend.state != "ok"
+    {
         "degraded"
     } else {
         "ok"
@@ -745,10 +871,72 @@ fn pool_health_summary(row: PoolHealthRow) -> StoragePoolHealth {
             status: row.status,
         },
         health: health.to_string(),
+        readiness: readiness.to_string(),
+        backend_state: backend.state,
+        backend_detail: backend.detail,
         active_placements: row.active_placements,
         retiring_placements: row.retiring_placements,
         failed_placements: row.failed_placements,
         cleanup_failed_placements: row.cleanup_failed_placements,
+    }
+}
+
+fn pool_backend_health_from_result(result: Result<()>) -> PoolBackendHealth {
+    match result {
+        Ok(()) => PoolBackendHealth {
+            state: "ok".to_string(),
+            detail: None,
+        },
+        Err(error) => pool_backend_health_from_error(&error),
+    }
+}
+
+fn pool_backend_health_from_error(error: &Error) -> PoolBackendHealth {
+    let Some(storage_error) = error.downcast_ref::<StorageBackendError>() else {
+        return PoolBackendHealth {
+            state: "backend_error".to_string(),
+            detail: Some("storage backend check failed".to_string()),
+        };
+    };
+    let (state, detail) = match storage_error {
+        StorageBackendError::NotFound(_) => (
+            "missing_object",
+            "storage backend object was not found during health check",
+        ),
+        StorageBackendError::ChecksumMismatch(_) => (
+            "checksum_mismatch",
+            "storage backend object checksum did not match metadata",
+        ),
+        StorageBackendError::SizeMismatch(_) => (
+            "size_mismatch",
+            "storage backend object size did not match metadata",
+        ),
+        StorageBackendError::AuthFailed(_) | StorageBackendError::PermissionDenied(_) => (
+            "auth_failed",
+            "storage backend authentication or authorization failed",
+        ),
+        StorageBackendError::Timeout(_) => ("timeout", "storage backend health check timed out"),
+        StorageBackendError::UnreachableEndpoint(_) => (
+            "unreachable_endpoint",
+            "storage backend endpoint was unreachable",
+        ),
+        StorageBackendError::SecretUnavailable(_) => (
+            "secret_unavailable",
+            "storage backend deployment secret was unavailable",
+        ),
+        StorageBackendError::InvalidConfig(_) => (
+            "invalid_config",
+            "storage backend configuration was invalid",
+        ),
+        StorageBackendError::Unavailable(_) => ("unavailable", "storage backend was unavailable"),
+        StorageBackendError::UnexpectedStatus(_) => (
+            "unexpected_status",
+            "storage backend returned an unexpected status",
+        ),
+    };
+    PoolBackendHealth {
+        state: state.to_string(),
+        detail: Some(detail.to_string()),
     }
 }
 
@@ -794,7 +982,7 @@ fn storage_metadata_diagnostics(
             "storage pool metadata degraded: active_pools={active_pools}, platform_default_active={platform_default_active}, invalid_policy_references={invalid_policy_references}, active_placements_on_inactive_pools={active_placements_on_inactive_pools}, missing_active_placements={missing_active_placements}"
         )
     } else {
-        format!("storage pool metadata consistent with {active_pools} active PostgreSQL pool(s)")
+        format!("storage pool metadata consistent with {active_pools} active storage pool(s)")
     };
 
     StorageMetadataDiagnostics {
@@ -850,7 +1038,12 @@ fn cleanup_blocker_labels(state: CleanupBlockerState) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Storage;
+    use crate::{
+        sha256_hex,
+        storage_backend::{s3_put_object, select_storage_backend, StorageBackendSelection},
+        Storage,
+    };
+    use serde_json::{json, Value};
     use sqlx::postgres::PgPoolOptions;
 
     const SCHEMA: &str = include_str!("../sql/schema.sql");
@@ -993,21 +1186,90 @@ mod tests {
         .expect("insert failed migration");
     }
 
+    fn s3_test_config() -> Option<Value> {
+        let endpoint_url = std::env::var("LPE_S3_TEST_ENDPOINT_URL").ok()?;
+        let bucket = std::env::var("LPE_S3_TEST_BUCKET").ok()?;
+        let signing_region = std::env::var("LPE_S3_TEST_SIGNING_REGION")
+            .or_else(|_| std::env::var("LPE_S3_TEST_REGION"))
+            .ok()?;
+        if std::env::var("LPE_S3_TEST_ACCESS_KEY_ID").is_err()
+            || std::env::var("LPE_S3_TEST_SECRET_ACCESS_KEY").is_err()
+        {
+            return None;
+        }
+        let addressing_style =
+            std::env::var("LPE_S3_TEST_ADDRESSING_STYLE").unwrap_or_else(|_| "path".to_string());
+        let object_prefix = std::env::var("LPE_S3_TEST_OBJECT_PREFIX")
+            .map(|prefix| format!("{}/{}", prefix.trim_matches('/'), Uuid::new_v4()))
+            .unwrap_or_else(|_| format!("lpe-storage-health-tests/{}", Uuid::new_v4()));
+        Some(json!({
+            "endpointUrl": endpoint_url,
+            "bucket": bucket,
+            "signingRegion": signing_region,
+            "addressingStyle": addressing_style,
+            "objectPrefix": object_prefix,
+            "credentialsRef": "env:LPE_S3_TEST"
+        }))
+    }
+
     #[test]
     fn pool_health_marks_failed_placements_degraded() {
-        let health = pool_health_summary(PoolHealthRow {
-            id: PRIMARY_POOL_ID,
-            name: "postgres-primary".to_string(),
-            pool_kind: "postgres".to_string(),
-            status: "active".to_string(),
-            active_placements: 8,
-            retiring_placements: 1,
-            failed_placements: 1,
-            cleanup_failed_placements: 0,
-        });
+        let health = pool_health_summary(
+            PoolHealthRow {
+                id: PRIMARY_POOL_ID,
+                name: "postgres-primary".to_string(),
+                pool_kind: "postgres".to_string(),
+                status: "active".to_string(),
+                config_json: serde_json::json!({}),
+                policy_references: 1,
+                active_placements: 8,
+                retiring_placements: 1,
+                failed_placements: 1,
+                cleanup_failed_placements: 0,
+            },
+            PoolBackendHealth {
+                state: "ok".to_string(),
+                detail: None,
+            },
+        );
 
         assert_eq!(health.health, "degraded");
+        assert_eq!(health.readiness, "required");
+        assert_eq!(health.backend_state, "ok");
         assert_eq!(health.pool.name, "postgres-primary");
+    }
+
+    #[test]
+    fn s3_backend_health_errors_map_to_provider_neutral_states() {
+        let cases = [
+            (
+                StorageBackendError::NotFound("missing".to_string()),
+                "missing_object",
+            ),
+            (
+                StorageBackendError::ChecksumMismatch("bad checksum".to_string()),
+                "checksum_mismatch",
+            ),
+            (
+                StorageBackendError::AuthFailed("auth".to_string()),
+                "auth_failed",
+            ),
+            (
+                StorageBackendError::Timeout("timeout".to_string()),
+                "timeout",
+            ),
+            (
+                StorageBackendError::UnreachableEndpoint("unreachable".to_string()),
+                "unreachable_endpoint",
+            ),
+        ];
+
+        for (error, state) in cases {
+            let error: Error = error.into();
+            let health = pool_backend_health_from_error(&error);
+            assert_eq!(health.state, state);
+            assert!(health.detail.is_some());
+        }
     }
 
     #[test]
@@ -1079,6 +1341,102 @@ mod tests {
             .expect("tenant health");
         assert_eq!(tenant.placements.active, 1);
         assert_eq!(tenant.migrations.failed, 0);
+    }
+
+    #[tokio::test]
+    async fn s3_compatible_pool_health_checks_active_object_placement() {
+        let Some(config) = s3_test_config() else {
+            eprintln!(
+                "skipping S3-compatible integration test; set LPE_S3_TEST_ENDPOINT_URL, LPE_S3_TEST_BUCKET, LPE_S3_TEST_SIGNING_REGION or LPE_S3_TEST_REGION, LPE_S3_TEST_ACCESS_KEY_ID, and LPE_S3_TEST_SECRET_ACCESS_KEY"
+            );
+            return;
+        };
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping S3-compatible integration test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+
+        let pool_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO storage_pools (id, name, pool_kind, status, config_json)
+            VALUES ($1, 's3-health', 's3_compatible', 'active', $2)
+            "#,
+        )
+        .bind(pool_id)
+        .bind(&config)
+        .execute(storage.pool())
+        .await
+        .expect("insert s3 health pool");
+        let (tenant_id, domain_id) = insert_tenant_domain(&storage, "vis-s3-health").await;
+        let blob_id = Uuid::new_v4();
+        let bytes = b"s3-health-check";
+        let content_sha256 = sha256_hex(bytes);
+        sqlx::query(
+            r#"
+            INSERT INTO blobs (
+                id, tenant_id, domain_id, blob_kind, content_sha256, media_type,
+                size_octets, blob_bytes, magika_status, extraction_status, validated_at
+            )
+            VALUES ($1, $2, $3, 'attachment', $4, 'text/plain', $5, ''::bytea, 'valid', 'not_requested', NOW())
+            "#,
+        )
+        .bind(blob_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(&content_sha256)
+        .bind(bytes.len() as i64)
+        .execute(storage.pool())
+        .await
+        .expect("insert s3 health blob");
+        let placement_id = Uuid::new_v4();
+        let StorageBackendSelection::S3Compatible(parsed_config) =
+            select_storage_backend("s3_compatible", &config).expect("parse s3 config")
+        else {
+            panic!("expected s3-compatible backend");
+        };
+        s3_put_object(
+            &parsed_config,
+            placement_id,
+            bytes,
+            &content_sha256,
+            bytes.len() as i64,
+        )
+        .await
+        .expect("put s3 health object");
+        sqlx::query(
+            r#"
+            INSERT INTO blob_placements (
+                id, tenant_id, domain_id, blob_id, blob_kind, storage_pool_id,
+                placement_status, verified_content_sha256, verified_size_octets, verified_at
+            )
+            VALUES ($1, $2, $3, $4, 'attachment', $5, 'active', $6, $7, NOW())
+            "#,
+        )
+        .bind(placement_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(blob_id)
+        .bind(pool_id)
+        .bind(&content_sha256)
+        .bind(bytes.len() as i64)
+        .execute(storage.pool())
+        .await
+        .expect("insert s3 health placement");
+
+        let health = storage
+            .fetch_platform_storage_health()
+            .await
+            .expect("fetch storage health");
+        let s3_pool = health
+            .pools
+            .iter()
+            .find(|pool| pool.pool.id == pool_id)
+            .expect("s3 pool in health");
+        assert_eq!(s3_pool.health, "ok");
+        assert_eq!(s3_pool.readiness, "required");
+        assert_eq!(s3_pool.backend_state, "ok");
+        assert!(s3_pool.backend_detail.is_none());
     }
 
     #[tokio::test]

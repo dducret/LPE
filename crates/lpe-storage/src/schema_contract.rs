@@ -289,12 +289,17 @@ fn attachment_metadata_changes_write_mail_change_log_entries() {
 fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
     let storage_pools = table_definition("storage_pools");
     assert!(
-        storage_pools.contains("pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres'))")
+        storage_pools
+            .contains("pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres', 's3_compatible'))")
             && storage_pools.contains(
                 "status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled'))"
             )
+            && storage_pools.contains("config_json JSONB NOT NULL DEFAULT '{}'::jsonb")
+            && storage_pools.contains("(pool_kind = 'postgres' AND config_json = '{}'::jsonb)")
+            && storage_pools
+                .contains("(pool_kind = 's3_compatible' AND jsonb_typeof(config_json) = 'object')")
             && storage_pools.contains("UNIQUE (name)"),
-        "storage_pools must represent the current database-backed storage pool only"
+        "storage_pools must represent database-backed and provider-neutral S3-compatible pools"
     );
 
     let blob_placements = table_definition("blob_placements");
@@ -357,7 +362,7 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
         "WHERE placement_status IN ('retiring', 'cleanup_failed')",
     ]);
 
-    for unsupported_backend in ["s3", "aws", "azure", "cloud", "bucket"] {
+    for unsupported_backend in ["aws", "azure", "cloud"] {
         assert!(
             !storage_pools
                 .to_ascii_lowercase()
@@ -365,7 +370,7 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
                 && !blob_placements
                     .to_ascii_lowercase()
                     .contains(unsupported_backend),
-            "Milestone 2 schema must not introduce backend config for {unsupported_backend}"
+            "Milestone 6 schema must not introduce provider-specific backend config for {unsupported_backend}"
         );
     }
 }

@@ -3,7 +3,7 @@
 ## Purpose
 
 This document records the current status of the `LPE` mailbox storage-pool work
-and the active Milestone 6 Codex prompt pack.
+and the completed Milestone 6 Codex prompt pack.
 
 The target scale example remains 1000 mailboxes with quotas up to 100 GB each,
 or up to 100 TB of logical mailbox capacity before replication, backup,
@@ -36,12 +36,13 @@ Completed:
   expose pool health, placement state, migration status, cleanup status, and
   degraded or blocked metadata without exposing object keys, secrets, provider
   credentials, or provider-specific internals.
-
-Active next step:
-
 - Milestone 6: S3-compatible object storage. This adds the first non-database
-  blob backend through the existing storage-pool and placement model. It must
-  remain provider-neutral and must not add AWS- or Azure-specific behavior.
+  blob backend through the existing storage-pool and placement model. Durable
+  attachment and MIME-part blobs can be written, read, statted, verified, and
+  explicitly migrated between database-backed and S3-compatible placements.
+  Health summaries expose provider-neutral backend states and required/optional
+  readiness roles. The implementation remains provider-neutral and does not add
+  AWS- or Azure-specific behavior.
 
 Deferred from the current release:
 
@@ -64,6 +65,8 @@ Deferred from the current release:
   blobs move only through explicit migration jobs, not through policy changes.
 - Mailbox-level policy remains deferred.
 - Raw RFC 5322 message blobs remain database-backed initially.
+- S3-compatible credentials use deployment secret references. Credentials are
+  not stored inline in normal storage-pool database rows.
 - Admin visibility surfaces status, health, explicit migration jobs, and cleanup
   blockers only through summarized pool and policy data. It must not expose
   backend object keys, database internals, secrets, provider credentials, or
@@ -337,4 +340,3 @@ Short roadmap:
 5. Operations release gate: benchmark migration throughput, restore from
    PostgreSQL plus cloud blobs, egress/cost warnings, readiness behavior, and
    failure-mode diagnostics before exposing the backends as supported.
-

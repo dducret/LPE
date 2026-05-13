@@ -147,11 +147,11 @@ tasks, attachments, `Sent`, drafts, or outbox state.
 `blobs` stores durable raw RFC 5322 bytes, MIME part bytes, and attachment bytes
 with content hashes per tenant/domain. PostgreSQL remains the metadata
 authority for canonical blob identifiers, tenant/domain ownership, hashes,
-lifecycle state, and references from mail objects. The current local
-implementation stores blob bytes in PostgreSQL, with durable attachment bytes
-and the schema-supported MIME-part blob kind accessed through the internal
-`lpe-storage` `BlobStore` boundary. Raw RFC 5322 message blobs remain
-database-backed initially. `messages.blob_id` points to the raw message blob.
+lifecycle state, storage-pool configuration, placement metadata, and references
+from mail objects. Durable attachment bytes and the schema-supported MIME-part
+blob kind are accessed through the internal `lpe-storage` `BlobStore` boundary.
+Raw RFC 5322 message blobs remain database-backed initially. `messages.blob_id`
+points to the raw message blob.
 Export and protocol body fetches reconstruct from this canonical MIME plus
 parsed part metadata. The raw blob reference is domain-bound so a message cannot
 point at a raw MIME blob deduplicated under another domain in the same tenant.
@@ -171,34 +171,40 @@ Magika validation results, validation status, and extraction lifecycle fields.
 Only `PDF`, `DOCX`, and `ODT` can enter text extraction. Other validated formats
 remain downloadable but not indexed.
 `storage_pools` and `blob_placements` record where durable attachment and
-MIME-part blobs are stored, with the current database-backed pool still reading
-bytes from `blobs.blob_bytes`. Raw RFC 5322 message blobs remain
+MIME-part blobs are stored. Database-backed pools read bytes from
+`blobs.blob_bytes`. S3-compatible pools store bytes in provider-neutral object
+storage using object keys derived from placement metadata rather than tenant,
+domain, mailbox, message, or provider-specific identifiers. S3-compatible pool
+configuration records endpoint, bucket, signing-region or region-like value,
+addressing style, optional object prefix, and deployment secret reference; it
+must not store inline credentials. Raw RFC 5322 message blobs remain
 database-backed initially and do not require placement rows. Durable attachment
-and MIME-part `BlobStore` read/stat/verify paths require an active
-database-backed placement row; a missing active placement is a storage-layer
+and MIME-part `BlobStore` read/stat/verify paths require an active placement row
+on an active supported pool; a missing active placement is a storage-layer
 failure, not a missing mailbox or message. Schema v2 still treats PostgreSQL as
-the authoritative metadata store. Policy changes record intent for future writes
-only and do not implicitly migrate existing blobs. `storage_policy_assignments`
-stores admin-managed platform, tenant, domain, and account policy assignments.
-Mailbox-level policy is not part of schema v2. `blob_migration_jobs` records
-explicit Milestone 3 online migration work for durable attachment and MIME-part
-placements between database-backed pools, including retry, verification, switch,
-cancellation, and rollback-window metadata. During the switch, the verified
-target placement becomes active and the old source placement is retained as
-`retiring` with `rollback_until` metadata. Milestone 4 old-placement cleanup is
-limited to non-active database-backed placement rows and transitions eligible
-rows through cleanup state to `deleted`. Cleanup is blocked while the rollback
-window is active, while an active replacement is missing, while live canonical
+the authoritative metadata store. Policy changes record intent for future
+writes only and do not implicitly migrate existing blobs.
+`storage_policy_assignments` stores admin-managed platform, tenant, domain, and
+account policy assignments. Mailbox-level policy is not part of schema v2.
+`blob_migration_jobs` records explicit online migration work for durable
+attachment and MIME-part placements between database-backed and S3-compatible
+pools, including retry, verification, switch, cancellation, and rollback-window
+metadata. During the switch, the verified target placement becomes active and
+the old source placement is retained as `retiring` with `rollback_until`
+metadata. Old-placement cleanup transitions eligible non-active placement rows
+through cleanup state to `deleted`. Cleanup is blocked while the rollback window
+is active, while an active replacement is missing, while live canonical
 message/MIME-part/attachment/extraction/text references still need the old
 placement, or while blob/message retention or legal-hold metadata protects the
 content. Placement cleanup does not delete canonical `blobs`, `messages`,
 `mime_parts`, `attachments`, `attachment_extraction_jobs`, or
 `attachment_texts` rows. Raw RFC 5322 message blobs remain database-backed
-initially and outside migration and placement-cleanup scope. Milestone 5 admin
-APIs and UI expose pool/policy summaries, health, migration jobs, and cleanup
-status without exposing backend object keys, provider credentials, secrets, or
-provider-specific backend internals. Provider-Specific Cloud Backends remain
-future-release work.
+initially and outside migration and placement-cleanup scope. Admin APIs and UI
+expose pool/policy summaries, health, migration jobs, and cleanup status
+without exposing backend object keys, provider credentials, secrets, or
+provider-specific backend internals. S3-compatible storage is provider-neutral
+and is not AWS-specific or Azure-specific support. Provider-Specific Cloud
+Backends remain future-release work.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation

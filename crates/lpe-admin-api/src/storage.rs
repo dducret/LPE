@@ -45,6 +45,7 @@ pub(crate) async fn create_storage_pool(
                     name: request.name,
                     pool_kind: request.pool_kind,
                     status: request.status,
+                    config: request.config,
                 },
                 storage_audit(&admin, "create-storage-pool", "storage pool"),
             )
@@ -68,6 +69,7 @@ pub(crate) async fn update_storage_pool(
                     pool_id,
                     name: request.name,
                     status: request.status,
+                    config: request.config,
                 },
                 storage_audit(&admin, "update-storage-pool", &pool_id.to_string()),
             )
@@ -398,6 +400,8 @@ fn storage_policy_error(error: anyhow::Error) -> (StatusCode, String) {
         || lowered.contains("must reference")
         || lowered.contains("cannot disable")
         || lowered.contains("must be lowercase")
+        || lowered.contains("not stored inline")
+        || lowered.contains("do not accept backend configuration")
     {
         return bad_request_error(message);
     }
@@ -494,8 +498,28 @@ mod tests {
     #[test]
     fn storage_policy_errors_map_validation_to_bad_request() {
         let (status, _) = storage_policy_error(anyhow::anyhow!(
-            "storage policy must reference an active PostgreSQL storage pool"
+            "storage policy must reference an active storage pool"
         ));
         assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn create_storage_pool_request_accepts_s3_compatible_config_shape() {
+        let request: CreateStoragePoolRequest = serde_json::from_value(serde_json::json!({
+            "name": "object-main",
+            "poolKind": "s3_compatible",
+            "status": "active",
+            "config": {
+                "endpointUrl": "https://objects.example.test",
+                "bucket": "lpe-blobs",
+                "signingRegion": "local",
+                "addressingStyle": "path",
+                "credentialsRef": "env:LPE_STORAGE_POOL_MAIN"
+            }
+        }))
+        .expect("deserialize storage pool create request");
+
+        assert_eq!(request.pool_kind, "s3_compatible");
+        assert!(request.config.is_some());
     }
 }

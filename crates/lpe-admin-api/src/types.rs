@@ -5,6 +5,7 @@ use lpe_storage::{
     MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary, TaskListGrant,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use uuid::Uuid;
 
 pub type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
@@ -321,6 +322,7 @@ pub struct CreateStoragePoolRequest {
     pub name: String,
     pub pool_kind: String,
     pub status: String,
+    pub config: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,6 +330,7 @@ pub struct CreateStoragePoolRequest {
 pub struct UpdateStoragePoolRequest {
     pub name: String,
     pub status: String,
+    pub config: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]

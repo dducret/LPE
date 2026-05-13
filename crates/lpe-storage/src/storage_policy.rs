@@ -4,6 +4,10 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{
+    storage_backend::{
+        normalize_storage_pool_config, normalize_storage_pool_kind, select_storage_backend,
+        storage_pool_config_summary,
+    },
     AuditEntryInput, NewStoragePool, Storage, StoragePolicyOverview, StoragePolicyScope,
     StoragePolicySummary, StoragePolicyUpdate, StoragePoolReference, StoragePoolSummary,
     UpdateStoragePool, PLATFORM_TENANT_ID,
@@ -15,6 +19,7 @@ struct PoolRow {
     name: String,
     pool_kind: String,
     status: String,
+    config_json: serde_json::Value,
     is_platform_default: bool,
     created_at: String,
     updated_at: String,
@@ -70,19 +75,21 @@ impl Storage {
     ) -> Result<StoragePoolSummary> {
         let name = normalize_storage_pool_name(&input.name)?;
         let pool_kind = normalize_storage_pool_kind(&input.pool_kind)?;
+        let config_json = normalize_storage_pool_config(pool_kind, input.config)?;
         let status = normalize_storage_pool_status(&input.status)?;
         let pool_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
 
         let row = sqlx::query(
             r#"
-            INSERT INTO storage_pools (id, name, pool_kind, status)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO storage_pools (id, name, pool_kind, status, config_json)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING
                 id,
                 name,
                 pool_kind,
                 status,
+                config_json,
                 FALSE AS is_platform_default,
                 to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
@@ -92,6 +99,7 @@ impl Storage {
         .bind(name)
         .bind(pool_kind)
         .bind(status)
+        .bind(config_json)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -108,6 +116,11 @@ impl Storage {
     ) -> Result<StoragePoolSummary> {
         let name = normalize_storage_pool_name(&input.name)?;
         let status = normalize_storage_pool_status(&input.status)?;
+        let existing = self.load_storage_pool_row(input.pool_id).await?;
+        let config_json = match input.config {
+            Some(config) => normalize_storage_pool_config(&existing.pool_kind, Some(config))?,
+            None => existing.config_json,
+        };
         if status == "disabled" {
             self.ensure_storage_pool_can_be_disabled(input.pool_id)
                 .await?;
@@ -119,6 +132,7 @@ impl Storage {
             UPDATE storage_pools
             SET name = $2,
                 status = $3,
+                config_json = $4,
                 updated_at = NOW()
             WHERE id = $1
             RETURNING
@@ -126,6 +140,7 @@ impl Storage {
                 name,
                 pool_kind,
                 status,
+                config_json,
                 id = (
                     SELECT storage_pool_id
                     FROM storage_policy_assignments
@@ -139,6 +154,7 @@ impl Storage {
         .bind(input.pool_id)
         .bind(name)
         .bind(status)
+        .bind(config_json)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow!("storage pool not found"))?;
@@ -436,6 +452,7 @@ impl Storage {
                 name,
                 pool_kind,
                 status,
+                config_json,
                 id = (
                     SELECT storage_pool_id
                     FROM storage_policy_assignments
@@ -454,6 +471,34 @@ impl Storage {
         .await?;
 
         rows.into_iter().map(pool_row_from_row).collect()
+    }
+
+    async fn load_storage_pool_row(&self, pool_id: Uuid) -> Result<PoolRow> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                id,
+                name,
+                pool_kind,
+                status,
+                config_json,
+                id = (
+                    SELECT storage_pool_id
+                    FROM storage_policy_assignments
+                    WHERE scope_kind = 'platform'
+                    LIMIT 1
+                ) AS is_platform_default,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM storage_pools
+            WHERE id = $1
+            "#,
+        )
+        .bind(pool_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow!("storage pool not found"))?;
+        pool_row_from_row(row)
     }
 
     async fn load_storage_policy_assignments(
@@ -656,25 +701,12 @@ impl Storage {
     }
 
     async fn ensure_active_storage_pool(&self, pool_id: Uuid) -> Result<()> {
-        let exists = sqlx::query_scalar::<_, bool>(
-            r#"
-            SELECT EXISTS (
-                SELECT 1
-                FROM storage_pools
-                WHERE id = $1
-                  AND pool_kind = 'postgres'
-                  AND status = 'active'
-            )
-            "#,
-        )
-        .bind(pool_id)
-        .fetch_one(&self.pool)
-        .await?;
-        if exists {
-            Ok(())
-        } else {
-            bail!("storage policy must reference an active PostgreSQL storage pool")
+        let pool = self.load_storage_pool_row(pool_id).await?;
+        if pool.status != "active" {
+            bail!("storage policy must reference an active storage pool");
         }
+        select_storage_backend(&pool.pool_kind, &pool.config_json)?;
+        Ok(())
     }
 
     async fn ensure_storage_pool_can_be_disabled(&self, pool_id: Uuid) -> Result<()> {
@@ -749,13 +781,6 @@ fn normalize_storage_pool_name(name: &str) -> Result<String> {
     Ok(trimmed.to_string())
 }
 
-fn normalize_storage_pool_kind(pool_kind: &str) -> Result<&'static str> {
-    match pool_kind.trim() {
-        "postgres" => Ok("postgres"),
-        _ => bail!("only PostgreSQL storage pools are supported"),
-    }
-}
-
 fn normalize_storage_pool_status(status: &str) -> Result<&'static str> {
     match status.trim() {
         "active" => Ok("active"),
@@ -770,6 +795,7 @@ fn pool_row_from_row(row: sqlx::postgres::PgRow) -> Result<PoolRow> {
         name: row.try_get("name")?,
         pool_kind: row.try_get("pool_kind")?,
         status: row.try_get("status")?,
+        config_json: row.try_get("config_json")?,
         is_platform_default: row.try_get("is_platform_default")?,
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
@@ -781,13 +807,18 @@ fn storage_pool_summary_from_row(row: sqlx::postgres::PgRow) -> Result<StoragePo
 }
 
 fn storage_pool_summary(pool: PoolRow) -> StoragePoolSummary {
-    let assignable = pool.pool_kind == "postgres" && pool.status == "active";
+    let config = storage_pool_config_summary(&pool.pool_kind, &pool.config_json)
+        .ok()
+        .flatten();
+    let assignable = pool.status == "active"
+        && select_storage_backend(&pool.pool_kind, &pool.config_json).is_ok();
     StoragePoolSummary {
         id: pool.id,
         name: pool.name,
         pool_kind: pool.pool_kind,
         status: pool.status,
         assignable,
+        config,
         is_platform_default: pool.is_platform_default,
         created_at: pool.created_at,
         updated_at: pool.updated_at,
@@ -866,6 +897,7 @@ fn policy_summary(
 mod tests {
     use super::*;
     use crate::Storage;
+    use serde_json::json;
     use sqlx::postgres::PgPoolOptions;
 
     const SCHEMA: &str = include_str!("../sql/schema.sql");
@@ -933,6 +965,7 @@ mod tests {
                     name: "postgres-secondary".to_string(),
                     pool_kind: "postgres".to_string(),
                     status: "active".to_string(),
+                    config: None,
                 },
                 audit("create-storage-pool"),
             )
@@ -1007,6 +1040,7 @@ mod tests {
                     pool_id: secondary_pool_id,
                     name: "postgres-secondary".to_string(),
                     status: "disabled".to_string(),
+                    config: None,
                 },
                 audit("disable-storage-pool"),
             )
@@ -1024,7 +1058,7 @@ mod tests {
             .await
             .expect_err("disabled pool should be rejected")
             .to_string();
-        assert!(disabled_error.contains("active PostgreSQL storage pool"));
+        assert!(disabled_error.contains("active storage pool"));
 
         let unknown_error = storage
             .set_tenant_storage_policy(
@@ -1037,7 +1071,47 @@ mod tests {
             .await
             .expect_err("unknown pool should be rejected")
             .to_string();
-        assert!(unknown_error.contains("active PostgreSQL storage pool"));
+        assert!(unknown_error.contains("storage pool not found"));
+    }
+
+    #[tokio::test]
+    async fn s3_compatible_pool_config_is_redacted_in_summary() {
+        let Some(storage) = test_storage().await else {
+            return;
+        };
+
+        let summary = storage
+            .create_storage_pool(
+                NewStoragePool {
+                    name: "object-main".to_string(),
+                    pool_kind: "s3_compatible".to_string(),
+                    status: "active".to_string(),
+                    config: Some(json!({
+                        "endpointUrl": "https://objects.example.test/",
+                        "bucket": "lpe-blobs",
+                        "signingRegion": "local",
+                        "addressingStyle": "path-style",
+                        "objectPrefix": "/mail/blobs/",
+                        "credentialsRef": "env:LPE_STORAGE_POOL_MAIN"
+                    })),
+                },
+                audit("create-storage-pool"),
+            )
+            .await
+            .expect("create s3-compatible pool");
+
+        assert_eq!(summary.pool_kind, "s3_compatible");
+        assert!(summary.assignable);
+        let config = summary.config.expect("redacted config");
+        assert_eq!(
+            config.endpoint_url.as_deref(),
+            Some("https://objects.example.test")
+        );
+        assert_eq!(config.object_prefix.as_deref(), Some("mail/blobs"));
+        assert!(config.credentials_configured);
+        let serialized = serde_json::to_string(&config).expect("serialize summary");
+        assert!(!serialized.contains("LPE_STORAGE_POOL_MAIN"));
+        assert!(!serialized.contains("credentialsRef"));
     }
 
     #[tokio::test]

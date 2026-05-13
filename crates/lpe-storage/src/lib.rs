@@ -14,6 +14,7 @@ mod outbound;
 pub mod protocols;
 pub mod pst;
 mod shared;
+mod storage_backend;
 pub mod storage_policy;
 pub mod storage_visibility;
 pub mod submission;
@@ -75,8 +76,8 @@ pub use crate::types::{
     StorageMetadataDiagnostics, StorageMigrationCounts, StorageMigrationJobSummary,
     StorageMigrationVisibilityResponse, StorageOverview, StoragePlacementCounts,
     StoragePolicyOverview, StoragePolicyScope, StoragePolicySummary, StoragePolicyUpdate,
-    StoragePoolHealth, StoragePoolReference, StoragePoolSummary, UpdateAccount, UpdateDomain,
-    UpdateStoragePool,
+    StoragePoolConfigSummary, StoragePoolHealth, StoragePoolReference, StoragePoolSummary,
+    UpdateAccount, UpdateDomain, UpdateStoragePool,
 };
 pub use crate::workspace::{
     ClientContact, ClientEvent, ClientMessage, ClientWorkspace, UpsertClientContactInput,
