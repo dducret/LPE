@@ -84,9 +84,7 @@ impl SearchExpression {
             Self::Cc(query) => {
                 searchable_recipients(&email.cc).contains(&normalize_search_text(query))
             }
-            Self::Body(query) => {
-                normalize_search_text(&email.body_text).contains(&normalize_search_text(query))
-            }
+            Self::Body(query) => searchable_body(email).contains(&normalize_search_text(query)),
             Self::Header(name, query) => {
                 searchable_header_value(email, name).contains(&normalize_search_text(query))
             }
@@ -278,10 +276,19 @@ fn searchable_recipients(recipients: &[JmapEmailAddress]) -> String {
 
 fn search_email_text(email: &ImapEmail) -> String {
     normalize_search_text(&format!(
-        "{}\n{}\n{}",
+        "{}\n{}\n{}\n{}",
         render_visible_header(email),
         email.body_text,
+        email.body_html_sanitized.as_deref().unwrap_or_default(),
         email.preview
+    ))
+}
+
+fn searchable_body(email: &ImapEmail) -> String {
+    normalize_search_text(&format!(
+        "{}\n{}",
+        email.body_text,
+        email.body_html_sanitized.as_deref().unwrap_or_default()
     ))
 }
 
@@ -296,7 +303,7 @@ fn searchable_header_value(email: &ImapEmail, name: &str) -> String {
         "MESSAGE-ID" => {
             normalize_search_text(email.internet_message_id.as_deref().unwrap_or_default())
         }
-        _ => search_email_text(email),
+        _ => normalize_search_text(&render_visible_header(email)),
     }
 }
 

@@ -6,7 +6,8 @@
 
 ## Implementation/Usage
 
-- Publish autoconfiguration through the Rust `LPE` service or through `nginx` and `LPE-CT`.
+- Publish public autoconfiguration through `LPE-CT` HTTPS. The core `LPE` service may render the response behind the proxy, but public clients must not be directed to a core `LPE` listener.
+- Publish `IMAP` only when public IMAPS is exposed by `LPE-CT`; set `LPE_AUTOCONFIG_IMAP_HOST` to that public `LPE-CT` IMAPS hostname. Leaving it unset suppresses IMAP blocks in Thunderbird autoconfig and Outlook POX Autodiscover.
 - Publish `SMTP` submission only when a real authenticated client-submission listener is exposed by `LPE-CT`.
 - Never advertise the internal `LPE -> LPE-CT` relay as client `SMTP`.
 - Publish `ActiveSync` only for clients that support `Exchange ActiveSync`.
@@ -57,9 +58,9 @@
 | --- | --- |
 | `LPE_PUBLIC_SCHEME` | `https` |
 | `LPE_PUBLIC_HOSTNAME` | inferred from `Host` or `X-Forwarded-Host` when unset |
-| `LPE_AUTOCONFIG_IMAP_HOST` | optional |
-| `LPE_AUTOCONFIG_IMAP_PORT` | `993` |
-| `LPE_AUTOCONFIG_SMTP_HOST` | optional; enables the published `SMTP` block |
+| `LPE_AUTOCONFIG_IMAP_HOST` | optional; enables published `IMAP` blocks and must name the public `LPE-CT` IMAPS endpoint, not the core `LPE` listener |
+| `LPE_AUTOCONFIG_IMAP_PORT` | `993` when `LPE_AUTOCONFIG_IMAP_HOST` is set |
+| `LPE_AUTOCONFIG_SMTP_HOST` | optional; enables the published `SMTP` block only for real authenticated client submission |
 | `LPE_AUTOCONFIG_SMTP_PORT` | `465` |
 | `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE` | `SSL` |
 | `LPE_AUTOCONFIG_EWS_ENABLED` | true values: `true`, `1`, `yes`, `on` |

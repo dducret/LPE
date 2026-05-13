@@ -48,18 +48,13 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         reader.read_exact(&mut line_end).await?;
 
         validate_append_attachments(&self.validator, &literal)?;
+        let parsed = parse_rfc822_message(&literal)?;
         if append_to_sent {
-            let parsed = parse_rfc822_message(&literal).ok();
             let sent_messages = self
                 .store
                 .fetch_imap_emails(principal.account_id, mailbox.id)
                 .await?;
-            let append_uid = sent_append_ack_uid(
-                &sent_messages,
-                parsed
-                    .as_ref()
-                    .and_then(|message| message.message_id.as_deref()),
-            );
+            let append_uid = sent_append_ack_uid(&sent_messages, parsed.message_id.as_deref());
             if let Some(uid) = append_uid {
                 let state = self
                     .store
@@ -77,15 +72,8 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                 writer.flush().await?;
                 return Ok(true);
             }
-
-            writer
-                .write_all(format!("{tag} OK APPEND completed\r\n").as_bytes())
-                .await?;
-            writer.flush().await?;
-            return Ok(true);
         }
 
-        let parsed = parse_rfc822_message(&literal)?;
         let from_display = parsed
             .from
             .as_ref()
@@ -279,21 +267,19 @@ fn sent_append_ack_uid(
     sent_messages: &[lpe_storage::ImapEmail],
     appended_message_id: Option<&str>,
 ) -> Option<u32> {
-    appended_message_id
-        .and_then(|message_id| {
-            sent_messages
-                .iter()
-                .find(|email| {
-                    email
-                        .internet_message_id
-                        .as_deref()
-                        .is_some_and(|stored_message_id| {
-                            message_ids_match(stored_message_id, message_id)
-                        })
-                })
-                .map(|email| email.uid)
-        })
-        .or_else(|| sent_messages.iter().map(|email| email.uid).max())
+    appended_message_id.and_then(|message_id| {
+        sent_messages
+            .iter()
+            .find(|email| {
+                email
+                    .internet_message_id
+                    .as_deref()
+                    .is_some_and(|stored_message_id| {
+                        message_ids_match(stored_message_id, message_id)
+                    })
+            })
+            .map(|email| email.uid)
+    })
 }
 
 fn message_ids_match(stored: &str, appended: &str) -> bool {

@@ -313,18 +313,10 @@ fn append_body_section(output: &mut Vec<u8>, email: &ImapEmail, section: &BodySe
     let value = match normalized.as_str() {
         "HEADER" | "0" | "0.HEADER" => render_header(email),
         value if is_header_fields_section(value) => render_header_fields(email, value),
-        "TEXT" | "1" | "1.TEXT" => email.body_text.clone(),
-        "2" | "2.TEXT" => email
-            .body_html_sanitized
-            .as_deref()
-            .unwrap_or(&email.body_text)
-            .to_string(),
+        "TEXT" => render_message_body(email),
         "" => render_full_message(email),
-        "1.MIME" => render_text_part_mime_header("plain"),
-        "2.MIME" => render_text_part_mime_header("html"),
         "MIME" | "0.MIME" => render_root_mime_header(email),
-        "1.HEADER" | "2.HEADER" => render_header(email),
-        _ => email.body_text.clone(),
+        _ => render_part_section(email, &normalized),
     };
     let (partial_start, bytes) = apply_partial(value.as_bytes(), section.partial);
     append_literal(output, &section_label(section, partial_start), bytes);
@@ -430,9 +422,6 @@ fn render_header_lines(email: &ImapEmail) -> Vec<String> {
     if !email.cc.is_empty() {
         lines.push(format!("Cc: {}", render_recipient_header(&email.cc)));
     }
-    if !email.bcc.is_empty() && matches!(email.mailbox_role.as_str(), "drafts" | "sent") {
-        lines.push(format!("Bcc: {}", render_recipient_header(&email.bcc)));
-    }
     lines.push(format!("Subject: {}", email.subject));
     if let Some(message_id) = email.internet_message_id.as_deref() {
         lines.push(format!("Message-Id: {}", message_id));
@@ -481,19 +470,54 @@ fn render_header_fields(email: &ImapEmail, section: &str) -> String {
 }
 
 fn render_full_message(email: &ImapEmail) -> String {
-    if email.body_html_sanitized.is_some() {
-        return format!("{}{}", render_header(email), render_multipart_body(email));
-    }
-    format!("{}{}", render_header(email), email.body_text)
+    format!("{}{}", render_header(email), render_message_body(email))
 }
 
 fn message_rfc822_size(email: &ImapEmail) -> usize {
     render_full_message(email).as_bytes().len()
 }
 
-fn render_text_part_mime_header(subtype: &str) -> String {
+fn render_message_body(email: &ImapEmail) -> String {
+    if email_has_attachment_parts(email) || email.has_attachments {
+        return render_mixed_body(email);
+    }
+    if email.body_html_sanitized.is_some() {
+        return render_alternative_body(email);
+    }
+    email.body_text.clone()
+}
+
+fn render_part_section(email: &ImapEmail, section: &str) -> String {
+    let (part_path, suffix) = section
+        .split_once('.')
+        .map(|(part_path, suffix)| (part_path, suffix))
+        .unwrap_or((section, ""));
+    if part_path.is_empty() {
+        return email.body_text.clone();
+    }
+
+    if suffix == "MIME" {
+        return render_part_mime_header(email, part_path);
+    }
+    if suffix == "HEADER" || suffix.starts_with("HEADER.FIELDS") {
+        return render_header(email);
+    }
+
+    match resolve_body_part(email, part_path) {
+        Some(ResolvedBodyPart::Plain) => email.body_text.clone(),
+        Some(ResolvedBodyPart::Html) => email
+            .body_html_sanitized
+            .as_deref()
+            .unwrap_or(&email.body_text)
+            .to_string(),
+        Some(ResolvedBodyPart::Attachment(_)) => String::new(),
+        None => email.body_text.clone(),
+    }
+}
+
+fn render_text_part_mime_header(subtype: &str, charset: &str) -> String {
     format!(
-        "Content-Type: text/{subtype}; charset=UTF-8\r\nContent-Transfer-Encoding: 7bit\r\n\r\n"
+        "Content-Type: text/{subtype}; charset={charset}\r\nContent-Transfer-Encoding: 7bit\r\n\r\n"
     )
 }
 
@@ -505,7 +529,9 @@ fn render_root_mime_header(email: &ImapEmail) -> String {
 }
 
 fn root_content_type(email: &ImapEmail) -> String {
-    if email.body_html_sanitized.is_some() {
+    if email_has_attachment_parts(email) || email.has_attachments {
+        format!("multipart/mixed; boundary=\"{}\"", mixed_boundary(email))
+    } else if email.body_html_sanitized.is_some() {
         format!(
             "multipart/alternative; boundary=\"{}\"",
             multipart_boundary(email)
@@ -515,7 +541,7 @@ fn root_content_type(email: &ImapEmail) -> String {
     }
 }
 
-fn render_multipart_body(email: &ImapEmail) -> String {
+fn render_alternative_body(email: &ImapEmail) -> String {
     let boundary = multipart_boundary(email);
     let html = email
         .body_html_sanitized
@@ -524,21 +550,56 @@ fn render_multipart_body(email: &ImapEmail) -> String {
     format!(
         concat!(
             "--{boundary}\r\n",
-            "Content-Type: text/plain; charset=UTF-8\r\n",
+            "Content-Type: text/plain; charset={text_charset}\r\n",
             "Content-Transfer-Encoding: 7bit\r\n",
             "\r\n",
             "{text}\r\n",
             "--{boundary}\r\n",
-            "Content-Type: text/html; charset=UTF-8\r\n",
+            "Content-Type: text/html; charset={html_charset}\r\n",
             "Content-Transfer-Encoding: 7bit\r\n",
             "\r\n",
             "{html}\r\n",
             "--{boundary}--\r\n"
         ),
         boundary = boundary,
+        text_charset = body_part_charset(email, "1", "UTF-8"),
+        html_charset = body_part_charset(email, "2", "UTF-8"),
         text = email.body_text,
         html = html
     )
+}
+
+fn render_mixed_body(email: &ImapEmail) -> String {
+    let boundary = mixed_boundary(email);
+    let mut body = String::new();
+    if email.body_html_sanitized.is_some() {
+        body.push_str(&format!(
+            "--{boundary}\r\nContent-Type: multipart/alternative; boundary=\"{}\"\r\n\r\n",
+            multipart_boundary(email)
+        ));
+        body.push_str(&render_alternative_body(email));
+    } else {
+        body.push_str(&format!(
+            "--{boundary}\r\n{}{}",
+            render_text_part_mime_header("plain", &body_part_charset(email, "1", "UTF-8")),
+            email.body_text
+        ));
+        body.push_str("\r\n");
+    }
+
+    for part in attachment_parts(email) {
+        body.push_str(&format!(
+            "--{boundary}\r\n{}",
+            render_attachment_mime_header(part)
+        ));
+    }
+    if email.has_attachments && attachment_parts(email).is_empty() {
+        body.push_str(&format!(
+            "--{boundary}\r\nContent-Type: application/octet-stream\r\nContent-Transfer-Encoding: base64\r\nContent-Disposition: attachment\r\n\r\n"
+        ));
+    }
+    body.push_str(&format!("--{boundary}--\r\n"));
+    body
 }
 
 fn multipart_boundary(email: &ImapEmail) -> String {
@@ -561,18 +622,10 @@ fn render_envelope(email: &ImapEmail) -> String {
         render_address_list(from_display, Some(from_address)),
         render_recipients(&email.to),
         render_recipients(&email.cc),
-        render_recipients(visible_bcc(email)),
+        "NIL",
         "NIL",
         nstring(email.internet_message_id.as_deref()),
     )
-}
-
-fn visible_bcc(email: &ImapEmail) -> &[JmapEmailAddress] {
-    if matches!(email.mailbox_role.as_str(), "drafts" | "sent") {
-        &email.bcc
-    } else {
-        &[]
-    }
 }
 
 fn render_recipients(recipients: &[JmapEmailAddress]) -> String {
@@ -620,11 +673,7 @@ fn render_single_address(display_name: Option<&str>, address: &str) -> String {
 
 fn render_bodystructure(email: &ImapEmail) -> String {
     let body = render_body_bodystructure(email);
-    let attachment_parts = email
-        .mime_parts
-        .iter()
-        .filter(|part| imap_attachment_part(part))
-        .collect::<Vec<_>>();
+    let attachment_parts = attachment_parts(email);
     if !attachment_parts.is_empty() {
         format!(
             "({} {} \"MIXED\" (\"BOUNDARY\" \"{}\") NIL NIL)",
@@ -649,12 +698,16 @@ fn render_bodystructure(email: &ImapEmail) -> String {
 }
 
 fn render_body_bodystructure(email: &ImapEmail) -> String {
-    let text = render_text_bodystructure(&email.body_text, "PLAIN");
+    let text = render_text_bodystructure(
+        &email.body_text,
+        "PLAIN",
+        &body_part_charset(email, "1", "UTF-8"),
+    );
     if let Some(html) = email.body_html_sanitized.as_deref() {
         format!(
             "({} {} \"ALTERNATIVE\" (\"BOUNDARY\" \"{}\") NIL NIL)",
             text,
-            render_text_bodystructure(html, "HTML"),
+            render_text_bodystructure(html, "HTML", &body_part_charset(email, "2", "UTF-8")),
             multipart_boundary(email)
         )
     } else {
@@ -662,10 +715,11 @@ fn render_body_bodystructure(email: &ImapEmail) -> String {
     }
 }
 
-fn render_text_bodystructure(value: &str, subtype: &str) -> String {
+fn render_text_bodystructure(value: &str, subtype: &str, charset: &str) -> String {
     format!(
-        "(\"TEXT\" \"{}\" (\"CHARSET\" \"UTF-8\") NIL NIL \"7BIT\" {} {} NIL NIL NIL)",
+        "(\"TEXT\" \"{}\" (\"CHARSET\" {}) NIL NIL \"7BIT\" {} {} NIL NIL NIL)",
         subtype,
+        nstring(Some(charset)),
         value.as_bytes().len(),
         value.lines().count().max(1)
     )
@@ -697,6 +751,18 @@ fn render_attachment_bodystructure(part: &ImapMimePart) -> String {
 fn render_fallback_attachment_bodystructure() -> String {
     "(\"APPLICATION\" \"OCTET-STREAM\" NIL NIL NIL \"BASE64\" 0 NIL (\"ATTACHMENT\" NIL) NIL)"
         .to_string()
+}
+
+fn email_has_attachment_parts(email: &ImapEmail) -> bool {
+    email.mime_parts.iter().any(imap_attachment_part)
+}
+
+fn attachment_parts(email: &ImapEmail) -> Vec<&ImapMimePart> {
+    email
+        .mime_parts
+        .iter()
+        .filter(|part| imap_attachment_part(part))
+        .collect()
 }
 
 fn imap_attachment_part(part: &ImapMimePart) -> bool {
@@ -784,6 +850,63 @@ fn content_type_parameter<'a>(content_type: &'a str, name: &str) -> Option<&'a s
     })
 }
 
+fn render_part_mime_header(email: &ImapEmail, part_path: &str) -> String {
+    match resolve_body_part(email, part_path) {
+        Some(ResolvedBodyPart::Plain) => {
+            render_text_part_mime_header("plain", &body_part_charset(email, "1", "UTF-8"))
+        }
+        Some(ResolvedBodyPart::Html) => {
+            render_text_part_mime_header("html", &body_part_charset(email, "2", "UTF-8"))
+        }
+        Some(ResolvedBodyPart::Attachment(part)) => render_attachment_mime_header(part),
+        None => render_text_part_mime_header("plain", &body_part_charset(email, "1", "UTF-8")),
+    }
+}
+
+fn render_attachment_mime_header(part: &ImapMimePart) -> String {
+    let mut lines = vec![format!("Content-Type: {}", part.content_type.trim())];
+    lines.push(format!(
+        "Content-Transfer-Encoding: {}",
+        part.transfer_encoding
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("base64")
+    ));
+    if let Some(content_id) = part
+        .content_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        lines.push(format!(
+            "Content-ID: <{}>",
+            content_id.trim_matches(['<', '>'])
+        ));
+    }
+    if let Some(disposition) = part
+        .content_disposition
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let mut value = disposition.to_string();
+        if let Some(file_name) = part
+            .file_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            value.push_str(&format!(
+                "; filename=\"{}\"",
+                sanitize_imap_quoted(file_name)
+            ));
+        }
+        lines.push(format!("Content-Disposition: {}", value));
+    }
+    lines.join("\r\n") + "\r\n\r\n"
+}
+
 fn render_disposition(part: &ImapMimePart) -> String {
     let disposition = part
         .content_disposition
@@ -799,6 +922,51 @@ fn render_disposition(part: &ImapMimePart) -> String {
         .map(|file_name| format!("(\"FILENAME\" {})", nstring(Some(file_name))))
         .unwrap_or_else(|| "NIL".to_string());
     format!("({} {})", nstring(Some(&disposition)), parameters)
+}
+
+enum ResolvedBodyPart<'a> {
+    Plain,
+    Html,
+    Attachment(&'a ImapMimePart),
+}
+
+fn resolve_body_part<'a>(email: &'a ImapEmail, part_path: &str) -> Option<ResolvedBodyPart<'a>> {
+    let normalized = part_path.trim();
+    if normalized == "1" || normalized == "1.1" {
+        return Some(ResolvedBodyPart::Plain);
+    }
+    if email.body_html_sanitized.is_some() && (normalized == "2" || normalized == "1.2") {
+        return Some(ResolvedBodyPart::Html);
+    }
+    if let Some(part) = email
+        .mime_parts
+        .iter()
+        .find(|part| part.part_path.eq_ignore_ascii_case(normalized))
+    {
+        return Some(ResolvedBodyPart::Attachment(part));
+    }
+
+    let attachment_index = normalized.parse::<usize>().ok()?.checked_sub(2)?;
+    attachment_parts(email)
+        .get(attachment_index)
+        .copied()
+        .map(ResolvedBodyPart::Attachment)
+}
+
+fn body_part_charset(email: &ImapEmail, path: &str, fallback: &str) -> String {
+    email
+        .mime_parts
+        .iter()
+        .find(|part| part.part_path == path)
+        .and_then(|part| {
+            part.charset_name
+                .as_deref()
+                .or_else(|| content_type_parameter(&part.content_type, "charset"))
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 fn nstring(value: Option<&str>) -> String {
@@ -1095,10 +1263,11 @@ pub(crate) fn render_selected_updates(
     for (index, email) in current.emails.iter().enumerate() {
         if !previous_ids.contains(&email.id) {
             output.push_str(&format!(
-                "* {} FETCH (UID {} FLAGS ({}))\r\n",
+                "* {} FETCH (UID {} FLAGS ({}) MODSEQ ({}))\r\n",
                 index + 1,
                 email.uid,
-                render_flags(email, &current.mailbox_name)
+                render_flags(email, &current.mailbox_name),
+                email.modseq
             ));
             continue;
         }
@@ -1109,11 +1278,15 @@ pub(crate) fn render_selected_updates(
         else {
             continue;
         };
-        if previous_email.unread != email.unread || previous_email.flagged != email.flagged {
+        if previous_email.unread != email.unread
+            || previous_email.flagged != email.flagged
+            || previous_email.deleted != email.deleted
+        {
             output.push_str(&format!(
-                "* {} FETCH (FLAGS ({}))\r\n",
+                "* {} FETCH (FLAGS ({}) MODSEQ ({}))\r\n",
                 index + 1,
-                render_flags(email, &current.mailbox_name)
+                render_flags(email, &current.mailbox_name),
+                email.modseq
             ));
         }
     }

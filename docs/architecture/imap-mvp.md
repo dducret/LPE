@@ -43,6 +43,10 @@
   - UID behavior is scoped to mailbox state
 - File validation:
   - any imported client-provided file must pass the canonical validation path
+- Edge exposure:
+  - public IMAP is exposed as IMAPS through `LPE-CT`, not by making the core `LPE` IMAP listener public
+  - autoconfiguration may publish IMAP only when `LPE-CT` exposes the IMAPS proxy and `LPE_AUTOCONFIG_IMAP_HOST` names that public edge endpoint
+  - autoconfiguration must not publish client `SMTP` from IMAP support; SMTP appears only when `LPE-CT` exposes real authenticated client submission
 - Diagnostics:
   - expose enough session, command, and mailbox identifiers for traceability
   - avoid logging protected metadata or secrets
@@ -62,6 +66,8 @@
 | `Outbox` | no protocol-local implementation |
 | Search | no `Bcc` exposure |
 | External `SMTP` | `LPE-CT`, not IMAP adapter |
+| Public IMAPS | `LPE-CT` TLS proxy to private core `lpe-imap` |
+| Autoconfig IMAP | explicit `LPE_AUTOCONFIG_IMAP_HOST` pointing at the public `LPE-CT` IMAPS endpoint |
 
 | Transcript | Local coverage |
 | --- | --- |

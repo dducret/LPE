@@ -36,6 +36,12 @@
   - `/EWS/Exchange.asmx`
   - `/mapi/`
   - `/rpc/rpcproxy.dll`
+  - `/autoconfig/mail/config-v1.1.xml`
+  - `/.well-known/autoconfig/mail/config-v1.1.xml`
+  - `/autodiscover/autodiscover.xml`
+- Public non-HTTPS client ports may include:
+  - `993` IMAPS, terminated by `LPE-CT` and proxied to the private core `lpe-imap` listener
+  - `465` authenticated client submission, terminated by `LPE-CT` only when deployed
 - Internal routes:
   - `/api/v1/integration/outbound-messages`
   - `/internal/lpe-ct/inbound-deliveries`
@@ -44,6 +50,8 @@
   - `/internal/lpe-ct/submissions`
 - Edge publication is separate from protocol implementation.
 - Autodiscovery must publish only implemented and exposed endpoints.
+- IMAP autodiscovery/autoconfiguration must publish the public `LPE-CT` IMAPS hostname only after the `LPE-CT` IMAPS proxy is configured and verified. It must not publish the private core `LPE` IMAP listener.
+- Autodiscovery/autoconfiguration must not publish client `SMTP` unless `LPE-CT` exposes real authenticated client submission; the internal `LPE -> LPE-CT` handoff is not client submission.
 
 ## Reference Table/List
 

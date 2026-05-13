@@ -12,7 +12,9 @@ use uuid::Uuid;
 
 use crate::{
     parse::parse_request_line,
-    render::{render_mailbox_name, sanitize_imap_quoted, sanitize_imap_text},
+    render::{
+        render_mailbox_name, render_selected_updates, sanitize_imap_quoted, sanitize_imap_text,
+    },
     store::ImapStore,
 };
 
@@ -350,7 +352,6 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             other => {
                 warn!(
                     command = %other,
-                    arguments = %request.arguments,
                     "unsupported IMAP command"
                 );
                 writer
@@ -368,7 +369,6 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             Err(error) => {
                 warn!(
                     command = %request.command,
-                    arguments = %request.arguments,
                     error = %sanitize_imap_text(&error.to_string()),
                     "IMAP command failed"
                 );
@@ -405,15 +405,35 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         Ok(true)
     }
 
-    async fn handle_noop<W>(&self, tag: &str, writer: &mut W) -> Result<bool>
+    async fn handle_noop<W>(&mut self, tag: &str, writer: &mut W) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
+        self.refresh_selected_updates(writer).await?;
         writer
             .write_all(format!("{tag} OK NOOP completed\r\n").as_bytes())
             .await?;
         writer.flush().await?;
         Ok(true)
+    }
+
+    pub(crate) async fn refresh_selected_updates<W>(&mut self, writer: &mut W) -> Result<()>
+    where
+        W: AsyncWriteExt + Unpin,
+    {
+        let previous = self.selected.clone();
+        self.refresh_selected().await?;
+        let Some(previous) = previous.as_ref() else {
+            return Ok(());
+        };
+        let Some(current) = self.selected.as_ref() else {
+            return Ok(());
+        };
+        let updates = render_selected_updates(previous, current)?;
+        if !updates.is_empty() {
+            writer.write_all(updates.as_bytes()).await?;
+        }
+        Ok(())
     }
 
     async fn handle_id<W>(&self, tag: &str, writer: &mut W) -> Result<bool>

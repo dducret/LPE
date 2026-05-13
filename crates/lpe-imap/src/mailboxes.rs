@@ -401,9 +401,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(b"* FLAGS (\\Seen \\Flagged \\Deleted \\Draft)\r\n")
             .await?;
         writer
-            .write_all(
-                b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\Draft)] supported flags\r\n",
-            )
+            .write_all(b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted)] supported flags\r\n")
             .await?;
         writer
             .write_all(format!("* {} EXISTS\r\n", exists).as_bytes())
@@ -463,7 +461,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         self.require_selected()?;
-        self.refresh_selected().await?;
+        self.refresh_selected_updates(writer).await?;
         writer
             .write_all(format!("{tag} OK CHECK completed\r\n").as_bytes())
             .await?;

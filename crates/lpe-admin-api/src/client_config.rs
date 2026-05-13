@@ -166,8 +166,8 @@ async fn outlook_autodiscover_json(
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PublishedEndpoints {
     display_domain: String,
-    imap_host: String,
-    imap_port: u16,
+    imap_host: Option<String>,
+    imap_port: Option<u16>,
     smtp_host: Option<String>,
     smtp_port: Option<u16>,
     smtp_socket_type: Option<String>,
@@ -195,9 +195,13 @@ impl PublishedEndpoints {
             .and_then(email_domain)
             .unwrap_or_else(|| public_host_name.clone());
 
-        let imap_host =
-            env::var("LPE_AUTOCONFIG_IMAP_HOST").unwrap_or_else(|_| public_host_name.clone());
-        let imap_port = read_u16_env("LPE_AUTOCONFIG_IMAP_PORT", 993);
+        let imap_host = env::var("LPE_AUTOCONFIG_IMAP_HOST")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let imap_port = imap_host
+            .as_ref()
+            .map(|_| read_u16_env("LPE_AUTOCONFIG_IMAP_PORT", 993));
 
         let smtp_host = env::var("LPE_AUTOCONFIG_SMTP_HOST")
             .ok()
@@ -324,16 +328,18 @@ fn render_thunderbird_autoconfig(config: &PublishedEndpoints) -> String {
     ));
     xml.push_str("    <displayName>LPE Mail</displayName>\n");
     xml.push_str("    <displayShortName>LPE</displayShortName>\n");
-    xml.push_str("    <incomingServer type=\"imap\">\n");
-    xml.push_str(&format!(
-        "      <hostname>{}</hostname>\n",
-        escape_xml(&config.imap_host)
-    ));
-    xml.push_str(&format!("      <port>{}</port>\n", config.imap_port));
-    xml.push_str("      <socketType>SSL</socketType>\n");
-    xml.push_str("      <authentication>password-cleartext</authentication>\n");
-    xml.push_str("      <username>%EMAILADDRESS%</username>\n");
-    xml.push_str("    </incomingServer>\n");
+    if let (Some(imap_host), Some(imap_port)) = (config.imap_host.as_deref(), config.imap_port) {
+        xml.push_str("    <incomingServer type=\"imap\">\n");
+        xml.push_str(&format!(
+            "      <hostname>{}</hostname>\n",
+            escape_xml(imap_host)
+        ));
+        xml.push_str(&format!("      <port>{}</port>\n", imap_port));
+        xml.push_str("      <socketType>SSL</socketType>\n");
+        xml.push_str("      <authentication>password-cleartext</authentication>\n");
+        xml.push_str("      <username>%EMAILADDRESS%</username>\n");
+        xml.push_str("    </incomingServer>\n");
+    }
     if let (Some(smtp_host), Some(smtp_port), Some(smtp_socket_type)) = (
         config.smtp_host.as_deref(),
         config.smtp_port,
@@ -380,25 +386,33 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
             "    <Account>\n",
             "      <AccountType>email</AccountType>\n",
             "      <Action>settings</Action>\n",
-            "      <MicrosoftOnline>False</MicrosoftOnline>\n",
-            "      <Protocol>\n",
-            "        <Type>IMAP</Type>\n",
-            "        <Server>{imap_host}</Server>\n",
-            "        <Port>{imap_port}</Port>\n",
-            "        <DomainRequired>off</DomainRequired>\n",
-            "        <LoginName>{email}</LoginName>\n",
-            "        <SPA>off</SPA>\n",
-            "        <SSL>on</SSL>\n",
-            "        <AuthRequired>on</AuthRequired>\n",
-            "      </Protocol>\n"
+            "      <MicrosoftOnline>False</MicrosoftOnline>\n"
         ),
         display_domain = escape_xml(&config.display_domain),
         email = escape_xml(email),
         legacy_user = escape_xml(&legacy_user(email, &config.display_domain)),
         deployment_id = escape_xml(&deployment_id(&config.display_domain)),
-        imap_host = escape_xml(&config.imap_host),
-        imap_port = config.imap_port,
     );
+
+    if let (Some(imap_host), Some(imap_port)) = (config.imap_host.as_deref(), config.imap_port) {
+        xml.push_str(&format!(
+            concat!(
+                "      <Protocol>\n",
+                "        <Type>IMAP</Type>\n",
+                "        <Server>{imap_host}</Server>\n",
+                "        <Port>{imap_port}</Port>\n",
+                "        <DomainRequired>off</DomainRequired>\n",
+                "        <LoginName>{email}</LoginName>\n",
+                "        <SPA>off</SPA>\n",
+                "        <SSL>on</SSL>\n",
+                "        <AuthRequired>on</AuthRequired>\n",
+                "      </Protocol>\n"
+            ),
+            imap_host = escape_xml(imap_host),
+            imap_port = imap_port,
+            email = escape_xml(email),
+        ));
+    }
 
     if let (Some(smtp_host), Some(smtp_port)) = (config.smtp_host.as_deref(), config.smtp_port) {
         xml.push_str(&format!(
@@ -448,7 +462,7 @@ fn render_exchange_provider_autodiscover_protocols(
     config: &PublishedEndpoints,
     email: &str,
 ) -> String {
-    let mailbox_server = ews_host(&config.ews_url).unwrap_or(&config.imap_host);
+    let mailbox_server = mailbox_server_name(config);
     let server_dn = format!(
         "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Servers/cn={mailbox_server}"
     );
@@ -507,6 +521,17 @@ fn render_exchange_provider_autodiscover_protocols(
     xml
 }
 
+fn mailbox_server_name(config: &PublishedEndpoints) -> &str {
+    ews_host(&config.ews_url).unwrap_or_else(|| fallback_host(config))
+}
+
+fn fallback_host(config: &PublishedEndpoints) -> &str {
+    config
+        .imap_host
+        .as_deref()
+        .unwrap_or(&config.display_domain)
+}
+
 fn exchange_provider_ews_url_fields(config: &PublishedEndpoints) -> String {
     if !config.ews_enabled {
         return String::new();
@@ -555,7 +580,8 @@ fn render_ews_web_autodiscover_protocol(config: &PublishedEndpoints, email: &str
             "        </External>\n",
             "      </Protocol>\n"
         ),
-        public_host = escape_xml(&ews_host(&config.ews_url).unwrap_or(&config.imap_host)),
+        public_host =
+            escape_xml(&ews_host(&config.ews_url).unwrap_or_else(|| fallback_host(config))),
         email = escape_xml(email),
         ews_url = escape_xml(&config.ews_url),
     )
@@ -601,7 +627,7 @@ fn render_soap_user_settings_autodiscover(
     } else {
         ""
     };
-    let mailbox_server = ews_host(ews_url).unwrap_or(&config.imap_host);
+    let mailbox_server = ews_host(ews_url).unwrap_or_else(|| fallback_host(config));
     let legacy_dn = format!(
         "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}",
         legacy_user(email, &config.display_domain)
@@ -1009,8 +1035,8 @@ mod tests {
     fn sample_config() -> PublishedEndpoints {
         PublishedEndpoints {
             display_domain: "example.test".to_string(),
-            imap_host: "mail.example.test".to_string(),
-            imap_port: 993,
+            imap_host: Some("mail.example.test".to_string()),
+            imap_port: Some(993),
             smtp_host: None,
             smtp_port: None,
             smtp_socket_type: None,
@@ -1034,14 +1060,37 @@ mod tests {
     }
 
     #[test]
-    fn thunderbird_autoconfig_defaults_to_imap_only() {
+    fn thunderbird_autoconfig_publishes_imap_only_when_edge_imaps_is_configured() {
         let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_AUTOCONFIG_IMAP_HOST");
+        std::env::remove_var("LPE_AUTOCONFIG_IMAP_PORT");
         std::env::remove_var("LPE_AUTOCONFIG_SMTP_HOST");
-        let xml = render_thunderbird_autoconfig(&sample_config());
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "core.example.test".parse().unwrap());
+        let unpublished = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let unpublished_xml = render_thunderbird_autoconfig(&unpublished);
 
-        assert!(xml.contains("<incomingServer type=\"imap\">"));
-        assert!(!xml.contains("<outgoingServer type=\"smtp\">"));
-        assert!(xml.contains("https://mail.example.test/api/jmap/session"));
+        assert!(unpublished.imap_host.is_none());
+        assert!(!unpublished_xml.contains("<incomingServer type=\"imap\">"));
+        assert!(!unpublished_xml.contains("<outgoingServer type=\"smtp\">"));
+
+        std::env::set_var("LPE_AUTOCONFIG_IMAP_HOST", "imap.edge.example.test");
+        std::env::set_var("LPE_AUTOCONFIG_IMAP_PORT", "993");
+        let published = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let published_xml = render_thunderbird_autoconfig(&published);
+
+        assert_eq!(
+            published.imap_host.as_deref(),
+            Some("imap.edge.example.test")
+        );
+        assert!(published_xml.contains("<incomingServer type=\"imap\">"));
+        assert!(published_xml.contains("<hostname>imap.edge.example.test</hostname>"));
+        assert!(published_xml.contains("<port>993</port>"));
+        assert!(!published_xml.contains("<outgoingServer type=\"smtp\">"));
+        assert!(published_xml.contains("https://core.example.test/api/jmap/session"));
+
+        std::env::remove_var("LPE_AUTOCONFIG_IMAP_HOST");
+        std::env::remove_var("LPE_AUTOCONFIG_IMAP_PORT");
     }
 
     #[test]
@@ -1058,6 +1107,27 @@ mod tests {
         assert!(xml.contains("<outgoingServer type=\"smtp\">"));
         assert!(xml.contains("<hostname>submit.example.test</hostname>"));
         assert!(xml.contains("<port>465</port>"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_does_not_publish_imap_or_smtp_without_explicit_edge_configuration() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LPE_AUTOCONFIG_IMAP_HOST");
+        std::env::remove_var("LPE_AUTOCONFIG_IMAP_PORT");
+        std::env::remove_var("LPE_AUTOCONFIG_SMTP_HOST");
+        std::env::remove_var("LPE_AUTOCONFIG_SMTP_PORT");
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "core.example.test".parse().unwrap());
+
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(config.imap_host.is_none());
+        assert!(!xml.contains("<Type>IMAP</Type>"));
+        assert!(!xml.contains("<Type>SMTP</Type>"));
+        assert!(
+            xml.contains("<AutoDiscoverSMTPAddress>alice@example.test</AutoDiscoverSMTPAddress>")
+        );
     }
 
     #[test]

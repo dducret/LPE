@@ -115,6 +115,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let (set_token, condstore, mode_token, flags_token) = parse_store_arguments(arguments)?;
         let mode = parse_store_mode(&mode_token)?;
         let flags = parse_flag_list(&flags_token)?;
+        ensure_store_flags_supported(&flags)?;
         let selected = self.require_selected()?.clone();
         if selected.read_only {
             bail!("mailbox is read-only");
@@ -125,21 +126,25 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .map(|index| selected.emails[*index].id)
             .collect::<Vec<_>>();
         let unread = match mode.replace {
-            true => Some(!flags.contains("\\Seen")),
-            false if mode_token.starts_with("+") && flags.contains("\\Seen") => Some(false),
-            false if mode_token.starts_with("-") && flags.contains("\\Seen") => Some(true),
+            true => Some(!flag_present(&flags, "\\Seen")),
+            false if mode_token.starts_with("+") && flag_present(&flags, "\\Seen") => Some(false),
+            false if mode_token.starts_with("-") && flag_present(&flags, "\\Seen") => Some(true),
             _ => None,
         };
         let flagged = match mode.replace {
-            true => Some(flags.contains("\\Flagged")),
-            false if mode_token.starts_with("+") && flags.contains("\\Flagged") => Some(true),
-            false if mode_token.starts_with("-") && flags.contains("\\Flagged") => Some(false),
+            true => Some(flag_present(&flags, "\\Flagged")),
+            false if mode_token.starts_with("+") && flag_present(&flags, "\\Flagged") => Some(true),
+            false if mode_token.starts_with("-") && flag_present(&flags, "\\Flagged") => {
+                Some(false)
+            }
             _ => None,
         };
         let deleted = match mode.replace {
-            true => Some(flags.contains("\\Deleted")),
-            false if mode_token.starts_with("+") && flags.contains("\\Deleted") => Some(true),
-            false if mode_token.starts_with("-") && flags.contains("\\Deleted") => Some(false),
+            true => Some(flag_present(&flags, "\\Deleted")),
+            false if mode_token.starts_with("+") && flag_present(&flags, "\\Deleted") => Some(true),
+            false if mode_token.starts_with("-") && flag_present(&flags, "\\Deleted") => {
+                Some(false)
+            }
             _ => None,
         };
 
@@ -504,4 +509,20 @@ fn ensure_move_allowed(selected: &SelectedMailbox, target_mailbox: &JmapMailbox)
         bail!("MOVE from Drafts is only supported to Trash for client deletion");
     }
     Ok(())
+}
+
+fn ensure_store_flags_supported(flags: &std::collections::HashSet<String>) -> Result<()> {
+    for flag in flags {
+        if !["\\Seen", "\\Flagged", "\\Deleted"]
+            .iter()
+            .any(|supported| flag.eq_ignore_ascii_case(supported))
+        {
+            bail!("unsupported STORE flag {}", flag);
+        }
+    }
+    Ok(())
+}
+
+fn flag_present(flags: &std::collections::HashSet<String>, expected: &str) -> bool {
+    flags.iter().any(|flag| flag.eq_ignore_ascii_case(expected))
 }

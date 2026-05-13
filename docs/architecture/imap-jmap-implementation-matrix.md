@@ -33,7 +33,7 @@ state. It is not a collaboration, calendar, contact, task, or send protocol.
 | --- | --- | --- |
 | `MUST` | Authentication and TLS policy | Authenticate mailbox users before mailbox access; publish only configured TLS endpoints; reject anonymous or guest mailbox access. |
 | `MUST` | `CAPABILITY` accuracy | Advertise only implemented IMAP commands and extensions. Capability changes must track behavior and tests. |
-| `MUST` | Client discovery boundary | IMAP autoconfiguration may remain the Outlook desktop fallback path while Exchange-style MAPI autodiscover stays gated; IMAP discovery must not imply a client `SMTP` endpoint or MAPI publication. |
+| `MUST` | Client discovery boundary | IMAP autoconfiguration may remain the Outlook desktop fallback path while Exchange-style MAPI autodiscover stays gated; IMAP discovery must publish only an implemented and exposed `LPE-CT` IMAPS endpoint, must not point clients at the private core `LPE` IMAP listener, and must not imply a client `SMTP` endpoint or MAPI publication. |
 | `MUST` | Mailbox discovery | `LIST`, `XLIST` compatibility where needed, `STATUS`, and special mailbox aliases must map to canonical folders. |
 | `MUST` | Mailbox selection | `SELECT` and `EXAMINE` must expose stable `UIDVALIDITY`, `UIDNEXT`, message counts, recent state, and mod-sequence metadata where advertised. |
 | `MUST` | Message read | `FETCH` and `UID FETCH` must read canonical message metadata, headers, bodies, HTML/plain body variants, MIME structure, flags, dates, sizes, byte lengths, and partial body ranges. Other compatibility protocols, including MAPI body streams and stream-size probes, must derive message bodies from the same canonical content. |
