@@ -41,6 +41,10 @@
   - `Email/queryChanges` and `Mailbox/queryChanges` store ordered query
     snapshots in `jmap_query_states` and expose only resumable query-state
     references to clients
+- Mailboxes:
+  - `Mailbox/*` supports `parentId` hierarchy immediately for internationalized mailbox support
+  - `isSubscribed` reflects canonical persisted subscription state shared with IMAP `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB`
+  - mailbox name validation follows the strict Unicode policy in `docs/i18n.md`, including rejection of mixed-script and confusable names
 - Submission:
   - `EmailSubmission/set` loads a persisted draft
   - canonical submission creates authoritative `Sent`
