@@ -316,6 +316,27 @@ pub struct UpdateAntispamSettingsRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateStoragePoolRequest {
+    pub name: String,
+    pub pool_kind: String,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStoragePoolRequest {
+    pub name: String,
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStoragePolicyRequest {
+    pub storage_pool_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CreateServerAdministratorRequest {
     pub domain_id: Option<Uuid>,
     pub email: String,

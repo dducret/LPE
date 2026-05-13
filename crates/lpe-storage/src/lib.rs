@@ -14,6 +14,8 @@ mod outbound;
 pub mod protocols;
 pub mod pst;
 mod shared;
+pub mod storage_policy;
+pub mod storage_visibility;
 pub mod submission;
 pub mod tasks;
 pub mod types;
@@ -66,9 +68,14 @@ pub use crate::types::{
     AccountRecord, AdminDashboard, AliasRecord, AntispamSettings, AuditEntryInput, AuditEvent,
     DashboardUpdate, DomainRecord, EmailTraceResult, EmailTraceSearchInput, FilterRule,
     HealthResponse, LocalAiSettings, MailFlowEntry, MailboxRecord, NewAccount, NewAlias, NewDomain,
-    NewFilterRule, NewMailbox, NewServerAdministrator, OutboundQueueStatusUpdate, OverviewStats,
-    ProtocolStatus, QuarantineItem, SecuritySettings, ServerAdministrator, ServerSettings,
-    SieveScriptDocument, SieveScriptSummary, StorageOverview, UpdateAccount, UpdateDomain,
+    NewFilterRule, NewMailbox, NewServerAdministrator, NewStoragePool, OutboundQueueStatusUpdate,
+    OverviewStats, ProtocolStatus, QuarantineItem, SecuritySettings, ServerAdministrator,
+    ServerSettings, SieveScriptDocument, SieveScriptSummary, StorageCleanupCounts,
+    StorageCleanupPlacementSummary, StorageCleanupVisibilityResponse, StorageHealthResponse,
+    StorageMigrationCounts, StorageMigrationJobSummary, StorageMigrationVisibilityResponse,
+    StorageOverview, StoragePlacementCounts, StoragePolicyOverview, StoragePolicyScope,
+    StoragePolicySummary, StoragePolicyUpdate, StoragePoolHealth, StoragePoolReference,
+    StoragePoolSummary, UpdateAccount, UpdateDomain, UpdateStoragePool,
 };
 pub use crate::workspace::{
     ClientContact, ClientEvent, ClientMessage, ClientWorkspace, UpsertClientContactInput,

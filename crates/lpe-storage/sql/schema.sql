@@ -283,6 +283,55 @@ CREATE TABLE storage_pools (
 INSERT INTO storage_pools (id, name, pool_kind)
 VALUES ('00000000-0000-0000-0000-000000000001', 'postgres-primary', 'postgres');
 
+CREATE TABLE storage_policy_assignments (
+    id UUID PRIMARY KEY,
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('platform', 'tenant', 'domain', 'account')),
+    tenant_id UUID,
+    domain_id UUID,
+    account_id UUID,
+    storage_pool_id UUID NOT NULL,
+    updated_by TEXT NOT NULL CHECK (btrim(updated_by) <> ''),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (
+        (scope_kind = 'platform' AND tenant_id IS NULL AND domain_id IS NULL AND account_id IS NULL)
+        OR (scope_kind = 'tenant' AND tenant_id IS NOT NULL AND domain_id IS NULL AND account_id IS NULL)
+        OR (scope_kind = 'domain' AND tenant_id IS NOT NULL AND domain_id IS NOT NULL AND account_id IS NULL)
+        OR (scope_kind = 'account' AND tenant_id IS NOT NULL AND domain_id IS NULL AND account_id IS NOT NULL)
+    ),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX storage_policy_platform_idx
+    ON storage_policy_assignments (scope_kind)
+    WHERE scope_kind = 'platform';
+
+CREATE UNIQUE INDEX storage_policy_tenant_idx
+    ON storage_policy_assignments (tenant_id)
+    WHERE scope_kind = 'tenant';
+
+CREATE UNIQUE INDEX storage_policy_domain_idx
+    ON storage_policy_assignments (tenant_id, domain_id)
+    WHERE scope_kind = 'domain';
+
+CREATE UNIQUE INDEX storage_policy_account_idx
+    ON storage_policy_assignments (tenant_id, account_id)
+    WHERE scope_kind = 'account';
+
+CREATE INDEX storage_policy_pool_idx
+    ON storage_policy_assignments (storage_pool_id, scope_kind);
+
+INSERT INTO storage_policy_assignments (id, scope_kind, storage_pool_id, updated_by)
+VALUES (
+    '00000000-0000-0000-0000-000000000002',
+    'platform',
+    '00000000-0000-0000-0000-000000000001',
+    'schema'
+);
+
 CREATE TABLE blobs (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

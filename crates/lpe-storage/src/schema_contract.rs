@@ -371,6 +371,48 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
 }
 
 #[test]
+fn storage_policy_assignments_capture_milestone_five_scope_contract() {
+    let policies = table_definition("storage_policy_assignments");
+    for required in [
+        "scope_kind TEXT NOT NULL CHECK (scope_kind IN ('platform', 'tenant', 'domain', 'account'))",
+        "tenant_id UUID",
+        "domain_id UUID",
+        "account_id UUID",
+        "storage_pool_id UUID NOT NULL",
+        "updated_by TEXT NOT NULL CHECK (btrim(updated_by) <> '')",
+        "FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE",
+        "FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE CASCADE",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+        "FOREIGN KEY (storage_pool_id) REFERENCES storage_pools (id) ON DELETE RESTRICT",
+    ] {
+        assert!(
+            policies.contains(required),
+            "storage_policy_assignments is missing required Milestone 5 policy fragment: {required}"
+        );
+    }
+
+    assert_schema_contains_all(&[
+        "CREATE UNIQUE INDEX storage_policy_platform_idx",
+        "WHERE scope_kind = 'platform'",
+        "CREATE UNIQUE INDEX storage_policy_tenant_idx",
+        "WHERE scope_kind = 'tenant'",
+        "CREATE UNIQUE INDEX storage_policy_domain_idx",
+        "WHERE scope_kind = 'domain'",
+        "CREATE UNIQUE INDEX storage_policy_account_idx",
+        "WHERE scope_kind = 'account'",
+        "CREATE INDEX storage_policy_pool_idx",
+        "INSERT INTO storage_policy_assignments (id, scope_kind, storage_pool_id, updated_by)",
+    ]);
+
+    for forbidden in ["s3", "aws", "azure", "cloud", "bucket", "mailbox_id"] {
+        assert!(
+            !policies.to_ascii_lowercase().contains(forbidden),
+            "Milestone 5 storage policy must not introduce forbidden scope/backend fragment: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn blob_migration_jobs_capture_milestone_three_worker_contract() {
     let jobs = table_definition("blob_migration_jobs");
     for required in [

@@ -197,6 +197,188 @@ pub struct StorageOverview {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePoolSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub pool_kind: String,
+    pub status: String,
+    pub assignable: bool,
+    pub is_platform_default: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePoolReference {
+    pub id: Uuid,
+    pub name: String,
+    pub pool_kind: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePolicyScope {
+    pub kind: String,
+    pub tenant_id: Option<Uuid>,
+    pub tenant_name: Option<String>,
+    pub domain_id: Option<Uuid>,
+    pub domain_name: Option<String>,
+    pub account_id: Option<Uuid>,
+    pub account_email: Option<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePolicySummary {
+    pub scope: StoragePolicyScope,
+    pub configured_pool: Option<StoragePoolReference>,
+    pub effective_pool: StoragePoolReference,
+    pub inherited_from: Option<String>,
+    pub updated_at: Option<String>,
+    pub updated_by: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePolicyOverview {
+    pub allowed_pools: Vec<StoragePoolSummary>,
+    pub policies: Vec<StoragePolicySummary>,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewStoragePool {
+    pub name: String,
+    pub pool_kind: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateStoragePool {
+    pub pool_id: Uuid,
+    pub name: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoragePolicyUpdate {
+    pub storage_pool_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageHealthResponse {
+    pub status: String,
+    pub pools: Vec<StoragePoolHealth>,
+    pub placements: StoragePlacementCounts,
+    pub migrations: StorageMigrationCounts,
+    pub cleanup: StorageCleanupCounts,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePoolHealth {
+    pub pool: StoragePoolReference,
+    pub health: String,
+    pub active_placements: u64,
+    pub retiring_placements: u64,
+    pub failed_placements: u64,
+    pub cleanup_failed_placements: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoragePlacementCounts {
+    pub active: u64,
+    pub copying: u64,
+    pub verified: u64,
+    pub retiring: u64,
+    pub failed: u64,
+    pub cleaning: u64,
+    pub cleanup_failed: u64,
+    pub deleted: u64,
+    pub missing_active: u64,
+    pub degraded: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageMigrationCounts {
+    pub pending: u64,
+    pub running: u64,
+    pub verified: u64,
+    pub switched: u64,
+    pub failed: u64,
+    pub cancelled: u64,
+    pub expired_leases: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageCleanupCounts {
+    pub due: u64,
+    pub retiring: u64,
+    pub cleaning: u64,
+    pub cleanup_failed: u64,
+    pub deleted: u64,
+    pub blocked_by_rollback: u64,
+    pub blocked_by_missing_active_replacement: u64,
+    pub blocked_by_retention_or_legal_hold: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageMigrationVisibilityResponse {
+    pub summary: StorageMigrationCounts,
+    pub items: Vec<StorageMigrationJobSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageMigrationJobSummary {
+    pub id: Uuid,
+    pub tenant_id: Uuid,
+    pub domain_id: Uuid,
+    pub blob_kind: String,
+    pub source_pool: StoragePoolReference,
+    pub target_pool: StoragePoolReference,
+    pub status: String,
+    pub attempts: u32,
+    pub next_attempt_at: String,
+    pub last_error_summary: Option<String>,
+    pub started_at: Option<String>,
+    pub verified_at: Option<String>,
+    pub switched_at: Option<String>,
+    pub rollback_until: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageCleanupVisibilityResponse {
+    pub summary: StorageCleanupCounts,
+    pub items: Vec<StorageCleanupPlacementSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageCleanupPlacementSummary {
+    pub tenant_id: Uuid,
+    pub domain_id: Uuid,
+    pub blob_kind: String,
+    pub pool: StoragePoolReference,
+    pub status: String,
+    pub cleanup_attempts: u32,
+    pub rollback_until: Option<String>,
+    pub next_cleanup_attempt_at: Option<String>,
+    pub cleaned_at: Option<String>,
+    pub cleanup_error_summary: Option<String>,
+    pub blockers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct AuditEvent {
     pub id: Uuid,
     pub timestamp: String,

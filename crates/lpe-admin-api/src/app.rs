@@ -48,6 +48,12 @@ use crate::{
         delete_sieve_script, get_sieve_overview, get_sieve_script, put_sieve_script,
         rename_sieve_script, set_active_sieve_script,
     },
+    storage::{
+        create_storage_pool, get_storage_cleanup, get_storage_health, get_storage_migrations,
+        get_storage_policies, list_storage_pools, update_account_storage_policy,
+        update_domain_storage_policy, update_platform_storage_policy, update_storage_pool,
+        update_tenant_storage_policy,
+    },
     workspace::{
         client_workspace, delete_client_contact, delete_client_event, delete_client_task,
         delete_draft_message, get_client_task, list_client_task_lists, list_client_tasks,
@@ -211,6 +217,31 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/settings/security", put(update_security_settings))
         .route("/console/settings/local-ai", put(update_local_ai_settings))
         .route("/console/settings/antispam", put(update_antispam_settings))
+        .route(
+            "/console/storage/pools",
+            get(list_storage_pools).post(create_storage_pool),
+        )
+        .route("/console/storage/pools/{pool_id}", put(update_storage_pool))
+        .route("/console/storage/policies", get(get_storage_policies))
+        .route(
+            "/console/storage/policies/platform",
+            put(update_platform_storage_policy),
+        )
+        .route(
+            "/console/storage/policies/tenants/{tenant_id}",
+            put(update_tenant_storage_policy),
+        )
+        .route(
+            "/console/storage/policies/domains/{domain_id}",
+            put(update_domain_storage_policy),
+        )
+        .route(
+            "/console/storage/policies/accounts/{account_id}",
+            put(update_account_storage_policy),
+        )
+        .route("/console/storage/health", get(get_storage_health))
+        .route("/console/storage/migrations", get(get_storage_migrations))
+        .route("/console/storage/cleanup", get(get_storage_cleanup))
         .merge(client_config::router())
         .nest("/jmap", lpe_jmap::router())
         .merge(lpe_exchange::router())
@@ -356,6 +387,29 @@ mod tests {
         assert!(console_source.contains("perimeter filtering rules are managed by LPE-CT"));
         assert!(!console_source.contains("update-antispam-settings"));
         assert!(!console_source.contains("create-antispam-rule"));
+    }
+
+    #[test]
+    fn storage_policy_routes_are_registered() {
+        let app_source = include_str!("app.rs");
+
+        for route in [
+            "/console/storage/pools",
+            "/console/storage/pools/{pool_id}",
+            "/console/storage/policies",
+            "/console/storage/policies/platform",
+            "/console/storage/policies/tenants/{tenant_id}",
+            "/console/storage/policies/domains/{domain_id}",
+            "/console/storage/policies/accounts/{account_id}",
+            "/console/storage/health",
+            "/console/storage/migrations",
+            "/console/storage/cleanup",
+        ] {
+            assert!(
+                app_source.contains(route),
+                "storage policy route is not registered: {route}"
+            );
+        }
     }
 
     #[test]
