@@ -49,6 +49,8 @@ struct FakeStore {
     uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
     raw_message_blobs: Arc<Mutex<HashMap<Uuid, JmapUploadBlob>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
+    created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
+    updated_mailboxes: Arc<Mutex<Vec<JmapMailboxUpdateInput>>>,
     active_sieve_script: Arc<Mutex<Option<String>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     submitted_drafts: Arc<Mutex<Vec<Uuid>>>,
@@ -285,11 +287,13 @@ impl FakeStore {
     fn draft_mailbox() -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+            parent_id: None,
             role: "drafts".to_string(),
             name: "Drafts".to_string(),
             sort_order: 10,
             total_emails: 1,
             unread_emails: 0,
+            is_subscribed: true,
         }
     }
 
@@ -353,11 +357,13 @@ impl FakeStore {
     fn inbox_mailbox() -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap(),
+            parent_id: None,
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 0,
             total_emails: 1,
             unread_emails: 1,
+            is_subscribed: true,
         }
     }
 
@@ -803,13 +809,16 @@ impl JmapStore for FakeStore {
         input: JmapMailboxCreateInput,
         _audit: AuditEntryInput,
     ) -> Result<JmapMailbox> {
+        self.created_mailboxes.lock().unwrap().push(input.clone());
         Ok(JmapMailbox {
             id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+            parent_id: input.parent_id,
             role: "".to_string(),
             name: input.name,
             sort_order: input.sort_order.unwrap_or(99),
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: input.is_subscribed,
         })
     }
 
@@ -818,13 +827,16 @@ impl JmapStore for FakeStore {
         input: JmapMailboxUpdateInput,
         _audit: AuditEntryInput,
     ) -> Result<JmapMailbox> {
+        self.updated_mailboxes.lock().unwrap().push(input.clone());
         Ok(JmapMailbox {
             id: input.mailbox_id,
+            parent_id: input.parent_id.flatten(),
             role: "".to_string(),
             name: input.name.unwrap_or_else(|| "Updated".to_string()),
             sort_order: input.sort_order.unwrap_or(10),
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: input.is_subscribed.unwrap_or(true),
         })
     }
 
@@ -2753,11 +2765,13 @@ async fn email_get_and_query_preserve_multiple_mailbox_ids_for_one_email() {
     let inbox = FakeStore::inbox_mailbox();
     let archive = JmapMailbox {
         id: Uuid::parse_str("acacacac-acac-acac-acac-acacacacacac").unwrap(),
+        parent_id: None,
         role: "custom".to_string(),
         name: "Archive".to_string(),
         sort_order: 20,
         total_emails: 1,
         unread_emails: 0,
+        is_subscribed: true,
     };
     let mut email = FakeStore::inbox_email();
     email.mailbox_ids = vec![inbox.id, archive.id];
@@ -3945,19 +3959,23 @@ async fn email_query_changes_reports_existing_message_reorders() {
 async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
     let first_mailbox = JmapMailbox {
         id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+        parent_id: None,
         role: "".to_string(),
         name: "Same".to_string(),
         sort_order: 10,
         total_emails: 0,
         unread_emails: 0,
+        is_subscribed: true,
     };
     let second_mailbox = JmapMailbox {
         id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+        parent_id: None,
         role: "".to_string(),
         name: "Same".to_string(),
         sort_order: 10,
         total_emails: 0,
         unread_emails: 0,
+        is_subscribed: true,
     };
     let first_contact = ClientContact {
         id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
@@ -4206,19 +4224,23 @@ async fn mailbox_query_changes_reject_cross_account_query_state_replay() {
 async fn mailbox_query_changes_report_mailbox_reorders() {
     let first_mailbox = JmapMailbox {
         id: Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap(),
+        parent_id: None,
         role: "".to_string(),
         name: "Alpha".to_string(),
         sort_order: 10,
         total_emails: 0,
         unread_emails: 0,
+        is_subscribed: true,
     };
     let second_mailbox = JmapMailbox {
         id: Uuid::parse_str("62626262-6262-6262-6262-626262626262").unwrap(),
+        parent_id: None,
         role: "".to_string(),
         name: "Bravo".to_string(),
         sort_order: 20,
         total_emails: 0,
         unread_emails: 0,
+        is_subscribed: true,
     };
     let initial = JmapService::new(FakeStore {
         session: Some(FakeStore::account()),
@@ -4876,6 +4898,436 @@ async fn search_snippets_return_preview_for_requested_messages() {
 }
 
 #[tokio::test]
+async fn mailbox_set_accepts_unicode_names_and_normalizes_to_nfc() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/set".to_string(),
+                    json!({
+                        "create": {
+                            "m1": {"name": "Cafe\u{301}"},
+                            "m2": {"name": "案件"},
+                            "m3": {"name": "📁 Projects"}
+                        }
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "Mailbox/set");
+    let mut names = store
+        .created_mailboxes
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|input| input.name.clone())
+        .collect::<Vec<_>>();
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            "Café".to_string(),
+            "案件".to_string(),
+            "📁 Projects".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn mailbox_set_rejects_reserved_role_names_and_aliases() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/set".to_string(),
+                    json!({
+                        "create": {
+                            "inbox": {"name": "INBOX"},
+                            "sent": {"name": "Sent Items"},
+                            "junk": {"name": "Spam"}
+                        }
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "error");
+    assert_eq!(response.method_responses[0].1["type"], "invalidArguments");
+    assert_eq!(
+        response.method_responses[0].1["description"],
+        "mailbox name is reserved"
+    );
+    assert!(store.created_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mailbox_set_update_validates_and_normalizes_unicode_names() {
+    let mailbox_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Projects".to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/set".to_string(),
+                    json!({"update": {mailbox_id.to_string(): {"name": "Cafe\u{301}"}}}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "Mailbox/set");
+    assert_eq!(
+        store.updated_mailboxes.lock().unwrap()[0].name,
+        Some("Café".to_string())
+    );
+}
+
+#[tokio::test]
+async fn mailbox_set_rejects_canonical_equivalent_sibling_duplicates() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![JmapMailbox {
+            id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Café".to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/set".to_string(),
+                    json!({"create": {"m1": {"name": "Cafe\u{301}"}}}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "error");
+    assert_eq!(response.method_responses[0].1["type"], "invalidArguments");
+    assert_eq!(
+        response.method_responses[0].1["description"],
+        "mailbox already exists"
+    );
+    assert!(store.created_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mailbox_set_rejects_controls_and_delimiters_at_method_level() {
+    let mailbox_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Projects".to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"create": {"m1": {"name": "Bad\nName"}}}),
+                        "c1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"update": {mailbox_id.to_string(): {"name": "Projects/2026"}}}),
+                        "c2".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "error");
+    assert_eq!(response.method_responses[0].1["type"], "invalidArguments");
+    assert_eq!(
+        response.method_responses[0].1["description"],
+        "mailbox name contains a control character"
+    );
+    assert_eq!(response.method_responses[1].0, "error");
+    assert_eq!(response.method_responses[1].1["type"], "invalidArguments");
+    assert_eq!(
+        response.method_responses[1].1["description"],
+        "mailbox name segment contains the hierarchy delimiter"
+    );
+    assert!(store.created_mailboxes.lock().unwrap().is_empty());
+    assert!(store.updated_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mailbox_get_returns_nfc_unicode_names_as_json_strings() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![JmapMailbox {
+            id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Café".to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }],
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/get".to_string(),
+                    json!({}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["list"][0]["name"],
+        Value::String("Café".to_string())
+    );
+}
+
+#[tokio::test]
+async fn mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set() {
+    let parent_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let child_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let parent = JmapMailbox {
+        id: parent_id,
+        parent_id: None,
+        role: "custom".to_string(),
+        name: "Projects".to_string(),
+        sort_order: 10,
+        total_emails: 0,
+        unread_emails: 0,
+        is_subscribed: true,
+    };
+    let child = JmapMailbox {
+        id: child_id,
+        parent_id: Some(parent_id),
+        role: "custom".to_string(),
+        name: "Alpha".to_string(),
+        sort_order: 20,
+        total_emails: 0,
+        unread_emails: 0,
+        is_subscribed: false,
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![parent.clone(), child.clone()],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({"ids": [child_id.to_string()], "properties": ["id", "parentId", "isSubscribed"]}),
+                        "g".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/query".to_string(),
+                        json!({"filter": {"parentId": parent_id.to_string()}}),
+                        "q".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({
+                            "create": {"created": {"name": "Beta", "parentId": parent_id.to_string(), "isSubscribed": false}},
+                            "update": {child_id.to_string(): {"parentId": null, "isSubscribed": true}}
+                        }),
+                        "s".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["list"][0]["parentId"],
+        Value::String(parent_id.to_string())
+    );
+    assert_eq!(
+        response.method_responses[0].1["list"][0]["isSubscribed"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        response.method_responses[1].1["ids"],
+        json!([child_id.to_string()])
+    );
+    let created = store.created_mailboxes.lock().unwrap();
+    assert_eq!(created[0].parent_id, Some(parent_id));
+    assert!(!created[0].is_subscribed);
+    let updated = store.updated_mailboxes.lock().unwrap();
+    assert_eq!(updated[0].parent_id, Some(None));
+    assert_eq!(updated[0].is_subscribed, Some(true));
+}
+
+#[tokio::test]
+async fn mailbox_set_rejects_parent_cycles_and_unknown_parents() {
+    let parent_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let child_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![
+            JmapMailbox {
+                id: parent_id,
+                parent_id: None,
+                role: "custom".to_string(),
+                name: "Projects".to_string(),
+                sort_order: 10,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: child_id,
+                parent_id: Some(parent_id),
+                role: "custom".to_string(),
+                name: "Alpha".to_string(),
+                sort_order: 20,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+        ],
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"update": {parent_id.to_string(): {"parentId": child_id.to_string()}}}),
+                        "cycle".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"create": {"orphan": {"name": "Orphan", "parentId": Uuid::new_v4().to_string()}}}),
+                        "owner".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "error");
+    assert_eq!(
+        response.method_responses[0].1["description"],
+        "mailbox parentId creates a cycle"
+    );
+    assert_eq!(response.method_responses[1].0, "error");
+    assert_eq!(
+        response.method_responses[1].1["description"],
+        "mailbox parentId must reference a mailbox in the same account"
+    );
+}
+
+#[tokio::test]
 async fn mailbox_set_copy_import_and_quota_are_available() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -4906,7 +5358,7 @@ async fn mailbox_set_copy_import_and_quota_are_available() {
                     method_calls: vec![
                         JmapMethodCall(
                             "Mailbox/set".to_string(),
-                            json!({"create": {"m1": {"name": "Archive"}}}),
+                            json!({"create": {"m1": {"name": "Projects"}}}),
                             "c1".to_string(),
                         ),
                         JmapMethodCall(
@@ -4976,7 +5428,7 @@ async fn mailbox_copy_and_import_reject_read_only_shared_mailbox_mutations() {
                         "Mailbox/set".to_string(),
                         json!({
                             "accountId": shared_account_id,
-                            "create": {"m1": {"name": "Archive"}},
+                            "create": {"m1": {"name": "Projects"}},
                             "update": {draft_mailbox_id: {"name": "Renamed"}},
                             "destroy": [FakeStore::draft_mailbox().id.to_string()]
                         }),
@@ -8995,11 +9447,13 @@ async fn benchmark_mailbox_listing_and_push_paths() {
     fn generated_mailbox(index: usize) -> JmapMailbox {
         JmapMailbox {
             id: Uuid::from_u128(0x1000_0000_0000_0000_0000_0000_0000_0000 + index as u128),
+            parent_id: None,
             role: String::new(),
             name: format!("Mailbox {index:04}"),
             sort_order: index as i32,
             total_emails: (index % 17) as u32,
             unread_emails: (index % 5) as u32,
+            is_subscribed: true,
         }
     }
 

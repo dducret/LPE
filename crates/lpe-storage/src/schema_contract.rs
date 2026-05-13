@@ -918,6 +918,47 @@ fn jmap_email_projection_preserves_multi_mailbox_memberships() {
 }
 
 #[test]
+fn jmap_mailbox_storage_uses_shared_name_policy() {
+    for (name, body) in [
+        (
+            "create_jmap_mailbox",
+            function_body(PROTOCOLS_STORAGE, "pub async fn create_jmap_mailbox"),
+        ),
+        (
+            "update_jmap_mailbox",
+            function_body(PROTOCOLS_STORAGE, "pub async fn update_jmap_mailbox"),
+        ),
+    ] {
+        assert!(
+            body.contains("MailboxDisplayName::new")
+                && body.contains("ensure_mailbox_name_available_in_tx"),
+            "{name} must validate JMAP mailbox names and sibling collisions through the shared storage policy"
+        );
+    }
+    assert!(
+        PROTOCOLS_STORAGE.contains("MailboxNamePolicy::canonical_key"),
+        "storage duplicate checks must use shared mailbox canonical keys"
+    );
+}
+
+#[test]
+fn mailbox_hierarchy_and_subscriptions_are_canonical_storage() {
+    assert_schema_contains_all(&[
+        "parent_mailbox_id UUID",
+        "CREATE TABLE mailbox_subscriptions",
+        "PRIMARY KEY (tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id)",
+        "CREATE INDEX mailbox_subscriptions_subscriber_idx",
+    ]);
+    assert!(
+        PROTOCOLS_STORAGE.contains("mb.parent_mailbox_id")
+            && PROTOCOLS_STORAGE.contains("COALESCE(ms.is_subscribed, TRUE)")
+            && PROTOCOLS_STORAGE.contains("ensure_mailbox_parent_valid_in_tx")
+            && PROTOCOLS_STORAGE.contains("set_mailbox_subscription"),
+        "protocol storage must expose mailbox hierarchy and persisted subscription state"
+    );
+}
+
+#[test]
 fn runtime_access_paths_have_scaling_indexes() {
     assert_schema_contains_all(&[
         "CREATE INDEX mailbox_messages_visible_uid_idx",

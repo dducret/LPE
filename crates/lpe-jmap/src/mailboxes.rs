@@ -82,7 +82,10 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        let filter_state = arguments.filter.clone();
+        let sort_state = arguments.sort.clone();
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
+        mailboxes = filter_mailboxes(mailboxes, filter_state.as_ref())?;
         mailboxes.sort_by_key(|mailbox| {
             (
                 mailbox.sort_order,
@@ -117,18 +120,31 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .unwrap_or(0);
         let query_state = match self
             .store
-            .save_jmap_query_state(account_id, "Mailbox/query", None, None, cursor, &all_ids)
+            .save_jmap_query_state(
+                account_id,
+                "Mailbox/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                cursor,
+                &all_ids,
+            )
             .await?
         {
             Some(state_id) => encode_query_state_reference(
                 account_id,
                 "Mailbox/query",
-                None,
-                None,
+                filter_state.clone(),
+                sort_state.clone(),
                 state_id,
                 cursor,
             )?,
-            None => encode_query_state(account_id, "Mailbox/query", None, None, all_ids)?,
+            None => encode_query_state(
+                account_id,
+                "Mailbox/query",
+                filter_state.clone(),
+                sort_state.clone(),
+                all_ids,
+            )?,
         };
 
         Ok(json!({
@@ -177,6 +193,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 previous.ids.clone()
             };
         let mut mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
+        mailboxes = filter_mailboxes(mailboxes, filter_state.as_ref())?;
         mailboxes.sort_by_key(|mailbox| {
             (
                 mailbox.sort_order,
@@ -306,6 +323,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .requested_account_access(account, arguments.account_id.as_deref())
             .await?;
         let account_id = account_access.account_id;
+        let existing_mailboxes = self.store.fetch_jmap_mailboxes(account_id).await?;
+        validate_mailbox_set_names(
+            arguments.create.as_ref(),
+            arguments.update.as_ref(),
+            &existing_mailboxes,
+        )?;
         let old_state = self.mailbox_object_state(&account_access).await?;
         let mut created = Map::new();
         let mut not_created = Map::new();
@@ -330,7 +353,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 JmapMailboxCreateInput {
                                     account_id,
                                     name: input.name,
+                                    parent_id: input.parent_id,
                                     sort_order: input.sort_order,
+                                    is_subscribed: input.is_subscribed,
                                 },
                                 audit,
                             )
@@ -372,7 +397,9 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                     account_id,
                                     mailbox_id,
                                     name: input.name,
+                                    parent_id: input.parent_id,
                                     sort_order: input.sort_order,
+                                    is_subscribed: input.is_subscribed,
                                 },
                                 audit,
                             )
@@ -441,6 +468,7 @@ fn mailbox_properties(properties: Option<Vec<String>>) -> HashSet<String> {
             vec![
                 "id".to_string(),
                 "name".to_string(),
+                "parentId".to_string(),
                 "role".to_string(),
                 "sortOrder".to_string(),
                 "totalEmails".to_string(),
@@ -463,6 +491,12 @@ fn mailbox_to_value(
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", mailbox.id.to_string());
     insert_if(properties, &mut object, "name", mailbox.name.clone());
+    insert_if(
+        properties,
+        &mut object,
+        "parentId",
+        mailbox.parent_id.map(|id| id.to_string()),
+    );
     insert_if(properties, &mut object, "role", mailbox.role.clone());
     insert_if(properties, &mut object, "sortOrder", mailbox.sort_order);
     insert_if(properties, &mut object, "totalEmails", mailbox.total_emails);
@@ -472,7 +506,12 @@ fn mailbox_to_value(
         "unreadEmails",
         mailbox.unread_emails,
     );
-    insert_if(properties, &mut object, "isSubscribed", true);
+    insert_if(
+        properties,
+        &mut object,
+        "isSubscribed",
+        mailbox.is_subscribed,
+    );
     if properties.contains("myRights") {
         object.insert(
             "myRights".to_string(),
@@ -530,15 +569,18 @@ fn parse_mailbox_create(value: Value) -> Result<MailboxCreateInput> {
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow!("mailbox name is required"))?
         .to_string();
-    let name = if MailboxNamePolicy::system_role_for_display_name(&raw_name).is_some() {
-        raw_name
-    } else {
-        MailboxSegment::new(&raw_name)?.to_string()
-    };
+    let name = MailboxSegment::new(&raw_name)?.to_string();
+    let parent_id = parse_parent_id_field(object.get("parentId"))?.flatten();
     let sort_order = object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32;
+    let is_subscribed = object
+        .get("isSubscribed")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
     Ok(MailboxCreateInput {
         name,
+        parent_id,
         sort_order: Some(sort_order),
+        is_subscribed,
     })
 }
 
@@ -551,14 +593,190 @@ fn parse_mailbox_update(value: Value) -> Result<MailboxUpdateInput> {
         .and_then(Value::as_str)
         .map(|value| MailboxSegment::new(value).map(|segment| segment.to_string()))
         .transpose()?;
+    let parent_id = parse_parent_id_field(object.get("parentId"))?;
     let sort_order = object
         .get("sortOrder")
         .and_then(Value::as_i64)
         .map(|value| value as i32);
-    if name.is_none() && sort_order.is_none() {
+    let is_subscribed = object.get("isSubscribed").and_then(Value::as_bool);
+    if name.is_none() && parent_id.is_none() && sort_order.is_none() && is_subscribed.is_none() {
         return Err(anyhow!(
             "mailbox update must include at least one mutable property"
         ));
     }
-    Ok(MailboxUpdateInput { name, sort_order })
+    Ok(MailboxUpdateInput {
+        name,
+        parent_id,
+        sort_order,
+        is_subscribed,
+    })
+}
+
+fn parse_parent_id_field(value: Option<&Value>) -> Result<Option<Option<Uuid>>> {
+    match value {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(id)) => Ok(Some(Some(parse_uuid(id)?))),
+        Some(_) => Err(anyhow!("mailbox parentId must be an id or null")),
+    }
+}
+
+fn filter_mailboxes(
+    mailboxes: Vec<JmapMailbox>,
+    filter: Option<&Value>,
+) -> Result<Vec<JmapMailbox>> {
+    let Some(filter) = filter else {
+        return Ok(mailboxes);
+    };
+    let object = filter
+        .as_object()
+        .ok_or_else(|| anyhow!("Mailbox/query filter must be an object"))?;
+    let parent_id = parse_parent_id_field(object.get("parentId"))?;
+    let name = object.get("name").and_then(Value::as_str);
+    let role = object.get("role").and_then(Value::as_str);
+    let has_any_role = object.get("hasAnyRole").and_then(Value::as_bool);
+    let is_subscribed = object.get("isSubscribed").and_then(Value::as_bool);
+
+    Ok(mailboxes
+        .into_iter()
+        .filter(|mailbox| {
+            parent_id
+                .as_ref()
+                .is_none_or(|parent_id| mailbox.parent_id == *parent_id)
+                && name.is_none_or(|name| mailbox.name.contains(name))
+                && role.is_none_or(|role| {
+                    if role.is_empty() {
+                        mailbox.role.is_empty() || mailbox.role == "custom"
+                    } else {
+                        mailbox.role == role
+                    }
+                })
+                && has_any_role.is_none_or(|expected| {
+                    let has_role = !mailbox.role.is_empty() && mailbox.role != "custom";
+                    has_role == expected
+                })
+                && is_subscribed.is_none_or(|expected| mailbox.is_subscribed == expected)
+        })
+        .collect())
+}
+
+fn validate_mailbox_set_names(
+    create: Option<&HashMap<String, Value>>,
+    update: Option<&HashMap<String, Value>>,
+    existing_mailboxes: &[JmapMailbox],
+) -> Result<()> {
+    let mut requested = Vec::new();
+    let existing_by_id = existing_mailboxes
+        .iter()
+        .map(|mailbox| (mailbox.id, mailbox))
+        .collect::<HashMap<_, _>>();
+
+    if let Some(create) = create {
+        let mut entries = create.iter().collect::<Vec<_>>();
+        entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (_, value) in entries {
+            let object = value
+                .as_object()
+                .ok_or_else(|| anyhow!("mailbox create arguments must be an object"))?;
+            let raw_name = mailbox_name_field(value, "mailbox create arguments must be an object")?;
+            let name = MailboxSegment::new(raw_name)?.to_string();
+            let parent_id = parse_parent_id_field(object.get("parentId"))?.flatten();
+            if parent_id.is_some_and(|parent_id| !existing_by_id.contains_key(&parent_id)) {
+                bail!("mailbox parentId must reference a mailbox in the same account");
+            }
+            requested.push((None, parent_id, MailboxNamePolicy::canonical_key(&name)));
+        }
+    }
+
+    if let Some(update) = update {
+        let mut entries = update.iter().collect::<Vec<_>>();
+        entries.sort_by(|(left, _), (right, _)| left.cmp(right));
+        for (id, value) in entries {
+            let object = value
+                .as_object()
+                .ok_or_else(|| anyhow!("mailbox update arguments must be an object"))?;
+            let mailbox_id = parse_uuid(id).ok();
+            let parent_id = parse_parent_id_field(object.get("parentId"))?;
+            if let Some(parent_id) = parent_id.flatten() {
+                if mailbox_id.is_some_and(|mailbox_id| mailbox_id == parent_id) {
+                    bail!("mailbox parentId creates a cycle");
+                }
+                if !existing_by_id.contains_key(&parent_id) {
+                    bail!("mailbox parentId must reference a mailbox in the same account");
+                }
+                if mailbox_id.is_some_and(|mailbox_id| {
+                    mailbox_parent_chain_contains(&existing_by_id, parent_id, mailbox_id)
+                }) {
+                    bail!("mailbox parentId creates a cycle");
+                }
+            }
+            if !object.contains_key("name") && parent_id.is_none() {
+                continue;
+            };
+            let Some(mailbox_id) = mailbox_id else {
+                continue;
+            };
+            let Some(existing) = existing_by_id.get(&mailbox_id) else {
+                continue;
+            };
+            let name = match object.get("name").and_then(Value::as_str) {
+                Some(raw_name) => MailboxSegment::new(raw_name)?.to_string(),
+                None => existing.name.clone(),
+            };
+            let parent_id = parent_id.unwrap_or(existing.parent_id);
+            requested.push((
+                Some(mailbox_id),
+                parent_id,
+                MailboxNamePolicy::canonical_key(&name),
+            ));
+        }
+    }
+
+    for (mailbox_id, parent_id, requested_key) in &requested {
+        for existing in existing_mailboxes {
+            if mailbox_id.is_some_and(|mailbox_id| mailbox_id == existing.id) {
+                continue;
+            }
+            if parent_id != &existing.parent_id {
+                continue;
+            }
+            if requested_key.collides_with(&MailboxNamePolicy::canonical_key(&existing.name)) {
+                bail!("mailbox already exists");
+            }
+        }
+    }
+
+    for index in 0..requested.len() {
+        for other in requested.iter().skip(index + 1) {
+            if requested[index].1 == other.1 && requested[index].2.collides_with(&other.2) {
+                bail!("mailbox already exists");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn mailbox_parent_chain_contains(
+    mailboxes: &HashMap<Uuid, &JmapMailbox>,
+    start: Uuid,
+    target: Uuid,
+) -> bool {
+    let mut current = Some(start);
+    while let Some(id) = current {
+        if id == target {
+            return true;
+        }
+        current = mailboxes.get(&id).and_then(|mailbox| mailbox.parent_id);
+    }
+    false
+}
+
+fn mailbox_name_field<'a>(value: &'a Value, object_error: &str) -> Result<&'a str> {
+    value
+        .as_object()
+        .ok_or_else(|| anyhow!("{}", object_error))?
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("mailbox name is required"))
 }

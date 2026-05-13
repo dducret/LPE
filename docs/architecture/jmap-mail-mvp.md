@@ -42,10 +42,13 @@
     snapshots in `jmap_query_states` and expose only resumable query-state
     references to clients
 - Mailboxes:
-  - `Mailbox/*` supports `parentId` hierarchy immediately for internationalized mailbox support
-  - `isSubscribed` reflects canonical persisted subscription state shared with IMAP `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB`
-  - mailbox name validation follows the strict Unicode policy in `docs/architecture/internationalized-mailbox-names.md`, including NFC display storage, canonical-key sibling collision checks, reserved-name protection, `/` rejection inside JMAP names, and rejection of mixed-script and confusable names
-  - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localized labels are client UI presentation driven by JMAP `role`
+  - `Mailbox.parentId` hierarchy is persisted in canonical mailbox state and exposed through `Mailbox/get`, `Mailbox/query`, `Mailbox/changes`, and `Mailbox/set`
+  - `Mailbox/set` validates that `parentId` belongs to the same mailbox account and rejects self-parenting or ancestor cycles
+  - `isSubscribed` reflects canonical persisted subscription state in `mailbox_subscriptions`, shared with IMAP `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB`
+  - `Mailbox/set` preflights create and update `name` values through the shared mailbox-name policy before persistence, including NFC display normalization, reserved-name protection, `/` rejection inside JMAP names, and deterministic method-level `invalidArguments` errors for invalid names
+  - canonical-equivalent duplicate rejection uses the shared mailbox canonical-key policy within the target parent, so siblings must be unique while the same leaf name may exist under different parents
+  - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localized labels are client UI presentation driven by JMAP `role`, not stored as translated role identities
+  - custom `Mailbox/set` create and update names must not collide with reserved role names or accepted IMAP compatibility aliases such as `INBOX`, `Sent Items`, `Deleted Items`, `Spam`, or `Archive`
 - Submission:
   - `EmailSubmission/set` loads a persisted draft
   - canonical submission creates authoritative `Sent`

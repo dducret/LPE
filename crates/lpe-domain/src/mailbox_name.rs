@@ -101,7 +101,17 @@ impl MailboxSegment {
 
 impl MailboxPath {
     pub fn parse(value: impl AsRef<str>) -> Result<Self, MailboxNameError> {
-        let value = value.as_ref();
+        Self::parse_with_reserved_policy(value.as_ref(), ReservedNamePolicy::Reject)
+    }
+
+    pub fn system(value: impl AsRef<str>) -> Result<Self, MailboxNameError> {
+        Self::parse_with_reserved_policy(value.as_ref(), ReservedNamePolicy::Allow)
+    }
+
+    fn parse_with_reserved_policy(
+        value: &str,
+        reserved_policy: ReservedNamePolicy,
+    ) -> Result<Self, MailboxNameError> {
         if value.is_empty() {
             return Err(MailboxNameError::Empty);
         }
@@ -114,7 +124,11 @@ impl MailboxPath {
             if raw_segment.is_empty() {
                 return Err(MailboxNameError::EmptySegment);
             }
-            segments.push(MailboxSegment::new(raw_segment)?);
+            let segment = match reserved_policy {
+                ReservedNamePolicy::Allow => MailboxSegment::system(raw_segment)?,
+                ReservedNamePolicy::Reject => MailboxSegment::new(raw_segment)?,
+            };
+            segments.push(segment);
         }
         if segments.len() > MAX_PATH_SEGMENTS {
             return Err(MailboxNameError::TooDeep);
@@ -173,6 +187,17 @@ pub struct MailboxNamePolicy;
 impl MailboxNamePolicy {
     pub fn canonical_key(value: &str) -> MailboxCanonicalKey {
         MailboxCanonicalKey::for_display_name(value)
+    }
+
+    pub fn list_pattern_matches(name: &str, pattern: &str) -> bool {
+        let name = fold_list_pattern_text(name);
+        let pattern = fold_list_pattern_text(pattern);
+        list_pattern_match_from(
+            &name.chars().collect::<Vec<_>>(),
+            &pattern.chars().collect::<Vec<_>>(),
+            0,
+            0,
+        )
     }
 
     pub fn system_role_for_display_name(value: &str) -> Option<&'static str> {
@@ -315,7 +340,7 @@ fn validate_normalized_segment(value: &str) -> Result<(), MailboxNameError> {
 
 fn validate_codepoints(value: &str) -> Result<(), MailboxNameError> {
     for ch in value.chars() {
-        if ch.is_control() || ch == '\u{7f}' {
+        if ch.is_control() || ch == '\u{7f}' || matches!(ch, '\u{2028}' | '\u{2029}') {
             return Err(MailboxNameError::ContainsControl);
         }
         if is_private_use(ch) || is_unsafe_invisible(ch) {
@@ -371,6 +396,39 @@ fn fold_for_comparison(value: &str) -> String {
         .split_ascii_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn fold_list_pattern_text(value: &str) -> String {
+    fold_for_comparison(&value.nfc().collect::<String>())
+}
+
+fn list_pattern_match_from(
+    name: &[char],
+    pattern: &[char],
+    name_index: usize,
+    pattern_index: usize,
+) -> bool {
+    if pattern_index == pattern.len() {
+        return name_index == name.len();
+    }
+
+    match pattern[pattern_index] {
+        '*' => (name_index..=name.len())
+            .any(|next| list_pattern_match_from(name, pattern, next, pattern_index + 1)),
+        '%' => {
+            let segment_end = name[name_index..]
+                .iter()
+                .position(|ch| *ch == MAILBOX_HIERARCHY_DELIMITER)
+                .map(|offset| name_index + offset)
+                .unwrap_or(name.len());
+            (name_index..=segment_end)
+                .any(|next| list_pattern_match_from(name, pattern, next, pattern_index + 1))
+        }
+        ch if name.get(name_index).is_some_and(|name_ch| *name_ch == ch) => {
+            list_pattern_match_from(name, pattern, name_index + 1, pattern_index + 1)
+        }
+        _ => false,
+    }
 }
 
 fn confusable_skeleton_char(ch: char) -> char {

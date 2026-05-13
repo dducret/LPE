@@ -452,6 +452,22 @@ impl ImapStore for FakeStore {
         Box::pin(async move { Ok(()) })
     }
 
+    fn set_mailbox_subscription<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        is_subscribed: bool,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let mut mailboxes = self.mailboxes.lock().unwrap();
+        let mailbox = mailboxes
+            .iter_mut()
+            .find(|mailbox| mailbox.id == mailbox_id)
+            .unwrap();
+        mailbox.is_subscribed = is_subscribed;
+        Box::pin(async move { Ok(()) })
+    }
+
     fn copy_imap_email<'a>(
         &'a self,
         _account_id: Uuid,
@@ -982,17 +998,18 @@ async fn login_list_select_fetch_store_search_and_append_work() {
         "* STATUS \"Projects\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 1004 UNSEEN 0 HIGHESTMODSEQ 5)"
     ));
 
-    let rename_projects = send_command(&mut stream, "A10 RENAME Projects Archive\r\n", "A10").await;
+    let rename_projects =
+        send_command(&mut stream, "A10 RENAME Projects Reference\r\n", "A10").await;
     assert!(rename_projects.contains("A10 OK RENAME completed"));
 
     let select_inbox_for_copy = send_command(&mut stream, "A10B SELECT Inbox\r\n", "A10B").await;
     assert!(select_inbox_for_copy.contains("* 1 EXISTS"));
 
-    let copy = send_command(&mut stream, "A11 COPY 1 Archive\r\n", "A11").await;
+    let copy = send_command(&mut stream, "A11 COPY 1 Reference\r\n", "A11").await;
     assert!(copy.contains("A11 OK [COPYUID 1004 1 1] COPY completed"));
 
-    let select_archive = send_command(&mut stream, "A12 SELECT Archive\r\n", "A12").await;
-    assert!(select_archive.contains("* 1 EXISTS"));
+    let select_reference = send_command(&mut stream, "A12 SELECT Reference\r\n", "A12").await;
+    assert!(select_reference.contains("* 1 EXISTS"));
 
     let richer_search = send_command(
         &mut stream,
@@ -1007,9 +1024,9 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(move_response.contains("* 0 EXISTS"));
     assert!(move_response.contains("A14 OK [COPYUID 111 1 2] MOVE completed"));
 
-    let select_archive_after_move =
-        send_command(&mut stream, "A15 SELECT Archive\r\n", "A15").await;
-    assert!(select_archive_after_move.contains("* 0 EXISTS"));
+    let select_reference_after_move =
+        send_command(&mut stream, "A15 SELECT Reference\r\n", "A15").await;
+    assert!(select_reference_after_move.contains("* 0 EXISTS"));
 
     let select_drafts = send_command(&mut stream, "A16 SELECT Drafts\r\n", "A16").await;
     assert!(select_drafts.contains("* 0 EXISTS"));
@@ -1056,13 +1073,240 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     let sent_status = send_command(&mut stream, "A18T STATUS Sent (MESSAGES)\r\n", "A18T").await;
     assert!(sent_status.contains("* STATUS \"Sent\" (MESSAGES 1)"));
 
-    let delete_archive = send_command(&mut stream, "A19 DELETE Archive\r\n", "A19").await;
-    assert!(delete_archive.contains("A19 OK DELETE completed"));
+    let delete_reference = send_command(&mut stream, "A19 DELETE Reference\r\n", "A19").await;
+    assert!(delete_reference.contains("A19 OK DELETE completed"));
 
     let select_inbox = send_command(&mut stream, "A20 SELECT Inbox\r\n", "A20").await;
     assert!(select_inbox.contains("* 2 EXISTS"));
     let rejected_move = send_command(&mut stream, "A21 MOVE 1 Drafts\r\n", "A21").await;
     assert!(rejected_move.contains("A21 NO MOVE does not support Sent or Drafts"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn utf8_accept_enables_utf8_mailbox_response_quoting() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let create_prompt = send_partial_command(&mut stream, "A2 CREATE {5}\r\n").await;
+    assert!(create_prompt.contains("+ Ready for literal data"));
+    let create = send_command(&mut stream, "Café\r\n", "A2").await;
+    assert!(create.contains("A2 OK CREATE completed"));
+
+    let list_before_enable = send_command(&mut stream, "A3 LIST \"\" \"Café\"\r\n", "A3").await;
+    assert!(list_before_enable.contains("* LIST (\\HasNoChildren) \"/\" {5}\r\nCafé"));
+    assert!(!list_before_enable.contains("\"Café\""));
+
+    let capability = send_command(&mut stream, "A4 CAPABILITY\r\n", "A4").await;
+    assert!(capability.contains("IMAP4rev2"));
+    assert!(capability.contains("UTF8=ACCEPT"));
+
+    let enable = send_command(&mut stream, "A5 ENABLE UTF8=ACCEPT CONDSTORE\r\n", "A5").await;
+    assert!(enable.contains("* ENABLED UTF8=ACCEPT CONDSTORE"));
+    assert!(enable.contains("A5 OK ENABLE completed"));
+
+    let list_after_enable = send_command(&mut stream, "A6 LIST \"\" \"Café\"\r\n", "A6").await;
+    assert!(list_after_enable.contains("* LIST (\\HasNoChildren) \"/\" \"Café\""));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn unicode_mailbox_commands_resolve_and_render_consistently() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let create = send_command(&mut stream, "A3 CREATE \"Café\"\r\n", "A3").await;
+    assert!(create.contains("A3 OK CREATE completed"));
+
+    let list = send_command(&mut stream, "A4 LIST \"\" \"Café\"\r\n", "A4").await;
+    assert_eq!(list.matches("* LIST ").count(), 1);
+    assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"Café\""));
+
+    let status = send_command(
+        &mut stream,
+        "A5 STATUS \"Café\" (MESSAGES UIDNEXT)\r\n",
+        "A5",
+    )
+    .await;
+    assert!(status.contains("* STATUS \"Café\" (MESSAGES 0 UIDNEXT 1)"));
+
+    let select = send_command(&mut stream, "A6 SELECT \"Café\"\r\n", "A6").await;
+    assert!(select.contains("* 0 EXISTS"));
+    assert!(select.contains("A6 OK [READ-WRITE] SELECT completed"));
+
+    let subscribe = send_command(&mut stream, "A7 SUBSCRIBE \"Café\"\r\n", "A7").await;
+    assert!(subscribe.contains("A7 OK SUBSCRIBE completed"));
+
+    let unsubscribe = send_command(&mut stream, "A8 UNSUBSCRIBE \"Café\"\r\n", "A8").await;
+    assert!(unsubscribe.contains("A8 OK UNSUBSCRIBE completed"));
+
+    let rename = send_command(
+        &mut stream,
+        "A9 RENAME \"Café\" \"Café Reference\"\r\n",
+        "A9",
+    )
+    .await;
+    assert!(rename.contains("A9 OK RENAME completed"));
+
+    let status_renamed = send_command(
+        &mut stream,
+        "A10 STATUS \"Café Reference\" (MESSAGES)\r\n",
+        "A10",
+    )
+    .await;
+    assert!(status_renamed.contains("* STATUS \"Café Reference\" (MESSAGES 0)"));
+
+    let delete = send_command(&mut stream, "A11 DELETE \"Café Reference\"\r\n", "A11").await;
+    assert!(delete.contains("A11 OK DELETE completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn subscribe_unsubscribe_and_lsub_use_persisted_mailbox_state() {
+    let store = FakeStore::new();
+    {
+        let inbox_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+        let mut mailboxes = store.mailboxes.lock().unwrap();
+        let inbox = mailboxes
+            .iter_mut()
+            .find(|mailbox| mailbox.id == inbox_id)
+            .unwrap();
+        inbox.is_subscribed = false;
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let initial_lsub = send_command(&mut stream, "A2 LSUB \"\" \"*\"\r\n", "A2").await;
+    assert!(!initial_lsub.contains("* LSUB (\\HasNoChildren) \"/\" \"INBOX\""));
+
+    let subscribe = send_command(&mut stream, "A3 SUBSCRIBE Inbox\r\n", "A3").await;
+    assert!(subscribe.contains("A3 OK SUBSCRIBE completed"));
+    let subscribed_lsub = send_command(&mut stream, "A4 LSUB \"\" \"*\"\r\n", "A4").await;
+    assert!(subscribed_lsub.contains("\"INBOX\""));
+
+    let unsubscribe = send_command(&mut stream, "A5 UNSUBSCRIBE Inbox\r\n", "A5").await;
+    assert!(unsubscribe.contains("A5 OK UNSUBSCRIBE completed"));
+    let final_lsub = send_command(&mut stream, "A6 LSUB \"\" \"*\"\r\n", "A6").await;
+    assert!(!final_lsub.contains("* LSUB (\\HasNoChildren) \"/\" \"INBOX\""));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn unicode_nested_paths_and_list_wildcards_work_by_segment() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let create_projects = send_command(&mut stream, "A3 CREATE \"Projects\"\r\n", "A3").await;
+    assert!(create_projects.contains("A3 OK CREATE completed"));
+    let create_alpha = send_command(&mut stream, "A4 CREATE \"Projects/Alpha\"\r\n", "A4").await;
+    assert!(create_alpha.contains("A4 OK CREATE completed"));
+    let create_beta = send_command(&mut stream, "A5 CREATE \"Projects/Beta\"\r\n", "A5").await;
+    assert!(create_beta.contains("A5 OK CREATE completed"));
+    let create_quarter =
+        send_command(&mut stream, "A6 CREATE \"Projects/Alpha/Q1\"\r\n", "A6").await;
+    assert!(create_quarter.contains("A6 OK CREATE completed"));
+    let create_cases = send_command(&mut stream, "A7 CREATE \"案件\"\r\n", "A7").await;
+    assert!(create_cases.contains("A7 OK CREATE completed"));
+    let create_year = send_command(&mut stream, "A8 CREATE \"案件/2026\"\r\n", "A8").await;
+    assert!(create_year.contains("A8 OK CREATE completed"));
+    let create_client = send_command(&mut stream, "A9 CREATE \"案件/顧客\"\r\n", "A9").await;
+    assert!(create_client.contains("A9 OK CREATE completed"));
+    let create_client_q1 =
+        send_command(&mut stream, "A10 CREATE \"案件/顧客/Q1\"\r\n", "A10").await;
+    assert!(create_client_q1.contains("A10 OK CREATE completed"));
+    let create_cafe = send_command(&mut stream, "A11 CREATE \"Café\"\r\n", "A11").await;
+    assert!(create_cafe.contains("A11 OK CREATE completed"));
+
+    let top_level = send_command(&mut stream, "A12 LIST \"\" \"%\"\r\n", "A12").await;
+    assert!(top_level.contains("\"Projects\""));
+    assert!(top_level.contains("\"案件\""));
+    assert!(top_level.contains("\"Café\""));
+    assert!(!top_level.contains("\"Projects/Alpha\""));
+    assert!(!top_level.contains("\"案件/2026\""));
+
+    let project_children =
+        send_command(&mut stream, "A13 LIST \"\" \"Projects/%\"\r\n", "A13").await;
+    assert_eq!(project_children.matches("* LIST ").count(), 2);
+    assert!(project_children.contains("\"Projects/Alpha\""));
+    assert!(project_children.contains("\"Projects/Beta\""));
+    assert!(!project_children.contains("\"Projects/Alpha/Q1\""));
+
+    let one_level = send_command(&mut stream, "A14 LIST \"\" \"案件/%\"\r\n", "A14").await;
+    assert_eq!(one_level.matches("* LIST ").count(), 2);
+    assert!(one_level.contains("\"案件/2026\""));
+    assert!(one_level.contains("\"案件/顧客\""));
+    assert!(!one_level.contains("\"案件/顧客/Q1\""));
+
+    let recursive = send_command(&mut stream, "A15 LIST \"\" \"案*\"\r\n", "A15").await;
+    assert_eq!(recursive.matches("* LIST ").count(), 4);
+
+    let suffix = send_command(&mut stream, "A16 LIST \"\" \"*fé\"\r\n", "A16").await;
+    assert_eq!(suffix.matches("* LIST ").count(), 1);
+    assert!(suffix.contains("\"Café\""));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn malformed_utf8_mailbox_paths_are_rejected() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let empty_segment = send_command(&mut stream, "A3 CREATE \"案件//2026\"\r\n", "A3").await;
+    assert!(empty_segment.contains("A3 NO mailbox path contains an empty segment"));
+
+    let control = send_command(&mut stream, "A4 CREATE \"Bad\tName\"\r\n", "A4").await;
+    assert!(control.contains("A4 NO mailbox name contains a control character"));
+
+    let line_separator = send_command(&mut stream, "A5 CREATE \"Bad\u{2028}Name\"\r\n", "A5").await;
+    assert!(line_separator.contains("A5 NO mailbox name contains a control character"));
+
+    let invisible = send_command(&mut stream, "A6 CREATE \"Bad\u{200B}Name\"\r\n", "A6").await;
+    assert!(invisible.contains("A6 NO mailbox name contains an unsafe invisible character"));
+
+    let wildcard = send_command(&mut stream, "A7 CREATE \"Bad*Name\"\r\n", "A7").await;
+    assert!(wildcard.contains("A7 NO mailbox name must not contain LIST wildcards"));
 
     task.abort();
 }
@@ -1712,32 +1956,32 @@ async fn append_copy_move_and_expunge_preserve_canonical_uid_state() {
         email.mailbox_role == "sent" && email.uid == 3 && email.subject == "New sent import"
     }));
 
-    let create_archive = send_command(&mut stream, "A3 CREATE Archive\r\n", "A3").await;
-    assert!(create_archive.contains("A3 OK CREATE completed"));
+    let create_reference = send_command(&mut stream, "A3 CREATE Reference\r\n", "A3").await;
+    assert!(create_reference.contains("A3 OK CREATE completed"));
     let select_inbox = send_command(&mut stream, "A4 SELECT Inbox\r\n", "A4").await;
     assert!(select_inbox.contains("* OK [UIDVALIDITY 111]"));
     assert!(select_inbox.contains("* OK [UIDNEXT 2]"));
 
-    let copy = send_command(&mut stream, "A5 UID COPY 1 Archive\r\n", "A5").await;
+    let copy = send_command(&mut stream, "A5 UID COPY 1 Reference\r\n", "A5").await;
     assert!(copy.contains("A5 OK [COPYUID 1004 1 1] COPY completed"));
     let inbox_after_copy = send_command(&mut stream, "A6 UID FETCH 1 (UID FLAGS)\r\n", "A6").await;
     assert!(inbox_after_copy.contains("* 1 FETCH (UID 1 FLAGS ("));
 
-    let select_archive = send_command(&mut stream, "A7 SELECT Archive\r\n", "A7").await;
-    assert!(select_archive.contains("* 1 EXISTS"));
-    assert!(select_archive.contains("* OK [UIDVALIDITY 1004]"));
-    assert!(select_archive.contains("* OK [UIDNEXT 2]"));
-    let archive_fetch = send_command(&mut stream, "A8 UID FETCH 1 (UID FLAGS)\r\n", "A8").await;
-    assert!(archive_fetch.contains("* 1 FETCH (UID 1 FLAGS ("));
+    let select_reference = send_command(&mut stream, "A7 SELECT Reference\r\n", "A7").await;
+    assert!(select_reference.contains("* 1 EXISTS"));
+    assert!(select_reference.contains("* OK [UIDVALIDITY 1004]"));
+    assert!(select_reference.contains("* OK [UIDNEXT 2]"));
+    let reference_fetch = send_command(&mut stream, "A8 UID FETCH 1 (UID FLAGS)\r\n", "A8").await;
+    assert!(reference_fetch.contains("* 1 FETCH (UID 1 FLAGS ("));
 
     let move_to_trash =
         send_command(&mut stream, "A9 UID MOVE 1 \"Deleted Items\"\r\n", "A9").await;
     assert!(move_to_trash.contains("* 1 EXPUNGE"));
     assert!(move_to_trash.contains("* 0 EXISTS"));
     assert!(move_to_trash.contains("A9 OK [COPYUID 444 1 1] MOVE completed"));
-    let archive_after_move = send_command(&mut stream, "A10 SELECT Archive\r\n", "A10").await;
-    assert!(archive_after_move.contains("* 0 EXISTS"));
-    assert!(archive_after_move.contains("* OK [UIDNEXT 2]"));
+    let reference_after_move = send_command(&mut stream, "A10 SELECT Reference\r\n", "A10").await;
+    assert!(reference_after_move.contains("* 0 EXISTS"));
+    assert!(reference_after_move.contains("* OK [UIDNEXT 2]"));
 
     let select_trash = send_command(&mut stream, "A11 SELECT Trash\r\n", "A11").await;
     assert!(select_trash.contains("* 1 EXISTS"));
@@ -2012,16 +2256,18 @@ async fn outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable() {
 #[tokio::test]
 async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
     let store = FakeStore::new();
-    let archive_id = Uuid::new_v4();
+    let reference_id = Uuid::new_v4();
     {
         let mut mailboxes = store.mailboxes.lock().unwrap();
         mailboxes.push(JmapMailbox {
-            id: archive_id,
+            id: reference_id,
+            parent_id: None,
             role: String::new(),
-            name: "Archive".to_string(),
+            name: "Reference".to_string(),
             sort_order: 30,
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: true,
         });
     }
     {
@@ -2030,9 +2276,9 @@ async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
             "33333333-3333-3333-3333-333333333333",
             1,
             4,
-            &archive_id.to_string(),
+            &reference_id.to_string(),
             "",
-            "Archive",
+            "Reference",
             "First",
             true,
             false,
@@ -2041,9 +2287,9 @@ async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
             "44444444-4444-4444-4444-444444444444",
             2,
             5,
-            &archive_id.to_string(),
+            &reference_id.to_string(),
             "",
-            "Archive",
+            "Reference",
             "Second",
             true,
             false,
@@ -2059,7 +2305,7 @@ async fn condstore_store_reports_modified_and_keeps_fresh_messages() {
     let mut stream = TcpStream::connect(address).await.unwrap();
     let _ = read_response(&mut stream, None).await;
     let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
-    let _ = send_command(&mut stream, "A2 SELECT Archive\r\n", "A2").await;
+    let _ = send_command(&mut stream, "A2 SELECT Reference\r\n", "A2").await;
 
     {
         let next_modseq = store.next_modseq();
@@ -2221,7 +2467,7 @@ async fn search_and_uid_search_use_canonical_visible_fields_without_bcc() {
             address: "frank@example.test".to_string(),
             display_name: Some("Frank".to_string()),
         }];
-        third.body_text = "Gamma archive body".to_string();
+        third.body_text = "Gamma Reference body".to_string();
         third.sent_at = Some("2026-04-10T07:00:00Z".to_string());
         third.received_at = "2026-04-10T07:00:00Z".to_string();
     }
@@ -2729,16 +2975,18 @@ async fn idle_reports_selected_mailbox_flag_changes() {
 #[tokio::test]
 async fn store_survives_concurrent_selected_mailbox_removal() {
     let store = FakeStore::new();
-    let archive_id = Uuid::new_v4();
+    let reference_id = Uuid::new_v4();
     {
         let mut mailboxes = store.mailboxes.lock().unwrap();
         mailboxes.push(JmapMailbox {
-            id: archive_id,
+            id: reference_id,
+            parent_id: None,
             role: String::new(),
-            name: "Archive".to_string(),
+            name: "Reference".to_string(),
             sort_order: 30,
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: true,
         });
     }
     {
@@ -2791,16 +3039,18 @@ async fn store_survives_concurrent_selected_mailbox_removal() {
 #[tokio::test]
 async fn idle_reports_replacement_when_selected_mailbox_membership_changes_without_count_change() {
     let store = FakeStore::new();
-    let archive_id = Uuid::new_v4();
+    let reference_id = Uuid::new_v4();
     {
         let mut mailboxes = store.mailboxes.lock().unwrap();
         mailboxes.push(JmapMailbox {
-            id: archive_id,
+            id: reference_id,
+            parent_id: None,
             role: String::new(),
-            name: "Archive".to_string(),
+            name: "Reference".to_string(),
             sort_order: 30,
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: true,
         });
     }
 
@@ -2825,9 +3075,9 @@ async fn idle_reports_replacement_when_selected_mailbox_membership_changes_witho
             .iter_mut()
             .find(|email| email.mailbox_name == "Inbox")
             .unwrap();
-        moved.mailbox_id = archive_id;
+        moved.mailbox_id = reference_id;
         moved.mailbox_role.clear();
-        moved.mailbox_name = "Archive".to_string();
+        moved.mailbox_name = "Reference".to_string();
         moved.uid = 3;
         moved.modseq = moved_modseq;
         emails.push(email(
@@ -3215,11 +3465,13 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
 fn mailbox(id: &str, role: &str, name: &str, sort_order: i32) -> JmapMailbox {
     JmapMailbox {
         id: Uuid::parse_str(id).unwrap(),
+        parent_id: None,
         role: role.to_string(),
         name: name.to_string(),
         sort_order,
         total_emails: 0,
         unread_emails: 0,
+        is_subscribed: true,
     }
 }
 

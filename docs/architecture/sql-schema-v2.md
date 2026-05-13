@@ -85,6 +85,10 @@ one or more mailbox memberships through `mailbox_messages`.
 - special-use role
 - hierarchy fields
 
+`mailbox_subscriptions` owns per-subscriber mailbox subscription state. JMAP
+`Mailbox.isSubscribed` and IMAP `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB` must use
+that table; protocol adapters must not maintain separate subscription lists.
+
 Mailbox cached counters must remain internally consistent; `unread_messages`
 cannot exceed `total_messages`. Display names are unique within a parent
 folder, and root names are unique per account. Parent-folder lookup is indexed
@@ -485,6 +489,7 @@ collaboration, rights, or user-visible state.
 ### Mail, MIME, Search, and Attachments
 
 - `mailboxes`
+- `mailbox_subscriptions`
 - `storage_pools`
 - `blobs`
 - `blob_placements`

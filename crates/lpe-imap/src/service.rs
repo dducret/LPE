@@ -12,14 +12,12 @@ use uuid::Uuid;
 
 use crate::{
     parse::parse_request_line,
-    render::{
-        render_mailbox_name, render_selected_updates, sanitize_imap_quoted, sanitize_imap_text,
-    },
+    render::{render_mailbox_response_name, render_selected_updates, sanitize_imap_text},
     store::ImapStore,
 };
 
 const CAPABILITIES: &str =
-    "IMAP4rev1 AUTH=PLAIN AUTH=LOGIN AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ENABLE ACL SPECIAL-USE UNSELECT";
+    "IMAP4rev2 IMAP4rev1 AUTH=PLAIN AUTH=LOGIN AUTH=XOAUTH2 SASL-IR ID IDLE MOVE NAMESPACE UIDPLUS CONDSTORE ENABLE UTF8=ACCEPT ACL SPECIAL-USE UNSELECT";
 
 #[derive(Clone)]
 pub struct ImapServer<S, D> {
@@ -156,6 +154,7 @@ pub(crate) struct Session<S, D> {
     pub(crate) validator: Arc<Validator<D>>,
     pub(crate) principal: Option<AccountPrincipal>,
     pub(crate) selected: Option<SelectedMailbox>,
+    pub(crate) utf8_accept_enabled: bool,
 }
 
 #[derive(Clone)]
@@ -180,6 +179,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             validator,
             principal: None,
             selected: None,
+            utf8_accept_enabled: false,
         }
     }
 
@@ -450,7 +450,7 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         Ok(true)
     }
 
-    async fn handle_enable<W>(&self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
+    async fn handle_enable<W>(&mut self, tag: &str, arguments: &str, writer: &mut W) -> Result<bool>
     where
         W: AsyncWriteExt + Unpin,
     {
@@ -460,6 +460,9 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
             .filter_map(|capability| {
                 if capability.eq_ignore_ascii_case("CONDSTORE") {
                     Some("CONDSTORE")
+                } else if capability.eq_ignore_ascii_case("UTF8=ACCEPT") {
+                    self.utf8_accept_enabled = true;
+                    Some("UTF8=ACCEPT")
                 } else {
                     None
                 }
@@ -491,8 +494,8 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         writer
             .write_all(
                 format!(
-                    "* QUOTAROOT \"{}\"\r\n",
-                    sanitize_imap_quoted(&render_mailbox_name(&mailbox))
+                    "* QUOTAROOT {}\r\n",
+                    render_mailbox_response_name(&mailbox, self.utf8_accept_enabled)
                 )
                 .as_bytes(),
             )

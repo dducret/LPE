@@ -68,6 +68,13 @@ pub trait ImapStore: AccountAuthStore {
         mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
+    fn set_mailbox_subscription<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        is_subscribed: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
     fn copy_imap_email<'a>(
         &'a self,
         account_id: Uuid,
@@ -238,6 +245,25 @@ impl ImapStore for Storage {
         Box::pin(async move {
             self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
                 .await
+        })
+    }
+
+    fn set_mailbox_subscription<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        is_subscribed: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            lpe_storage::Storage::set_mailbox_subscription(
+                self,
+                account_id,
+                mailbox_id,
+                is_subscribed,
+                audit,
+            )
+            .await
         })
     }
 

@@ -80,33 +80,39 @@ impl FakeStore {
     fn draft_mailbox() -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+            parent_id: None,
             role: "drafts".to_string(),
             name: "Drafts".to_string(),
             sort_order: 10,
             total_emails: 1,
             unread_emails: 0,
+            is_subscribed: true,
         }
     }
 
     fn inbox_mailbox() -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+            parent_id: None,
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 1,
             total_emails: 1,
             unread_emails: 1,
+            is_subscribed: true,
         }
     }
 
     fn sent_mailbox() -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+            parent_id: None,
             role: "sent".to_string(),
             name: "Sent".to_string(),
             sort_order: 2,
             total_emails: 1,
             unread_emails: 0,
+            is_subscribed: true,
         }
     }
 

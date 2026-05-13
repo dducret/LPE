@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::{MailboxNamePolicy, MailboxPath};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -39,19 +40,17 @@ pub(crate) struct PartialRange {
 }
 
 pub(crate) fn mailbox_name_matches(display_name: &str, role: &str, requested: &str) -> bool {
-    if requested.eq_ignore_ascii_case(display_name)
-        || (role == "inbox" && requested.eq_ignore_ascii_case("INBOX"))
-    {
-        return true;
+    if let Some(system_role) = MailboxNamePolicy::system_role_for_display_name(requested) {
+        return system_role == role;
     }
 
-    let requested = requested.trim().to_ascii_lowercase();
-    match role {
-        "drafts" => matches!(requested.as_str(), "draft" | "drafts"),
-        "sent" => matches!(requested.as_str(), "sent" | "sent items" | "sent messages"),
-        "trash" => matches!(requested.as_str(), "deleted" | "deleted items" | "trash"),
-        _ => false,
-    }
+    let requested = MailboxPath::parse(requested);
+    let Ok(requested) = requested else {
+        return false;
+    };
+    let requested_key = MailboxNamePolicy::canonical_key(requested.as_str());
+    let display_key = MailboxNamePolicy::canonical_key(display_name);
+    requested_key.collides_with(&display_key)
 }
 
 pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
@@ -61,6 +60,8 @@ pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
         "sent" => flags.push("\\Sent"),
         "drafts" => flags.push("\\Drafts"),
         "trash" => flags.push("\\Trash"),
+        "junk" => flags.push("\\Junk"),
+        "archive" => flags.push("\\Archive"),
         _ => {}
     }
     format!("({})", flags.join(" "))
@@ -71,6 +72,18 @@ pub(crate) fn render_mailbox_name(mailbox: &JmapMailbox) -> String {
         "INBOX".to_string()
     } else {
         mailbox.name.clone()
+    }
+}
+
+pub(crate) fn render_mailbox_response_name(mailbox: &JmapMailbox, utf8_enabled: bool) -> String {
+    render_imap_mailbox_string(&render_mailbox_name(mailbox), utf8_enabled)
+}
+
+pub(crate) fn render_imap_mailbox_string(value: &str, utf8_enabled: bool) -> String {
+    if utf8_enabled || value.is_ascii() {
+        format!("\"{}\"", sanitize_imap_quoted(value))
+    } else {
+        format!("{{{}}}\r\n{}", value.len(), value)
     }
 }
 
@@ -380,6 +393,7 @@ pub(crate) fn render_status_response(
     emails: &[ImapEmail],
     requested: &[String],
     state: &ImapMailboxState,
+    utf8_enabled: bool,
 ) -> String {
     let unseen = emails.iter().filter(|email| email.unread).count();
     let items = requested
@@ -396,8 +410,8 @@ pub(crate) fn render_status_response(
         .collect::<Vec<_>>()
         .join(" ");
     format!(
-        "* STATUS \"{}\" ({})\r\n",
-        sanitize_imap_quoted(&render_mailbox_name(mailbox)),
+        "* STATUS {} ({})\r\n",
+        render_mailbox_response_name(mailbox, utf8_enabled),
         items
     )
 }
@@ -1305,9 +1319,45 @@ pub(crate) fn first_unseen_sequence(selected: &SelectedMailbox) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::{render_fetch_response, FetchAttributes, FetchItem};
-    use lpe_storage::{ImapEmail, ImapMimePart};
+    use super::{
+        mailbox_name_matches, render_fetch_response, render_list_flags, render_mailbox_name,
+        FetchAttributes, FetchItem,
+    };
+    use lpe_storage::{ImapEmail, ImapMimePart, JmapMailbox};
     use uuid::Uuid;
+
+    #[test]
+    fn reserved_mailbox_name_matching_is_role_bound() {
+        assert!(mailbox_name_matches("Courrier entrant", "inbox", "INBOX"));
+        assert!(!mailbox_name_matches("INBOX", "custom", "INBOX"));
+        assert!(!mailbox_name_matches("Sent Items", "custom", "Sent Items"));
+        assert!(mailbox_name_matches("Projects", "custom", "projects"));
+    }
+
+    #[test]
+    fn special_use_flags_are_role_based_for_localized_names() {
+        let mailbox = JmapMailbox {
+            id: Uuid::new_v4(),
+            parent_id: None,
+            role: "sent".to_string(),
+            name: "Gesendet".to_string(),
+            sort_order: 20,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        assert_eq!(render_mailbox_name(&mailbox), "Gesendet");
+        assert_eq!(
+            render_list_flags(&mailbox.role, false),
+            "(\\HasNoChildren \\Sent)"
+        );
+        assert_eq!(
+            render_list_flags("archive", false),
+            "(\\HasNoChildren \\Archive)"
+        );
+        assert_eq!(render_list_flags("junk", false), "(\\HasNoChildren \\Junk)");
+    }
 
     #[test]
     fn fetch_envelope_uses_parseable_sender_fallback() {

@@ -1288,12 +1288,17 @@ fn mailbox_state_fingerprint(
         })
         .unwrap_or((true, true, is_drafts, false));
     opaque_state_fingerprint(&format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        mailbox
+            .parent_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
         mailbox.role,
         mailbox.name,
         mailbox.sort_order,
         mailbox.total_emails,
         mailbox.unread_emails,
+        mailbox.is_subscribed,
         may_read,
         may_draft,
         may_draft,

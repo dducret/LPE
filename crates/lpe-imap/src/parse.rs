@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::{MailboxNamePolicy, MailboxPath};
 
 #[derive(Debug)]
 pub(crate) struct RequestLine {
@@ -109,4 +110,19 @@ pub(crate) fn first_token(arguments: &str, error: &str) -> Result<String> {
         .into_iter()
         .next()
         .ok_or_else(|| anyhow!(error.to_string()))
+}
+
+pub(crate) fn parse_mailbox_path_token(arguments: &str, error: &str) -> Result<MailboxPath> {
+    let mailbox_name = first_token(arguments, error)?;
+    parse_mailbox_path(&mailbox_name)
+}
+
+pub(crate) fn parse_mailbox_path(value: &str) -> Result<MailboxPath> {
+    if value.contains(['%', '*']) {
+        bail!("mailbox name must not contain LIST wildcards");
+    }
+    if MailboxNamePolicy::system_role_for_display_name(value).is_some() {
+        return Ok(MailboxPath::system(value)?);
+    }
+    Ok(MailboxPath::parse(value)?)
 }

@@ -52,11 +52,13 @@ pub struct ActiveSyncAttachmentContent {
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapMailbox {
     pub id: Uuid,
+    pub parent_id: Option<Uuid>,
     pub role: String,
     pub name: String,
     pub sort_order: i32,
     pub total_emails: u32,
     pub unread_emails: u32,
+    pub is_subscribed: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -222,7 +224,9 @@ pub struct JmapUploadBlob {
 pub struct JmapMailboxCreateInput {
     pub account_id: Uuid,
     pub name: String,
+    pub parent_id: Option<Uuid>,
     pub sort_order: Option<i32>,
+    pub is_subscribed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -230,7 +234,9 @@ pub struct JmapMailboxUpdateInput {
     pub account_id: Uuid,
     pub mailbox_id: Uuid,
     pub name: Option<String>,
+    pub parent_id: Option<Option<Uuid>>,
     pub sort_order: Option<i32>,
+    pub is_subscribed: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -596,12 +602,19 @@ impl Storage {
             r#"
             SELECT
                 mb.id,
+                mb.parent_mailbox_id,
                 mb.role,
                 mb.display_name,
                 mb.sort_order,
                 mb.total_messages::bigint AS total_emails,
-                mb.unread_messages::bigint AS unread_emails
+                mb.unread_messages::bigint AS unread_emails,
+                COALESCE(ms.is_subscribed, TRUE) AS is_subscribed
             FROM mailboxes mb
+            LEFT JOIN mailbox_subscriptions ms
+              ON ms.tenant_id = mb.tenant_id
+             AND ms.mailbox_account_id = mb.account_id
+             AND ms.mailbox_id = mb.id
+             AND ms.subscriber_account_id = $2
             WHERE mb.tenant_id = $1
               AND mb.account_id = $2
             ORDER BY mb.sort_order ASC, lower(mb.display_name) ASC
@@ -616,11 +629,13 @@ impl Storage {
             .into_iter()
             .map(|row| JmapMailbox {
                 id: row.id,
+                parent_id: row.parent_mailbox_id,
                 role: row.role,
                 name: row.display_name,
                 sort_order: row.sort_order,
                 total_emails: row.total_emails.max(0) as u32,
                 unread_emails: row.unread_emails.max(0) as u32,
+                is_subscribed: row.is_subscribed,
             })
             .collect())
     }
@@ -705,6 +720,7 @@ impl Storage {
         tx: &mut sqlx::Transaction<'_, Postgres>,
         tenant_id: &Uuid,
         account_id: Uuid,
+        parent_id: Option<Uuid>,
         display_name: &str,
         except_mailbox_id: Option<Uuid>,
     ) -> Result<()> {
@@ -714,10 +730,12 @@ impl Storage {
             SELECT id, display_name
             FROM mailboxes
             WHERE tenant_id = $1 AND account_id = $2
+              AND parent_mailbox_id IS NOT DISTINCT FROM $3
             "#,
         )
         .bind(tenant_id)
         .bind(account_id)
+        .bind(parent_id)
         .fetch_all(&mut **tx)
         .await?;
 
@@ -736,6 +754,78 @@ impl Storage {
         Ok(())
     }
 
+    async fn ensure_mailbox_parent_valid_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        parent_id: Option<Uuid>,
+    ) -> Result<()> {
+        let Some(parent_id) = parent_id else {
+            return Ok(());
+        };
+        if mailbox_id.is_some_and(|mailbox_id| mailbox_id == parent_id) {
+            bail!("mailbox parentId creates a cycle");
+        }
+
+        let mut current = Some(parent_id);
+        while let Some(candidate_id) = current {
+            let row = sqlx::query(
+                r#"
+                SELECT parent_mailbox_id
+                FROM mailboxes
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                LIMIT 1
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(candidate_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .ok_or_else(|| {
+                anyhow!("mailbox parentId must reference a mailbox in the same account")
+            })?;
+
+            current = row.try_get("parent_mailbox_id")?;
+            if mailbox_id.is_some_and(|mailbox_id| Some(mailbox_id) == current) {
+                bail!("mailbox parentId creates a cycle");
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn set_mailbox_subscription_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        mailbox_account_id: Uuid,
+        mailbox_id: Uuid,
+        subscriber_account_id: Uuid,
+        is_subscribed: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_subscriptions (
+                tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id, is_subscribed
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id)
+            DO UPDATE
+            SET is_subscribed = EXCLUDED.is_subscribed,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(mailbox_account_id)
+        .bind(mailbox_id)
+        .bind(subscriber_account_id)
+        .bind(is_subscribed)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
+    }
+
     pub async fn create_jmap_mailbox(
         &self,
         input: JmapMailboxCreateInput,
@@ -747,6 +837,9 @@ impl Storage {
             .await?;
 
         if let Some(role) = system_mailbox_role_for_display_name(&input.name) {
+            if input.parent_id.is_some() {
+                bail!("system mailbox cannot have parentId");
+            }
             let display_name = canonical_system_mailbox_display_name(role)
                 .ok_or_else(|| anyhow!("system mailbox display name not found"))?;
             let sort_order = match role {
@@ -767,6 +860,15 @@ impl Storage {
                     365,
                 )
                 .await?;
+            Self::set_mailbox_subscription_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                mailbox_id,
+                input.account_id,
+                input.is_subscribed,
+            )
+            .await?;
             self.insert_audit(&mut tx, &tenant_id, audit).await?;
             tx.commit().await?;
 
@@ -779,10 +881,19 @@ impl Storage {
         }
 
         let name = MailboxDisplayName::new(&input.name)?.into_string();
+        Self::ensure_mailbox_parent_valid_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            None,
+            input.parent_id,
+        )
+        .await?;
         Self::ensure_mailbox_name_available_in_tx(
             &mut tx,
             &tenant_id,
             input.account_id,
+            input.parent_id,
             &name,
             None,
         )
@@ -807,17 +918,29 @@ impl Storage {
             .await?;
         sqlx::query(
             r#"
-            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, uid_validity)
-            VALUES ($1, $2, $3, 'custom', $4, $5, $6)
+            INSERT INTO mailboxes (
+                id, tenant_id, account_id, parent_mailbox_id, role, display_name, sort_order, uid_validity
+            )
+            VALUES ($1, $2, $3, $4, 'custom', $5, $6, $7)
             "#,
         )
         .bind(mailbox_id)
         .bind(&tenant_id)
         .bind(input.account_id)
+        .bind(input.parent_id)
         .bind(&name)
         .bind(sort_order)
         .bind(allocate_uid_validity())
         .execute(&mut *tx)
+        .await?;
+        Self::set_mailbox_subscription_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            mailbox_id,
+            input.account_id,
+            input.is_subscribed,
+        )
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
@@ -833,7 +956,7 @@ impl Storage {
             "created",
             modseq,
             &principals,
-            serde_json::json!({"name": name}),
+            serde_json::json!({"name": name, "parentId": input.parent_id}),
         )
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
@@ -890,8 +1013,10 @@ impl Storage {
         }
 
         let name = MailboxPath::parse(name)?.into_string();
-        Self::ensure_mailbox_name_available_in_tx(&mut tx, &tenant_id, account_id, &name, None)
-            .await?;
+        Self::ensure_mailbox_name_available_in_tx(
+            &mut tx, &tenant_id, account_id, None, &name, None,
+        )
+        .await?;
 
         let next_sort_order = sqlx::query_scalar::<_, i32>(
             r#"
@@ -922,6 +1047,10 @@ impl Storage {
         .bind(next_sort_order)
         .bind(allocate_uid_validity())
         .execute(&mut *tx)
+        .await?;
+        Self::set_mailbox_subscription_in_tx(
+            &mut tx, &tenant_id, account_id, mailbox_id, account_id, true,
+        )
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
@@ -959,7 +1088,7 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let current = sqlx::query(
             r#"
-            SELECT role, display_name, sort_order
+            SELECT role, display_name, parent_mailbox_id, sort_order
             FROM mailboxes
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             LIMIT 1
@@ -978,15 +1107,26 @@ impl Storage {
         }
 
         let current_name = current.try_get::<String, _>("display_name")?;
+        let current_parent_id = current.try_get::<Option<Uuid>, _>("parent_mailbox_id")?;
         let current_sort_order = current.try_get::<i32, _>("sort_order")?;
         let name = match input.name.as_deref() {
             Some(name) => MailboxDisplayName::new(name)?.into_string(),
             None => current_name,
         };
+        let parent_id = input.parent_id.unwrap_or(current_parent_id);
+        Self::ensure_mailbox_parent_valid_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            Some(input.mailbox_id),
+            parent_id,
+        )
+        .await?;
         Self::ensure_mailbox_name_available_in_tx(
             &mut tx,
             &tenant_id,
             input.account_id,
+            parent_id,
             &name,
             Some(input.mailbox_id),
         )
@@ -998,18 +1138,34 @@ impl Storage {
         sqlx::query(
             r#"
             UPDATE mailboxes
-            SET display_name = $4, sort_order = $5, modseq = GREATEST(modseq + 1, $6), updated_at = NOW()
+            SET parent_mailbox_id = $4,
+                display_name = $5,
+                sort_order = $6,
+                modseq = GREATEST(modseq + 1, $7),
+                updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
         .bind(input.account_id)
         .bind(input.mailbox_id)
+        .bind(parent_id)
         .bind(&name)
         .bind(input.sort_order.unwrap_or(current_sort_order))
         .bind(modseq)
         .execute(&mut *tx)
         .await?;
+        if let Some(is_subscribed) = input.is_subscribed {
+            Self::set_mailbox_subscription_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                input.mailbox_id,
+                input.account_id,
+                is_subscribed,
+            )
+            .await?;
+        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
@@ -1024,7 +1180,7 @@ impl Storage {
             "updated",
             modseq,
             &principals,
-            serde_json::json!({"name": name}),
+            serde_json::json!({"name": name, "parentId": parent_id}),
         )
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
@@ -1071,6 +1227,7 @@ impl Storage {
             &mut tx,
             &tenant_id,
             account_id,
+            None,
             &name,
             Some(mailbox_id),
         )
@@ -1120,6 +1277,65 @@ impl Storage {
             .into_iter()
             .find(|mailbox| mailbox.id == mailbox_id)
             .ok_or_else(|| anyhow!("mailbox update failed"))
+    }
+
+    pub async fn set_mailbox_subscription(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        is_subscribed: bool,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let exists = sqlx::query(
+            r#"
+            SELECT id
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if exists.is_none() {
+            bail!("mailbox not found");
+        }
+
+        Self::set_mailbox_subscription_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            mailbox_id,
+            account_id,
+            is_subscribed,
+        )
+        .await?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox",
+            mailbox_id,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({"isSubscribed": is_subscribed}),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn destroy_jmap_mailbox(

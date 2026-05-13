@@ -166,11 +166,13 @@ impl FakeStore {
     fn mailbox(id: &str, role: &str, name: &str) -> JmapMailbox {
         JmapMailbox {
             id: Uuid::parse_str(id).unwrap(),
+            parent_id: None,
             role: role.to_string(),
             name: name.to_string(),
             sort_order: 40,
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: true,
         }
     }
 
@@ -852,11 +854,13 @@ impl ExchangeStore for FakeStore {
         self.created_mailboxes.lock().unwrap().push(input.clone());
         let mailbox = JmapMailbox {
             id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+            parent_id: input.parent_id,
             role: "custom".to_string(),
             name: input.name,
             sort_order: input.sort_order.unwrap_or(40),
             total_emails: 0,
             unread_emails: 0,
+            is_subscribed: input.is_subscribed,
         };
         self.mailboxes.lock().unwrap().push(mailbox.clone());
         Box::pin(async move { Ok(mailbox) })

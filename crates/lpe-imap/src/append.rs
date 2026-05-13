@@ -12,7 +12,6 @@ use uuid::Uuid;
 
 use crate::{
     parse::{parse_literal_size, tokenize},
-    render::mailbox_name_matches,
     Session,
 };
 
@@ -231,13 +230,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     }
 
     async fn resolve_append_mailbox(&self, mailbox_name: &str) -> Result<JmapMailbox> {
-        let principal = self.require_auth()?;
-        self.store
-            .ensure_imap_mailboxes(principal.account_id)
-            .await?
-            .into_iter()
-            .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, mailbox_name))
-            .ok_or_else(|| anyhow!("mailbox not found"))
+        self.resolve_mailbox_name(mailbox_name).await
     }
 }
 

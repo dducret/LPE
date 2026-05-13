@@ -311,6 +311,26 @@ CREATE INDEX mailboxes_parent_idx
 CREATE INDEX mailboxes_hierarchy_idx
     ON mailboxes (tenant_id, account_id, hierarchy_path);
 
+CREATE TABLE mailbox_subscriptions (
+    tenant_id UUID NOT NULL,
+    mailbox_account_id UUID NOT NULL,
+    mailbox_id UUID NOT NULL,
+    subscriber_account_id UUID NOT NULL,
+    is_subscribed BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id),
+    FOREIGN KEY (tenant_id, mailbox_account_id, mailbox_id)
+        REFERENCES mailboxes (tenant_id, account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, subscriber_account_id)
+        REFERENCES accounts (tenant_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX mailbox_subscriptions_subscriber_idx
+    ON mailbox_subscriptions (tenant_id, subscriber_account_id, is_subscribed);
+
 CREATE TABLE storage_pools (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL CHECK (name = lower(btrim(name)) AND name <> ''),

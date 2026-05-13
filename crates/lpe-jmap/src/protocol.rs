@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct JmapApiRequest {
@@ -129,6 +130,8 @@ pub struct MailboxQueryArguments {
     pub anchor: Option<String>,
     pub anchor_offset: Option<i64>,
     pub limit: Option<u64>,
+    pub filter: Option<Value>,
+    pub sort: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -489,13 +492,17 @@ pub struct EntityQuerySort {
 #[derive(Debug)]
 pub struct MailboxCreateInput {
     pub name: String,
+    pub parent_id: Option<Uuid>,
     pub sort_order: Option<i32>,
+    pub is_subscribed: bool,
 }
 
 #[derive(Debug)]
 pub struct MailboxUpdateInput {
     pub name: Option<String>,
+    pub parent_id: Option<Option<Uuid>>,
     pub sort_order: Option<i32>,
+    pub is_subscribed: Option<bool>,
 }
 
 #[derive(Debug, Default, Clone)]

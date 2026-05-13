@@ -2348,7 +2348,9 @@ where
                     JmapMailboxCreateInput {
                         account_id: principal.account_id,
                         name: display_name.clone(),
+                        parent_id: None,
                         sort_order: None,
+                        is_subscribed: true,
                     },
                     AuditEntryInput {
                         actor: principal.email.clone(),

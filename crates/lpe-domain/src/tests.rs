@@ -173,6 +173,52 @@ fn mailbox_path_rejects_empty_segments() {
 }
 
 #[test]
+fn mailbox_list_pattern_percent_matches_one_hierarchy_level() {
+    assert!(MailboxNamePolicy::list_pattern_matches("Projects", "%"));
+    assert!(MailboxNamePolicy::list_pattern_matches(
+        "Projects/2026",
+        "Projects/%"
+    ));
+    assert!(!MailboxNamePolicy::list_pattern_matches(
+        "Projects/2026/Q1",
+        "Projects/%"
+    ));
+    assert!(!MailboxNamePolicy::list_pattern_matches(
+        "Projects/2026",
+        "%"
+    ));
+}
+
+#[test]
+fn mailbox_list_pattern_star_matches_recursively() {
+    assert!(MailboxNamePolicy::list_pattern_matches(
+        "Projects/2026/Q1",
+        "Projects/*"
+    ));
+    assert!(MailboxNamePolicy::list_pattern_matches(
+        "Projects/2026/Q1",
+        "*"
+    ));
+}
+
+#[test]
+fn mailbox_list_pattern_matches_unicode_after_decoding() {
+    assert!(MailboxNamePolicy::list_pattern_matches(
+        "案件/顧客",
+        "案件/%"
+    ));
+    assert!(!MailboxNamePolicy::list_pattern_matches(
+        "案件/顧客/Q1",
+        "案件/%"
+    ));
+    assert!(MailboxNamePolicy::list_pattern_matches(
+        "Café",
+        "CAFE\u{301}"
+    ));
+    assert!(MailboxNamePolicy::list_pattern_matches("Straße", "STRASSE"));
+}
+
+#[test]
 fn mailbox_segment_rejects_delimiter_in_segment_names() {
     assert_eq!(
         MailboxSegment::new("Projects/2026").unwrap_err(),
@@ -192,6 +238,18 @@ fn mailbox_display_name_rejects_unsafe_invisible_characters() {
 fn mailbox_display_name_rejects_reserved_name_spoofing() {
     assert_eq!(
         MailboxDisplayName::new("ІNBOX").unwrap_err(),
+        MailboxNameError::ReservedName
+    );
+    assert_eq!(
+        MailboxSegment::new("Sent Items").unwrap_err(),
+        MailboxNameError::ReservedName
+    );
+    assert_eq!(
+        MailboxSegment::new("Spam").unwrap_err(),
+        MailboxNameError::ReservedName
+    );
+    assert_eq!(
+        MailboxSegment::new("Archive").unwrap_err(),
         MailboxNameError::ReservedName
     );
     assert_eq!(

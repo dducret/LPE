@@ -38,9 +38,14 @@
 - Canonical behavior:
   - folder aliases such as `Deleted Items` and `Trash` converge on canonical trash
   - internationalized mailbox names use the shared policy in `docs/architecture/internationalized-mailbox-names.md`; IMAP uses IMAP4rev2 UTF-8 behavior, and `UTF8=ACCEPT` is included in the first internationalized mailbox release but must be advertised only when command handling and tests match that behavior
-  - `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB` use canonical persisted subscription state shared with JMAP `isSubscribed`
+  - `CAPABILITY` advertises `IMAP4rev2` and `UTF8=ACCEPT`; clients can enable UTF-8 quoted mailbox names with `ENABLE UTF8=ACCEPT`
+  - `LIST`, `LSUB`, `STATUS`, and mailbox-name responses render mailbox names through the shared IMAP mailbox-name serializer; non-ASCII response names are sent as literals until `UTF8=ACCEPT` is enabled, then as UTF-8 quoted strings
+  - `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB` use canonical persisted `mailbox_subscriptions` state shared with JMAP `isSubscribed`; `LSUB` lists only currently subscribed mailboxes that match the requested pattern
   - mailbox name validation follows the strict Unicode policy in `docs/architecture/internationalized-mailbox-names.md`, including NFC display storage, canonical-key sibling collision checks, reserved-name protection, `/` hierarchy delimiter rules, and rejection of mixed-script and confusable names
-  - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localization is client UI presentation driven by special-use attributes
+  - `CREATE`, `RENAME`, `DELETE`, `SUBSCRIBE`, `UNSUBSCRIBE`, `STATUS`, `SELECT`, `EXAMINE`, `APPEND`, `COPY`, and `MOVE` resolve mailbox names through the shared decoded IMAP mailbox path parser
+  - `LIST` wildcard matching runs over decoded UTF-8 mailbox names; `%` matches one hierarchy segment and `*` matches recursively across `/` delimiters
+  - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localization is client UI presentation driven by special-use attributes, not by storing translated role names
+  - reserved special-use names and compatibility aliases such as `INBOX`, `Sent Items`, and `Deleted Items` resolve only by canonical mailbox role; a custom mailbox whose display name collides with a reserved alias must not be treated as that special-use mailbox
   - `APPEND` uses canonical draft or import persistence
   - flags update canonical message state
   - search uses canonical indexed fields and must not expose `Bcc`
@@ -73,8 +78,25 @@
 | Public IMAPS | `LPE-CT` TLS proxy to private core `lpe-imap` |
 | Autoconfig IMAP | explicit `LPE_AUTOCONFIG_IMAP_HOST` pointing at the public `LPE-CT` IMAPS endpoint |
 
+## LIST Hierarchy Examples
+
+With `/` as the hierarchy delimiter, `LIST "" "%"` returns only selectable
+mailboxes one level below the root, such as `INBOX`, `Sent`, `Projects`, or
+`案件`. It does not return `Projects/Alpha` or `案件/顧客`.
+
+`LIST "" "Projects/%"` returns direct children such as `Projects/Alpha` and
+`Projects/Beta`, but not `Projects/Alpha/Q1`.
+
+`LIST "" "Projects/*"` matches recursively and may return `Projects/Alpha`,
+`Projects/Beta`, and `Projects/Alpha/Q1`.
+
+Wildcard matching is performed after mailbox names are decoded to Unicode
+hierarchy paths. Compatibility aliases such as `Deleted Items` match only
+documented special-use aliases and are not emitted as extra mailbox names.
+
 | Transcript | Local coverage |
 | --- | --- |
+| UTF-8 mailbox lifecycle and `UTF8=ACCEPT` | `crates/lpe-imap::tests::utf8_accept_enables_utf8_mailbox_response_quoting`, `crates/lpe-imap::tests::unicode_mailbox_commands_resolve_and_render_consistently`, `crates/lpe-imap::tests::unicode_nested_paths_and_list_wildcards_work_by_segment`, `crates/lpe-imap::tests::malformed_utf8_mailbox_paths_are_rejected` |
 | Outlook first login/list/select/sync | `crates/lpe-imap::tests::outlook_first_login_list_select_sync_transcript` |
 | Outlook UID refresh | `crates/lpe-imap::tests::outlook_uid_search_refreshes_selected_mailbox_before_fetch` |
 | Outlook large mailbox refresh | `crates/lpe-imap::tests::outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable` |

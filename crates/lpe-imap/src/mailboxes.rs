@@ -1,15 +1,16 @@
 use anyhow::{anyhow, bail, Result};
-use lpe_domain::{MailboxNamePolicy, MailboxPath};
+use lpe_domain::MailboxNamePolicy;
 use lpe_magika::Detector;
 use lpe_storage::{AuditEntryInput, JmapMailbox};
 use tokio::io::AsyncWriteExt;
 use tracing::info;
 
 use crate::{
-    parse::{first_token, tokenize},
+    parse::{parse_mailbox_path, parse_mailbox_path_token, tokenize},
     render::{
         first_unseen_sequence, mailbox_name_matches, parse_status_items, render_list_flags,
-        render_mailbox_name, render_status_response, resolve_message_indexes, sanitize_imap_quoted,
+        render_mailbox_name, render_mailbox_response_name, render_status_response,
+        resolve_message_indexes,
     },
     MessageRefKind, SelectedMailbox, Session,
 };
@@ -71,7 +72,6 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         let mut matched = 0usize;
         for mailbox in mailboxes {
-            let mailbox_name = render_mailbox_name(&mailbox);
             if !mailbox_matches_pattern(&mailbox, &pattern) {
                 continue;
             }
@@ -79,10 +79,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             writer
                 .write_all(
                     format!(
-                        "* {} {} \"/\" \"{}\"\r\n",
+                        "* {} {} \"/\" {}\r\n",
                         command_name,
                         render_list_flags(&mailbox.role, legacy_xlist),
-                        sanitize_imap_quoted(&mailbox_name)
+                        render_mailbox_response_name(&mailbox, self.utf8_accept_enabled)
                     )
                     .as_bytes(),
                 )
@@ -118,7 +118,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         let mut matched = 0usize;
         for mailbox in mailboxes {
-            let mailbox_name = render_mailbox_name(&mailbox);
+            if !mailbox.is_subscribed {
+                continue;
+            }
             if !mailbox_matches_pattern(&mailbox, &pattern) {
                 continue;
             }
@@ -126,9 +128,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             writer
                 .write_all(
                     format!(
-                        "* LSUB {} \"/\" \"{}\"\r\n",
+                        "* LSUB {} \"/\" {}\r\n",
                         render_list_flags(&mailbox.role, false),
-                        sanitize_imap_quoted(&mailbox_name)
+                        render_mailbox_response_name(&mailbox, self.utf8_accept_enabled)
                     )
                     .as_bytes(),
                 )
@@ -151,7 +153,20 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        self.resolve_mailbox_by_name(arguments).await?;
+        let mailbox = self.resolve_mailbox_by_name(arguments).await?;
+        let principal = self.require_auth()?;
+        self.store
+            .set_mailbox_subscription(
+                principal.account_id,
+                mailbox.id,
+                true,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "imap-subscribe-mailbox".to_string(),
+                    subject: format!("subscribe mailbox {}", mailbox.name),
+                },
+            )
+            .await?;
         writer
             .write_all(format!("{tag} OK SUBSCRIBE completed\r\n").as_bytes())
             .await?;
@@ -168,7 +183,20 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        self.resolve_mailbox_by_name(arguments).await?;
+        let mailbox = self.resolve_mailbox_by_name(arguments).await?;
+        let principal = self.require_auth()?;
+        self.store
+            .set_mailbox_subscription(
+                principal.account_id,
+                mailbox.id,
+                false,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "imap-unsubscribe-mailbox".to_string(),
+                    subject: format!("unsubscribe mailbox {}", mailbox.name),
+                },
+            )
+            .await?;
         writer
             .write_all(format!("{tag} OK UNSUBSCRIBE completed\r\n").as_bytes())
             .await?;
@@ -211,7 +239,13 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .fetch_imap_mailbox_state(principal.account_id, mailbox.id)
             .await?;
         let requested = parse_status_items(arguments)?;
-        let response = render_status_response(&mailbox, &emails, &requested, &state);
+        let response = render_status_response(
+            &mailbox,
+            &emails,
+            &requested,
+            &state,
+            self.utf8_accept_enabled,
+        );
 
         writer.write_all(response.as_bytes()).await?;
         writer
@@ -238,8 +272,8 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        let mailbox_name = first_token(arguments, "CREATE expects a mailbox name")?;
-        let mailbox_name = normalize_imap_mailbox_name(&mailbox_name)?;
+        let mailbox_name =
+            parse_mailbox_path_token(arguments, "CREATE expects a mailbox name")?.into_string();
         let principal = self.require_auth()?;
         self.store
             .create_imap_mailbox(
@@ -307,9 +341,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             bail!("RENAME expects source and target mailbox names");
         }
         let mailbox = self.resolve_mailbox_by_name(&tokens[0]).await?;
-        let target_name = normalize_imap_mailbox_name(&tokens[1])?;
+        let target_name = parse_mailbox_path(&tokens[1])?.into_string();
         let principal = self.require_auth()?;
-        self.store
+        let renamed = self
+            .store
             .rename_imap_mailbox(
                 principal.account_id,
                 mailbox.id,
@@ -323,7 +358,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         if let Some(selected) = self.selected.as_mut() {
             if selected.mailbox_id == mailbox.id {
-                selected.mailbox_name = target_name;
+                selected.mailbox_name = renamed.name;
             }
         }
 
@@ -369,17 +404,14 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let principal = self.require_auth()?;
-        let mailbox_name = tokenize(arguments)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("SELECT expects a mailbox name"))?;
+        let mailbox_path = parse_mailbox_path_token(arguments, "SELECT expects a mailbox name")?;
         let mailboxes = self
             .store
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         let mailbox = mailboxes
             .into_iter()
-            .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, &mailbox_name))
+            .find(|candidate| mailbox_matches_path(candidate, &mailbox_path))
             .ok_or_else(|| anyhow!("mailbox not found"))?;
         let emails = self
             .store
@@ -607,7 +639,19 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     }
 
     pub(crate) async fn resolve_mailbox_by_name(&self, arguments: &str) -> Result<JmapMailbox> {
-        let mailbox_name = first_token(arguments, "mailbox name is required")?;
+        let mailbox_path = parse_mailbox_path_token(arguments, "mailbox name is required")?;
+        self.resolve_mailbox_path(&mailbox_path).await
+    }
+
+    pub(crate) async fn resolve_mailbox_name(&self, mailbox_name: &str) -> Result<JmapMailbox> {
+        let mailbox_path = parse_mailbox_path(mailbox_name)?;
+        self.resolve_mailbox_path(&mailbox_path).await
+    }
+
+    async fn resolve_mailbox_path(
+        &self,
+        mailbox_path: &lpe_domain::MailboxPath,
+    ) -> Result<JmapMailbox> {
         let principal = self.require_auth()?;
         let mailboxes = self
             .store
@@ -615,16 +659,13 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         mailboxes
             .into_iter()
-            .find(|candidate| mailbox_name_matches(&candidate.name, &candidate.role, &mailbox_name))
+            .find(|candidate| mailbox_matches_path(candidate, &mailbox_path))
             .ok_or_else(|| anyhow!("mailbox not found"))
     }
 }
 
-fn normalize_imap_mailbox_name(value: &str) -> Result<String> {
-    if MailboxNamePolicy::system_role_for_display_name(value).is_some() {
-        return Ok(value.to_string());
-    }
-    Ok(MailboxPath::parse(value)?.into_string())
+fn mailbox_matches_path(mailbox: &JmapMailbox, path: &lpe_domain::MailboxPath) -> bool {
+    mailbox_name_matches(&mailbox.name, &mailbox.role, path.as_str())
 }
 
 fn parse_list_pattern(arguments: &str) -> Result<String> {
@@ -636,13 +677,7 @@ fn parse_list_pattern(arguments: &str) -> Result<String> {
 }
 
 fn mailbox_pattern_matches(name: &str, pattern: &str) -> bool {
-    if pattern == "*" || pattern == "%" {
-        return true;
-    }
-    wildcard_match(
-        &name.to_ascii_uppercase(),
-        &pattern.replace('%', "*").to_ascii_uppercase(),
-    )
+    MailboxNamePolicy::list_pattern_matches(name, pattern)
 }
 
 fn mailbox_matches_pattern(mailbox: &JmapMailbox, pattern: &str) -> bool {
@@ -664,37 +699,4 @@ fn special_mailbox_aliases(role: &str) -> &'static [&'static str] {
         "trash" => &["Deleted", "Deleted Items", "Trash"],
         _ => &[],
     }
-}
-
-fn wildcard_match(value: &str, pattern: &str) -> bool {
-    let value = value.as_bytes();
-    let pattern = pattern.as_bytes();
-    let (mut value_index, mut pattern_index) = (0usize, 0usize);
-    let mut star_index = None;
-    let mut star_value_index = 0usize;
-
-    while value_index < value.len() {
-        if pattern_index < pattern.len()
-            && (pattern[pattern_index] == value[value_index] || pattern[pattern_index] == b'?')
-        {
-            value_index += 1;
-            pattern_index += 1;
-        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-            star_index = Some(pattern_index);
-            star_value_index = value_index;
-            pattern_index += 1;
-        } else if let Some(index) = star_index {
-            pattern_index = index + 1;
-            star_value_index += 1;
-            value_index = star_value_index;
-        } else {
-            return false;
-        }
-    }
-
-    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
-        pattern_index += 1;
-    }
-
-    pattern_index == pattern.len()
 }

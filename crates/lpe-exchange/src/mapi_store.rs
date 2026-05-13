@@ -437,11 +437,13 @@ mod tests {
         let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
         let mailbox = JmapMailbox {
             id: mailbox_id,
+            parent_id: None,
             role: "custom".to_string(),
             name: "RCA Sync".to_string(),
             sort_order: 10,
             total_emails: 1,
             unread_emails: 0,
+            is_subscribed: true,
         };
         let email = JmapEmail {
             id: message_id,

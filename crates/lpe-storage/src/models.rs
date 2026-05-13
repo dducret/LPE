@@ -57,11 +57,13 @@ pub(crate) struct AuditRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct JmapMailboxRow {
     pub(crate) id: Uuid,
+    pub(crate) parent_mailbox_id: Option<Uuid>,
     pub(crate) role: String,
     pub(crate) display_name: String,
     pub(crate) sort_order: i32,
     pub(crate) total_emails: i64,
     pub(crate) unread_emails: i64,
+    pub(crate) is_subscribed: bool,
 }
 
 #[derive(Debug, FromRow)]

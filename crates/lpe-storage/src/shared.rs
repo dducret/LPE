@@ -110,7 +110,23 @@ impl Storage {
         .fetch_optional(&mut **tx)
         .await?
         {
-            return row.try_get("id").map_err(Into::into);
+            let mailbox_id = row.try_get("id")?;
+            sqlx::query(
+                r#"
+                INSERT INTO mailbox_subscriptions (
+                    tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id, is_subscribed
+                )
+                VALUES ($1, $2, $3, $2, TRUE)
+                ON CONFLICT (tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id)
+                DO NOTHING
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .execute(&mut **tx)
+            .await?;
+            return Ok(mailbox_id);
         }
 
         let display_name = MailboxDisplayName::system(display_name)?.into_string();
@@ -131,6 +147,20 @@ impl Storage {
         .bind(&display_name)
         .bind(sort_order)
         .bind(uid_validity)
+        .execute(&mut **tx)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_subscriptions (
+                tenant_id, mailbox_account_id, mailbox_id, subscriber_account_id, is_subscribed
+            )
+            VALUES ($1, $2, $3, $2, TRUE)
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
         .execute(&mut **tx)
         .await?;
 
