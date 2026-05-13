@@ -2,8 +2,8 @@
 
 ## Purpose
 
-This document records the current status of the `LPE` mailbox storage-pool
-work and the next active Codex prompt pack.
+This document records the current status of the `LPE` mailbox storage-pool work
+and the active Milestone 6 Codex prompt pack.
 
 The target scale example remains 1000 mailboxes with quotas up to 100 GB each,
 or up to 100 TB of logical mailbox capacity before replication, backup,
@@ -29,21 +29,25 @@ Completed:
   implicit migration jobs.
 - Milestone 4: logical quota stability, retention/legal-hold guards, and safe
   old-placement cleanup implemented for database-backed placement rows.
-  Placement cleanup does not delete canonical blobs, messages, MIME parts,
-  attachments, extraction jobs, or attachment text rows.
+- Milestone 5: admin policy and visibility implemented. Global administrators
+  can manage platform storage pools and platform default policy. Tenant
+  administrators can inspect allowed policy summaries and manage authorized
+  tenant, domain, and account policy controls. Admin APIs and the admin UI
+  expose pool health, placement state, migration status, cleanup status, and
+  degraded or blocked metadata without exposing object keys, secrets, provider
+  credentials, or provider-specific internals.
 
 Active next step:
 
-- Milestone 5: admin policy and visibility. This adds management APIs, health
-  and migration status visibility, and the admin UI surface for storage pools
-  and policy. It must not add cloud backends, mailbox-level policy, or automatic
-  migration on policy change.
+- Milestone 6: S3-compatible object storage. This adds the first non-database
+  blob backend through the existing storage-pool and placement model. It must
+  remain provider-neutral and must not add AWS- or Azure-specific behavior.
 
 Deferred from the current release:
 
-- Provider-Specific Cloud Backends will be addressed in a future release.
-  This includes AWS S3, Azure Blob, and provider-specific durability,
-  consistency, cost, restore, and operational behavior.
+- Provider-Specific Cloud Backends will be addressed in a future release. This
+  includes AWS S3, Azure Blob, and provider-specific durability, consistency,
+  cost, restore, and operational behavior.
 
 ## Current Rules
 
@@ -56,107 +60,117 @@ Deferred from the current release:
   vendor APIs.
 - Storage policy is evaluated at write time only. Policy changes record future
   intent and do not implicitly move existing blobs.
-- Mailbox-level policy remains deferred until platform, tenant, domain, and
-  account policy are proven.
+- Platform, tenant, domain, and account storage policy are supported. Existing
+  blobs move only through explicit migration jobs, not through policy changes.
+- Mailbox-level policy remains deferred.
 - Raw RFC 5322 message blobs remain database-backed initially.
+- Admin visibility surfaces status, health, explicit migration jobs, and cleanup
+  blockers only through summarized pool and policy data. It must not expose
+  backend object keys, database internals, secrets, provider credentials, or
+  provider-specific backend configuration.
 - Every new dependency or external implementation idea must be checked against
   `LICENSE.md`.
 
-## Codex Prompt Pack: Milestone 5
+## Codex Prompt Pack: Milestone 6
 
-Use these prompts one at a time. Milestone 5 exposes storage management as
-policy, health, and migration visibility. It must not add S3, AWS, Azure,
-private object storage, mailbox-level policy, or automatic migration when a
-policy changes.
+Use these prompts one at a time. Milestone 6 adds a provider-neutral
+S3-compatible object-storage backend behind the existing `BlobStore`,
+storage-pool, placement, migration, quota, cleanup, and admin visibility model.
+It must not add AWS-specific behavior, Azure-specific behavior, mailbox-level
+policy, or automatic migration when a policy changes.
 
-### Prompt 1: Inspect Admin And Storage Baseline
+### Prompt 1: Inspect Backend Boundary And License Options
 
 ```text
 Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
 LICENSE.md, docs/architecture/sql-schema-v2.md,
 docs/architecture/data-lifecycle-and-compliance.md,
-docs/architecture/web-design.md, and
+docs/architecture/operations-and-disaster-recovery.md, and
 docs/architecture/mailbox-storage-pools-roadmap.md.
 
-Goal: inspect completed storage-pool milestones and current admin API/UI
-patterns before designing Milestone 5.
+Goal: inspect the completed database-backed storage-pool implementation and
+identify the smallest S3-compatible backend design for Milestone 6.
 
 Scope:
-- lpe-storage storage pool, placement, migration, quota, and cleanup code
-- lpe-admin-api routes, authorization, and response patterns
-- web admin list/drawer patterns
-- existing health, dashboard, and diagnostics types
+- lpe-storage BlobStore, storage pool, placement, migration, quota, and cleanup
+  code
+- lpe-admin-api storage pool and visibility code
+- current dependency set and LICENSE.md constraints
+- operations and restore documentation for blob storage
 
 Return:
-- current storage pool and policy data available in lpe-storage
-- current migration and cleanup status data available in lpe-storage
-- current admin roles and authorization checks relevant to platform, tenant,
-  domain, and account policy
+- current backend assumptions in BlobStore and placement code
+- current storage_pool kind/config/status fields
+- candidate S3-compatible client options and their licenses
+- whether any new dependency is required
+- the minimal provider-neutral configuration shape
 - files likely to change
 - risks or unclear points before editing
 
 Do not edit files.
 ```
 
-### Prompt 2: Design Admin API Surface
+### Prompt 2: Design S3-Compatible Backend Contract
 
 ```text
-Design the minimal Milestone 5 admin API for storage pools, storage policy,
-health, and migration visibility.
+Design the Milestone 6 provider-neutral S3-compatible backend contract.
 
 Constraints:
 - PostgreSQL remains the metadata authority.
-- No S3, AWS, Azure, or private object storage implementation.
-- No mailbox-level policy.
-- Policy changes do not implicitly create migration jobs.
-- Tenant administrators can see and manage only allowed tenant/domain/account
-  policy controls.
-- Global administrators can manage platform storage pools and platform default
-  policy.
-- Do not expose backend object keys, database internals, secrets, or provider
-  credentials.
+- Protocol adapters must remain backend-agnostic.
+- Use existing storage_pool and blob_placement metadata where possible.
+- S3-compatible support is provider-neutral; no AWS-only or Azure-only behavior.
+- Raw RFC 5322 message blobs remain database-backed initially.
+- Storage policy is evaluated at write time only.
+- Existing blobs move only through explicit migration jobs.
+- Mailbox-level policy remains deferred.
+- Secrets must use the existing deployment secret model.
+- Object keys, credentials, and provider internals must not leak through admin
+  APIs or protocol responses.
 - Do not add new dependencies unless absolutely required and checked against
   LICENSE.md.
 
 Return:
-- endpoints, methods, request bodies, and response bodies
-- authorization matrix for global admin and tenant admin
-- validation rules for platform, tenant, domain, and account policy
-- health/status fields for degraded pools, missing active placements, retiring
-  placements, migration jobs, and cleanup jobs
-- tests required for authorization, validation, and visibility
+- backend methods and error model
+- storage pool configuration fields
+- object key derivation rules that avoid tenant/domain leakage
+- checksum and size verification rules
+- retry and timeout behavior
+- readiness and health behavior
+- tests required before implementation
 - any simpler alternative and why it is or is not enough
 
 Do not edit code yet.
 ```
 
-### Prompt 3: Implement Storage Pool And Policy Admin APIs
+### Prompt 3: Implement Configuration And Backend Selection
 
 ```text
-Implement the approved Milestone 5 admin APIs for storage pools and storage
-policy.
+Implement the approved Milestone 6 configuration and backend-selection plumbing.
 
 Scope:
-- lpe-storage storage/admin query and mutation functions
-- lpe-admin-api request/response types and routes
-- no admin UI yet
-- no external storage backend
+- lpe-storage backend selection and storage-pool configuration handling
+- lpe-admin-api validation only if storage-pool configuration shape changes
+- no S3 data transfer yet
+- no AWS-specific behavior
+- no Azure-specific behavior
 - no mailbox-level policy
 - no automatic migration on policy changes
 
 Required behavior:
-- global admins can list and manage platform storage pools and platform default
-  policy
-- tenant admins can view allowed pool/policy summaries and manage tenant,
-  domain, and account policy where authorized
-- invalid policy references are rejected
-- object keys, secrets, and provider-specific internals are never returned
+- database-backed pools continue to work unchanged
+- S3-compatible pools can be configured with endpoint, bucket, region or
+  region-like value, path-style/virtual-hosted addressing mode where needed,
+  and secret references
+- credentials are not stored inline in normal database rows unless the approved
+  design explicitly says they are protected
+- admin summaries redact secrets and object key internals
 
 Verification:
-- focused lpe-storage tests for policy persistence and validation
-- focused lpe-admin-api tests for routes and authorization
+- focused lpe-storage tests for configuration validation and backend selection
+- focused lpe-admin-api tests if API validation changed
 - cargo test -p lpe-storage
-- cargo test -p lpe-admin-api
+- cargo test -p lpe-admin-api if admin API code changed
 
 Report:
 - changed files
@@ -164,152 +178,156 @@ Report:
 - explicit non-goals preserved
 ```
 
-### Prompt 4: Implement Migration And Health Visibility APIs
+### Prompt 4: Implement S3-Compatible Put Read Stat Verify
 
 ```text
-Implement Milestone 5 read-only visibility APIs for storage health, placement
-state, migration jobs, and cleanup jobs.
+Implement Milestone 6 S3-compatible object put, read, stat, and verify behavior
+behind the BlobStore backend boundary.
 
 Scope:
-- lpe-storage query functions
-- lpe-admin-api read-only endpoints
-- no migration creation UI unless already approved by the API design
-- no cloud backend
+- lpe-storage only unless compile errors require narrow callers
+- S3-compatible backend only
+- no AWS-specific behavior
+- no Azure-specific behavior
+- no admin UI
 - no mailbox-level policy
+- no automatic migration on policy changes
 
 Required behavior:
-- expose pool health summary without leaking secrets
-- expose counts for active, retiring, deleted, missing, or degraded placements
-- expose migration job status, retry state, last error summary, and target pool
-  summary
-- expose cleanup status and blocked cleanup reasons
-- tenant admins see only tenant-scoped data they are authorized to manage
-- global admins see platform-wide status
+- writes store bytes in the S3-compatible bucket under deterministic,
+  tenant/domain-safe object keys
+- reads fetch bytes through placement metadata only
+- stat returns size and checksum metadata without downloading bytes when the
+  backend supports it
+- verify checks size and checksum against PostgreSQL metadata
+- errors are mapped to storage-layer errors, not missing mailbox/message state
+- database-backed behavior remains unchanged
 
 Verification:
-- tests for global and tenant visibility boundaries
-- tests for degraded and blocked states
+- unit tests for object-key derivation and error mapping
+- integration tests gated by environment variables for put/read/stat/verify
 - cargo test -p lpe-storage
-- cargo test -p lpe-admin-api
 
 Report:
 - changed files
 - exact tests run
-- status fields intentionally omitted for security or scope reasons
+- skipped integration tests and required environment variables, if not run
 ```
 
-### Prompt 5: Build Admin UI List And Drawer
+### Prompt 5: Wire Migration To S3-Compatible Pools
 
 ```text
-Build the Milestone 5 admin UI for storage pool and policy visibility.
-
-Read docs/architecture/web-design.md before editing UI files.
-
-Scope:
-- existing admin web UI only
-- full-width storage pool/policy list
-- primary action in the list header where creation or policy change is allowed
-- right-side drawer for details, policy editing, health, and contextual actions
-- no mailbox-level policy
-- no cloud provider setup UI
-- no placeholder runtime actions
-
-Required behavior:
-- global admins can inspect platform pools, default policy, health, migration
-  status, and cleanup status
-- tenant admins can inspect allowed tenant/domain/account policy and scoped
-  status
-- UI shows degraded, retiring, blocked, and failed states clearly
-- UI never exposes object keys, secrets, or provider internals
-- UI uses the shared Tailwind-based design system and default management
-  pattern
-
-Verification:
-- run the relevant frontend build or tests available in the repository
-- if a local dev server is required, open the admin UI and verify the storage
-  management list/drawer in the browser
-- verify text fits at desktop and mobile widths
-
-Report:
-- changed files
-- exact verification run
-- screenshots or browser checks if performed
-```
-
-### Prompt 6: Add Operations And Audit Coverage
-
-```text
-Add the minimal Milestone 5 operational and audit coverage for storage pool
-policy and visibility.
+Extend explicit migration jobs so durable attachment and MIME-part blobs can
+move between database-backed and S3-compatible placements.
 
 Scope:
-- admin/API audit events for policy changes where audit infrastructure exists
-- health/readiness diagnostics for storage pool metadata consistency
-- operations documentation only where behavior changed
-- no cloud backend
-- no mailbox-level policy
+- lpe-storage migration worker and BlobStore backend routing
+- explicit migration jobs only
+- no policy-triggered automatic migration
+- no raw RFC 5322 message blob migration
+- no AWS-specific behavior
+- no Azure-specific behavior
+- no admin UI changes unless an existing API response must expose a new
+  provider-neutral status
 
 Required behavior:
-- policy changes record who changed what, at which scope, and when
-- degraded storage-pool metadata is visible through admin diagnostics
-- readiness behavior is documented if storage-pool metadata can affect service
-  readiness
-- no user-facing protocol behavior changes
+- migration can copy database-backed placement to S3-compatible placement
+- migration can copy S3-compatible placement to database-backed placement
+- migration can copy between two S3-compatible pools if both are configured
+- checksum and size verification happen before active placement switch
+- source placement remains available through the rollback window
+- repeated worker execution is idempotent
 
 Verification:
-- tests for audit/event records where supported
-- tests or diagnostics checks for degraded metadata state
+- focused lpe-storage tests for migration state transitions
+- S3 integration tests gated by environment variables for copy/verify/switch
 - cargo test -p lpe-storage
-- cargo test -p lpe-admin-api
 
 Report:
 - changed files
 - exact tests run
-- operational gaps intentionally deferred
+- skipped integration tests and required environment variables, if not run
 ```
 
-### Prompt 7: Document Milestone 5 Completion
+### Prompt 6: Add Health Readiness And Operations Coverage
+
+```text
+Add Milestone 6 health, readiness, operations, and restore coverage for
+S3-compatible storage pools.
+
+Scope:
+- lpe-storage health/readiness diagnostics
+- lpe-admin-api visibility only if existing storage health endpoints need new
+  provider-neutral fields
+- operations documentation where behavior changed
+- no AWS-specific behavior
+- no Azure-specific behavior
+- no mailbox-level policy
+
+Required behavior:
+- degraded S3-compatible pools are visible in health/status summaries
+- missing object, checksum mismatch, auth failure, timeout, and unreachable
+  endpoint failures map to distinct operational states where feasible
+- readiness behavior is documented for required and optional pools
+- restore procedure covers PostgreSQL plus S3-compatible object storage
+- user-facing protocols continue to fail as storage errors, not corrupted
+  mailbox state
+
+Verification:
+- focused diagnostics tests for degraded pool states
+- S3 integration tests gated by environment variables for health checks
+- cargo test -p lpe-storage
+- cargo test -p lpe-admin-api if admin visibility changed
+
+Report:
+- changed files
+- exact tests run
+- skipped integration tests and required environment variables, if not run
+```
+
+### Prompt 7: Document Milestone 6 Completion
 
 ```text
 Update only directly relevant architecture documentation for implemented
-Milestone 5 admin policy and visibility.
+Milestone 6 S3-compatible object storage.
 
 Scope:
 - docs/architecture/mailbox-storage-pools-roadmap.md
-- docs/architecture/sql-schema-v2.md if admin-facing schema behavior changed
-- docs/architecture/data-lifecycle-and-compliance.md if policy or cleanup
+- docs/architecture/sql-schema-v2.md if storage-pool or placement schema
   behavior changed
-- docs/architecture/operations-and-disaster-recovery.md if health, readiness,
-  restore, or diagnostics behavior changed
-- docs/architecture/web-design.md only if a durable admin UI rule changed
+- docs/architecture/data-lifecycle-and-compliance.md if lifecycle behavior
+  changed
+- docs/architecture/operations-and-disaster-recovery.md for restore, health,
+  readiness, diagnostics, and backup behavior
+- LICENSE.md only if a new accepted dependency exception is required and
+  approved
 
 Required documentation:
-- platform, tenant, domain, and account policy are supported
-- mailbox-level policy remains deferred
+- S3-compatible storage is provider-neutral and not AWS/Azure-specific support
+- PostgreSQL remains metadata authority
+- protocol adapters remain backend-agnostic
+- raw RFC 5322 message blobs remain database-backed initially
 - policy changes still do not implicitly migrate existing blobs
-- admin UI and APIs expose status, health, and migration visibility without
-  leaking object keys, secrets, or provider internals
+- credentials use the existing deployment secret model
 - Provider-Specific Cloud Backends remain future-release work
 
 Verification:
-- docs do not claim S3/AWS/Azure support is implemented
+- docs do not claim AWS-specific or Azure-specific support is implemented
 - docs do not claim mailbox-level policy is implemented
-- docs clearly distinguish policy changes from explicit migration jobs
 - run tests for any code touched
 ```
 
 ## Future Release: Provider-Specific Cloud Backends
 
 Provider-Specific Cloud Backends will be addressed in a future release after
-Milestone 5 admin policy and visibility is proven. This future work must still
+Milestone 6 S3-compatible object storage is proven. This future work must still
 preserve the rule that PostgreSQL is the metadata authority and protocol
 adapters never talk directly to cloud providers.
 
 Short roadmap:
 
-1. Provider-neutral hardening: prove the storage backend contract with one
-   non-local backend shape, failure injection, restore drills, and degraded
-   pool diagnostics.
+1. Provider-neutral hardening: use the S3-compatible backend evidence to prove
+   failure injection, restore drills, and degraded pool diagnostics.
 2. Dependency and license review: select allowed SDKs or protocol clients under
    the `LICENSE.md` policy before implementation.
 3. AWS S3 backend: implement provider-specific configuration, health checks,

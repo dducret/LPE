@@ -178,7 +178,9 @@ and MIME-part `BlobStore` read/stat/verify paths require an active
 database-backed placement row; a missing active placement is a storage-layer
 failure, not a missing mailbox or message. Schema v2 still treats PostgreSQL as
 the authoritative metadata store. Policy changes record intent for future writes
-only and do not implicitly migrate existing blobs. `blob_migration_jobs` records
+only and do not implicitly migrate existing blobs. `storage_policy_assignments`
+stores admin-managed platform, tenant, domain, and account policy assignments.
+Mailbox-level policy is not part of schema v2. `blob_migration_jobs` records
 explicit Milestone 3 online migration work for durable attachment and MIME-part
 placements between database-backed pools, including retry, verification, switch,
 cancellation, and rollback-window metadata. During the switch, the verified
@@ -192,9 +194,11 @@ placement, or while blob/message retention or legal-hold metadata protects the
 content. Placement cleanup does not delete canonical `blobs`, `messages`,
 `mime_parts`, `attachments`, `attachment_extraction_jobs`, or
 `attachment_texts` rows. Raw RFC 5322 message blobs remain database-backed
-initially and outside migration and placement-cleanup scope. Milestones 3 and 4
-do not add cloud storage, object storage, admin policy UI, or mailbox-level
-storage policy.
+initially and outside migration and placement-cleanup scope. Milestone 5 admin
+APIs and UI expose pool/policy summaries, health, migration jobs, and cleanup
+status without exposing backend object keys, provider credentials, secrets, or
+provider-specific backend internals. Provider-Specific Cloud Backends remain
+future-release work.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation
@@ -378,6 +382,8 @@ collaboration, rights, or user-visible state.
 - `admin_credentials`
 - `admin_sessions`
 - `server_administrators`
+- `storage_policy_assignments`
+- `audit_events`
 
 ### Mail, MIME, Search, and Attachments
 

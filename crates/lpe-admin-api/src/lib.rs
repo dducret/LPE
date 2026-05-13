@@ -34,7 +34,7 @@ pub(crate) use crate::app::{MIN_ADMIN_PASSWORD_LEN, MIN_INTEGRATION_SECRET_LEN};
 pub(crate) use crate::http::bad_request_error;
 pub(crate) use crate::readiness::{
     build_readiness_response, check_optional_http_dependency, ha_activation_check, lpe_ct_base_url,
-    readiness_failed, readiness_ok,
+    readiness_failed, readiness_ok, readiness_warn,
 };
 pub(crate) use crate::security::hash_password;
 pub(crate) use crate::util::{parse_collaboration_kind, parse_sender_delegation_right};

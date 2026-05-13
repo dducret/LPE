@@ -1724,16 +1724,12 @@ CREATE TABLE inference_run_chunks (
 
 CREATE TABLE audit_events (
     id UUID PRIMARY KEY,
-    tenant_id UUID NOT NULL,
-    actor_account_id UUID,
+    tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> ''),
+    actor TEXT NOT NULL CHECK (btrim(actor) <> ''),
     action TEXT NOT NULL CHECK (btrim(action) <> ''),
-    subject_kind TEXT NOT NULL CHECK (btrim(subject_kind) <> ''),
-    subject_id UUID,
-    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (tenant_id, id),
-    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, actor_account_id) REFERENCES accounts (tenant_id, id) ON DELETE RESTRICT
+    UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX audit_events_tenant_created_idx

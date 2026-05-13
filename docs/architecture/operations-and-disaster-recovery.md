@@ -11,6 +11,13 @@ Operations protect canonical `LPE` PostgreSQL state, blob storage, and `LPE-CT` 
   - `LPE-CT` local stores are technical and perimeter-owned
   - `LPE-CT` spool custody must be preserved for accepted but undelivered mail
   - readiness must pass before public routing
+  - core readiness includes a critical `storage-metadata` check: at least one
+    active PostgreSQL storage pool, an active platform default policy, valid
+    policy references, active placements on active pools, and no blobs missing
+    an active placement
+  - admin diagnostics expose storage-pool health, placement counts, explicit
+    migration jobs, cleanup status, and cleanup blockers without exposing object
+    keys, provider credentials, secrets, or provider-specific backend internals
 - Core backup boundary:
   - PostgreSQL database
   - canonical attachment/blob storage
@@ -69,6 +76,8 @@ Operations protect canonical `LPE` PostgreSQL state, blob storage, and `LPE-CT` 
 | Path / command | Purpose |
 | --- | --- |
 | `/health/ready` | readiness check |
+| `/health/ready` `storage-metadata` | critical storage-pool metadata consistency check |
+| Admin storage diagnostics | storage pool health, placement state, migration jobs, and cleanup blockers |
 | `/var/spool/lpe-ct` | sorting-center spool |
 | `/opt/lpe-ct/bin/lpe-ct-host-action` | host action helper |
 | `tools/operations_benchmark.py` | live cold-start, protocol latency, SMTP acceptance, and retry-throughput benchmark |

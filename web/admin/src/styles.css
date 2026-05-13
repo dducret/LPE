@@ -764,6 +764,11 @@ select:focus {
   background: var(--warning-soft);
 }
 
+.pill.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .row {
   justify-content: space-between;
   padding: 12px 0;
@@ -808,6 +813,25 @@ select:focus {
 .management-list-card,
 .account-list-card {
   width: 100%;
+}
+
+.storage-management {
+  display: grid;
+  gap: 16px;
+}
+
+.storage-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.storage-drawer {
+  width: min(680px, calc(100vw - 32px));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 251, 254, 0.9)),
+    var(--panel-strong);
 }
 
 .management-list,
@@ -931,7 +955,8 @@ select:focus {
 
 @media (max-width: 1200px) {
   .grid.two,
-  .overview-grid {
+  .overview-grid,
+  .storage-summary-grid {
     grid-template-columns: 1fr;
   }
 }

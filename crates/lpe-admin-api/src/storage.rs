@@ -184,7 +184,13 @@ pub(crate) async fn update_platform_storage_policy(
             StoragePolicyUpdate {
                 storage_pool_id: request.storage_pool_id,
             },
-            storage_audit(&admin, "update-platform-storage-policy", "platform"),
+            storage_policy_audit(
+                &admin,
+                "update-platform-storage-policy",
+                "platform",
+                None,
+                request.storage_pool_id,
+            ),
         )
         .await
         .map_err(storage_policy_error)?;
@@ -210,10 +216,12 @@ pub(crate) async fn update_tenant_storage_policy(
             StoragePolicyUpdate {
                 storage_pool_id: request.storage_pool_id,
             },
-            storage_audit(
+            storage_policy_audit(
                 &admin,
                 "update-tenant-storage-policy",
-                &tenant_id.to_string(),
+                "tenant",
+                Some(tenant_id),
+                request.storage_pool_id,
             ),
         )
         .await
@@ -239,10 +247,12 @@ pub(crate) async fn update_domain_storage_policy(
             StoragePolicyUpdate {
                 storage_pool_id: request.storage_pool_id,
             },
-            storage_audit(
+            storage_policy_audit(
                 &admin,
                 "update-domain-storage-policy",
-                &domain_id.to_string(),
+                "domain",
+                Some(domain_id),
+                request.storage_pool_id,
             ),
         )
         .await
@@ -268,10 +278,12 @@ pub(crate) async fn update_account_storage_policy(
             StoragePolicyUpdate {
                 storage_pool_id: request.storage_pool_id,
             },
-            storage_audit(
+            storage_policy_audit(
                 &admin,
                 "update-account-storage-policy",
-                &account_id.to_string(),
+                "account",
+                Some(account_id),
+                request.storage_pool_id,
             ),
         )
         .await
@@ -306,6 +318,26 @@ fn storage_audit(admin: &AuthenticatedAdmin, action: &str, subject: &str) -> Aud
         action: action.to_string(),
         subject: subject.to_string(),
     }
+}
+
+fn storage_policy_audit(
+    admin: &AuthenticatedAdmin,
+    action: &str,
+    scope_kind: &str,
+    scope_id: Option<Uuid>,
+    storage_pool_id: Option<Uuid>,
+) -> AuditEntryInput {
+    let scope = scope_id
+        .map(|id| format!("{scope_kind}:{id}"))
+        .unwrap_or_else(|| scope_kind.to_string());
+    let pool = storage_pool_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "inherit".to_string());
+    storage_audit(
+        admin,
+        action,
+        &format!("scope={scope} storage_pool_id={pool}"),
+    )
 }
 
 fn is_global_storage_admin(admin: &AuthenticatedAdmin) -> bool {
@@ -419,6 +451,44 @@ mod tests {
         assert!(ensure_tenant_storage_admin(&tenant, tenant_id).is_ok());
         assert!(ensure_tenant_storage_admin(&tenant, Uuid::new_v4()).is_err());
         assert!(ensure_tenant_storage_admin(&domain, tenant_id).is_err());
+    }
+
+    #[test]
+    fn storage_policy_audit_records_scope_and_pool_target() {
+        let tenant_id = Uuid::new_v4();
+        let pool_id = Uuid::new_v4();
+        let admin = admin("tenant-admin", tenant_id, vec!["dashboard", "policies"]);
+
+        let audit = storage_policy_audit(
+            &admin,
+            "update-tenant-storage-policy",
+            "tenant",
+            Some(tenant_id),
+            Some(pool_id),
+        );
+
+        assert_eq!(audit.actor, "admin@example.test");
+        assert_eq!(audit.action, "update-tenant-storage-policy");
+        assert!(audit.subject.contains(&format!("scope=tenant:{tenant_id}")));
+        assert!(audit
+            .subject
+            .contains(&format!("storage_pool_id={pool_id}")));
+    }
+
+    #[test]
+    fn storage_policy_audit_records_inheritance_clear() {
+        let tenant_id = Uuid::new_v4();
+        let admin = admin("tenant-admin", tenant_id, vec!["dashboard", "policies"]);
+
+        let audit = storage_policy_audit(
+            &admin,
+            "update-domain-storage-policy",
+            "domain",
+            Some(Uuid::new_v4()),
+            None,
+        );
+
+        assert!(audit.subject.contains("storage_pool_id=inherit"));
     }
 
     #[test]

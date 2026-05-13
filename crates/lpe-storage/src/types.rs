@@ -270,6 +270,18 @@ pub struct StoragePolicyUpdate {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct StorageMetadataDiagnostics {
+    pub status: String,
+    pub critical: bool,
+    pub active_pools: u64,
+    pub invalid_policy_references: u64,
+    pub active_placements_on_inactive_pools: u64,
+    pub missing_active_placements: u64,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StorageHealthResponse {
     pub status: String,
     pub pools: Vec<StoragePoolHealth>,

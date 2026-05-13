@@ -24,6 +24,11 @@
   old-placement cleanup scope.
 - Storage policy changes affect future writes only; they do not implicitly
   create migration jobs for existing blobs.
+- Storage policy can be assigned at platform, tenant, domain, and account
+  scope. Mailbox-level storage policy remains deferred.
+- Admin policy and visibility surfaces must expose only summarized pool,
+  placement, migration, and cleanup state. They must not expose object keys,
+  secrets, provider credentials, or provider-specific backend internals.
 - `Bcc`:
   - is protected metadata
   - must not be indexed in user search

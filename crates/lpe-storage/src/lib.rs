@@ -72,10 +72,11 @@ pub use crate::types::{
     OverviewStats, ProtocolStatus, QuarantineItem, SecuritySettings, ServerAdministrator,
     ServerSettings, SieveScriptDocument, SieveScriptSummary, StorageCleanupCounts,
     StorageCleanupPlacementSummary, StorageCleanupVisibilityResponse, StorageHealthResponse,
-    StorageMigrationCounts, StorageMigrationJobSummary, StorageMigrationVisibilityResponse,
-    StorageOverview, StoragePlacementCounts, StoragePolicyOverview, StoragePolicyScope,
-    StoragePolicySummary, StoragePolicyUpdate, StoragePoolHealth, StoragePoolReference,
-    StoragePoolSummary, UpdateAccount, UpdateDomain, UpdateStoragePool,
+    StorageMetadataDiagnostics, StorageMigrationCounts, StorageMigrationJobSummary,
+    StorageMigrationVisibilityResponse, StorageOverview, StoragePlacementCounts,
+    StoragePolicyOverview, StoragePolicyScope, StoragePolicySummary, StoragePolicyUpdate,
+    StoragePoolHealth, StoragePoolReference, StoragePoolSummary, UpdateAccount, UpdateDomain,
+    UpdateStoragePool,
 };
 pub use crate::workspace::{
     ClientContact, ClientEvent, ClientMessage, ClientWorkspace, UpsertClientContactInput,

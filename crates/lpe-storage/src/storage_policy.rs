@@ -1064,4 +1064,57 @@ mod tests {
             .expect("count migration jobs");
         assert_eq!(jobs, 0);
     }
+
+    #[tokio::test]
+    async fn policy_change_records_admin_audit_event() {
+        let Some(storage) = test_storage().await else {
+            return;
+        };
+        let (tenant_id, _, _) = insert_tenant_domain_account(&storage).await;
+        let secondary_pool_id = create_secondary_pool(&storage).await;
+
+        storage
+            .set_tenant_storage_policy(
+                tenant_id,
+                StoragePolicyUpdate {
+                    storage_pool_id: Some(secondary_pool_id),
+                },
+                AuditEntryInput {
+                    actor: "ops@example.test".to_string(),
+                    action: "update-tenant-storage-policy".to_string(),
+                    subject: format!(
+                        "scope=tenant:{tenant_id} storage_pool_id={secondary_pool_id}"
+                    ),
+                },
+            )
+            .await
+            .expect("set tenant policy");
+
+        let row = sqlx::query(
+            r#"
+            SELECT actor, action, subject
+            FROM audit_events
+            WHERE tenant_id = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id.to_string())
+        .fetch_one(storage.pool())
+        .await
+        .expect("audit row");
+
+        assert_eq!(
+            row.try_get::<String, _>("actor").unwrap(),
+            "ops@example.test"
+        );
+        assert_eq!(
+            row.try_get::<String, _>("action").unwrap(),
+            "update-tenant-storage-policy"
+        );
+        assert_eq!(
+            row.try_get::<String, _>("subject").unwrap(),
+            format!("scope=tenant:{tenant_id} storage_pool_id={secondary_pool_id}")
+        );
+    }
 }

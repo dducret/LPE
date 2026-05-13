@@ -413,6 +413,24 @@ fn storage_policy_assignments_capture_milestone_five_scope_contract() {
 }
 
 #[test]
+fn audit_events_support_platform_and_tenant_admin_policy_events() {
+    let audit = table_definition("audit_events");
+    for required in [
+        "tenant_id TEXT NOT NULL CHECK (btrim(tenant_id) <> '')",
+        "actor TEXT NOT NULL CHECK (btrim(actor) <> '')",
+        "action TEXT NOT NULL CHECK (btrim(action) <> '')",
+        "subject TEXT NOT NULL CHECK (btrim(subject) <> '')",
+        "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+        "UNIQUE (tenant_id, id)",
+    ] {
+        assert!(
+            audit.contains(required),
+            "audit_events is missing required admin policy audit fragment: {required}"
+        );
+    }
+}
+
+#[test]
 fn blob_migration_jobs_capture_milestone_three_worker_contract() {
     let jobs = table_definition("blob_migration_jobs");
     for required in [

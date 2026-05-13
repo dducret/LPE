@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     Storage, StorageCleanupCounts, StorageCleanupPlacementSummary,
-    StorageCleanupVisibilityResponse, StorageHealthResponse, StorageMigrationCounts,
-    StorageMigrationJobSummary, StorageMigrationVisibilityResponse, StoragePlacementCounts,
-    StoragePoolHealth, StoragePoolReference,
+    StorageCleanupVisibilityResponse, StorageHealthResponse, StorageMetadataDiagnostics,
+    StorageMigrationCounts, StorageMigrationJobSummary, StorageMigrationVisibilityResponse,
+    StoragePlacementCounts, StoragePoolHealth, StoragePoolReference,
 };
 
 #[derive(Debug, Clone)]
@@ -73,6 +73,72 @@ impl Storage {
     ) -> Result<StorageCleanupVisibilityResponse> {
         self.ensure_visibility_tenant_exists(tenant_id).await?;
         self.fetch_storage_cleanup(Some(tenant_id)).await
+    }
+
+    pub async fn fetch_storage_metadata_diagnostics(&self) -> Result<StorageMetadataDiagnostics> {
+        let active_pools = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM storage_pools
+            WHERE pool_kind = 'postgres'
+              AND status = 'active'
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .max(0) as u64;
+
+        let platform_default_active = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM storage_policy_assignments spa
+                JOIN storage_pools sp ON sp.id = spa.storage_pool_id
+                WHERE spa.scope_kind = 'platform'
+                  AND sp.pool_kind = 'postgres'
+                  AND sp.status = 'active'
+            )
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let invalid_policy_references = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM storage_policy_assignments spa
+            LEFT JOIN storage_pools sp ON sp.id = spa.storage_pool_id
+            WHERE sp.id IS NULL
+               OR sp.pool_kind <> 'postgres'
+               OR sp.status <> 'active'
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .max(0) as u64;
+
+        let active_placements_on_inactive_pools = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM blob_placements bp
+            JOIN storage_pools sp ON sp.id = bp.storage_pool_id
+            WHERE bp.placement_status = 'active'
+              AND (sp.pool_kind <> 'postgres' OR sp.status <> 'active')
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?
+        .max(0) as u64;
+
+        let missing_active_placements = self.count_missing_active_placements(None).await?;
+
+        Ok(storage_metadata_diagnostics(
+            active_pools,
+            platform_default_active,
+            invalid_policy_references,
+            active_placements_on_inactive_pools,
+            missing_active_placements,
+        ))
     }
 
     async fn fetch_storage_health(
@@ -711,6 +777,37 @@ fn summarize_error(error: Option<String>) -> Option<String> {
         .filter(|error| !error.is_empty())
 }
 
+fn storage_metadata_diagnostics(
+    active_pools: u64,
+    platform_default_active: bool,
+    invalid_policy_references: u64,
+    active_placements_on_inactive_pools: u64,
+    missing_active_placements: u64,
+) -> StorageMetadataDiagnostics {
+    let critical = active_pools == 0
+        || !platform_default_active
+        || invalid_policy_references > 0
+        || active_placements_on_inactive_pools > 0
+        || missing_active_placements > 0;
+    let detail = if critical {
+        format!(
+            "storage pool metadata degraded: active_pools={active_pools}, platform_default_active={platform_default_active}, invalid_policy_references={invalid_policy_references}, active_placements_on_inactive_pools={active_placements_on_inactive_pools}, missing_active_placements={missing_active_placements}"
+        )
+    } else {
+        format!("storage pool metadata consistent with {active_pools} active PostgreSQL pool(s)")
+    };
+
+    StorageMetadataDiagnostics {
+        status: if critical { "degraded" } else { "ok" }.to_string(),
+        critical,
+        active_pools,
+        invalid_policy_references,
+        active_placements_on_inactive_pools,
+        missing_active_placements,
+        detail,
+    }
+}
+
 struct CleanupBlockerState {
     placement_status: String,
     rollback_window_active: bool,
@@ -936,6 +1033,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn storage_metadata_diagnostics_marks_missing_active_as_critical() {
+        let diagnostics = storage_metadata_diagnostics(1, true, 0, 0, 2);
+
+        assert_eq!(diagnostics.status, "degraded");
+        assert!(diagnostics.critical);
+        assert_eq!(diagnostics.missing_active_placements, 2);
+        assert!(diagnostics.detail.contains("missing_active_placements=2"));
+    }
+
+    #[test]
+    fn storage_metadata_diagnostics_accepts_consistent_metadata() {
+        let diagnostics = storage_metadata_diagnostics(1, true, 0, 0, 0);
+
+        assert_eq!(diagnostics.status, "ok");
+        assert!(!diagnostics.critical);
+        assert_eq!(diagnostics.active_pools, 1);
+    }
+
     #[tokio::test]
     async fn storage_health_reports_degraded_and_tenant_scoped_counts() {
         let Some(storage) = test_storage().await else {
@@ -985,6 +1101,21 @@ mod tests {
             .blockers
             .iter()
             .any(|blocker| blocker == "rollback_window_active"));
+    }
+
+    #[tokio::test]
+    async fn storage_metadata_diagnostics_reports_consistent_seed_metadata() {
+        let Some(storage) = test_storage().await else {
+            return;
+        };
+
+        let diagnostics = storage
+            .fetch_storage_metadata_diagnostics()
+            .await
+            .expect("metadata diagnostics");
+        assert_eq!(diagnostics.status, "ok");
+        assert!(!diagnostics.critical);
+        assert_eq!(diagnostics.active_pools, 1);
     }
 
     #[test]
