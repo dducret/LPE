@@ -8,7 +8,7 @@ pub(crate) struct AccountRow {
     pub(crate) primary_email: String,
     pub(crate) display_name: String,
     pub(crate) quota_mb: i32,
-    pub(crate) used_mb: i32,
+    pub(crate) quota_used_octets: i64,
     pub(crate) status: String,
     pub(crate) gal_visibility: String,
     pub(crate) directory_kind: String,
@@ -226,7 +226,7 @@ pub(crate) struct MessageBccRecipientRecordRow {
 #[derive(Debug, FromRow)]
 pub(crate) struct AccountQuotaRow {
     pub(crate) quota_mb: i32,
-    pub(crate) used_mb: i32,
+    pub(crate) quota_used_octets: i64,
 }
 
 #[derive(Debug, FromRow)]

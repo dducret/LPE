@@ -183,11 +183,18 @@ explicit Milestone 3 online migration work for durable attachment and MIME-part
 placements between database-backed pools, including retry, verification, switch,
 cancellation, and rollback-window metadata. During the switch, the verified
 target placement becomes active and the old source placement is retained as
-`retiring` with `rollback_until` metadata; cleanup and deletion are not part of
-Milestone 3. Raw RFC 5322 message blobs remain database-backed initially and
-outside migration scope. Milestone 3 does not add cloud storage, object storage,
-admin policy UI, mailbox-level storage policy, or retention/legal-hold garbage
-collection.
+`retiring` with `rollback_until` metadata. Milestone 4 old-placement cleanup is
+limited to non-active database-backed placement rows and transitions eligible
+rows through cleanup state to `deleted`. Cleanup is blocked while the rollback
+window is active, while an active replacement is missing, while live canonical
+message/MIME-part/attachment/extraction/text references still need the old
+placement, or while blob/message retention or legal-hold metadata protects the
+content. Placement cleanup does not delete canonical `blobs`, `messages`,
+`mime_parts`, `attachments`, `attachment_extraction_jobs`, or
+`attachment_texts` rows. Raw RFC 5322 message blobs remain database-backed
+initially and outside migration and placement-cleanup scope. Milestones 3 and 4
+do not add cloud storage, object storage, admin policy UI, or mailbox-level
+storage policy.
 Lifecycle rows include update timestamps and worker-oriented indexes for Magika
 validation, async extraction, and retry scheduling.
 The schema enforces lifecycle timestamp consistency: completed Magika validation

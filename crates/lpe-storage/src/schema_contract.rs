@@ -290,8 +290,9 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
     let storage_pools = table_definition("storage_pools");
     assert!(
         storage_pools.contains("pool_kind TEXT NOT NULL CHECK (pool_kind IN ('postgres'))")
-            && storage_pools
-                .contains("status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled'))")
+            && storage_pools.contains(
+                "status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled'))"
+            )
             && storage_pools.contains("UNIQUE (name)"),
         "storage_pools must represent the current database-backed storage pool only"
     );
@@ -300,14 +301,22 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
     for required in [
         "blob_kind TEXT NOT NULL CHECK (blob_kind IN ('attachment', 'mime_part'))",
         "placement_status TEXT NOT NULL DEFAULT 'active'",
-        "CHECK (placement_status IN ('active', 'copying', 'verified', 'retiring', 'failed'))",
+        "'cleanup_failed'",
+        "'deleted'",
         "verified_content_sha256 TEXT NOT NULL CHECK (verified_content_sha256 ~ '^[0-9a-f]{64}$')",
         "verified_size_octets BIGINT NOT NULL CHECK (verified_size_octets >= 0)",
         "rollback_until TIMESTAMPTZ",
+        "cleanup_attempts INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_attempts >= 0)",
+        "cleanup_claimed_at TIMESTAMPTZ",
+        "cleaned_at TIMESTAMPTZ",
+        "cleanup_error TEXT",
+        "next_cleanup_attempt_at TIMESTAMPTZ",
         "UNIQUE (tenant_id, id)",
         "UNIQUE (tenant_id, domain_id, id, blob_id, blob_kind, storage_pool_id)",
         "CHECK (placement_status IN ('copying', 'failed') OR verified_at IS NOT NULL)",
-        "CHECK (rollback_until IS NULL OR placement_status = 'retiring')",
+        "CHECK (rollback_until IS NULL OR placement_status IN ('retiring', 'cleaning', 'cleanup_failed', 'deleted'))",
+        "CHECK (cleaned_at IS NULL OR placement_status = 'deleted')",
+        "CHECK (next_cleanup_attempt_at IS NULL OR placement_status = 'cleanup_failed')",
         "FOREIGN KEY (",
         "tenant_id,",
         "domain_id,",
@@ -344,11 +353,15 @@ fn blob_placement_metadata_is_tenant_domain_and_blob_safe() {
         "ON blob_placements (tenant_id, domain_id, blob_id, blob_kind)",
         "CREATE INDEX blob_placements_status_idx",
         "CREATE INDEX blob_placements_pool_status_idx",
+        "CREATE INDEX blob_placements_cleanup_due_idx",
+        "WHERE placement_status IN ('retiring', 'cleanup_failed')",
     ]);
 
     for unsupported_backend in ["s3", "aws", "azure", "cloud", "bucket"] {
         assert!(
-            !storage_pools.to_ascii_lowercase().contains(unsupported_backend)
+            !storage_pools
+                .to_ascii_lowercase()
+                .contains(unsupported_backend)
                 && !blob_placements
                     .to_ascii_lowercase()
                     .contains(unsupported_backend),
@@ -428,6 +441,37 @@ fn blob_migration_jobs_capture_milestone_three_worker_contract() {
             "Milestone 3 migration jobs must not introduce backend config for {unsupported_backend}"
         );
     }
+}
+
+#[test]
+fn blob_and_message_lifecycle_metadata_support_cleanup_guards() {
+    let blobs = table_definition("blobs");
+    for required in [
+        "retained_until TIMESTAMPTZ",
+        "legal_hold BOOLEAN NOT NULL DEFAULT FALSE",
+        "CHECK (retained_until IS NULL OR retained_until >= created_at)",
+    ] {
+        assert!(
+            blobs.contains(required),
+            "blobs is missing required lifecycle guard fragment: {required}"
+        );
+    }
+    let messages = table_definition("messages");
+    for required in [
+        "retained_until TIMESTAMPTZ",
+        "legal_hold BOOLEAN NOT NULL DEFAULT FALSE",
+        "CHECK (retained_until IS NULL OR retained_until >= created_at)",
+    ] {
+        assert!(
+            messages.contains(required),
+            "messages is missing required lifecycle guard fragment: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE INDEX blobs_lifecycle_protection_idx",
+        "WHERE retained_until IS NOT NULL OR legal_hold = TRUE",
+        "CREATE INDEX messages_lifecycle_protection_idx",
+    ]);
 }
 
 #[test]

@@ -80,6 +80,30 @@ pub(crate) struct BlobMigrationJob {
     pub(crate) attempts: i32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct PlacementCleanupEligibility {
+    pub(crate) placement_id: Uuid,
+    pub(crate) blockers: Vec<String>,
+}
+
+impl PlacementCleanupEligibility {
+    #[allow(dead_code)]
+    pub(crate) fn is_eligible(&self) -> bool {
+        self.blockers.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub(crate) struct PlacementCleanupResult {
+    pub(crate) placement_id: Uuid,
+    pub(crate) cleaned: bool,
+    pub(crate) status: String,
+    pub(crate) blockers: Vec<String>,
+    pub(crate) error: Option<String>,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct PostgresBlobStore;
 
@@ -752,6 +776,541 @@ impl PostgresBlobStore {
         .transpose()
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn old_placement_cleanup_eligibility(
+        &self,
+        pool: &PgPool,
+        placement_id: Uuid,
+    ) -> Result<PlacementCleanupEligibility> {
+        let Some(row) = sqlx::query(
+            r#"
+            SELECT
+                bp.tenant_id,
+                bp.domain_id,
+                bp.blob_id,
+                bp.blob_kind,
+                bp.placement_status,
+                bp.rollback_until IS NULL OR bp.rollback_until > NOW() AS rollback_window_active,
+                b.retained_until IS NOT NULL AND b.retained_until > NOW() AS blob_retention_active,
+                b.legal_hold AS blob_legal_hold_active
+            FROM blob_placements bp
+            JOIN blobs b
+              ON b.tenant_id = bp.tenant_id
+             AND b.domain_id = bp.domain_id
+             AND b.id = bp.blob_id
+             AND b.blob_kind = bp.blob_kind
+            WHERE bp.id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(placement_id)
+        .fetch_optional(pool)
+        .await?
+        else {
+            return Ok(PlacementCleanupEligibility {
+                placement_id,
+                blockers: vec!["placement_not_found".to_string()],
+            });
+        };
+
+        let tenant_id: Uuid = row.try_get("tenant_id")?;
+        let domain_id: Uuid = row.try_get("domain_id")?;
+        let blob_id: Uuid = row.try_get("blob_id")?;
+        let blob_kind: String = row.try_get("blob_kind")?;
+        let placement_status: String = row.try_get("placement_status")?;
+        let mut blockers = Vec::new();
+
+        if !matches!(placement_status.as_str(), "retiring" | "cleanup_failed") {
+            blockers.push("placement_not_retiring".to_string());
+        }
+        if row.try_get::<bool, _>("rollback_window_active")? {
+            blockers.push("rollback_window_active".to_string());
+        }
+
+        let active_replacement_exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM blob_placements bp
+                JOIN blobs b
+                  ON b.tenant_id = bp.tenant_id
+                 AND b.domain_id = bp.domain_id
+                 AND b.id = bp.blob_id
+                 AND b.blob_kind = bp.blob_kind
+                 AND b.content_sha256 = bp.verified_content_sha256
+                 AND b.size_octets = bp.verified_size_octets
+                JOIN storage_pools sp
+                  ON sp.id = bp.storage_pool_id
+                 AND sp.pool_kind = 'postgres'
+                 AND sp.status = 'active'
+                WHERE bp.tenant_id = $1
+                  AND bp.domain_id = $2
+                  AND bp.blob_id = $3
+                  AND bp.blob_kind = $4
+                  AND bp.id <> $5
+                  AND bp.placement_status = 'active'
+            )
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(blob_id)
+        .bind(&blob_kind)
+        .bind(placement_id)
+        .fetch_one(pool)
+        .await?;
+        if !active_replacement_exists {
+            blockers.push("active_replacement_missing".to_string());
+            blockers.extend(
+                self.live_reference_cleanup_blockers(pool, tenant_id, domain_id, blob_id)
+                    .await?,
+            );
+        }
+
+        if row.try_get::<bool, _>("blob_retention_active")? {
+            blockers.push("blob_retention_active".to_string());
+        }
+        if row.try_get::<bool, _>("blob_legal_hold_active")? {
+            blockers.push("blob_legal_hold_active".to_string());
+        }
+        blockers.extend(
+            self.message_lifecycle_cleanup_blockers(pool, tenant_id, domain_id, blob_id)
+                .await?,
+        );
+
+        blockers.sort();
+        blockers.dedup();
+        Ok(PlacementCleanupEligibility {
+            placement_id,
+            blockers,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn cleanup_old_retiring_placements(
+        &self,
+        pool: &PgPool,
+        limit: i64,
+    ) -> Result<Vec<PlacementCleanupResult>> {
+        if limit <= 0 {
+            return Ok(Vec::new());
+        }
+        let placement_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM blob_placements
+            WHERE placement_status IN ('retiring', 'cleanup_failed')
+              AND (next_cleanup_attempt_at IS NULL OR next_cleanup_attempt_at <= NOW())
+            ORDER BY rollback_until ASC NULLS LAST, updated_at ASC, id ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
+
+        let mut results = Vec::with_capacity(placement_ids.len());
+        for placement_id in placement_ids {
+            results.push(self.cleanup_one_old_placement(pool, placement_id).await?);
+        }
+        Ok(results)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn cleanup_one_old_placement(
+        &self,
+        pool: &PgPool,
+        placement_id: Uuid,
+    ) -> Result<PlacementCleanupResult> {
+        self.cleanup_one_old_placement_inner(pool, placement_id, None)
+            .await
+    }
+
+    async fn cleanup_one_old_placement_inner(
+        &self,
+        pool: &PgPool,
+        placement_id: Uuid,
+        forced_error: Option<&str>,
+    ) -> Result<PlacementCleanupResult> {
+        if let Some(status) = self.placement_status(pool, placement_id).await? {
+            if status == "deleted" {
+                return Ok(PlacementCleanupResult {
+                    placement_id,
+                    cleaned: false,
+                    status,
+                    blockers: Vec::new(),
+                    error: None,
+                });
+            }
+        }
+
+        let eligibility = self
+            .old_placement_cleanup_eligibility(pool, placement_id)
+            .await?;
+        if !eligibility.blockers.is_empty() {
+            let status = self
+                .placement_status(pool, placement_id)
+                .await?
+                .unwrap_or_else(|| "missing".to_string());
+            return Ok(PlacementCleanupResult {
+                placement_id,
+                cleaned: false,
+                status,
+                blockers: eligibility.blockers,
+                error: None,
+            });
+        }
+
+        let claimed = sqlx::query_scalar::<_, String>(
+            r#"
+            UPDATE blob_placements
+            SET placement_status = 'cleaning',
+                cleanup_attempts = cleanup_attempts + 1,
+                cleanup_claimed_at = NOW(),
+                cleanup_error = NULL,
+                next_cleanup_attempt_at = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+              AND placement_status IN ('retiring', 'cleanup_failed')
+              AND (next_cleanup_attempt_at IS NULL OR next_cleanup_attempt_at <= NOW())
+            RETURNING placement_status
+            "#,
+        )
+        .bind(placement_id)
+        .fetch_optional(pool)
+        .await?;
+
+        if claimed.is_none() {
+            let status = self
+                .placement_status(pool, placement_id)
+                .await?
+                .unwrap_or_else(|| "missing".to_string());
+            return Ok(PlacementCleanupResult {
+                placement_id,
+                cleaned: false,
+                status,
+                blockers: vec!["cleanup_claim_failed".to_string()],
+                error: None,
+            });
+        }
+
+        if let Some(error) = forced_error {
+            self.record_placement_cleanup_failure(pool, placement_id, error)
+                .await?;
+            return Ok(PlacementCleanupResult {
+                placement_id,
+                cleaned: false,
+                status: "cleanup_failed".to_string(),
+                blockers: Vec::new(),
+                error: Some(error.to_string()),
+            });
+        }
+
+        let updated = sqlx::query_scalar::<_, String>(
+            r#"
+            UPDATE blob_placements
+            SET placement_status = 'deleted',
+                cleaned_at = NOW(),
+                cleanup_error = NULL,
+                next_cleanup_attempt_at = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+              AND placement_status = 'cleaning'
+            RETURNING placement_status
+            "#,
+        )
+        .bind(placement_id)
+        .fetch_optional(pool)
+        .await;
+
+        match updated {
+            Ok(Some(status)) => Ok(PlacementCleanupResult {
+                placement_id,
+                cleaned: true,
+                status,
+                blockers: Vec::new(),
+                error: None,
+            }),
+            Ok(None) => {
+                let error = "cleanup placement was not in cleaning state";
+                self.record_placement_cleanup_failure(pool, placement_id, error)
+                    .await?;
+                Ok(PlacementCleanupResult {
+                    placement_id,
+                    cleaned: false,
+                    status: "cleanup_failed".to_string(),
+                    blockers: Vec::new(),
+                    error: Some(error.to_string()),
+                })
+            }
+            Err(error) => {
+                let error = error.to_string();
+                self.record_placement_cleanup_failure(pool, placement_id, &error)
+                    .await?;
+                Ok(PlacementCleanupResult {
+                    placement_id,
+                    cleaned: false,
+                    status: "cleanup_failed".to_string(),
+                    blockers: Vec::new(),
+                    error: Some(error),
+                })
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    async fn placement_status(&self, pool: &PgPool, placement_id: Uuid) -> Result<Option<String>> {
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT placement_status
+            FROM blob_placements
+            WHERE id = $1
+            LIMIT 1
+            "#,
+        )
+        .bind(placement_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(Into::into)
+    }
+
+    #[allow(dead_code)]
+    async fn record_placement_cleanup_failure(
+        &self,
+        pool: &PgPool,
+        placement_id: Uuid,
+        error: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET placement_status = 'cleanup_failed',
+                cleanup_error = $2,
+                next_cleanup_attempt_at = NOW() + INTERVAL '1 minute',
+                updated_at = NOW()
+            WHERE id = $1
+              AND placement_status = 'cleaning'
+            "#,
+        )
+        .bind(placement_id)
+        .bind(error)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn simulate_old_placement_cleanup_failure(
+        &self,
+        pool: &PgPool,
+        placement_id: Uuid,
+        error: &str,
+    ) -> Result<PlacementCleanupResult> {
+        self.cleanup_one_old_placement_inner(pool, placement_id, Some(error))
+            .await
+    }
+
+    #[allow(dead_code)]
+    async fn live_reference_cleanup_blockers(
+        &self,
+        pool: &PgPool,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        blob_id: Uuid,
+    ) -> Result<Vec<String>> {
+        let tenant = tenant_id.to_string();
+        let mut blockers = Vec::new();
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM messages m
+                WHERE m.tenant_id = $1
+                  AND m.domain_id = $2
+                  AND m.blob_id = $3
+                  AND EXISTS (
+                      SELECT 1
+                      FROM mailbox_messages mm
+                      WHERE mm.tenant_id = m.tenant_id
+                        AND mm.message_id = m.id
+                        AND mm.visibility <> 'expunged'
+                  )
+            )
+            "#,
+        )
+        .bind(&tenant)
+        .bind(domain_id)
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?
+        {
+            blockers.push("live_message_reference".to_string());
+        }
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mime_parts mp
+                WHERE mp.tenant_id = $1
+                  AND mp.domain_id = $2
+                  AND mp.blob_id = $3
+                  AND EXISTS (
+                      SELECT 1
+                      FROM mailbox_messages mm
+                      WHERE mm.tenant_id = mp.tenant_id
+                        AND mm.message_id = mp.message_id
+                        AND mm.visibility <> 'expunged'
+                  )
+            )
+            "#,
+        )
+        .bind(&tenant)
+        .bind(domain_id)
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?
+        {
+            blockers.push("live_mime_part_reference".to_string());
+        }
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM attachments a
+                WHERE a.tenant_id = $1
+                  AND a.domain_id = $2
+                  AND a.blob_id = $3
+                  AND EXISTS (
+                      SELECT 1
+                      FROM mailbox_messages mm
+                      WHERE mm.tenant_id = a.tenant_id
+                        AND mm.message_id = a.message_id
+                        AND mm.visibility <> 'expunged'
+                  )
+            )
+            "#,
+        )
+        .bind(&tenant)
+        .bind(domain_id)
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?
+        {
+            blockers.push("live_attachment_reference".to_string());
+        }
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM attachment_extraction_jobs
+                WHERE tenant_id = $1 AND blob_id = $2
+            )
+            "#,
+        )
+        .bind(&tenant)
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?
+        {
+            blockers.push("live_extraction_job_reference".to_string());
+        }
+        if sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM attachment_texts
+                WHERE tenant_id = $1 AND blob_id = $2
+            )
+            "#,
+        )
+        .bind(&tenant)
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?
+        {
+            blockers.push("live_attachment_text_reference".to_string());
+        }
+        Ok(blockers)
+    }
+
+    #[allow(dead_code)]
+    async fn message_lifecycle_cleanup_blockers(
+        &self,
+        pool: &PgPool,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        blob_id: Uuid,
+    ) -> Result<Vec<String>> {
+        let tenant = tenant_id.to_string();
+        let row = sqlx::query(
+            r#"
+            SELECT
+                EXISTS (
+                    SELECT 1
+                    FROM messages m
+                    WHERE m.tenant_id = $1
+                      AND m.domain_id = $2
+                      AND m.retained_until IS NOT NULL
+                      AND m.retained_until > NOW()
+                      AND (
+                          m.blob_id = $3
+                          OR EXISTS (
+                              SELECT 1
+                              FROM mime_parts mp
+                              WHERE mp.tenant_id = m.tenant_id
+                                AND mp.message_id = m.id
+                                AND mp.blob_id = $3
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM attachments a
+                              WHERE a.tenant_id = m.tenant_id
+                                AND a.message_id = m.id
+                                AND a.blob_id = $3
+                          )
+                      )
+                ) AS message_retention_active,
+                EXISTS (
+                    SELECT 1
+                    FROM messages m
+                    WHERE m.tenant_id = $1
+                      AND m.domain_id = $2
+                      AND m.legal_hold = TRUE
+                      AND (
+                          m.blob_id = $3
+                          OR EXISTS (
+                              SELECT 1
+                              FROM mime_parts mp
+                              WHERE mp.tenant_id = m.tenant_id
+                                AND mp.message_id = m.id
+                                AND mp.blob_id = $3
+                          )
+                          OR EXISTS (
+                              SELECT 1
+                              FROM attachments a
+                              WHERE a.tenant_id = m.tenant_id
+                                AND a.message_id = m.id
+                                AND a.blob_id = $3
+                          )
+                      )
+                ) AS message_legal_hold_active
+            "#,
+        )
+        .bind(&tenant)
+        .bind(domain_id)
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await?;
+        let mut blockers = Vec::new();
+        if row.try_get::<bool, _>("message_retention_active")? {
+            blockers.push("message_retention_active".to_string());
+        }
+        if row.try_get::<bool, _>("message_legal_hold_active")? {
+            blockers.push("message_legal_hold_active".to_string());
+        }
+        Ok(blockers)
+    }
+
     pub(crate) async fn read_durable_blob(
         &self,
         pool: &PgPool,
@@ -1013,6 +1572,268 @@ mod tests {
         .execute(storage.pool())
         .await
         .expect("insert domain");
+    }
+
+    async fn insert_account_mailbox(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+            VALUES ($1, $2, $3, 'quota-user@example.test', 'Quota User')
+            "#,
+        )
+        .bind(account_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert account");
+        sqlx::query(
+            r#"
+            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, uid_validity)
+            VALUES ($1, $2, $3, 'inbox', 'Inbox', 1)
+            "#,
+        )
+        .bind(mailbox_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert mailbox");
+    }
+
+    async fn insert_logical_message_with_attachment(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        imap_uid: i64,
+        logical_size_octets: i64,
+        attachment_bytes: &[u8],
+    ) -> Uuid {
+        let tenant = tenant_id.to_string();
+        let message_id = Uuid::new_v4();
+        let mailbox_message_id = Uuid::new_v4();
+        let raw_message = format!("Subject: quota-{imap_uid}\r\n\r\nbody").into_bytes();
+        let mut tx = storage.pool().begin().await.expect("begin quota tx");
+        let raw_blob_id = storage
+            .store_message_blob_in_tx(
+                &mut tx,
+                &tenant,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                &raw_message,
+            )
+            .await
+            .expect("store raw message blob");
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, tenant_id, domain_id, blob_id, message_hash,
+                normalized_subject, received_at, size_octets
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
+            "#,
+        )
+        .bind(message_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(raw_blob_id)
+        .bind(sha256_hex(&raw_message))
+        .bind(format!("quota-{imap_uid}"))
+        .bind(logical_size_octets)
+        .execute(&mut *tx)
+        .await
+        .expect("insert quota message");
+        let attachment_ids = storage
+            .ingest_message_attachments_in_tx(
+                &mut tx,
+                &tenant,
+                account_id,
+                message_id,
+                &[AttachmentUploadInput {
+                    file_name: "shared.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    disposition: Some("attachment".to_string()),
+                    content_id: None,
+                    blob_bytes: attachment_bytes.to_vec(),
+                }],
+            )
+            .await
+            .expect("ingest quota attachment");
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_messages (
+                id, tenant_id, account_id, mailbox_id, message_id, imap_uid, received_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            "#,
+        )
+        .bind(mailbox_message_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(message_id)
+        .bind(imap_uid)
+        .execute(&mut *tx)
+        .await
+        .expect("insert mailbox message");
+        storage
+            .assign_message_attachments_membership_in_tx(
+                &mut tx,
+                &tenant,
+                account_id,
+                message_id,
+                mailbox_message_id,
+            )
+            .await
+            .expect("assign attachment membership");
+        tx.commit().await.expect("commit quota message");
+
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT blob_id
+            FROM attachments
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(attachment_ids[0])
+        .fetch_one(storage.pool())
+        .await
+        .expect("load attachment blob id")
+    }
+
+    async fn logical_quota_snapshot(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> (u64, u64, u64) {
+        let account_used = storage
+            .fetch_jmap_quota(account_id)
+            .await
+            .expect("fetch account quota")
+            .used;
+        let mailbox_used = storage
+            .fetch_mailbox_logical_quota_used_octets(account_id, mailbox_id)
+            .await
+            .expect("fetch mailbox quota");
+        let domain_used = storage
+            .fetch_domain_logical_quota_used_octets(&tenant_id.to_string(), domain_id)
+            .await
+            .expect("fetch domain quota");
+        (account_used, mailbox_used, domain_used)
+    }
+
+    async fn expire_retiring_placement(storage: &Storage, tenant_id: Uuid, placement_id: Uuid) {
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET rollback_until = NOW() - INTERVAL '1 minute'
+            WHERE tenant_id = $1
+              AND id = $2
+              AND placement_status = 'retiring'
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(placement_id)
+        .execute(storage.pool())
+        .await
+        .expect("expire retiring placement rollback window");
+    }
+
+    async fn mark_active_replacement_failed(
+        storage: &Storage,
+        tenant_id: Uuid,
+        blob_id: Uuid,
+        source_placement_id: Uuid,
+    ) {
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET placement_status = 'failed', updated_at = NOW()
+            WHERE tenant_id = $1
+              AND blob_id = $2
+              AND id <> $3
+              AND placement_status = 'active'
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .bind(source_placement_id)
+        .execute(storage.pool())
+        .await
+        .expect("mark active replacement failed");
+    }
+
+    async fn cleanup_blockers(storage: &Storage, placement_id: Uuid) -> Vec<String> {
+        PostgresBlobStore
+            .old_placement_cleanup_eligibility(storage.pool(), placement_id)
+            .await
+            .expect("load cleanup eligibility")
+            .blockers
+    }
+
+    async fn placement_status_by_id(storage: &Storage, placement_id: Uuid) -> String {
+        sqlx::query_scalar::<_, String>(
+            r#"
+            SELECT placement_status
+            FROM blob_placements
+            WHERE id = $1
+            "#,
+        )
+        .bind(placement_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("load placement status")
+    }
+
+    async fn active_placement_id(storage: &Storage, tenant_id: Uuid, blob_id: Uuid) -> Uuid {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM blob_placements
+            WHERE tenant_id = $1
+              AND blob_id = $2
+              AND placement_status = 'active'
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("load active placement id")
+    }
+
+    async fn assert_active_blob_read(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        blob_id: Uuid,
+        expected_bytes: &[u8],
+    ) {
+        let blob = PostgresBlobStore
+            .read_durable_blob(
+                storage.pool(),
+                &tenant_id.to_string(),
+                domain_id,
+                DurableBlobKind::Attachment,
+                blob_id,
+            )
+            .await
+            .expect("read active blob")
+            .expect("active blob exists");
+        assert_eq!(blob.bytes, expected_bytes);
     }
 
     async fn active_placement_count(storage: &Storage, tenant_id: Uuid, blob_id: Uuid) -> i64 {
@@ -1733,14 +2554,9 @@ mod tests {
             b"switch-active-target",
         )
         .await;
-        let verified = create_verified_migration_job(
-            &storage,
-            tenant_id,
-            domain_id,
-            blob.id,
-            target_pool_id,
-        )
-        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
 
         let switched = PostgresBlobStore
             .switch_verified_blob_migration_job(storage.pool(), verified.id)
@@ -1790,14 +2606,9 @@ mod tests {
             b"switch-idempotent",
         )
         .await;
-        let verified = create_verified_migration_job(
-            &storage,
-            tenant_id,
-            domain_id,
-            blob.id,
-            target_pool_id,
-        )
-        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
         let blob_store = PostgresBlobStore;
 
         let first = blob_store
@@ -1855,14 +2666,9 @@ mod tests {
             .expect("blob before copy");
         assert_eq!(before.bytes, b"switch-read-path");
 
-        let verified = create_verified_migration_job(
-            &storage,
-            tenant_id,
-            domain_id,
-            blob.id,
-            target_pool_id,
-        )
-        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
         let during = blob_store
             .read_durable_blob(
                 storage.pool(),
@@ -1943,14 +2749,9 @@ mod tests {
             b"switch-rollback-window",
         )
         .await;
-        let verified = create_verified_migration_job(
-            &storage,
-            tenant_id,
-            domain_id,
-            blob.id,
-            target_pool_id,
-        )
-        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
 
         PostgresBlobStore
             .switch_verified_blob_migration_job(storage.pool(), verified.id)
@@ -1973,6 +2774,605 @@ mod tests {
         .await
         .expect("load rollback window");
         assert!(rollback_window_present);
+    }
+
+    #[tokio::test]
+    async fn logical_quota_is_stable_across_deduplicated_blob_migration() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+        let mailbox_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        insert_account_mailbox(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+
+        let first_blob_id = insert_logical_message_with_attachment(
+            &storage,
+            tenant_id,
+            domain_id,
+            account_id,
+            mailbox_id,
+            1,
+            1_024,
+            b"deduplicated attachment bytes",
+        )
+        .await;
+        let second_blob_id = insert_logical_message_with_attachment(
+            &storage,
+            tenant_id,
+            domain_id,
+            account_id,
+            mailbox_id,
+            2,
+            2_048,
+            b"deduplicated attachment bytes",
+        )
+        .await;
+        assert_eq!(second_blob_id, first_blob_id);
+
+        let before =
+            logical_quota_snapshot(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        assert_eq!(before, (3_072, 3_072, 3_072));
+
+        let verified = create_verified_migration_job(
+            &storage,
+            tenant_id,
+            domain_id,
+            first_blob_id,
+            target_pool_id,
+        )
+        .await;
+        let after_copy =
+            logical_quota_snapshot(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        assert_eq!(after_copy, before);
+
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+        let during_retiring =
+            logical_quota_snapshot(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        assert_eq!(during_retiring, before);
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, first_blob_id).await,
+            1
+        );
+
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET rollback_until = NOW() - INTERVAL '1 minute'
+            WHERE tenant_id = $1
+              AND id = $2
+              AND placement_status = 'retiring'
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(verified.source_placement_id)
+        .execute(storage.pool())
+        .await
+        .expect("expire rollback window");
+        let cleanup_eligible =
+            logical_quota_snapshot(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        assert_eq!(cleanup_eligible, before);
+    }
+
+    #[tokio::test]
+    async fn retiring_placement_cleanup_is_blocked_by_rollback_window() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"rollback-guard",
+        )
+        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
+
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+
+        let eligibility = PostgresBlobStore
+            .old_placement_cleanup_eligibility(storage.pool(), verified.source_placement_id)
+            .await
+            .expect("load cleanup eligibility");
+        assert!(!eligibility.is_eligible());
+        assert_eq!(eligibility.placement_id, verified.source_placement_id);
+        assert!(eligibility
+            .blockers
+            .contains(&"rollback_window_active".to_string()));
+    }
+
+    #[tokio::test]
+    async fn retiring_placement_cleanup_is_blocked_when_live_references_need_it() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+        let mailbox_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        insert_account_mailbox(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let blob_id = insert_logical_message_with_attachment(
+            &storage,
+            tenant_id,
+            domain_id,
+            account_id,
+            mailbox_id,
+            1,
+            1_024,
+            b"live-reference-guard",
+        )
+        .await;
+        sqlx::query(
+            r#"
+            INSERT INTO attachment_texts (
+                tenant_id, blob_id, extracted_text, content_hash, search_vector
+            )
+            VALUES ($1, $2, 'indexed text', $3, to_tsvector('simple', 'indexed text'))
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .bind(sha256_hex(b"indexed text"))
+        .execute(storage.pool())
+        .await
+        .expect("insert attachment text");
+
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob_id, target_pool_id)
+                .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+        expire_retiring_placement(&storage, tenant_id, verified.source_placement_id).await;
+        mark_active_replacement_failed(&storage, tenant_id, blob_id, verified.source_placement_id)
+            .await;
+
+        let blockers = cleanup_blockers(&storage, verified.source_placement_id).await;
+        for expected in [
+            "active_replacement_missing",
+            "live_attachment_reference",
+            "live_attachment_text_reference",
+            "live_extraction_job_reference",
+            "live_mime_part_reference",
+        ] {
+            assert!(
+                blockers.contains(&expected.to_string()),
+                "missing blocker {expected}; blockers: {blockers:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn retiring_placement_cleanup_is_blocked_by_retention_and_legal_hold() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+        let mailbox_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        insert_account_mailbox(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let blob_id = insert_logical_message_with_attachment(
+            &storage,
+            tenant_id,
+            domain_id,
+            account_id,
+            mailbox_id,
+            1,
+            1_024,
+            b"retention-legal-hold-guard",
+        )
+        .await;
+        let message_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT message_id
+            FROM attachments
+            WHERE tenant_id = $1 AND blob_id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("load retained message id");
+        sqlx::query(
+            r#"
+            UPDATE blobs
+            SET retained_until = NOW() + INTERVAL '1 day',
+                legal_hold = TRUE
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(blob_id)
+        .execute(storage.pool())
+        .await
+        .expect("protect blob");
+        sqlx::query(
+            r#"
+            UPDATE messages
+            SET retained_until = NOW() + INTERVAL '1 day',
+                legal_hold = TRUE
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(message_id)
+        .execute(storage.pool())
+        .await
+        .expect("protect message");
+
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob_id, target_pool_id)
+                .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+        expire_retiring_placement(&storage, tenant_id, verified.source_placement_id).await;
+
+        let blockers = cleanup_blockers(&storage, verified.source_placement_id).await;
+        for expected in [
+            "blob_legal_hold_active",
+            "blob_retention_active",
+            "message_legal_hold_active",
+            "message_retention_active",
+        ] {
+            assert!(
+                blockers.contains(&expected.to_string()),
+                "missing blocker {expected}; blockers: {blockers:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn cleanup_worker_deletes_old_placement_metadata_and_preserves_active_reads() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"cleanup-preserves-active-read",
+        )
+        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+        expire_retiring_placement(&storage, tenant_id, verified.source_placement_id).await;
+
+        let results = PostgresBlobStore
+            .cleanup_old_retiring_placements(storage.pool(), 10)
+            .await
+            .expect("cleanup old placements");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].placement_id, verified.source_placement_id);
+        assert!(results[0].cleaned);
+        assert_eq!(results[0].status, "deleted");
+        assert_eq!(
+            placement_status_by_id(&storage, verified.source_placement_id).await,
+            "deleted"
+        );
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, blob.id).await,
+            1
+        );
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            blob.id,
+            b"cleanup-preserves-active-read",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_worker_refuses_the_only_active_placement() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"only-active-cleanup-refused",
+        )
+        .await;
+        let active_id = active_placement_id(&storage, tenant_id, blob.id).await;
+
+        let result = PostgresBlobStore
+            .cleanup_one_old_placement(storage.pool(), active_id)
+            .await
+            .expect("cleanup active placement");
+        assert!(!result.cleaned);
+        assert_eq!(result.status, "active");
+        assert!(result
+            .blockers
+            .contains(&"placement_not_retiring".to_string()));
+        assert_eq!(placement_status_by_id(&storage, active_id).await, "active");
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            blob.id,
+            b"only-active-cleanup-refused",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_worker_repeated_execution_is_idempotent() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"cleanup-idempotent",
+        )
+        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+        expire_retiring_placement(&storage, tenant_id, verified.source_placement_id).await;
+
+        let first = PostgresBlobStore
+            .cleanup_one_old_placement(storage.pool(), verified.source_placement_id)
+            .await
+            .expect("first cleanup");
+        assert!(first.cleaned);
+        let second = PostgresBlobStore
+            .cleanup_one_old_placement(storage.pool(), verified.source_placement_id)
+            .await
+            .expect("second cleanup");
+        assert!(!second.cleaned);
+        assert_eq!(second.status, "deleted");
+        assert!(second.blockers.is_empty());
+        let worker_results = PostgresBlobStore
+            .cleanup_old_retiring_placements(storage.pool(), 10)
+            .await
+            .expect("repeat worker cleanup");
+        assert!(worker_results.is_empty());
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            blob.id,
+            b"cleanup-idempotent",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_worker_records_retryable_failure_without_breaking_active_reads() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"cleanup-retryable-failure",
+        )
+        .await;
+        let verified =
+            create_verified_migration_job(&storage, tenant_id, domain_id, blob.id, target_pool_id)
+                .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified migration job")
+            .expect("switched job");
+        expire_retiring_placement(&storage, tenant_id, verified.source_placement_id).await;
+
+        let failure = PostgresBlobStore
+            .simulate_old_placement_cleanup_failure(
+                storage.pool(),
+                verified.source_placement_id,
+                "simulated metadata cleanup failure",
+            )
+            .await
+            .expect("simulate cleanup failure");
+        assert!(!failure.cleaned);
+        assert_eq!(failure.status, "cleanup_failed");
+        assert_eq!(
+            placement_status_by_id(&storage, verified.source_placement_id).await,
+            "cleanup_failed"
+        );
+        let retry_not_due = PostgresBlobStore
+            .cleanup_old_retiring_placements(storage.pool(), 10)
+            .await
+            .expect("cleanup before retry due");
+        assert!(retry_not_due.is_empty());
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            blob.id,
+            b"cleanup-retryable-failure",
+        )
+        .await;
+
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET next_cleanup_attempt_at = NOW() - INTERVAL '1 minute'
+            WHERE id = $1
+            "#,
+        )
+        .bind(verified.source_placement_id)
+        .execute(storage.pool())
+        .await
+        .expect("make cleanup retry due");
+        let retry = PostgresBlobStore
+            .cleanup_old_retiring_placements(storage.pool(), 10)
+            .await
+            .expect("retry cleanup");
+        assert_eq!(retry.len(), 1);
+        assert!(retry[0].cleaned);
+        assert_eq!(retry[0].status, "deleted");
+        assert_active_blob_read(
+            &storage,
+            tenant_id,
+            domain_id,
+            blob.id,
+            b"cleanup-retryable-failure",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn cleanup_worker_claims_due_old_placements_deterministically() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        insert_tenant_domain(&storage, tenant_id, domain_id).await;
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let first_blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"cleanup-order-first",
+        )
+        .await;
+        let second_blob = put_test_blob(
+            &storage,
+            tenant_id,
+            domain_id,
+            DurableBlobKind::Attachment,
+            b"cleanup-order-second",
+        )
+        .await;
+        let first = create_verified_migration_job(
+            &storage,
+            tenant_id,
+            domain_id,
+            first_blob.id,
+            target_pool_id,
+        )
+        .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), first.id)
+            .await
+            .expect("switch first job")
+            .expect("first switched");
+        let second = create_verified_migration_job(
+            &storage,
+            tenant_id,
+            domain_id,
+            second_blob.id,
+            target_pool_id,
+        )
+        .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), second.id)
+            .await
+            .expect("switch second job")
+            .expect("second switched");
+
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET rollback_until = CASE
+                    WHEN id = $2 THEN NOW() - INTERVAL '2 hours'
+                    WHEN id = $3 THEN NOW() - INTERVAL '1 hour'
+                    ELSE rollback_until
+                END
+            WHERE tenant_id = $1
+              AND id IN ($2, $3)
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(first.source_placement_id)
+        .bind(second.source_placement_id)
+        .execute(storage.pool())
+        .await
+        .expect("set deterministic rollback order");
+
+        let results = PostgresBlobStore
+            .cleanup_old_retiring_placements(storage.pool(), 1)
+            .await
+            .expect("cleanup one placement");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].placement_id, first.source_placement_id);
+        assert_eq!(
+            placement_status_by_id(&storage, first.source_placement_id).await,
+            "deleted"
+        );
+        assert_eq!(
+            placement_status_by_id(&storage, second.source_placement_id).await,
+            "retiring"
+        );
     }
 
     #[tokio::test]
@@ -2389,5 +3789,86 @@ mod tests {
             .expect("cid attachment content exists");
         assert_eq!(by_cid.file_reference, file_reference);
         assert_eq!(by_cid.blob_bytes, b"attachment body");
+
+        let attachment_blob_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT blob_id
+            FROM attachments
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(attachment_id)
+        .fetch_one(storage.pool())
+        .await
+        .expect("load attachment blob id");
+        let target_pool_id = insert_secondary_storage_pool(&storage).await;
+        let verified = create_verified_migration_job(
+            &storage,
+            tenant_id,
+            domain_id,
+            attachment_blob_id,
+            target_pool_id,
+        )
+        .await;
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch verified attachment migration");
+        expire_retiring_placement(&storage, tenant_id, verified.source_placement_id).await;
+        let cleanup = PostgresBlobStore
+            .cleanup_one_old_placement(storage.pool(), verified.source_placement_id)
+            .await
+            .expect("cleanup old attachment placement");
+        assert!(cleanup.cleaned);
+        assert_eq!(cleanup.status, "deleted");
+        assert_eq!(
+            placement_status_by_id(&storage, verified.source_placement_id).await,
+            "deleted"
+        );
+        assert_eq!(
+            active_placement_count(&storage, tenant_id, attachment_blob_id).await,
+            1
+        );
+
+        let attachments = storage
+            .fetch_activesync_message_attachments(account_id, message_id)
+            .await
+            .expect("fetch attachment list after old placement cleanup");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].file_reference, file_reference);
+
+        let after_cleanup_by_reference = storage
+            .fetch_activesync_attachment_content(account_id, &file_reference)
+            .await
+            .expect("fetch attachment by reference after cleanup")
+            .expect("attachment content exists after cleanup");
+        assert_eq!(after_cleanup_by_reference.blob_bytes, b"attachment body");
+
+        let after_cleanup_by_cid = storage
+            .fetch_message_attachment_content_by_cid(account_id, message_id, "cid-1")
+            .await
+            .expect("fetch attachment by cid after cleanup")
+            .expect("cid attachment content exists after cleanup");
+        assert_eq!(after_cleanup_by_cid.blob_bytes, b"attachment body");
+
+        let jmap_emails = storage
+            .fetch_jmap_emails(account_id, &[message_id])
+            .await
+            .expect("fetch JMAP email after cleanup");
+        assert_eq!(jmap_emails.len(), 1);
+        assert_eq!(jmap_emails[0].id, message_id);
+        assert!(jmap_emails[0].has_attachments);
+
+        let imap_emails = storage
+            .fetch_imap_emails(account_id, mailbox_id)
+            .await
+            .expect("fetch IMAP email after cleanup");
+        assert_eq!(imap_emails.len(), 1);
+        assert_eq!(imap_emails[0].id, message_id);
+        assert!(imap_emails[0]
+            .mime_parts
+            .iter()
+            .any(|part| part.file_name.as_deref() == Some("note.txt")));
     }
 }

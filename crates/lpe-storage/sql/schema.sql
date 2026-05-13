@@ -301,6 +301,8 @@ CREATE TABLE blobs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     validated_at TIMESTAMPTZ,
+    retained_until TIMESTAMPTZ,
+    legal_hold BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, domain_id, id),
     UNIQUE (tenant_id, domain_id, blob_kind, content_sha256),
@@ -310,6 +312,7 @@ CREATE TABLE blobs (
         OR (magika_status IN ('valid', 'rejected', 'failed') AND validated_at IS NOT NULL)
     ),
     CHECK (validated_at IS NULL OR validated_at >= created_at),
+    CHECK (retained_until IS NULL OR retained_until >= created_at),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT
 );
 
@@ -325,6 +328,10 @@ CREATE UNIQUE INDEX blobs_attachment_dedupe_idx
     ON blobs (tenant_id, domain_id, content_sha256)
     WHERE blob_kind = 'attachment';
 
+CREATE INDEX blobs_lifecycle_protection_idx
+    ON blobs (tenant_id, retained_until)
+    WHERE retained_until IS NOT NULL OR legal_hold = TRUE;
+
 CREATE TABLE blob_placements (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -333,18 +340,35 @@ CREATE TABLE blob_placements (
     blob_kind TEXT NOT NULL CHECK (blob_kind IN ('attachment', 'mime_part')),
     storage_pool_id UUID NOT NULL,
     placement_status TEXT NOT NULL DEFAULT 'active'
-        CHECK (placement_status IN ('active', 'copying', 'verified', 'retiring', 'failed')),
+        CHECK (placement_status IN (
+            'active',
+            'copying',
+            'verified',
+            'retiring',
+            'failed',
+            'cleaning',
+            'cleanup_failed',
+            'deleted'
+        )),
     verified_content_sha256 TEXT NOT NULL CHECK (verified_content_sha256 ~ '^[0-9a-f]{64}$'),
     verified_size_octets BIGINT NOT NULL CHECK (verified_size_octets >= 0),
     verified_at TIMESTAMPTZ,
     rollback_until TIMESTAMPTZ,
+    cleanup_attempts INTEGER NOT NULL DEFAULT 0 CHECK (cleanup_attempts >= 0),
+    cleanup_claimed_at TIMESTAMPTZ,
+    cleaned_at TIMESTAMPTZ,
+    cleanup_error TEXT,
+    next_cleanup_attempt_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, domain_id, id, blob_id, blob_kind, storage_pool_id),
     CHECK (placement_status IN ('copying', 'failed') OR verified_at IS NOT NULL),
     CHECK (verified_at IS NULL OR verified_at >= created_at),
-    CHECK (rollback_until IS NULL OR placement_status = 'retiring'),
+    CHECK (rollback_until IS NULL OR placement_status IN ('retiring', 'cleaning', 'cleanup_failed', 'deleted')),
+    CHECK (cleaned_at IS NULL OR placement_status = 'deleted'),
+    CHECK (cleaned_at IS NULL OR cleaned_at >= created_at),
+    CHECK (next_cleanup_attempt_at IS NULL OR placement_status = 'cleanup_failed'),
     FOREIGN KEY (
         tenant_id,
         domain_id,
@@ -382,6 +406,10 @@ CREATE INDEX blob_placements_status_idx
 
 CREATE INDEX blob_placements_pool_status_idx
     ON blob_placements (storage_pool_id, placement_status, updated_at);
+
+CREATE INDEX blob_placements_cleanup_due_idx
+    ON blob_placements (rollback_until, updated_at, id)
+    WHERE placement_status IN ('retiring', 'cleanup_failed');
 
 CREATE TABLE blob_migration_jobs (
     id UUID PRIMARY KEY,
@@ -491,8 +519,11 @@ CREATE TABLE messages (
     size_octets BIGINT NOT NULL CHECK (size_octets >= 0),
     has_attachments BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    retained_until TIMESTAMPTZ,
+    legal_hold BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, id, domain_id),
+    CHECK (retained_until IS NULL OR retained_until >= created_at),
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, domain_id, blob_id) REFERENCES blobs (tenant_id, domain_id, id) ON DELETE RESTRICT
 );
@@ -503,6 +534,10 @@ CREATE INDEX messages_tenant_received_idx
 CREATE INDEX messages_internet_message_idx
     ON messages (tenant_id, internet_message_id)
     WHERE internet_message_id IS NOT NULL;
+
+CREATE INDEX messages_lifecycle_protection_idx
+    ON messages (tenant_id, retained_until)
+    WHERE retained_until IS NOT NULL OR legal_hold = TRUE;
 
 CREATE TABLE message_headers (
     id UUID PRIMARY KEY,

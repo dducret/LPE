@@ -7,10 +7,23 @@
 ## Implementation/Usage
 
 - Mailbox size tiers are quota policy inputs.
+- Quota accounting uses canonical logical message/blob size and is independent
+  of durable blob placement count. Active plus retiring placements for the same
+  blob must not double-count mailbox, account, or domain usage.
 - `PST` import and export must preserve canonical messages and attachments.
 - Attachment blobs are deduplicated per domain.
 - Export must reconstruct every message with its blobs.
 - Retention and legal hold must apply before destructive deletion.
+- Old placement cleanup is not canonical message/blob deletion. It applies only
+  to non-active placement rows that have passed their rollback window and have
+  passed live-reference, retention, and legal-hold guards.
+- Placement cleanup must not delete canonical `blobs`, `messages`,
+  `mime_parts`, `attachments`, `attachment_extraction_jobs`, or
+  `attachment_texts` rows.
+- Raw RFC 5322 message blobs remain database-backed initially and are outside
+  old-placement cleanup scope.
+- Storage policy changes affect future writes only; they do not implicitly
+  create migration jobs for existing blobs.
 - `Bcc`:
   - is protected metadata
   - must not be indexed in user search
@@ -27,5 +40,9 @@
 | primary store | `PostgreSQL` |
 | search default | `PostgreSQL` |
 | attachment dedupe | per domain |
+| quota accounting | canonical logical size, not placement count |
+| old placement cleanup | rollback-window, live-reference, retention, and legal-hold guarded |
+| canonical blob/message deletion | not performed by placement cleanup |
+| raw RFC 5322 message blobs | database-backed initially |
 | protected recipient metadata | `Bcc` |
 | attachment text index formats | `PDF`, `DOCX`, `ODT` |

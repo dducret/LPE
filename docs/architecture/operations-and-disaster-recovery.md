@@ -26,8 +26,12 @@ Operations protect canonical `LPE` PostgreSQL state, blob storage, and `LPE-CT` 
   - restore core PostgreSQL before starting protocol adapters
   - restore blobs with database consistency
   - treat storage migration rollback as placement metadata recovery: after a
-    Milestone 3 switch, the old source placement remains `retiring` with a
-    rollback window until a later cleanup milestone deletes it
+    switch, the old source placement remains `retiring` with a rollback window
+    until Milestone 4 cleanup marks it `deleted` after rollback-window,
+    live-reference, retention, and legal-hold guards pass
+  - placement cleanup is not canonical message/blob deletion; restore and
+    rollback procedures must preserve canonical `blobs`, `messages`,
+    `mime_parts`, `attachments`, extraction jobs, and attachment text rows
   - restore `LPE-CT` spool before accepting SMTP traffic
   - validate `/health/ready`
 - Node replacement:

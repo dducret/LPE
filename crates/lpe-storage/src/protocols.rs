@@ -2152,9 +2152,23 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let row = sqlx::query_as::<_, AccountQuotaRow>(
             r#"
-            SELECT quota_mb, used_mb
-            FROM accounts
-            WHERE tenant_id = $1 AND id = $2
+            SELECT
+                a.quota_mb,
+                COALESCE((
+                    SELECT SUM(logical_messages.size_octets)::BIGINT
+                    FROM (
+                        SELECT DISTINCT m.id, m.size_octets
+                        FROM mailbox_messages mm
+                        JOIN messages m
+                          ON m.tenant_id = mm.tenant_id
+                         AND m.id = mm.message_id
+                        WHERE mm.tenant_id = a.tenant_id
+                          AND mm.account_id = a.id
+                          AND mm.visibility <> 'expunged'
+                    ) logical_messages
+                ), 0)::BIGINT AS quota_used_octets
+            FROM accounts a
+            WHERE a.tenant_id = $1 AND a.id = $2
             LIMIT 1
             "#,
         )
@@ -2167,9 +2181,69 @@ impl Storage {
         Ok(JmapQuota {
             id: "mail".to_string(),
             name: "Mail".to_string(),
-            used: (row.used_mb.max(0) as u64) * 1024 * 1024,
+            used: row.quota_used_octets.max(0) as u64,
             hard_limit: (row.quota_mb.max(0) as u64) * 1024 * 1024,
         })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn fetch_mailbox_logical_quota_used_octets(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> Result<u64> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let used = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COALESCE(SUM(m.size_octets), 0)::BIGINT
+            FROM mailbox_messages mm
+            JOIN messages m
+              ON m.tenant_id = mm.tenant_id
+             AND m.id = mm.message_id
+            WHERE mm.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.mailbox_id = $3
+              AND mm.visibility <> 'expunged'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(used.max(0) as u64)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn fetch_domain_logical_quota_used_octets(
+        &self,
+        tenant_id: &str,
+        domain_id: Uuid,
+    ) -> Result<u64> {
+        let used = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COALESCE((
+                SELECT SUM(logical_messages.size_octets)::BIGINT
+                FROM (
+                    SELECT DISTINCT m.id, m.size_octets
+                    FROM messages m
+                    JOIN mailbox_messages mm
+                      ON mm.tenant_id = m.tenant_id
+                     AND mm.message_id = m.id
+                     AND mm.visibility <> 'expunged'
+                    WHERE m.tenant_id = $1
+                      AND m.domain_id = $2
+                ) logical_messages
+            ), 0)::BIGINT
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(domain_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(used.max(0) as u64)
     }
 
     pub async fn fetch_jmap_message_blob(

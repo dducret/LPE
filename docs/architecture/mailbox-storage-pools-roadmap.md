@@ -2,584 +2,321 @@
 
 ## Purpose
 
-This document defines the roadmap for managing large `LPE` mailbox estates where
-logical mailbox capacity can exceed the capacity or performance profile of one
-physical storage device.
+This document records the current status of the `LPE` mailbox storage-pool
+work and the next active Codex prompt pack.
 
-The target example is 1000 mailboxes with quotas up to 100 GB each. That is up
-to 100 TB of logical mailbox capacity before replication, backup, retention,
-legal hold, and migration safety windows.
+The target scale example remains 1000 mailboxes with quotas up to 100 GB each,
+or up to 100 TB of logical mailbox capacity before replication, backup,
+retention, legal hold, and migration safety windows.
 
-## Assumptions
+## Current Status
 
-- PostgreSQL remains the authoritative store for canonical mailbox metadata,
-  mailbox membership, sync state, quotas, retention, and rights.
+Status date: 2026-05-13.
+
+Completed:
+
+- Milestone 0: architecture decision recorded. PostgreSQL remains the metadata
+  authority, protocol adapters stay backend-agnostic, and storage movement uses
+  copy, verify, metadata switch, rollback window, and cleanup.
+- Milestone 1: internal `BlobStore` boundary implemented for durable attachment
+  and MIME-part blobs while preserving database-backed byte storage. Raw RFC
+  5322 message blobs remain database-backed initially.
+- Milestone 2: storage-pool and blob-placement metadata implemented for
+  database-backed durable attachment and MIME-part blobs. Blob bytes still live
+  in PostgreSQL.
+- Milestone 3: explicit online migration jobs and database-backed
+  copy/verify/switch behavior implemented. Policy changes still do not create
+  implicit migration jobs.
+- Milestone 4: logical quota stability, retention/legal-hold guards, and safe
+  old-placement cleanup implemented for database-backed placement rows.
+  Placement cleanup does not delete canonical blobs, messages, MIME parts,
+  attachments, extraction jobs, or attachment text rows.
+
+Active next step:
+
+- Milestone 5: admin policy and visibility. This adds management APIs, health
+  and migration status visibility, and the admin UI surface for storage pools
+  and policy. It must not add cloud backends, mailbox-level policy, or automatic
+  migration on policy change.
+
+Deferred from the current release:
+
+- Provider-Specific Cloud Backends will be addressed in a future release.
+  This includes AWS S3, Azure Blob, and provider-specific durability,
+  consistency, cost, restore, and operational behavior.
+
+## Current Rules
+
+- PostgreSQL is the authoritative store for canonical mailbox metadata,
+  mailbox membership, sync state, quotas, retention, rights, blob metadata, and
+  placement metadata.
+- `LPE-CT` must not store canonical mailbox or collaboration state.
 - User-facing protocols continue to read and write canonical `LPE` state.
-- `LPE-CT` does not store canonical mailbox or collaboration state.
-- Blob bytes may live outside PostgreSQL once placement metadata and non-database
-  storage backends are implemented. The current `BlobStore` boundary preserves
-  database-backed storage while keeping protocols independent from that detail.
-- Storage movement must be transparent to users and protocol clients.
-- Administrators should not need to know object keys or disk paths, but they
-  must see policy, placement, health, migration progress, and risk.
-
-## Resolved Decisions
-
-| Decision | Outcome |
-| --- | --- |
-| RFC 5322 message blobs | Keep database-backed initially. Move attachment and MIME blob handling behind the storage boundary first. |
-| Storage policy evaluation | Evaluate storage policy at write time only. Policy changes do not trigger implicit immediate migration. |
-| Public-cloud encryption | Use the existing deployment secret model for the first public-cloud release. |
-| Mailbox-level policy | Defer mailbox-level policy until tenant, domain, and account policy are proven. |
-
-## Success Criteria
-
-- A mailbox can keep the same account id, mailbox ids, IMAP UIDs, JMAP ids,
-  ActiveSync sync keys, and MAPI sync semantics while its message and attachment
-  bytes move between storage pools.
-- Blob movement uses copy, checksum verification, metadata switch, rollback
-  window, and garbage collection.
-- Export can reconstruct every message with its original blobs after movement.
-- Deduplicated blobs remain tenant/domain safe.
-- Quota accounting remains independent from the physical storage backend.
-- Restore procedures cover PostgreSQL and canonical blob storage consistently.
-
-## Non-Goals
-
-- Do not move canonical mailbox state to `LPE-CT`.
-- Do not make protocol adapters aware of disks, buckets, or cloud vendors.
-- Do not add arbitrary pluggable data stores for metadata.
-- Do not add new attachment indexing formats as part of storage movement.
-- Do not copy implementation details from Stalwart or any license-incompatible
-  project.
-
-## Target Model
-
-`LPE` should treat physical storage as named storage pools behind a canonical
-blob layer. The implemented local/current `BlobStore` boundary now records
-database-backed storage pool and placement metadata for durable attachment and
-MIME-part blobs, but blob bytes still live in PostgreSQL and mailbox movement is
-not implemented.
-
-```text
-PostgreSQL
-  tenants
-  domains
-  accounts
-  mailboxes
-  messages
-  mailbox membership
-  quotas
-  blob metadata
-  blob placement
-  migration jobs
-
-Blob storage manager
-  local filesystem pool
-  local HDD pool
-  local SSD pool
-  private object storage pool
-  S3-compatible pool
-  future AWS S3 pool
-  future Azure Blob pool
-```
-
-Mailboxes do not point to paths or buckets. Messages and MIME parts reference
-canonical blob ids. PostgreSQL remains the metadata authority. Placement
-metadata points durable attachment and MIME-part blobs at database-backed pools
-only. Milestone 3 adds explicit migration jobs and a database-backed
-copy/verify/switch worker over those placement rows. Cloud, object storage,
-cleanup, retention/legal-hold integration, admin UI, and mailbox-level policy
-remain future milestones.
-
-## Storage Policy Levels
-
-Storage policy should be assignable in this order of specificity:
-
-| Level | Purpose |
-| --- | --- |
-| Platform default | Installation-wide fallback |
-| Tenant | Business or compliance default |
-| Domain | Domain-specific storage and residency |
-| Account | VIP, archive, or high-volume account rules |
-
-Policy should describe intent, not vendor details:
-
-- hot pool
-- archive pool
-- minimum verified replicas
-- migration window
-- retention/legal-hold behavior
-- maximum tolerated degraded time
-
-Policy is evaluated when new canonical blob bytes are written. Changing a
-policy records new intent for future writes; explicit migration jobs are
-required to move existing blobs.
-
-Mailbox-level policy remains deferred. The first admin surface should stop at
-platform, tenant, domain, and account policy.
-
-## Phased Plan
-
-### Milestone 0: Architecture Decision
-
-Document the boundary before code changes.
-
-Deliverables:
-
-- define `BlobStore`, `BlobPlacement`, `StoragePool`, and `StoragePolicy`
-  terminology
-- update architecture docs that currently imply blobs are database-only
-- define restore and rollback expectations
-- define dependency and license constraints for future storage adapters
-
-Verification:
-
-- documentation states that PostgreSQL remains metadata authority
-- documentation states that protocol adapters do not talk to storage backends
-- documentation states that blob movement is copy-verify-switch-cleanup
-
-### Milestone 1: Internal Blob Storage Boundary
-
-Create one internal blob storage abstraction inside `lpe-storage`.
-
-Status: implemented for the local/current storage behavior. `lpe-storage`
-contains an internal `BlobStore` boundary for durable attachment blobs and the
-schema-supported MIME-part blob kind. The boundary supports put, read, stat, and
-checksum/size verification while continuing to store bytes in PostgreSQL.
-Protocol adapters continue to call canonical `lpe-storage` APIs and do not know
-about storage backends.
-
-Deliverables:
-
-- a minimal Rust service boundary for put, read, stat, and verify
-- a local/current storage implementation that preserves PostgreSQL-backed byte
-  storage
-- raw RFC 5322 message blobs remain database-backed initially
-- JMAP upload blobs remain expiring PostgreSQL staging objects, not durable
-  storage placements
-- tests proving current attachment, protocol fetch, and export flows still work
-- no cloud dependency yet
-- delete-after-retention remains deferred until retention, legal-hold, and
-  placement garbage-collection rules exist
-
-Verification:
-
-- `cargo test -p lpe-storage`
-- protocol tests that fetch attachments still pass
-- export tests still reconstruct messages with blobs
-
-Current non-goals for Milestone 1:
-
-- no storage-pool table
-- no blob-placement table
-- no non-database backend
-- no automatic movement of existing blobs when policy changes
-- no mailbox-visible movement semantics yet
-
-### Milestone 2: Blob Placement Metadata
-
-Teach PostgreSQL where a blob is stored without moving mailbox state.
-
-Status: implemented for database-backed durable attachment and MIME-part blobs.
-`storage_pools` and `blob_placements` are metadata only in this milestone.
-Blob bytes still live in `blobs.blob_bytes`, and active database-backed
-placements are required for durable attachment and MIME-part `BlobStore`
-read/stat/verify paths. Raw RFC 5322 message blobs remain database-backed
-initially and do not require placement rows.
-
-Deliverables:
-
-- storage pool table
-- blob placement table
-- placement metadata for attachment and MIME blobs first; raw RFC 5322 message
-  blob placement can remain database-backed until later evidence justifies
-  moving it
-- placement status values such as `active`, `copying`, `verified`,
-  `retiring`, and `failed`
-- checksum and size verification fields
-- indexes for blob fetch and migration workers
-- no cloud backend, migration worker, admin UI, mailbox-level policy, or
-  automatic policy-triggered movement
-
-Verification:
-
-- schema constraints prevent cross-tenant/domain placement mistakes
-- tests prove a message can fetch a blob through placement metadata
-- tests prove a missing active placement fails as a storage error, not as
-  missing mailbox state
-- policy changes still record intent for future writes only and do not
-  implicitly migrate existing blobs
-
-### Milestone 3: Online Migration Worker
-
-Move blob bytes between pools without changing mailbox-visible state.
-
-Status: implemented for explicit job-driven movement between database-backed
-durable attachment and MIME-part placements. Policy changes still record intent
-for future writes only and do not create implicit migration jobs. Raw RFC 5322
-message blobs remain database-backed initially and outside migration scope.
-Source placements are marked `retiring` and retained with rollback-window
-metadata after the active-placement switch; cleanup and deletion remain future
-work.
-
-Deliverables:
-
-- migration job table
-- copy worker
-- checksum verification
-- atomic active-placement switch
-- source-placement rollback window
-- retry and failure states
-- database-backed source and target placements only
-- no cloud backend, admin UI, mailbox-level policy, or retention/legal-hold
-  garbage collection
-
-Verification:
-
-- migration can be interrupted and resumed
-- reads continue during migration
-- rollback can use the old placement before garbage collection
-- duplicate migration jobs do not corrupt placement state
-- exactly one active placement remains after switch
-
-### Milestone 4: Quota, Retention, and Legal Hold Integration
-
-Keep account and domain quota behavior independent from physical placement.
-
-Deliverables:
-
-- quota accounting based on canonical logical size
-- policy checks before deleting old placements
-- legal hold protection for blobs referenced by held messages
-- garbage collection rules for unreferenced placements
-
-Verification:
-
-- deleting an old placement cannot delete a held blob
-- deduplicated blobs are kept while any live reference remains
-- mailbox quota reports remain stable before and after movement
-
-### Milestone 5: Admin Policy and Visibility
-
-Expose storage management as policy and health, not object paths.
-
-Deliverables:
-
-- admin API for storage pools and policies
-- migration status endpoints
-- health indicators for degraded pools and missing replicas
-- policy controls for platform, tenant, domain, and account levels only
-- admin UI list and right-side drawer following the default management pattern
-
-Verification:
-
-- tenant admins see only allowed tenant/domain/account policy controls
-- global admins can manage platform pools
-- mailbox-level policy is not exposed in the first admin release
-- UI exposes progress and risk without leaking secrets or provider internals
-
-### Milestone 6: S3-Compatible Object Storage
-
-Add the first non-local backend only after the internal boundary is proven.
-
-Deliverables:
-
-- S3-compatible storage adapter
-- configuration and secret handling
-- encryption integrated with the existing deployment secret model
-- multipart upload/download policy where needed
-- integration tests gated by environment variables
-
-Verification:
-
-- local tests still run without S3
-- S3 integration tests prove upload, read, verify, migration, and delete
-- dependency licenses are reviewed before adoption
-
-### Milestone 7: Provider-Specific Cloud Backends
-
-Add AWS S3 or Azure Blob only when generic S3-compatible behavior is not enough.
-
-Deliverables:
-
-- provider-specific configuration
-- encryption integrated with the existing deployment secret model unless a
-  later architecture decision explicitly introduces a separate key hierarchy
-- provider health checks
-- documented durability and consistency assumptions
-- cloud-cost and egress warnings in operational docs
-
-Verification:
-
-- each provider has explicit integration tests
-- restore drills cover PostgreSQL plus cloud blob storage
-- failure modes are visible through readiness and operations diagnostics
-
-### Milestone 8: Operations Benchmarks and Restore Drills
-
-Prove that the design works at realistic mailbox sizes.
-
-Deliverables:
-
-- benchmark profiles for large mailbox `IMAP`, `JMAP`, and `ActiveSync` fetches
-- migration throughput measurements
-- restore playbook for PostgreSQL plus blob pools
-- degraded-pool runbook
-
-Verification:
-
-- benchmark evidence uses deployed services, not mocks
-- restore drill reconstructs messages and attachments
-- protocol clients remain stable during storage movement
-
-## Codex Prompt Pack: Milestone 4
-
-Use these prompts one at a time. Milestone 4 integrates logical quota,
-retention, legal hold, and safe placement cleanup rules after explicit
-database-backed migration. It must not add S3, AWS, Azure, private object
-storage, admin UI, mailbox-level policy, or automatic migration when a policy
-changes.
-
-### Prompt 1: Inspect Lifecycle Baseline
+- Protocol adapters must not know disk paths, buckets, object keys, or cloud
+  vendor APIs.
+- Storage policy is evaluated at write time only. Policy changes record future
+  intent and do not implicitly move existing blobs.
+- Mailbox-level policy remains deferred until platform, tenant, domain, and
+  account policy are proven.
+- Raw RFC 5322 message blobs remain database-backed initially.
+- Every new dependency or external implementation idea must be checked against
+  `LICENSE.md`.
+
+## Codex Prompt Pack: Milestone 5
+
+Use these prompts one at a time. Milestone 5 exposes storage management as
+policy, health, and migration visibility. It must not add S3, AWS, Azure,
+private object storage, mailbox-level policy, or automatic migration when a
+policy changes.
+
+### Prompt 1: Inspect Admin And Storage Baseline
 
 ```text
 Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
 LICENSE.md, docs/architecture/sql-schema-v2.md,
 docs/architecture/data-lifecycle-and-compliance.md,
-docs/architecture/attachments-v1.md, and
+docs/architecture/web-design.md, and
 docs/architecture/mailbox-storage-pools-roadmap.md.
 
-Goal: inspect the completed Milestone 3 migration flow and identify the
-smallest Milestone 4 lifecycle integration for logical quota, retention, legal
-hold, and placement garbage collection.
+Goal: inspect completed storage-pool milestones and current admin API/UI
+patterns before designing Milestone 5.
 
 Scope:
-- lpe-storage only unless a test proves another crate must change
-- inspect blob placement, migration, and BlobStore code
-- inspect current quota/account/domain size accounting
-- inspect retention and legal-hold schema or documented gaps
-- inspect attachment/blob reference paths from messages, MIME parts,
-  attachments, extraction jobs, and attachment texts
+- lpe-storage storage pool, placement, migration, quota, and cleanup code
+- lpe-admin-api routes, authorization, and response patterns
+- web admin list/drawer patterns
+- existing health, dashboard, and diagnostics types
 
 Return:
-- current logical size accounting behavior
-- current retiring placement behavior after migration
-- current retention/legal-hold model and any missing schema
-- exact blockers to deleting old placements safely
-- proposed minimal Milestone 4 implementation slices
+- current storage pool and policy data available in lpe-storage
+- current migration and cleanup status data available in lpe-storage
+- current admin roles and authorization checks relevant to platform, tenant,
+  domain, and account policy
+- files likely to change
 - risks or unclear points before editing
 
 Do not edit files.
 ```
 
-### Prompt 2: Design Lifecycle And Cleanup Rules
+### Prompt 2: Design Admin API Surface
 
 ```text
-Design the minimal Milestone 4 lifecycle rules for quota, retention, legal hold,
-and old-placement cleanup.
+Design the minimal Milestone 5 admin API for storage pools, storage policy,
+health, and migration visibility.
 
 Constraints:
 - PostgreSQL remains the metadata authority.
-- Quota accounting is based on canonical logical blob/message size, not the
-  number of physical placements.
-- Raw RFC 5322 message blobs remain database-backed initially.
-- Storage policy is evaluated at write time only; policy changes do not create
-  implicit migration jobs.
-- Cleanup only applies to non-active old placements that are safe to remove.
-- Do not delete canonical blobs, messages, MIME parts, attachments, extraction
-  jobs, or attachment text rows in this milestone unless the existing code
-  already has a safe deletion path.
-- No cloud, S3, AWS, Azure, or private object storage implementation.
-- No admin API or UI.
+- No S3, AWS, Azure, or private object storage implementation.
 - No mailbox-level policy.
-- Do not add new dependencies.
+- Policy changes do not implicitly create migration jobs.
+- Tenant administrators can see and manage only allowed tenant/domain/account
+  policy controls.
+- Global administrators can manage platform storage pools and platform default
+  policy.
+- Do not expose backend object keys, database internals, secrets, or provider
+  credentials.
+- Do not add new dependencies unless absolutely required and checked against
+  LICENSE.md.
 
 Return:
-- lifecycle state rules for active, retiring, and deleted placement rows
-- the retention and legal-hold checks required before deleting placement bytes
-- the reference checks required before deleting an old placement
-- how quota reports remain stable before and after migration
-- schema additions, if any, and why they are necessary
-- tests required for each rule
+- endpoints, methods, request bodies, and response bodies
+- authorization matrix for global admin and tenant admin
+- validation rules for platform, tenant, domain, and account policy
+- health/status fields for degraded pools, missing active placements, retiring
+  placements, migration jobs, and cleanup jobs
+- tests required for authorization, validation, and visibility
 - any simpler alternative and why it is or is not enough
 
 Do not edit code yet.
 ```
 
-### Prompt 3: Implement Logical Quota Stability
+### Prompt 3: Implement Storage Pool And Policy Admin APIs
 
 ```text
-Implement Milestone 4 quota stability so mailbox/account/domain quota behavior
-uses canonical logical size and is not affected by placement count.
+Implement the approved Milestone 5 admin APIs for storage pools and storage
+policy.
 
 Scope:
-- lpe-storage quota and storage-overview paths only
-- no admin API or UI
+- lpe-storage storage/admin query and mutation functions
+- lpe-admin-api request/response types and routes
+- no admin UI yet
 - no external storage backend
-- no placement deletion yet
-- no unrelated quota refactor
+- no mailbox-level policy
+- no automatic migration on policy changes
 
 Required behavior:
-- active plus retiring placements for one blob do not double-count quota
-- moving a blob between database-backed placements does not change mailbox,
-  account, or domain logical size reports
-- deduplicated blobs continue to count according to the existing canonical
-  quota model, not physical placement count
+- global admins can list and manage platform storage pools and platform default
+  policy
+- tenant admins can view allowed pool/policy summaries and manage tenant,
+  domain, and account policy where authorized
+- invalid policy references are rejected
+- object keys, secrets, and provider-specific internals are never returned
 
 Verification:
-- focused lpe-storage tests for quota before migration, during retiring
-  placement state, and after cleanup eligibility
-- tests include deduplicated attachment blobs where feasible
+- focused lpe-storage tests for policy persistence and validation
+- focused lpe-admin-api tests for routes and authorization
 - cargo test -p lpe-storage
+- cargo test -p lpe-admin-api
 
 Report:
 - changed files
 - exact tests run
-- any existing quota behavior intentionally preserved
+- explicit non-goals preserved
 ```
 
-### Prompt 4: Add Retention And Legal-Hold Guards
+### Prompt 4: Implement Migration And Health Visibility APIs
 
 ```text
-Add the minimal Milestone 4 guards that prevent old placement cleanup while a
-blob is protected by retention, legal hold, or live canonical references.
+Implement Milestone 5 read-only visibility APIs for storage health, placement
+state, migration jobs, and cleanup jobs.
 
 Scope:
-- lpe-storage only
-- old placement cleanup eligibility only
-- no message deletion feature expansion
-- no admin API or UI
-- no external storage backend
+- lpe-storage query functions
+- lpe-admin-api read-only endpoints
+- no migration creation UI unless already approved by the API design
+- no cloud backend
+- no mailbox-level policy
 
 Required behavior:
-- a retiring placement is not cleanup-eligible before its rollback window
-  expires
-- a retiring placement is not cleanup-eligible while the blob is referenced by
-  live messages, MIME parts, attachments, extraction jobs, or attachment texts
-  in a way that still needs the placement
-- a retiring placement is not cleanup-eligible when existing or newly added
-  retention/legal-hold metadata says the blob must be preserved
-- guards return explicit reasons that tests can assert
+- expose pool health summary without leaking secrets
+- expose counts for active, retiring, deleted, missing, or degraded placements
+- expose migration job status, retry state, last error summary, and target pool
+  summary
+- expose cleanup status and blocked cleanup reasons
+- tenant admins see only tenant-scoped data they are authorized to manage
+- global admins see platform-wide status
 
 Verification:
-- tests for rollback-window protection
-- tests for live reference protection
-- tests for retention/legal-hold protection
+- tests for global and tenant visibility boundaries
+- tests for degraded and blocked states
 - cargo test -p lpe-storage
+- cargo test -p lpe-admin-api
 
 Report:
 - changed files
 - exact tests run
-- any retention/legal-hold limitation that remains documented
+- status fields intentionally omitted for security or scope reasons
 ```
 
-### Prompt 5: Implement Safe Placement Cleanup Worker
+### Prompt 5: Build Admin UI List And Drawer
 
 ```text
-Implement the Milestone 4 cleanup worker for old non-active placements that have
-passed all lifecycle guards.
+Build the Milestone 5 admin UI for storage pool and policy visibility.
+
+Read docs/architecture/web-design.md before editing UI files.
 
 Scope:
-- lpe-storage only
-- database-backed placements only
-- old placement cleanup only
-- no canonical blob/message deletion
-- no active placement deletion
-- no external storage backend
-- no admin API or UI
+- existing admin web UI only
+- full-width storage pool/policy list
+- primary action in the list header where creation or policy change is allowed
+- right-side drawer for details, policy editing, health, and contextual actions
+- no mailbox-level policy
+- no cloud provider setup UI
+- no placeholder runtime actions
 
 Required behavior:
-- cleanup claims eligible retiring placements deterministically
-- cleanup never deletes the only active placement for a blob
-- cleanup marks placement cleanup/deletion state before removing or clearing
-  physical placement bytes, according to the approved design
-- repeated cleanup execution is idempotent
-- failed cleanup records retryable state without making the blob unreadable
+- global admins can inspect platform pools, default policy, health, migration
+  status, and cleanup status
+- tenant admins can inspect allowed tenant/domain/account policy and scoped
+  status
+- UI shows degraded, retiring, blocked, and failed states clearly
+- UI never exposes object keys, secrets, or provider internals
+- UI uses the shared Tailwind-based design system and default management
+  pattern
 
 Verification:
-- tests prove active placement reads still work after old placement cleanup
-- tests prove cleanup refuses the last active placement
-- tests prove repeated cleanup is safe
-- tests prove failed cleanup can retry
+- run the relevant frontend build or tests available in the repository
+- if a local dev server is required, open the admin UI and verify the storage
+  management list/drawer in the browser
+- verify text fits at desktop and mobile widths
+
+Report:
+- changed files
+- exact verification run
+- screenshots or browser checks if performed
+```
+
+### Prompt 6: Add Operations And Audit Coverage
+
+```text
+Add the minimal Milestone 5 operational and audit coverage for storage pool
+policy and visibility.
+
+Scope:
+- admin/API audit events for policy changes where audit infrastructure exists
+- health/readiness diagnostics for storage pool metadata consistency
+- operations documentation only where behavior changed
+- no cloud backend
+- no mailbox-level policy
+
+Required behavior:
+- policy changes record who changed what, at which scope, and when
+- degraded storage-pool metadata is visible through admin diagnostics
+- readiness behavior is documented if storage-pool metadata can affect service
+  readiness
+- no user-facing protocol behavior changes
+
+Verification:
+- tests for audit/event records where supported
+- tests or diagnostics checks for degraded metadata state
 - cargo test -p lpe-storage
+- cargo test -p lpe-admin-api
 
 Report:
 - changed files
 - exact tests run
-- cleanup behavior intentionally limited to old placements
+- operational gaps intentionally deferred
 ```
 
-### Prompt 6: Prove Export And Protocol Fetch Stability
+### Prompt 7: Document Milestone 5 Completion
 
 ```text
-Verify that Milestone 4 quota and cleanup behavior does not break canonical
-message export or protocol attachment fetches.
-
-Scope:
-- lpe-storage tests first
-- protocol crate changes only if an existing test proves a regression
-- no new protocol features
-- no external storage backend
-- no admin API or UI
-
-Required behavior:
-- export reconstructs messages and attachments after migration and old-placement
-  cleanup
-- JMAP, ActiveSync, EWS/MAPI, and IMAP-facing storage paths still use canonical
-  lpe-storage APIs
-- missing cleaned-up old placements do not surface as missing mailbox/message
-  state
-
-Verification:
-- add or update focused lpe-storage tests for export/fetch after cleanup
-- run cargo test -p lpe-storage
-- run narrow protocol tests only if lpe-storage API signatures or behavior
-  changed in a way protocol crates compile against
-
-Report:
-- changed files
-- exact tests run
-- protocol paths checked
-```
-
-### Prompt 7: Document Milestone 4 Completion
-
-```text
-Update only directly relevant architecture documentation for the implemented
-Milestone 4 lifecycle integration.
+Update only directly relevant architecture documentation for implemented
+Milestone 5 admin policy and visibility.
 
 Scope:
 - docs/architecture/mailbox-storage-pools-roadmap.md
-- docs/architecture/sql-schema-v2.md
-- docs/architecture/data-lifecycle-and-compliance.md
-- docs/architecture/operations-and-disaster-recovery.md only if restore,
-  rollback, or cleanup behavior changed
+- docs/architecture/sql-schema-v2.md if admin-facing schema behavior changed
+- docs/architecture/data-lifecycle-and-compliance.md if policy or cleanup
+  behavior changed
+- docs/architecture/operations-and-disaster-recovery.md if health, readiness,
+  restore, or diagnostics behavior changed
+- docs/architecture/web-design.md only if a durable admin UI rule changed
 
 Required documentation:
-- quota accounting is logical and independent of placement count
-- old placement cleanup is guarded by rollback windows, live references,
-  retention, and legal hold
-- canonical blobs/messages are not deleted by placement cleanup
-- raw RFC 5322 message blobs remain database-backed initially
+- platform, tenant, domain, and account policy are supported
+- mailbox-level policy remains deferred
 - policy changes still do not implicitly migrate existing blobs
-- cloud backends, admin UI, and mailbox-level policy remain future milestones
+- admin UI and APIs expose status, health, and migration visibility without
+  leaking object keys, secrets, or provider internals
+- Provider-Specific Cloud Backends remain future-release work
 
 Verification:
 - docs do not claim S3/AWS/Azure support is implemented
 - docs do not claim mailbox-level policy is implemented
-- docs clearly distinguish placement cleanup from canonical message/blob
-  deletion
-- cargo test -p lpe-storage if documentation touched schema_contract
-  expectations
+- docs clearly distinguish policy changes from explicit migration jobs
+- run tests for any code touched
 ```
 
-## Deferred Decisions
+## Future Release: Provider-Specific Cloud Backends
 
-- When, if ever, raw RFC 5322 message blobs should move out of the database.
-- Whether policy changes should gain an optional explicit "create migration
-  plan" workflow after write-time policy behavior is proven.
-- Whether public-cloud backends need a separate encryption key hierarchy after
-  the existing deployment secret model is proven in restore drills.
-- Whether mailbox-level policy is needed after tenant, domain, and account
-  policy is proven.
+Provider-Specific Cloud Backends will be addressed in a future release after
+Milestone 5 admin policy and visibility is proven. This future work must still
+preserve the rule that PostgreSQL is the metadata authority and protocol
+adapters never talk directly to cloud providers.
+
+Short roadmap:
+
+1. Provider-neutral hardening: prove the storage backend contract with one
+   non-local backend shape, failure injection, restore drills, and degraded
+   pool diagnostics.
+2. Dependency and license review: select allowed SDKs or protocol clients under
+   the `LICENSE.md` policy before implementation.
+3. AWS S3 backend: implement provider-specific configuration, health checks,
+   upload/read/verify/delete behavior, retry semantics, and restore tests.
+4. Azure Blob backend: implement equivalent provider-specific behavior and
+   document consistency, authentication, and operational differences from AWS.
+5. Operations release gate: benchmark migration throughput, restore from
+   PostgreSQL plus cloud blobs, egress/cost warnings, readiness behavior, and
+   failure-mode diagnostics before exposing the backends as supported.
+

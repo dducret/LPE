@@ -28,7 +28,19 @@ impl Storage {
                 primary_email,
                 display_name,
                 quota_mb,
-                used_mb,
+                COALESCE((
+                    SELECT SUM(logical_messages.size_octets)::BIGINT
+                    FROM (
+                        SELECT DISTINCT m.id, m.size_octets
+                        FROM mailbox_messages mm
+                        JOIN messages m
+                          ON m.tenant_id = mm.tenant_id
+                         AND m.id = mm.message_id
+                        WHERE mm.tenant_id = accounts.tenant_id
+                          AND mm.account_id = accounts.id
+                          AND mm.visibility <> 'expunged'
+                    ) logical_messages
+                ), 0)::BIGINT AS quota_used_octets,
                 status,
                 gal_visibility,
                 directory_kind
@@ -120,7 +132,7 @@ impl Storage {
                 email: row.primary_email,
                 display_name: row.display_name,
                 quota_mb: row.quota_mb as u32,
-                used_mb: row.used_mb as u32,
+                used_mb: (row.quota_used_octets.max(0) / 1_048_576) as u32,
                 status: row.status,
                 gal_visibility: row.gal_visibility,
                 directory_kind: row.directory_kind,
@@ -306,8 +318,14 @@ impl Storage {
 
         let insert_result = sqlx::query(
             r#"
-            INSERT INTO accounts (id, tenant_id, primary_email, display_name, quota_mb, used_mb, status)
-            VALUES ($1, $2, $3, $4, $5, 0, 'active')
+            INSERT INTO accounts (
+                id, tenant_id, primary_domain_id, primary_email, display_name,
+                quota_mb, quota_used_octets, status
+            )
+            SELECT $1, $2, d.id, $3, $4, $5, 0, 'active'
+            FROM domains d
+            WHERE d.tenant_id = $2
+              AND d.name = split_part($3, '@', 2)
             ON CONFLICT (tenant_id, primary_email) DO NOTHING
             "#,
         )

@@ -215,13 +215,29 @@ impl Storage {
             SELECT
                 m.id,
                 m.internet_message_id,
-                m.from_address,
-                m.subject_normalized,
-                COALESCE(mb.body_text, '') AS body_text
+                COALESCE(fr.address, '') AS from_address,
+                m.normalized_subject AS subject_normalized,
+                COALESCE(tb.body_text, '') AS body_text
             FROM messages m
-            LEFT JOIN message_bodies mb ON mb.message_id = m.id
-            WHERE m.tenant_id = $1 AND m.mailbox_id = $2
-            ORDER BY m.received_at ASC
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = m.tenant_id
+             AND mm.message_id = m.id
+             AND mm.visibility <> 'expunged'
+            LEFT JOIN message_recipients fr
+              ON fr.tenant_id = m.tenant_id
+             AND fr.message_id = m.id
+             AND fr.role = 'from'
+            LEFT JOIN LATERAL (
+                SELECT body_text
+                FROM message_bodies
+                WHERE tenant_id = m.tenant_id
+                  AND message_id = m.id
+                  AND body_kind = 'text'
+                ORDER BY id ASC
+                LIMIT 1
+            ) tb ON TRUE
+            WHERE m.tenant_id = $1 AND mm.mailbox_id = $2
+            ORDER BY mm.received_at ASC, m.received_at ASC
             "#,
         )
         .bind(&job.tenant_id)
@@ -528,4 +544,317 @@ fn decode_pst_field(value: &str) -> String {
         }
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sha256_hex;
+    use sqlx::postgres::PgPoolOptions;
+
+    const SCHEMA: &str = include_str!("../sql/schema.sql");
+
+    async fn test_storage() -> Option<Storage> {
+        let database_url = match std::env::var("LPE_STORAGE_TEST_DATABASE_URL") {
+            Ok(value) => value,
+            Err(_) => return None,
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&database_url)
+            .await
+            .expect("connect to LPE_STORAGE_TEST_DATABASE_URL");
+        sqlx::raw_sql("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            .execute(&pool)
+            .await
+            .expect("reset test database schema");
+        sqlx::raw_sql(SCHEMA)
+            .execute(&pool)
+            .await
+            .expect("apply schema.sql to test database");
+        Some(Storage::new(pool))
+    }
+
+    async fn insert_account_mailbox(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO tenants (id, slug, display_name)
+            VALUES ($1, 'pst-test', 'PST Test')
+            "#,
+        )
+        .bind(tenant_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert tenant");
+        sqlx::query(
+            r#"
+            INSERT INTO domains (id, tenant_id, name)
+            VALUES ($1, $2, 'example.test')
+            "#,
+        )
+        .bind(domain_id)
+        .bind(tenant_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert domain");
+        sqlx::query(
+            r#"
+            INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+            VALUES ($1, $2, $3, 'user@example.test', 'User')
+            "#,
+        )
+        .bind(account_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert account");
+        sqlx::query(
+            r#"
+            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, uid_validity)
+            VALUES ($1, $2, $3, 'inbox', 'Inbox', 1)
+            "#,
+        )
+        .bind(mailbox_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert mailbox");
+    }
+
+    async fn insert_message_with_attachment(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+    ) -> (Uuid, Uuid) {
+        let tenant = tenant_id.to_string();
+        let message_id = Uuid::new_v4();
+        let mailbox_message_id = Uuid::new_v4();
+        let raw_message =
+            b"From: sender@example.test\r\nSubject: Export Subject\r\n\r\nExport body".to_vec();
+        let mut tx = storage.pool().begin().await.expect("begin export tx");
+        let raw_blob_id = storage
+            .store_message_blob_in_tx(
+                &mut tx,
+                &tenant,
+                domain_id,
+                "raw_message",
+                "message/rfc822",
+                &raw_message,
+            )
+            .await
+            .expect("store raw message blob");
+        sqlx::query(
+            r#"
+            INSERT INTO messages (
+                id, tenant_id, domain_id, blob_id, internet_message_id,
+                message_hash, normalized_subject, received_at, size_octets
+            )
+            VALUES ($1, $2, $3, $4, '<export@example.test>', $5, 'Export Subject', NOW(), $6)
+            "#,
+        )
+        .bind(message_id)
+        .bind(tenant_id)
+        .bind(domain_id)
+        .bind(raw_blob_id)
+        .bind(sha256_hex(&raw_message))
+        .bind(raw_message.len() as i64)
+        .execute(&mut *tx)
+        .await
+        .expect("insert export message");
+        sqlx::query(
+            r#"
+            INSERT INTO message_recipients (
+                id, tenant_id, message_id, role, address, display_name, ordinal
+            )
+            VALUES ($1, $2, $3, 'from', 'sender@example.test', 'Sender', 0)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(tenant_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await
+        .expect("insert sender");
+        storage
+            .upsert_message_body_in_tx(&mut tx, &tenant, domain_id, message_id, "Export body", None)
+            .await
+            .expect("insert message body");
+        let attachment_ids = storage
+            .ingest_message_attachments_in_tx(
+                &mut tx,
+                &tenant,
+                account_id,
+                message_id,
+                &[AttachmentUploadInput {
+                    file_name: "export.txt".to_string(),
+                    media_type: "text/plain".to_string(),
+                    disposition: Some("attachment".to_string()),
+                    content_id: None,
+                    blob_bytes: b"attachment body".to_vec(),
+                }],
+            )
+            .await
+            .expect("ingest export attachment");
+        sqlx::query(
+            r#"
+            INSERT INTO mailbox_messages (
+                id, tenant_id, account_id, mailbox_id, message_id, imap_uid, received_at
+            )
+            VALUES ($1, $2, $3, $4, $5, 1, NOW())
+            "#,
+        )
+        .bind(mailbox_message_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(message_id)
+        .execute(&mut *tx)
+        .await
+        .expect("insert mailbox message");
+        storage
+            .assign_message_attachments_membership_in_tx(
+                &mut tx,
+                &tenant,
+                account_id,
+                message_id,
+                mailbox_message_id,
+            )
+            .await
+            .expect("assign attachment membership");
+        tx.commit().await.expect("commit export message");
+
+        let blob_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT blob_id
+            FROM attachments
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(attachment_ids[0])
+        .fetch_one(storage.pool())
+        .await
+        .expect("load export attachment blob");
+        (message_id, blob_id)
+    }
+
+    async fn insert_secondary_storage_pool(storage: &Storage) -> Uuid {
+        let pool_id = Uuid::from_u128(2);
+        sqlx::query(
+            r#"
+            INSERT INTO storage_pools (id, name, pool_kind)
+            VALUES ($1, 'postgres-secondary', 'postgres')
+            "#,
+        )
+        .bind(pool_id)
+        .execute(storage.pool())
+        .await
+        .expect("insert secondary storage pool");
+        pool_id
+    }
+
+    async fn migrate_attachment_and_cleanup_source(
+        storage: &Storage,
+        tenant_id: Uuid,
+        domain_id: Uuid,
+        blob_id: Uuid,
+    ) {
+        let target_pool_id = insert_secondary_storage_pool(storage).await;
+        PostgresBlobStore
+            .create_blob_migration_job(
+                storage.pool(),
+                &tenant_id.to_string(),
+                domain_id,
+                "attachment",
+                blob_id,
+                target_pool_id,
+            )
+            .await
+            .expect("create export attachment migration job");
+        let verified = PostgresBlobStore
+            .copy_and_verify_one_blob_migration_job(storage.pool())
+            .await
+            .expect("copy and verify export attachment migration")
+            .expect("verified export attachment migration");
+        PostgresBlobStore
+            .switch_verified_blob_migration_job(storage.pool(), verified.id)
+            .await
+            .expect("switch export attachment migration");
+        sqlx::query(
+            r#"
+            UPDATE blob_placements
+            SET rollback_until = NOW() - INTERVAL '1 minute'
+            WHERE tenant_id = $1
+              AND id = $2
+              AND placement_status = 'retiring'
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(verified.source_placement_id)
+        .execute(storage.pool())
+        .await
+        .expect("expire export attachment rollback window");
+        let cleanup = PostgresBlobStore
+            .cleanup_one_old_placement(storage.pool(), verified.source_placement_id)
+            .await
+            .expect("cleanup export attachment old placement");
+        assert!(cleanup.cleaned);
+        assert_eq!(cleanup.status, "deleted");
+    }
+
+    #[tokio::test]
+    async fn pst_export_reconstructs_attachment_after_old_placement_cleanup() {
+        let Some(storage) = test_storage().await else {
+            eprintln!("skipping database test; set LPE_STORAGE_TEST_DATABASE_URL");
+            return;
+        };
+        let tenant_id = Uuid::new_v4();
+        let domain_id = Uuid::new_v4();
+        let account_id = Uuid::new_v4();
+        let mailbox_id = Uuid::new_v4();
+        insert_account_mailbox(&storage, tenant_id, domain_id, account_id, mailbox_id).await;
+        let (_message_id, attachment_blob_id) =
+            insert_message_with_attachment(&storage, tenant_id, domain_id, account_id, mailbox_id)
+                .await;
+        migrate_attachment_and_cleanup_source(&storage, tenant_id, domain_id, attachment_blob_id)
+            .await;
+
+        let job_id = Uuid::new_v4();
+        let output_path = std::env::temp_dir().join(format!("lpe-pst-export-{job_id}.pst"));
+        let job = PendingPstJobRow {
+            id: job_id,
+            tenant_id: tenant_id.to_string(),
+            mailbox_id,
+            account_id,
+            direction: "export".to_string(),
+            server_path: output_path.to_string_lossy().to_string(),
+            requested_by: "test".to_string(),
+        };
+
+        let processed = storage
+            .export_mailbox_to_pst(&job)
+            .await
+            .expect("export mailbox after old placement cleanup");
+        assert_eq!(processed, 1);
+        let exported = std::fs::read_to_string(&output_path).expect("read exported PST fixture");
+        let _ = std::fs::remove_file(&output_path);
+        assert!(exported.contains("LPE-PST-V1"));
+        assert!(exported.contains(
+            "MESSAGE\t<export@example.test>\tsender@example.test\tExport Subject\tExport body"
+        ));
+        assert!(exported.contains(&format!(
+            "ATTACHMENT\texport.txt\ttext/plain\t{}",
+            BASE64.encode(b"attachment body")
+        )));
+    }
 }
