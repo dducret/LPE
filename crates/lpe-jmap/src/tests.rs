@@ -4919,7 +4919,8 @@ async fn mailbox_set_accepts_unicode_names_and_normalizes_to_nfc() {
                         "create": {
                             "m1": {"name": "Cafe\u{301}"},
                             "m2": {"name": "案件"},
-                            "m3": {"name": "📁 Projects"}
+                            "m3": {"name": "📁 Projects"},
+                            "m4": {"name": "مشاريع"}
                         }
                     }),
                     "c1".to_string(),
@@ -4942,6 +4943,7 @@ async fn mailbox_set_accepts_unicode_names_and_normalizes_to_nfc() {
         names,
         vec![
             "Café".to_string(),
+            "مشاريع".to_string(),
             "案件".to_string(),
             "📁 Projects".to_string(),
         ]
@@ -5136,6 +5138,82 @@ async fn mailbox_set_rejects_controls_and_delimiters_at_method_level() {
     );
     assert!(store.created_mailboxes.lock().unwrap().is_empty());
     assert!(store.updated_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mailbox_set_rejects_invisible_bidi_mixed_script_and_confusable_names() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![JmapMailbox {
+            id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "paypal".to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"create": {"invisible": {"name": "Bad\u{200B}Name"}}}),
+                        "c1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"create": {"bidi": {"name": "Bad\u{202e}Name"}}}),
+                        "c2".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"create": {"mixed": {"name": "p\u{430}yp\u{430}l"}}}),
+                        "c3".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({"create": {"confusable": {"name": "\u{440}\u{430}\u{443}\u{440}\u{430}\u{04cf}"}}}),
+                        "c4".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "error");
+    assert_eq!(
+        response.method_responses[0].1["description"],
+        "mailbox name contains an unsafe invisible character"
+    );
+    assert_eq!(response.method_responses[1].0, "error");
+    assert_eq!(
+        response.method_responses[1].1["description"],
+        "mailbox name contains an unsafe invisible character"
+    );
+    assert_eq!(response.method_responses[2].0, "error");
+    assert_eq!(
+        response.method_responses[2].1["description"],
+        "mailbox name mixes scripts in a confusable way"
+    );
+    assert_eq!(response.method_responses[3].0, "error");
+    assert_eq!(
+        response.method_responses[3].1["description"],
+        "mailbox already exists"
+    );
+    assert!(store.created_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

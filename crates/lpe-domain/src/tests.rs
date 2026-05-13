@@ -157,6 +157,12 @@ fn mailbox_display_name_accepts_arabic_names_without_controls() {
 }
 
 #[test]
+fn mailbox_display_name_accepts_hebrew_names_without_controls() {
+    let name = MailboxDisplayName::new("משימות").unwrap();
+    assert_eq!(name.as_str(), "משימות");
+}
+
+#[test]
 fn mailbox_display_name_rejects_control_characters() {
     assert_eq!(
         MailboxDisplayName::new("Projects\n2026").unwrap_err(),
@@ -232,6 +238,30 @@ fn mailbox_display_name_rejects_unsafe_invisible_characters() {
         MailboxDisplayName::new("Safe\u{200d}Name").unwrap_err(),
         MailboxNameError::ContainsUnsafeInvisible
     );
+}
+
+#[test]
+fn mailbox_display_name_rejects_bidi_controls() {
+    assert_eq!(
+        MailboxDisplayName::new("Reports\u{202e}2026").unwrap_err(),
+        MailboxNameError::ContainsUnsafeInvisible
+    );
+}
+
+#[test]
+fn mailbox_display_name_rejects_mixed_script_confusables() {
+    assert_eq!(
+        MailboxDisplayName::new("p\u{430}yp\u{430}l").unwrap_err(),
+        MailboxNameError::ContainsMixedScriptConfusable
+    );
+}
+
+#[test]
+fn mailbox_canonical_key_collides_for_whole_script_confusables() {
+    let latin = MailboxNamePolicy::canonical_key("paypal");
+    let cyrillic = MailboxNamePolicy::canonical_key("\u{440}\u{430}\u{443}\u{440}\u{430}\u{04cf}");
+
+    assert!(latin.collides_with(&cyrillic));
 }
 
 #[test]

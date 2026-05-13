@@ -8,6 +8,7 @@ use argon2::{
     Argon2, PasswordHasher,
 };
 use base64::Engine as _;
+use lpe_domain::MailboxNamePolicy;
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore, StoreFuture};
 use lpe_storage::{
@@ -401,6 +402,10 @@ impl ImapStore for FakeStore {
             return Box::pin(async move { Ok(created) });
         }
 
+        if mailbox_name_collides(&mailboxes, name, None) {
+            return Box::pin(async move { anyhow::bail!("mailbox already exists") });
+        }
+
         let mailbox = mailbox(
             &Uuid::new_v4().to_string(),
             "custom",
@@ -428,6 +433,9 @@ impl ImapStore for FakeStore {
         _audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         let mut mailboxes = self.mailboxes.lock().unwrap();
+        if mailbox_name_collides(&mailboxes, name, Some(mailbox_id)) {
+            return Box::pin(async move { anyhow::bail!("mailbox already exists") });
+        }
         let mailbox = mailboxes
             .iter_mut()
             .find(|mailbox| mailbox.id == mailbox_id)
@@ -1180,6 +1188,49 @@ async fn unicode_mailbox_commands_resolve_and_render_consistently() {
 }
 
 #[tokio::test]
+async fn real_client_like_unicode_mailbox_transcript_covers_display_names() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let create_emoji = send_command(&mut stream, "A3 CREATE \"📁 Projects\"\r\n", "A3").await;
+    assert!(create_emoji.contains("A3 OK CREATE completed"));
+    let create_cjk = send_command(&mut stream, "A4 CREATE \"案件\"\r\n", "A4").await;
+    assert!(create_cjk.contains("A4 OK CREATE completed"));
+    let create_rtl = send_command(&mut stream, "A5 CREATE \"مشاريع\"\r\n", "A5").await;
+    assert!(create_rtl.contains("A5 OK CREATE completed"));
+
+    let list = send_command(&mut stream, "A6 LIST \"\" \"%\"\r\n", "A6").await;
+    assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"📁 Projects\""));
+    assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"案件\""));
+    assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"مشاريع\""));
+
+    let select = send_command(&mut stream, "A7 SELECT \"📁 Projects\"\r\n", "A7").await;
+    assert!(select.contains("* 0 EXISTS"));
+    assert!(select.contains("A7 OK [READ-WRITE] SELECT completed"));
+
+    let rename = send_command(
+        &mut stream,
+        "A8 RENAME \"📁 Projects\" \"📁 Projects 2026\"\r\n",
+        "A8",
+    )
+    .await;
+    assert!(rename.contains("A8 OK RENAME completed"), "{rename}");
+
+    let delete = send_command(&mut stream, "A9 DELETE \"📁 Projects 2026\"\r\n", "A9").await;
+    assert!(delete.contains("A9 OK DELETE completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn subscribe_unsubscribe_and_lsub_use_persisted_mailbox_state() {
     let store = FakeStore::new();
     {
@@ -1305,8 +1356,52 @@ async fn malformed_utf8_mailbox_paths_are_rejected() {
     let invisible = send_command(&mut stream, "A6 CREATE \"Bad\u{200B}Name\"\r\n", "A6").await;
     assert!(invisible.contains("A6 NO mailbox name contains an unsafe invisible character"));
 
-    let wildcard = send_command(&mut stream, "A7 CREATE \"Bad*Name\"\r\n", "A7").await;
-    assert!(wildcard.contains("A7 NO mailbox name must not contain LIST wildcards"));
+    let bidi = send_command(&mut stream, "A7 CREATE \"Bad\u{202e}Name\"\r\n", "A7").await;
+    assert!(bidi.contains("A7 NO mailbox name contains an unsafe invisible character"));
+
+    let mixed_script =
+        send_command(&mut stream, "A8 CREATE \"p\u{430}yp\u{430}l\"\r\n", "A8").await;
+    assert!(mixed_script.contains("A8 NO mailbox name mixes scripts in a confusable way"));
+
+    let wildcard = send_command(&mut stream, "A9 CREATE \"Bad*Name\"\r\n", "A9").await;
+    assert!(wildcard.contains("A9 NO mailbox name must not contain LIST wildcards"));
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn unicode_spoofing_duplicates_are_rejected_for_imap_create_and_rename() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let create_cafe = send_command(&mut stream, "A3 CREATE \"Café\"\r\n", "A3").await;
+    assert!(create_cafe.contains("A3 OK CREATE completed"));
+    let create_decomposed = send_command(&mut stream, "A4 CREATE \"Cafe\u{301}\"\r\n", "A4").await;
+    assert!(create_decomposed.contains("A4 NO mailbox already exists"));
+
+    let create_latin = send_command(&mut stream, "A5 CREATE \"paypal\"\r\n", "A5").await;
+    assert!(create_latin.contains("A5 OK CREATE completed"));
+    let create_confusable = send_command(
+        &mut stream,
+        "A6 CREATE \"\u{440}\u{430}\u{443}\u{440}\u{430}\u{04cf}\"\r\n",
+        "A6",
+    )
+    .await;
+    assert!(create_confusable.contains("A6 NO mailbox already exists"));
+
+    let create_cases = send_command(&mut stream, "A7 CREATE \"案件\"\r\n", "A7").await;
+    assert!(create_cases.contains("A7 OK CREATE completed"));
+    let rename_duplicate =
+        send_command(&mut stream, "A8 RENAME \"案件\" \"Cafe\u{301}\"\r\n", "A8").await;
+    assert!(rename_duplicate.contains("A8 NO mailbox already exists"));
 
     task.abort();
 }
@@ -3483,6 +3578,18 @@ fn system_mailbox_for_name(name: &str) -> Option<(&'static str, &'static str, i3
         "deleted" | "deleted items" | "trash" => Some(("trash", "Deleted", 30)),
         _ => None,
     }
+}
+
+fn mailbox_name_collides(
+    mailboxes: &[JmapMailbox],
+    requested_name: &str,
+    except_mailbox_id: Option<Uuid>,
+) -> bool {
+    let requested_key = MailboxNamePolicy::canonical_key(requested_name);
+    mailboxes.iter().any(|mailbox| {
+        except_mailbox_id.is_none_or(|except| except != mailbox.id)
+            && requested_key.collides_with(&MailboxNamePolicy::canonical_key(&mailbox.name))
+    })
 }
 
 fn email(

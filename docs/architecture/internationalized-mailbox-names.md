@@ -382,6 +382,14 @@ or Hebrew single-script mailbox name, a nested Unicode IMAP path, invalid
 control-character names, invalid delimiter-in-segment names, and confusable
 spoof attempts.
 
+Current regression examples:
+
+| Area | Tested examples |
+| --- | --- |
+| Shared mailbox-name policy | `Café`, `Cafe\u0301`, `案件`, `📁 Projects`, `مشاريع`, `משימות`, control characters, zero-width invisible characters, U+202E RIGHT-TO-LEFT OVERRIDE, mixed Latin/Cyrillic `pаypаl`, and whole-script confusable skeleton collision for Cyrillic `раураӏ` versus Latin `paypal`. |
+| IMAP workflow | Transcript-style `ENABLE UTF8=ACCEPT`, `CREATE`, `LIST`, `SELECT`, `RENAME`, and `DELETE` coverage for `📁 Projects`, `案件`, `مشاريع`, and `Café`; wildcard hierarchy matching for Unicode paths; canonical-equivalent duplicate rejection for `Cafe\u0301` versus `Café`; confusable sibling rejection for Cyrillic `раураӏ` versus Latin `paypal`. |
+| JMAP workflow | `Mailbox/set` create/update normalization for `Cafe\u0301` to `Café`, accepted Unicode names including `案件`, `📁 Projects`, and `مشاريع`, deterministic rejection of controls, `/`, invisible and bidi controls, mixed-script spoof strings, reserved names, canonical-equivalent sibling duplicates, and confusable sibling names; `Mailbox/get` returns stored NFC names. |
+
 ## Implementation Link
 
 The shared mailbox-name primitives live in
@@ -398,4 +406,3 @@ normalization.
 - This document does not enable IMAP `CREATE-SPECIAL-USE`.
 - This document does not add new dependencies; future dependency choices still
   follow `LICENSE.md`.
-- This document does not change tests because it is architecture-only.

@@ -340,7 +340,8 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         if tokens.len() != 2 {
             bail!("RENAME expects source and target mailbox names");
         }
-        let mailbox = self.resolve_mailbox_by_name(&tokens[0]).await?;
+        let source_path = parse_mailbox_path(&tokens[0])?;
+        let mailbox = self.resolve_mailbox_path(&source_path).await?;
         let target_name = parse_mailbox_path(&tokens[1])?.into_string();
         let principal = self.require_auth()?;
         let renamed = self

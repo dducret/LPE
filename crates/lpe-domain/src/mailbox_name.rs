@@ -35,6 +35,7 @@ pub enum MailboxNameError {
     ContainsDelimiter,
     ContainsControl,
     ContainsUnsafeInvisible,
+    ContainsMixedScriptConfusable,
     ReservedName,
 }
 
@@ -72,6 +73,9 @@ impl MailboxDisplayName {
             ))
         {
             return Err(MailboxNameError::ReservedName);
+        }
+        if has_mixed_latin_greek_or_cyrillic_confusable(&normalized) {
+            return Err(MailboxNameError::ContainsMixedScriptConfusable);
         }
         Ok(Self(normalized))
     }
@@ -239,6 +243,7 @@ impl fmt::Display for MailboxNameError {
             Self::ContainsDelimiter => "mailbox name segment contains the hierarchy delimiter",
             Self::ContainsControl => "mailbox name contains a control character",
             Self::ContainsUnsafeInvisible => "mailbox name contains an unsafe invisible character",
+            Self::ContainsMixedScriptConfusable => "mailbox name mixes scripts in a confusable way",
             Self::ReservedName => "mailbox name is reserved",
         })
     }
@@ -383,6 +388,31 @@ fn is_unsafe_invisible(ch: char) -> bool {
             | 0xE0000..=0xE007F
             | 0xE0100..=0xE01EF
     )
+}
+
+fn has_mixed_latin_greek_or_cyrillic_confusable(value: &str) -> bool {
+    let has_latin = value.chars().any(is_latin_letter);
+    let has_greek_or_cyrillic = value.chars().any(is_greek_or_cyrillic_letter);
+    has_latin
+        && has_greek_or_cyrillic
+        && value
+            .chars()
+            .any(|ch| is_greek_or_cyrillic_letter(ch) && confusable_skeleton_char(ch) != ch)
+}
+
+fn is_latin_letter(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x0041..=0x005A
+            | 0x0061..=0x007A
+            | 0x00C0..=0x00FF
+            | 0x0100..=0x024F
+            | 0x1E00..=0x1EFF
+    )
+}
+
+fn is_greek_or_cyrillic_letter(ch: char) -> bool {
+    matches!(ch as u32, 0x0370..=0x03FF | 0x0400..=0x052F)
 }
 
 fn fold_for_comparison(value: &str) -> String {
