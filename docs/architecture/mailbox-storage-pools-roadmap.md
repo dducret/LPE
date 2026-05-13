@@ -3,7 +3,7 @@
 ## Purpose
 
 This document records the current status of the `LPE` mailbox storage-pool work
-and the completed Milestone 6 Codex prompt pack.
+and the active Milestone 7 Codex prompt pack.
 
 The target scale example remains 1000 mailboxes with quotas up to 100 GB each,
 or up to 100 TB of logical mailbox capacity before replication, backup,
@@ -29,26 +29,19 @@ Completed:
   implicit migration jobs.
 - Milestone 4: logical quota stability, retention/legal-hold guards, and safe
   old-placement cleanup implemented for database-backed placement rows.
-- Milestone 5: admin policy and visibility implemented. Global administrators
-  can manage platform storage pools and platform default policy. Tenant
-  administrators can inspect allowed policy summaries and manage authorized
-  tenant, domain, and account policy controls. Admin APIs and the admin UI
-  expose pool health, placement state, migration status, cleanup status, and
-  degraded or blocked metadata without exposing object keys, secrets, provider
-  credentials, or provider-specific internals.
-- Milestone 6: S3-compatible object storage. This adds the first non-database
-  blob backend through the existing storage-pool and placement model. Durable
-  attachment and MIME-part blobs can be written, read, statted, verified, and
-  explicitly migrated between database-backed and S3-compatible placements.
-  Health summaries expose provider-neutral backend states and required/optional
-  readiness roles. The implementation remains provider-neutral and does not add
-  AWS- or Azure-specific behavior.
+- Milestone 5: admin policy and visibility implemented without exposing object
+  keys, secrets, provider credentials, or provider-specific internals.
+- Milestone 6: provider-neutral S3-compatible object storage implemented behind
+  the existing storage-pool, placement, migration, quota, cleanup, and admin
+  visibility model. Durable attachment and MIME-part blobs can be written,
+  read, statted, verified, and explicitly migrated between database-backed and
+  S3-compatible placements.
 
-Deferred from the current release:
+Active next step:
 
-- Provider-Specific Cloud Backends will be addressed in a future release. This
-  includes AWS S3, Azure Blob, and provider-specific durability, consistency,
-  cost, restore, and operational behavior.
+- Milestone 7: Provider-Specific Cloud Backends. This adds AWS S3 and Azure
+  Blob provider-specific configuration, health checks, operational assumptions,
+  and restore tests where generic S3-compatible behavior is not enough.
 
 ## Current Rules
 
@@ -67,22 +60,21 @@ Deferred from the current release:
 - Raw RFC 5322 message blobs remain database-backed initially.
 - S3-compatible credentials use deployment secret references. Credentials are
   not stored inline in normal storage-pool database rows.
-- Admin visibility surfaces status, health, explicit migration jobs, and cleanup
-  blockers only through summarized pool and policy data. It must not expose
-  backend object keys, database internals, secrets, provider credentials, or
-  provider-specific backend configuration.
+- Provider-specific cloud backends must continue to use PostgreSQL metadata,
+  canonical placement rows, the `BlobStore` backend boundary, and the admin
+  visibility redaction rules established by earlier milestones.
 - Every new dependency or external implementation idea must be checked against
   `LICENSE.md`.
 
-## Codex Prompt Pack: Milestone 6
+## Codex Prompt Pack: Milestone 7
 
-Use these prompts one at a time. Milestone 6 adds a provider-neutral
-S3-compatible object-storage backend behind the existing `BlobStore`,
-storage-pool, placement, migration, quota, cleanup, and admin visibility model.
-It must not add AWS-specific behavior, Azure-specific behavior, mailbox-level
-policy, or automatic migration when a policy changes.
+Use these prompts one at a time. Milestone 7 adds provider-specific cloud
+backend support after the provider-neutral S3-compatible backend is proven. It
+must not move canonical mailbox state out of PostgreSQL, bypass `BlobStore`,
+expose provider credentials, add mailbox-level policy, or make policy changes
+implicitly migrate blobs.
 
-### Prompt 1: Inspect Backend Boundary And License Options
+### Prompt 1: Inspect Provider-Specific Gaps
 
 ```text
 Read AGENTS.md, ARCHITECTURE.md, docs/architecture/initial-architecture.md,
@@ -91,86 +83,90 @@ docs/architecture/data-lifecycle-and-compliance.md,
 docs/architecture/operations-and-disaster-recovery.md, and
 docs/architecture/mailbox-storage-pools-roadmap.md.
 
-Goal: inspect the completed database-backed storage-pool implementation and
-identify the smallest S3-compatible backend design for Milestone 6.
+Goal: inspect the completed provider-neutral S3-compatible backend and identify
+the smallest Milestone 7 gaps for AWS S3 and Azure Blob support.
 
 Scope:
-- lpe-storage BlobStore, storage pool, placement, migration, quota, and cleanup
-  code
-- lpe-admin-api storage pool and visibility code
+- lpe-storage BlobStore and backend-selection code
+- storage pool configuration and admin redaction behavior
+- health/readiness diagnostics
+- operations and restore documentation
 - current dependency set and LICENSE.md constraints
-- operations and restore documentation for blob storage
 
 Return:
-- current backend assumptions in BlobStore and placement code
-- current storage_pool kind/config/status fields
-- candidate S3-compatible client options and their licenses
-- whether any new dependency is required
-- the minimal provider-neutral configuration shape
+- which AWS S3 behavior can reuse the S3-compatible backend unchanged
+- which AWS-specific settings need explicit configuration or validation
+- which Azure Blob behavior cannot reuse the S3-compatible backend
+- candidate SDK/protocol-client options and licenses for AWS and Azure
+- provider-specific failure modes to expose in health/status
 - files likely to change
 - risks or unclear points before editing
 
 Do not edit files.
 ```
 
-### Prompt 2: Design S3-Compatible Backend Contract
+### Prompt 2: Design Provider-Specific Backend Contracts
 
 ```text
-Design the Milestone 6 provider-neutral S3-compatible backend contract.
+Design the Milestone 7 provider-specific backend contracts for AWS S3 and Azure
+Blob.
 
 Constraints:
 - PostgreSQL remains the metadata authority.
-- Protocol adapters must remain backend-agnostic.
-- Use existing storage_pool and blob_placement metadata where possible.
-- S3-compatible support is provider-neutral; no AWS-only or Azure-only behavior.
+- Protocol adapters remain backend-agnostic.
+- Reuse the existing BlobStore backend boundary.
+- Reuse storage_pool, blob_placement, migration, quota, cleanup, and admin
+  visibility models.
 - Raw RFC 5322 message blobs remain database-backed initially.
 - Storage policy is evaluated at write time only.
 - Existing blobs move only through explicit migration jobs.
 - Mailbox-level policy remains deferred.
-- Secrets must use the existing deployment secret model.
-- Object keys, credentials, and provider internals must not leak through admin
-  APIs or protocol responses.
-- Do not add new dependencies unless absolutely required and checked against
-  LICENSE.md.
+- Credentials use the existing deployment secret model.
+- Object keys, credentials, account names, connection strings, and provider
+  internals must not leak through admin APIs or protocol responses.
+- Do not add dependencies unless required and checked against LICENSE.md.
 
 Return:
-- backend methods and error model
-- storage pool configuration fields
-- object key derivation rules that avoid tenant/domain leakage
-- checksum and size verification rules
-- retry and timeout behavior
-- readiness and health behavior
+- provider kind names and configuration fields
+- AWS S3 behavior that aliases the S3-compatible backend
+- Azure Blob backend methods and error model
+- provider-specific health, readiness, and diagnostics states
+- object key/blob name derivation rules
+- checksum, ETag, and size verification rules per provider
+- retry, timeout, and rate-limit behavior
 - tests required before implementation
 - any simpler alternative and why it is or is not enough
 
 Do not edit code yet.
 ```
 
-### Prompt 3: Implement Configuration And Backend Selection
+### Prompt 3: Implement Provider Configuration And Redaction
 
 ```text
-Implement the approved Milestone 6 configuration and backend-selection plumbing.
+Implement the approved Milestone 7 provider-specific configuration and
+redaction behavior.
 
 Scope:
-- lpe-storage backend selection and storage-pool configuration handling
-- lpe-admin-api validation only if storage-pool configuration shape changes
-- no S3 data transfer yet
-- no AWS-specific behavior
-- no Azure-specific behavior
+- lpe-storage storage-pool configuration validation
+- lpe-admin-api validation and summaries only if provider configuration is
+  exposed there
+- no data transfer implementation yet
+- no protocol adapter changes
 - no mailbox-level policy
 - no automatic migration on policy changes
 
 Required behavior:
-- database-backed pools continue to work unchanged
-- S3-compatible pools can be configured with endpoint, bucket, region or
-  region-like value, path-style/virtual-hosted addressing mode where needed,
-  and secret references
-- credentials are not stored inline in normal database rows unless the approved
-  design explicitly says they are protected
-- admin summaries redact secrets and object key internals
+- AWS S3 pools can declare provider-specific options only when needed beyond
+  the generic S3-compatible shape
+- Azure Blob pools can declare account/container/endpoint or equivalent
+  provider-specific settings through secret references
+- credentials and sensitive provider internals are redacted in all admin
+  summaries
+- invalid provider configuration is rejected with actionable diagnostics
+- existing database-backed and S3-compatible pool behavior remains unchanged
 
 Verification:
-- focused lpe-storage tests for configuration validation and backend selection
+- focused lpe-storage tests for provider configuration validation and redaction
 - focused lpe-admin-api tests if API validation changed
 - cargo test -p lpe-storage
 - cargo test -p lpe-admin-api if admin API code changed
@@ -178,37 +174,34 @@ Verification:
 Report:
 - changed files
 - exact tests run
-- explicit non-goals preserved
+- dependency/license decisions
 ```
 
-### Prompt 4: Implement S3-Compatible Put Read Stat Verify
+### Prompt 4: Implement AWS S3 Provider Behavior
 
 ```text
-Implement Milestone 6 S3-compatible object put, read, stat, and verify behavior
-behind the BlobStore backend boundary.
+Implement Milestone 7 AWS S3 provider behavior.
 
 Scope:
-- lpe-storage only unless compile errors require narrow callers
-- S3-compatible backend only
-- no AWS-specific behavior
-- no Azure-specific behavior
-- no admin UI
+- lpe-storage backend routing and AWS S3-specific behavior
+- prefer reusing the S3-compatible backend where behavior is equivalent
+- no Azure implementation in this prompt
+- no protocol adapter changes
 - no mailbox-level policy
 - no automatic migration on policy changes
 
 Required behavior:
-- writes store bytes in the S3-compatible bucket under deterministic,
-  tenant/domain-safe object keys
-- reads fetch bytes through placement metadata only
-- stat returns size and checksum metadata without downloading bytes when the
-  backend supports it
-- verify checks size and checksum against PostgreSQL metadata
-- errors are mapped to storage-layer errors, not missing mailbox/message state
-- database-backed behavior remains unchanged
+- AWS S3 put/read/stat/verify works through BlobStore and placement metadata
+- AWS-specific endpoint, region, addressing, checksum, and error behavior is
+  handled where it differs from generic S3-compatible storage
+- AWS health/readiness checks expose provider-specific degraded states without
+  leaking credentials or object keys
+- migration to and from AWS S3 placements uses explicit migration jobs only
+- database-backed and generic S3-compatible behavior remains unchanged
 
 Verification:
-- unit tests for object-key derivation and error mapping
-- integration tests gated by environment variables for put/read/stat/verify
+- unit tests for AWS-specific configuration, error mapping, and redaction
+- AWS integration tests gated by environment variables
 - cargo test -p lpe-storage
 
 Report:
@@ -217,33 +210,32 @@ Report:
 - skipped integration tests and required environment variables, if not run
 ```
 
-### Prompt 5: Wire Migration To S3-Compatible Pools
+### Prompt 5: Implement Azure Blob Provider Behavior
 
 ```text
-Extend explicit migration jobs so durable attachment and MIME-part blobs can
-move between database-backed and S3-compatible placements.
+Implement Milestone 7 Azure Blob provider behavior.
 
 Scope:
-- lpe-storage migration worker and BlobStore backend routing
-- explicit migration jobs only
-- no policy-triggered automatic migration
-- no raw RFC 5322 message blob migration
-- no AWS-specific behavior
-- no Azure-specific behavior
-- no admin UI changes unless an existing API response must expose a new
-  provider-neutral status
+- lpe-storage backend routing and Azure Blob-specific behavior
+- no AWS changes except shared abstractions required by Azure
+- no protocol adapter changes
+- no mailbox-level policy
+- no automatic migration on policy changes
 
 Required behavior:
-- migration can copy database-backed placement to S3-compatible placement
-- migration can copy S3-compatible placement to database-backed placement
-- migration can copy between two S3-compatible pools if both are configured
-- checksum and size verification happen before active placement switch
-- source placement remains available through the rollback window
-- repeated worker execution is idempotent
+- Azure Blob put/read/stat/verify works through BlobStore and placement metadata
+- Azure container/blob naming, metadata, checksum, lease/concurrency, and error
+  behavior are handled explicitly
+- Azure health/readiness checks expose provider-specific degraded states without
+  leaking credentials, account names where sensitive, connection strings, or
+  blob names
+- migration to and from Azure Blob placements uses explicit migration jobs only
+- database-backed, generic S3-compatible, and AWS behavior remains unchanged
 
 Verification:
-- focused lpe-storage tests for migration state transitions
-- S3 integration tests gated by environment variables for copy/verify/switch
+- unit tests for Azure-specific configuration, blob naming, error mapping, and
+  redaction
+- Azure integration tests gated by environment variables
 - cargo test -p lpe-storage
 
 Report:
@@ -252,33 +244,32 @@ Report:
 - skipped integration tests and required environment variables, if not run
 ```
 
-### Prompt 6: Add Health Readiness And Operations Coverage
+### Prompt 6: Add Provider-Specific Operations And Restore Gates
 
 ```text
-Add Milestone 6 health, readiness, operations, and restore coverage for
-S3-compatible storage pools.
+Add Milestone 7 operations, restore, and readiness gates for AWS S3 and Azure
+Blob.
 
 Scope:
 - lpe-storage health/readiness diagnostics
 - lpe-admin-api visibility only if existing storage health endpoints need new
-  provider-neutral fields
+  provider-specific states
 - operations documentation where behavior changed
-- no AWS-specific behavior
-- no Azure-specific behavior
+- no protocol adapter changes
 - no mailbox-level policy
 
 Required behavior:
-- degraded S3-compatible pools are visible in health/status summaries
-- missing object, checksum mismatch, auth failure, timeout, and unreachable
-  endpoint failures map to distinct operational states where feasible
-- readiness behavior is documented for required and optional pools
-- restore procedure covers PostgreSQL plus S3-compatible object storage
+- AWS and Azure degraded states are visible in summarized admin diagnostics
+- restore procedures cover PostgreSQL plus provider-specific blob storage
+- readiness behavior distinguishes required pools from optional/archive pools
+- egress/cost and region/residency risks are documented
 - user-facing protocols continue to fail as storage errors, not corrupted
   mailbox state
 
 Verification:
-- focused diagnostics tests for degraded pool states
-- S3 integration tests gated by environment variables for health checks
+- focused diagnostics tests for provider-specific degraded states
+- AWS and Azure integration tests gated by environment variables for health and
+  restore-critical operations
 - cargo test -p lpe-storage
 - cargo test -p lpe-admin-api if admin visibility changed
 
@@ -288,11 +279,11 @@ Report:
 - skipped integration tests and required environment variables, if not run
 ```
 
-### Prompt 7: Document Milestone 6 Completion
+### Prompt 7: Document Milestone 7 Completion
 
 ```text
 Update only directly relevant architecture documentation for implemented
-Milestone 6 S3-compatible object storage.
+Milestone 7 provider-specific cloud backends.
 
 Scope:
 - docs/architecture/mailbox-storage-pools-roadmap.md
@@ -301,42 +292,39 @@ Scope:
 - docs/architecture/data-lifecycle-and-compliance.md if lifecycle behavior
   changed
 - docs/architecture/operations-and-disaster-recovery.md for restore, health,
-  readiness, diagnostics, and backup behavior
+  readiness, diagnostics, egress/cost, and residency behavior
 - LICENSE.md only if a new accepted dependency exception is required and
   approved
 
 Required documentation:
-- S3-compatible storage is provider-neutral and not AWS/Azure-specific support
+- AWS S3 and Azure Blob support remains behind the BlobStore boundary
 - PostgreSQL remains metadata authority
 - protocol adapters remain backend-agnostic
 - raw RFC 5322 message blobs remain database-backed initially
 - policy changes still do not implicitly migrate existing blobs
 - credentials use the existing deployment secret model
-- Provider-Specific Cloud Backends remain future-release work
+- provider-specific risks and restore requirements are explicit
 
 Verification:
-- docs do not claim AWS-specific or Azure-specific support is implemented
 - docs do not claim mailbox-level policy is implemented
+- docs do not expose secret material, object keys, or provider internals
 - run tests for any code touched
 ```
 
-## Future Release: Provider-Specific Cloud Backends
+## Future Release: Operations Benchmarks And Restore Drills
 
-Provider-Specific Cloud Backends will be addressed in a future release after
-Milestone 6 S3-compatible object storage is proven. This future work must still
-preserve the rule that PostgreSQL is the metadata authority and protocol
-adapters never talk directly to cloud providers.
+After Milestone 7, the next release gate is proving the storage model at
+realistic mailbox sizes and under provider failure modes.
 
 Short roadmap:
 
-1. Provider-neutral hardening: use the S3-compatible backend evidence to prove
-   failure injection, restore drills, and degraded pool diagnostics.
-2. Dependency and license review: select allowed SDKs or protocol clients under
-   the `LICENSE.md` policy before implementation.
-3. AWS S3 backend: implement provider-specific configuration, health checks,
-   upload/read/verify/delete behavior, retry semantics, and restore tests.
-4. Azure Blob backend: implement equivalent provider-specific behavior and
-   document consistency, authentication, and operational differences from AWS.
-5. Operations release gate: benchmark migration throughput, restore from
-   PostgreSQL plus cloud blobs, egress/cost warnings, readiness behavior, and
-   failure-mode diagnostics before exposing the backends as supported.
+1. Benchmark migration throughput across database-backed, S3-compatible, AWS S3,
+   and Azure Blob pools.
+2. Prove restore from PostgreSQL plus each configured blob backend.
+3. Run degraded-pool drills for missing objects, checksum mismatch, auth
+   failure, timeout, region outage, and provider throttling.
+4. Capture JMAP, IMAP, ActiveSync, EWS, and MAPI attachment fetch behavior
+   during degraded and recovered storage states.
+5. Publish operations evidence before marking provider-specific backends as
+   production-supported.
+
