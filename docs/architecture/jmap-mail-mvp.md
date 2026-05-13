@@ -44,7 +44,8 @@
 - Mailboxes:
   - `Mailbox/*` supports `parentId` hierarchy immediately for internationalized mailbox support
   - `isSubscribed` reflects canonical persisted subscription state shared with IMAP `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB`
-  - mailbox name validation follows the strict Unicode policy in `docs/i18n.md`, including rejection of mixed-script and confusable names
+  - mailbox name validation follows the strict Unicode policy in `docs/architecture/internationalized-mailbox-names.md`, including NFC display storage, canonical-key sibling collision checks, reserved-name protection, `/` rejection inside JMAP names, and rejection of mixed-script and confusable names
+  - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localized labels are client UI presentation driven by JMAP `role`
 - Submission:
   - `EmailSubmission/set` loads a persisted draft
   - canonical submission creates authoritative `Sent`

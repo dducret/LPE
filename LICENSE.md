@@ -33,6 +33,10 @@ These exceptions are currently accepted because they are common in the Rust ecos
 
 `idna` is acceptable for mailbox-domain normalization because its Rust source is published under `Apache-2.0 OR MIT`, it implements UTS 46 processing instead of adding local IDNA logic, and it is already present in the workspace dependency graph.
 
+`unicode-normalization` is acceptable for mailbox-name NFC normalization because it is published under `Apache-2.0 OR MIT` and implements Unicode normalization instead of adding local Unicode transformation logic.
+
+`unicode-security` is acceptable for mailbox-name mixed-script and confusable detection because it is published under `Apache-2.0 OR MIT` and implements Unicode security checks instead of adding local confusable data handling.
+
 Google `Magika` is an acceptable candidate for file-type validation because its official project is published under `Apache-2.0`. As with every dependency, the selected integration path and its transitive dependencies must still be reviewed before adoption.
 
 ## External Reference Constraint

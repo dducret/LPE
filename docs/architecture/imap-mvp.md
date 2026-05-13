@@ -37,9 +37,10 @@
   - `APPEND`
 - Canonical behavior:
   - folder aliases such as `Deleted Items` and `Trash` converge on canonical trash
-  - internationalized mailbox names use IMAP4rev2 UTF-8 behavior; `UTF8=ACCEPT` is included in the first internationalized mailbox release and must be advertised only when command handling and tests match that behavior
+  - internationalized mailbox names use the shared policy in `docs/architecture/internationalized-mailbox-names.md`; IMAP uses IMAP4rev2 UTF-8 behavior, and `UTF8=ACCEPT` is included in the first internationalized mailbox release but must be advertised only when command handling and tests match that behavior
   - `SUBSCRIBE`, `UNSUBSCRIBE`, and `LSUB` use canonical persisted subscription state shared with JMAP `isSubscribed`
-  - mailbox name validation follows the strict Unicode policy in `docs/i18n.md`, including rejection of mixed-script and confusable names
+  - mailbox name validation follows the strict Unicode policy in `docs/architecture/internationalized-mailbox-names.md`, including NFC display storage, canonical-key sibling collision checks, reserved-name protection, `/` hierarchy delimiter rules, and rejection of mixed-script and confusable names
+  - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localization is client UI presentation driven by special-use attributes
   - `APPEND` uses canonical draft or import persistence
   - flags update canonical message state
   - search uses canonical indexed fields and must not expose `Bcc`
