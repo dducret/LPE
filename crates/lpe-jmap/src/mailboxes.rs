@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::{MailboxNamePolicy, MailboxSegment};
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -524,13 +525,16 @@ fn parse_mailbox_create(value: Value) -> Result<MailboxCreateInput> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("mailbox create arguments must be an object"))?;
-    let name = object
+    let raw_name = object
         .get("name")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("mailbox name is required"))?
         .to_string();
+    let name = if MailboxNamePolicy::system_role_for_display_name(&raw_name).is_some() {
+        raw_name
+    } else {
+        MailboxSegment::new(&raw_name)?.to_string()
+    };
     let sort_order = object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32;
     Ok(MailboxCreateInput {
         name,
@@ -545,9 +549,8 @@ fn parse_mailbox_update(value: Value) -> Result<MailboxUpdateInput> {
     let name = object
         .get("name")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string);
+        .map(|value| MailboxSegment::new(value).map(|segment| segment.to_string()))
+        .transpose()?;
     let sort_order = object
         .get("sortOrder")
         .and_then(Value::as_i64)

@@ -382,6 +382,14 @@ or Hebrew single-script mailbox name, a nested Unicode IMAP path, invalid
 control-character names, invalid delimiter-in-segment names, and confusable
 spoof attempts.
 
+## Implementation Link
+
+The shared mailbox-name primitives live in
+`crates/lpe-domain/src/mailbox_name.rs`. IMAP path handling, JMAP mailbox
+create/update parsing, storage duplicate checks, and Sieve `fileinto` mailbox
+creation must use that module instead of protocol-local display-name
+normalization.
+
 ## Non-Goals
 
 - This document does not define EAI local-part or IDNA mailbox-address policy.

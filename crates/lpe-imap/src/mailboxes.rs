@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::{MailboxNamePolicy, MailboxPath};
 use lpe_magika::Detector;
 use lpe_storage::{AuditEntryInput, JmapMailbox};
 use tokio::io::AsyncWriteExt;
@@ -620,30 +621,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
 }
 
 fn normalize_imap_mailbox_name(value: &str) -> Result<String> {
-    let trimmed = value.trim().trim_matches('/').trim();
-    if trimmed.is_empty() {
-        bail!("mailbox name is required");
+    if MailboxNamePolicy::system_role_for_display_name(value).is_some() {
+        return Ok(value.to_string());
     }
-    if trimmed.len() > 255 {
-        bail!("mailbox name is too long");
-    }
-
-    let mut segments = Vec::new();
-    for segment in trimmed.split('/') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            bail!("mailbox path contains an empty segment");
-        }
-        if segment.len() > 64 {
-            bail!("mailbox path segment is too long");
-        }
-        segments.push(segment);
-    }
-    if segments.len() > 16 {
-        bail!("mailbox path is too deep");
-    }
-
-    Ok(segments.join("/"))
+    Ok(MailboxPath::parse(value)?.into_string())
 }
 
 fn parse_list_pattern(arguments: &str) -> Result<String> {

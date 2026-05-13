@@ -1,4 +1,5 @@
 use super::{
+    MailboxDisplayName, MailboxNameError, MailboxNamePolicy, MailboxPath, MailboxSegment,
     OutboundMessageHandoffRequest, OutboundMessageHandoffResponse, SmtpSubmissionRequest,
     TransportDeliveryStatus, TransportDsnReport, TransportRecipient, TransportRetryAdvice,
     TransportRouteDecision, TransportTechnicalStatus, TransportThrottleStatus,
@@ -116,4 +117,85 @@ fn smtp_submission_request_serializes_raw_message_as_base64() {
 
     let json = serde_json::to_value(&request).unwrap();
     assert_eq!(json["raw_message"], "U3ViamVjdDogaGkNCg0KYm9keQ==");
+}
+
+#[test]
+fn mailbox_display_name_accepts_ascii_names() {
+    let name = MailboxDisplayName::new("Projects").unwrap();
+    assert_eq!(name.as_str(), "Projects");
+    assert_eq!(name.canonical_key().as_str(), "projects");
+}
+
+#[test]
+fn mailbox_display_name_normalizes_cafe_to_nfc_collision_key() {
+    let composed = MailboxDisplayName::new("Café").unwrap();
+    let decomposed = MailboxDisplayName::new("Cafe\u{301}").unwrap();
+
+    assert_eq!(composed.as_str(), "Café");
+    assert_eq!(decomposed.as_str(), "Café");
+    assert!(composed
+        .canonical_key()
+        .collides_with(&decomposed.canonical_key()));
+}
+
+#[test]
+fn mailbox_display_name_accepts_emoji_names() {
+    let name = MailboxDisplayName::new("📁 Projects").unwrap();
+    assert_eq!(name.as_str(), "📁 Projects");
+}
+
+#[test]
+fn mailbox_display_name_accepts_japanese_names() {
+    let name = MailboxDisplayName::new("案件").unwrap();
+    assert_eq!(name.as_str(), "案件");
+}
+
+#[test]
+fn mailbox_display_name_accepts_arabic_names_without_controls() {
+    let name = MailboxDisplayName::new("مشاريع").unwrap();
+    assert_eq!(name.as_str(), "مشاريع");
+}
+
+#[test]
+fn mailbox_display_name_rejects_control_characters() {
+    assert_eq!(
+        MailboxDisplayName::new("Projects\n2026").unwrap_err(),
+        MailboxNameError::ContainsControl
+    );
+}
+
+#[test]
+fn mailbox_path_rejects_empty_segments() {
+    assert_eq!(
+        MailboxPath::parse("Projects//2026").unwrap_err(),
+        MailboxNameError::EmptySegment
+    );
+}
+
+#[test]
+fn mailbox_segment_rejects_delimiter_in_segment_names() {
+    assert_eq!(
+        MailboxSegment::new("Projects/2026").unwrap_err(),
+        MailboxNameError::ContainsDelimiter
+    );
+}
+
+#[test]
+fn mailbox_display_name_rejects_unsafe_invisible_characters() {
+    assert_eq!(
+        MailboxDisplayName::new("Safe\u{200d}Name").unwrap_err(),
+        MailboxNameError::ContainsUnsafeInvisible
+    );
+}
+
+#[test]
+fn mailbox_display_name_rejects_reserved_name_spoofing() {
+    assert_eq!(
+        MailboxDisplayName::new("ІNBOX").unwrap_err(),
+        MailboxNameError::ReservedName
+    );
+    assert_eq!(
+        MailboxNamePolicy::system_role_for_display_name("Deleted Items"),
+        Some("trash")
+    );
 }

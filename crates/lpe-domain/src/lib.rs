@@ -2,6 +2,7 @@ pub mod account;
 pub mod bridge_auth;
 pub mod document;
 mod encoding;
+pub mod mailbox_name;
 pub mod submission;
 pub mod transport;
 
@@ -13,6 +14,10 @@ pub use crate::bridge_auth::{
 };
 pub use crate::document::{
     AccessScope, DocumentAnnotation, DocumentChunk, DocumentKind, DocumentProjection,
+};
+pub use crate::mailbox_name::{
+    MailboxCanonicalKey, MailboxDisplayName, MailboxNameError, MailboxNamePolicy, MailboxPath,
+    MailboxSegment, MAILBOX_HIERARCHY_DELIMITER,
 };
 pub use crate::submission::{
     InboundDeliveryRequest, InboundDeliveryResponse, RecipientVerificationRequest,

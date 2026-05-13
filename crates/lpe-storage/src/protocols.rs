@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::{MailboxDisplayName, MailboxNamePolicy, MailboxPath};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Postgres, Row};
 use uuid::Uuid;
 
 use crate::{
@@ -700,6 +701,41 @@ impl Storage {
             .collect())
     }
 
+    pub(crate) async fn ensure_mailbox_name_available_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        display_name: &str,
+        except_mailbox_id: Option<Uuid>,
+    ) -> Result<()> {
+        let requested_key = MailboxNamePolicy::canonical_key(display_name);
+        let rows = sqlx::query(
+            r#"
+            SELECT id, display_name
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        for row in rows {
+            let mailbox_id = row.try_get::<Uuid, _>("id")?;
+            if except_mailbox_id.is_some_and(|except| except == mailbox_id) {
+                continue;
+            }
+            let existing_name = row.try_get::<String, _>("display_name")?;
+            let existing_key = MailboxNamePolicy::canonical_key(&existing_name);
+            if requested_key.collides_with(&existing_key) {
+                bail!("mailbox already exists");
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn create_jmap_mailbox(
         &self,
         input: JmapMailboxCreateInput,
@@ -710,11 +746,7 @@ impl Storage {
         self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
             .await?;
 
-        let name = input.name.trim();
-        if name.is_empty() {
-            bail!("mailbox name is required");
-        }
-        if let Some(role) = system_mailbox_role_for_display_name(name) {
+        if let Some(role) = system_mailbox_role_for_display_name(&input.name) {
             let display_name = canonical_system_mailbox_display_name(role)
                 .ok_or_else(|| anyhow!("system mailbox display name not found"))?;
             let sort_order = match role {
@@ -746,22 +778,15 @@ impl Storage {
                 .ok_or_else(|| anyhow!("mailbox creation failed"));
         }
 
-        let duplicate = sqlx::query(
-            r#"
-            SELECT 1
-            FROM mailboxes
-            WHERE tenant_id = $1 AND account_id = $2 AND lower(display_name) = lower($3)
-            LIMIT 1
-            "#,
+        let name = MailboxDisplayName::new(&input.name)?.into_string();
+        Self::ensure_mailbox_name_available_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            &name,
+            None,
         )
-        .bind(&tenant_id)
-        .bind(input.account_id)
-        .bind(&name)
-        .fetch_optional(&mut *tx)
         .await?;
-        if duplicate.is_some() {
-            bail!("mailbox already exists");
-        }
 
         let next_sort_order = sqlx::query_scalar::<_, i32>(
             r#"
@@ -821,6 +846,110 @@ impl Storage {
             .ok_or_else(|| anyhow!("mailbox creation failed"))
     }
 
+    pub async fn create_imap_mailbox(
+        &self,
+        account_id: Uuid,
+        name: &str,
+        audit: AuditEntryInput,
+    ) -> Result<JmapMailbox> {
+        let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, account_id)
+            .await?;
+
+        if let Some(role) = system_mailbox_role_for_display_name(name) {
+            let display_name = canonical_system_mailbox_display_name(role)
+                .ok_or_else(|| anyhow!("system mailbox display name not found"))?;
+            let sort_order = match role {
+                "inbox" => 0,
+                "drafts" => 10,
+                "sent" => 20,
+                "trash" => 30,
+                _ => 30,
+            };
+            let mailbox_id = self
+                .ensure_mailbox(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    role,
+                    display_name,
+                    sort_order,
+                    365,
+                )
+                .await?;
+            self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            tx.commit().await?;
+
+            return self
+                .fetch_jmap_mailboxes(account_id)
+                .await?
+                .into_iter()
+                .find(|mailbox| mailbox.id == mailbox_id)
+                .ok_or_else(|| anyhow!("mailbox creation failed"));
+        }
+
+        let name = MailboxPath::parse(name)?.into_string();
+        Self::ensure_mailbox_name_available_in_tx(&mut tx, &tenant_id, account_id, &name, None)
+            .await?;
+
+        let next_sort_order = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT COALESCE(MAX(sort_order), 0) + 1
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let mailbox_id = Uuid::new_v4();
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, uid_validity)
+            VALUES ($1, $2, $3, 'custom', $4, $5, $6)
+            "#,
+        )
+        .bind(mailbox_id)
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&name)
+        .bind(next_sort_order)
+        .bind(allocate_uid_validity())
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox",
+            mailbox_id,
+            "created",
+            modseq,
+            &principals,
+            serde_json::json!({"name": name}),
+        )
+        .await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        self.fetch_jmap_mailboxes(account_id)
+            .await?
+            .into_iter()
+            .find(|mailbox| mailbox.id == mailbox_id)
+            .ok_or_else(|| anyhow!("mailbox creation failed"))
+    }
+
     pub async fn update_jmap_mailbox(
         &self,
         input: JmapMailboxUpdateInput,
@@ -850,33 +979,18 @@ impl Storage {
 
         let current_name = current.try_get::<String, _>("display_name")?;
         let current_sort_order = current.try_get::<i32, _>("sort_order")?;
-        let name = input
-            .name
-            .as_deref()
-            .unwrap_or(&current_name)
-            .trim()
-            .to_string();
-        if name.is_empty() {
-            bail!("mailbox name is required");
-        }
-
-        let duplicate = sqlx::query(
-            r#"
-            SELECT 1
-            FROM mailboxes
-            WHERE tenant_id = $1 AND account_id = $2 AND lower(display_name) = lower($3) AND id <> $4
-            LIMIT 1
-            "#,
+        let name = match input.name.as_deref() {
+            Some(name) => MailboxDisplayName::new(name)?.into_string(),
+            None => current_name,
+        };
+        Self::ensure_mailbox_name_available_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            &name,
+            Some(input.mailbox_id),
         )
-        .bind(&tenant_id)
-        .bind(input.account_id)
-        .bind(&name)
-        .bind(input.mailbox_id)
-        .fetch_optional(&mut *tx)
         .await?;
-        if duplicate.is_some() {
-            bail!("mailbox already exists");
-        }
 
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
@@ -920,6 +1034,91 @@ impl Storage {
             .await?
             .into_iter()
             .find(|mailbox| mailbox.id == input.mailbox_id)
+            .ok_or_else(|| anyhow!("mailbox update failed"))
+    }
+
+    pub async fn rename_imap_mailbox(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        name: &str,
+        audit: AuditEntryInput,
+    ) -> Result<JmapMailbox> {
+        let mut tx = self.pool.begin().await?;
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let current = sqlx::query(
+            r#"
+            SELECT role, sort_order
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("mailbox not found"))?;
+
+        let role = current.try_get::<String, _>("role")?;
+        if is_system_mailbox_role(&role) {
+            bail!("system mailbox cannot be modified through IMAP");
+        }
+
+        let name = MailboxPath::parse(name)?.into_string();
+        Self::ensure_mailbox_name_available_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            &name,
+            Some(mailbox_id),
+        )
+        .await?;
+
+        let sort_order = current.try_get::<i32, _>("sort_order")?;
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        sqlx::query(
+            r#"
+            UPDATE mailboxes
+            SET display_name = $4, sort_order = $5, modseq = GREATEST(modseq + 1, $6), updated_at = NOW()
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(mailbox_id)
+        .bind(&name)
+        .bind(sort_order)
+        .bind(modseq)
+        .execute(&mut *tx)
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(mailbox_id),
+            "mailbox",
+            mailbox_id,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({"name": name}),
+        )
+        .await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        self.fetch_jmap_mailboxes(account_id)
+            .await?
+            .into_iter()
+            .find(|mailbox| mailbox.id == mailbox_id)
             .ok_or_else(|| anyhow!("mailbox update failed"))
     }
 

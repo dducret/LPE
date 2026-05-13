@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use lpe_core::sieve::parse_script;
+use lpe_domain::MailboxDisplayName;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -449,34 +450,31 @@ impl Storage {
     pub async fn create_mailbox(&self, input: NewMailbox, audit: AuditEntryInput) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
-        let exists = sqlx::query(
-            r#"
-            SELECT 1
-            FROM mailboxes
-            WHERE tenant_id = $1 AND account_id = $2 AND lower(display_name) = lower($3)
-            LIMIT 1
-            "#,
+        let display_name = MailboxDisplayName::new(&input.display_name)?.into_string();
+        let name_available = Self::ensure_mailbox_name_available_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            &display_name,
+            None,
         )
-        .bind(&tenant_id)
-        .bind(input.account_id)
-        .bind(input.display_name.trim())
-        .fetch_optional(&mut *tx)
-        .await?;
+        .await;
 
-        if exists.is_none() {
-            let sort_order = sqlx::query_scalar::<_, i32>(
-                r#"
+        match name_available {
+            Ok(()) => {
+                let sort_order = sqlx::query_scalar::<_, i32>(
+                    r#"
                 SELECT COALESCE(MAX(sort_order), 0) + 1
                 FROM mailboxes
                 WHERE tenant_id = $1 AND account_id = $2
                 "#,
-            )
-            .bind(&tenant_id)
-            .bind(input.account_id)
-            .fetch_one(&mut *tx)
-            .await?;
+                )
+                .bind(&tenant_id)
+                .bind(input.account_id)
+                .fetch_one(&mut *tx)
+                .await?;
 
-            sqlx::query(
+                sqlx::query(
                 r#"
                 INSERT INTO mailboxes (
                     id, tenant_id, account_id, role, display_name, sort_order, retention_days, uid_validity
@@ -488,14 +486,17 @@ impl Storage {
             .bind(&tenant_id)
             .bind(input.account_id)
             .bind(input.role.trim())
-            .bind(input.display_name.trim())
+            .bind(&display_name)
             .bind(sort_order)
             .bind(input.retention_days as i32)
             .bind(allocate_uid_validity())
             .execute(&mut *tx)
             .await?;
 
-            self.insert_audit(&mut tx, &tenant_id, audit).await?;
+                self.insert_audit(&mut tx, &tenant_id, audit).await?;
+            }
+            Err(error) if error.to_string() == "mailbox already exists" => {}
+            Err(error) => return Err(error),
         }
 
         tx.commit().await?;

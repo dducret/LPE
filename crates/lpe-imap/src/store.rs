@@ -2,9 +2,9 @@ use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AuditEntryInput, ImapEmail, ImapMailboxState, JmapEmailQuery, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxAccountAccess,
-    MailboxDelegationGrant, MailboxDelegationGrantInput, SavedDraftMessage, SenderDelegationGrant,
-    SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
+    JmapMailbox, MailboxAccountAccess, MailboxDelegationGrant, MailboxDelegationGrantInput,
+    SavedDraftMessage, SenderDelegationGrant, SenderDelegationGrantInput, SenderDelegationRight,
+    Storage, SubmitMessageInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -212,15 +212,7 @@ impl ImapStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         Box::pin(async move {
-            self.create_jmap_mailbox(
-                JmapMailboxCreateInput {
-                    account_id,
-                    name: name.to_string(),
-                    sort_order: None,
-                },
-                audit,
-            )
-            .await
+            lpe_storage::Storage::create_imap_mailbox(self, account_id, name, audit).await
         })
     }
 
@@ -232,16 +224,8 @@ impl ImapStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         Box::pin(async move {
-            self.update_jmap_mailbox(
-                JmapMailboxUpdateInput {
-                    account_id,
-                    mailbox_id,
-                    name: Some(name.to_string()),
-                    sort_order: None,
-                },
-                audit,
-            )
-            .await
+            lpe_storage::Storage::rename_imap_mailbox(self, account_id, mailbox_id, name, audit)
+                .await
         })
     }
 

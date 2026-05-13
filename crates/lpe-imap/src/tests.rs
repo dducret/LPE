@@ -59,6 +59,7 @@ struct FakeStore {
 
 impl FakeStore {
     fn new() -> Self {
+        let tenant_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
         let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
         let inbox_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
         let sent_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
@@ -67,7 +68,7 @@ impl FakeStore {
         Self {
             session: None,
             login: AccountLogin {
-                tenant_id: "tenant-a".to_string(),
+                tenant_id,
                 account_id,
                 email: "alice@example.test".to_string(),
                 display_name: "Alice".to_string(),
@@ -221,7 +222,7 @@ impl AccountAuthStore for FakeStore {
 
     fn append_audit_event<'a>(
         &'a self,
-        _tenant_id: &'a str,
+        _tenant_id: &'a Uuid,
         _entry: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move { Ok(()) })
@@ -694,6 +695,7 @@ impl ImapStore for FakeStore {
     ) -> StoreFuture<'a, MailboxAccountAccess> {
         let identity = if account_id == self.login.account_id {
             MailboxAccountAccess {
+                tenant_id: self.login.tenant_id,
                 account_id: self.login.account_id,
                 email: self.login.email.clone(),
                 display_name: self.login.display_name.clone(),

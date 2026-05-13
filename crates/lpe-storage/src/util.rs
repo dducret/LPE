@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::MailboxNamePolicy;
 use sha2::{Digest, Sha256};
 use std::env;
 use uuid::Uuid;
@@ -116,23 +117,11 @@ pub(crate) fn permissions_from_storage(
 }
 
 pub(crate) fn system_mailbox_role_for_display_name(display_name: &str) -> Option<&'static str> {
-    match display_name.trim().to_ascii_lowercase().as_str() {
-        "inbox" => Some("inbox"),
-        "draft" | "drafts" => Some("drafts"),
-        "sent" | "sent items" | "sent messages" => Some("sent"),
-        "deleted" | "deleted items" | "trash" => Some("trash"),
-        _ => None,
-    }
+    MailboxNamePolicy::system_role_for_display_name(display_name)
 }
 
 pub(crate) fn canonical_system_mailbox_display_name(role: &str) -> Option<&'static str> {
-    match role {
-        "inbox" => Some("Inbox"),
-        "drafts" => Some("Drafts"),
-        "sent" => Some("Sent"),
-        "trash" => Some("Deleted"),
-        _ => None,
-    }
+    MailboxNamePolicy::canonical_system_display_name(role)
 }
 
 pub(crate) fn normalize_admin_permissions(

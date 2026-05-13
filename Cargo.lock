@@ -1481,6 +1481,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "unicode-normalization",
  "uuid",
 ]
 
@@ -1509,6 +1510,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "base64",
+ "lpe-domain",
  "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",
@@ -1525,6 +1527,7 @@ dependencies = [
  "axum",
  "base64",
  "lpe-core",
+ "lpe-domain",
  "lpe-magika",
  "lpe-storage",
  "serde",

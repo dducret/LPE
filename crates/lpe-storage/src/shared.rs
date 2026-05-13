@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_domain::MailboxDisplayName;
 use serde_json::{json, Value};
 use sqlx::{Postgres, Row};
 use uuid::Uuid;
@@ -112,6 +113,7 @@ impl Storage {
             return row.try_get("id").map_err(Into::into);
         }
 
+        let display_name = MailboxDisplayName::system(display_name)?.into_string();
         let mailbox_id = Uuid::new_v4();
         let uid_validity = allocate_uid_validity();
         sqlx::query(
@@ -126,7 +128,7 @@ impl Storage {
         .bind(tenant_id)
         .bind(account_id)
         .bind(lookup_role)
-        .bind(display_name)
+        .bind(&display_name)
         .bind(sort_order)
         .bind(uid_validity)
         .execute(&mut **tx)

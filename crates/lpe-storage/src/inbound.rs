@@ -3,7 +3,9 @@ use lpe_core::sieve::{
     evaluate_script, ExecutionOutcome as SieveExecutionOutcome,
     MessageContext as SieveMessageContext, VacationAction,
 };
-use lpe_domain::{InboundDeliveryRequest, InboundDeliveryResponse};
+use lpe_domain::{
+    InboundDeliveryRequest, InboundDeliveryResponse, MailboxDisplayName, MailboxNamePolicy,
+};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row};
 use std::collections::{BTreeMap, BTreeSet};
@@ -576,25 +578,26 @@ impl Storage {
         display_name: &str,
         _retention_days: i32,
     ) -> Result<Uuid> {
-        let display_name = display_name.trim();
-        if display_name.is_empty() {
-            bail!("fileinto target mailbox is required");
-        }
-        if let Some(mailbox_id) = sqlx::query_scalar::<_, Uuid>(
+        let display_name = MailboxDisplayName::new(display_name)
+            .map_err(|_| anyhow::anyhow!("fileinto target mailbox is invalid"))?
+            .into_string();
+        let requested_key = MailboxNamePolicy::canonical_key(&display_name);
+        let rows = sqlx::query(
             r#"
-            SELECT id
+            SELECT id, display_name
             FROM mailboxes
-            WHERE tenant_id = $1 AND account_id = $2 AND lower(display_name) = lower($3)
-            LIMIT 1
+            WHERE tenant_id = $1 AND account_id = $2
             "#,
         )
         .bind(tenant_id)
         .bind(account_id)
-        .bind(display_name)
-        .fetch_optional(&mut **tx)
-        .await?
-        {
-            return Ok(mailbox_id);
+        .fetch_all(&mut **tx)
+        .await?;
+        for row in rows {
+            let existing_name = row.try_get::<String, _>("display_name")?;
+            if requested_key.collides_with(&MailboxNamePolicy::canonical_key(&existing_name)) {
+                return row.try_get("id").map_err(Into::into);
+            }
         }
 
         let sort_order = sqlx::query_scalar::<_, i32>(
@@ -620,7 +623,7 @@ impl Storage {
         .bind(mailbox_id)
         .bind(tenant_id)
         .bind(account_id)
-        .bind(display_name)
+        .bind(&display_name)
         .bind(sort_order)
         .bind(allocate_uid_validity())
         .execute(&mut **tx)
