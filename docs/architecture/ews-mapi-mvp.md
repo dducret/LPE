@@ -4,6 +4,8 @@
 
 `lpe-exchange` exposes bounded EWS compatibility and guarded MAPI over HTTP endpoints over canonical `LPE` mailbox, contacts, calendar, task, address-book, and submission state. It is not a complete Exchange server and must not introduce Exchange-specific storage.
 
+The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI over HTTP is maintained in `docs/architecture/mapi-over-http-implementation-plan.md`.
+
 ## Implementation/Usage
 
 - EWS endpoints:
@@ -16,6 +18,15 @@
   - `POST /mapi/emsmdb`
   - `OPTIONS /mapi/nspi`
   - `POST /mapi/nspi`
+- MAPI implementation modules under `crates/lpe-exchange/src/mapi/`:
+  - `transport.rs` owns MAPI/HTTP request validation, response envelopes, cookies, diagnostics, and endpoint routing.
+  - `session.rs` owns authenticated session state, handle tables, request replay caches, and RPC/HTTP EMSMDB context execution.
+  - `dispatch.rs` owns Execute request decoding and ROP dispatch against canonical `LPE` state.
+  - `rop.rs` owns ROP buffer parsing, ROP response encoding, and low-level cursor helpers.
+  - `tables.rs` owns hierarchy, contents, attachment, contact, and calendar table projections.
+  - `properties.rs` owns property tags, named properties, value conversion, streams, and canonical property application.
+  - `sync.rs` owns replica identifiers, FastTransfer/ICS buffers, manifests, and sync object mapping.
+  - `nspi.rs` owns address-book request handling and tenant-visible NSPI projections.
 - Outlook Anywhere / RPC over HTTP endpoint:
   - `/rpc/rpcproxy.dll`
 - Authentication:
@@ -59,6 +70,16 @@
 | `EMSMDB` | mailbox tables, message content, flags, folders, sync state |
 | `NSPI` | account/contact address-book visibility |
 | `/rpc/rpcproxy.dll` | authenticated RPC/HTTP mailbox transport path |
+| MAPI identity | store-backed projection from canonical UUIDs to replica GUID, FID, MID, LongTermID, source key, change key, and instance key values |
+
+| MAPI property area | Current support |
+| --- | --- |
+| Property tags | `properties.rs` parses a property tag into a 16-bit property ID and a 16-bit MS-OXCDATA property type. IDs `0x8001..0xFFFE` are treated as named-property IDs. |
+| Scalar values | Inline ROP property values support `PtypInteger16`, `PtypInteger32`, `PtypBoolean`, `PtypInteger64`, `PtypTime`, `PtypString8`, `PtypString`, `PtypGuid`, `PtypBinary`, and `PtypErrorCode`. Unicode strings are UTF-16LE with a terminating null. |
+| Multivalued values | The bounded initial codec supports `PtypMultipleInteger16`, `PtypMultipleInteger32`, `PtypMultipleInteger64`, `PtypMultipleString8`, `PtypMultipleString`, `PtypMultipleGuid`, and `PtypMultipleBinary` using ROP-buffer counts. |
+| Binary and large values | Inline `PtypBinary` uses the ROP 16-bit byte count. Large body, HTML, and attachment data use the existing stream ROP path instead of inventing a protocol-local blob store. |
+| Named properties | `RopGetPropertyIdsFromNames`, `RopGetNamesFromPropertyIds`, and `RopQueryNamedProperties` use the session-local registry. Durable named-property mapping is deferred until a canonical persistent custom-property surface is documented. |
+| Unsupported property types | Unsupported inline property types fail at decode time and surface through the existing ROP property error path instead of being silently coerced. |
 
 | MAPI gate | Required behavior |
 | --- | --- |

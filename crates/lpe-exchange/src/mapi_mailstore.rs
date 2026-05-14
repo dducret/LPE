@@ -1,9 +1,7 @@
 use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
-pub(crate) const STORE_REPLICA_GUID: [u8; 16] = [
-    0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10,
-];
+pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -107,21 +105,17 @@ pub(crate) fn canonical_message_change_number_with_attachments(
 }
 
 pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
-    let mut key = STORE_REPLICA_GUID.to_vec();
-    key.extend_from_slice(&uuid_global_counter(id).to_le_bytes());
-    key
+    let object_id =
+        crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI identity mapping missing");
+    crate::mapi::identity::source_key_for_object_id(object_id)
 }
 
 pub(crate) fn source_key_for_store_id(store_id: u64) -> Vec<u8> {
-    let mut key = STORE_REPLICA_GUID.to_vec();
-    key.extend_from_slice(&store_id.to_le_bytes());
-    key
+    crate::mapi::identity::source_key_for_object_id(store_id)
 }
 
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
-    let mut key = STORE_REPLICA_GUID.to_vec();
-    key.extend_from_slice(&change_number.max(1).to_le_bytes());
-    key
+    crate::mapi::identity::change_key_for_change_number(change_number)
 }
 
 pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
@@ -363,14 +357,6 @@ fn write_prefixed_bytes(buffer: &mut Vec<u8>, bytes: &[u8]) {
     buffer.extend_from_slice(&bytes[..bytes.len().min(u16::MAX as usize)]);
 }
 
-fn uuid_global_counter(id: &Uuid) -> u64 {
-    let bytes = id.as_bytes();
-    let value = u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]) & 0x0000_FFFF_FFFF_FFFF;
-    value.max(0x100)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,6 +383,7 @@ mod tests {
     #[test]
     fn source_and_change_keys_are_stable_replica_scoped_values() {
         let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(id, crate::mapi::identity::mapi_store_id(42));
         let source_key = source_key_for_uuid(&id);
         let change_key = change_key_for_change_number(42);
 

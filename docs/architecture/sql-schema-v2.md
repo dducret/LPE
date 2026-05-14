@@ -204,6 +204,12 @@ Protocol adapters store only cursor rows:
   Content and read-state checkpoints are mailbox-scoped and must have a real
   mailbox id. MAPI checkpoints store positions over canonical change rows, not
   mailbox or message replicas.
+- `mapi_mailbox_replicas` and `mapi_object_identities` store the durable MAPI
+  identity projection for a canonical account: replica GUID, allocated
+  48-bit global counters, FIDs, MIDs, source keys, change keys, and instance
+  keys. These rows map canonical UUIDs to protocol identifiers; they do not
+  store mailbox content, folder replicas, message bodies, attachments, `Sent`,
+  drafts, outbox, or search state.
 
 None of these tables stores canonical messages, folders, contacts, calendars,
 tasks, attachments, `Sent`, drafts, or outbox state.
@@ -516,6 +522,8 @@ collaboration, rights, or user-visible state.
 - `jmap_query_states`
 - `activesync_sync_cursors`
 - `mapi_sync_checkpoints`
+- `mapi_mailbox_replicas`
+- `mapi_object_identities`
 
 ### Submission and Transport Integration
 

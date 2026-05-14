@@ -274,9 +274,51 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         PROTOCOLS_STORAGE.contains("FROM mail_change_log")
             && PROTOCOLS_STORAGE.contains("fetch_canonical_change_cursor(account_id)")
             && SCHEMA.contains("CREATE TABLE mapi_sync_checkpoints")
+            && SCHEMA.contains("CREATE TABLE mapi_mailbox_replicas")
+            && SCHEMA.contains("CREATE TABLE mapi_object_identities")
             && table_definition("mapi_sync_checkpoints").contains("last_change_sequence"),
-        "JMAP, ActiveSync, and MAPI cursors must store positions and replay from canonical logs instead of protocol-owned content snapshots"
+        "JMAP, ActiveSync, and MAPI cursors must store positions and replay from canonical logs; MAPI identity rows must store protocol IDs without protocol-owned content snapshots"
     );
+}
+
+#[test]
+fn mapi_identity_mapping_is_store_backed() {
+    let replicas = table_definition("mapi_mailbox_replicas");
+    for required in [
+        "replica_guid UUID NOT NULL",
+        "next_global_counter BIGINT NOT NULL DEFAULT 17",
+        "PRIMARY KEY (tenant_id, account_id)",
+        "UNIQUE (tenant_id, account_id, replica_guid)",
+    ] {
+        assert!(
+            replicas.contains(required),
+            "mapi_mailbox_replicas must persist replica allocation state: {required}"
+        );
+    }
+
+    let identities = table_definition("mapi_object_identities");
+    for required in [
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('mailbox', 'message', 'contact', 'calendar_event'))",
+        "canonical_id UUID NOT NULL",
+        "mapi_global_counter BIGINT NOT NULL",
+        "mapi_object_id BIGINT NOT NULL",
+        "source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 24)",
+        "change_key BYTEA",
+        "instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 24)",
+        "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id)",
+        "UNIQUE (tenant_id, account_id, mapi_global_counter)",
+        "UNIQUE (tenant_id, account_id, mapi_object_id)",
+    ] {
+        assert!(
+            identities.contains(required),
+            "mapi_object_identities must persist durable MAPI object identity: {required}"
+        );
+    }
+
+    assert_schema_contains_all(&[
+        "CREATE INDEX mapi_object_identities_lookup_idx",
+        "CREATE INDEX mapi_object_identities_source_key_idx",
+    ]);
 }
 
 #[test]

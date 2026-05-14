@@ -9,6 +9,38 @@ use lpe_storage::{
 use sqlx::Row;
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MapiIdentityObjectKind {
+    Mailbox,
+    Message,
+    Contact,
+    CalendarEvent,
+}
+
+impl MapiIdentityObjectKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Mailbox => "mailbox",
+            Self::Message => "message",
+            Self::Contact => "contact",
+            Self::CalendarEvent => "calendar_event",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiIdentityRequest {
+    pub(crate) object_kind: MapiIdentityObjectKind,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) reserved_global_counter: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiIdentityRecord {
+    pub(crate) canonical_id: Uuid,
+    pub(crate) object_id: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) id: Uuid,
@@ -32,6 +64,12 @@ pub(crate) enum ExchangeAddressBookDirectoryKind {
 }
 
 pub trait ExchangeStore: AccountAuthStore {
+    fn fetch_or_allocate_mapi_identities<'a>(
+        &'a self,
+        account_id: Uuid,
+        requests: &'a [MapiIdentityRequest],
+    ) -> StoreFuture<'a, Vec<MapiIdentityRecord>>;
+
     fn fetch_address_book_entries<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -301,6 +339,125 @@ pub trait ExchangeStore: AccountAuthStore {
 }
 
 impl ExchangeStore for Storage {
+    fn fetch_or_allocate_mapi_identities<'a>(
+        &'a self,
+        account_id: Uuid,
+        requests: &'a [MapiIdentityRequest],
+    ) -> StoreFuture<'a, Vec<MapiIdentityRecord>> {
+        Box::pin(async move {
+            let tenant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT tenant_id
+                FROM accounts
+                WHERE id = $1
+                LIMIT 1
+                "#,
+            )
+            .bind(account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+
+            let mut tx = self.pool().begin().await?;
+            sqlx::query(
+                r#"
+                INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (tenant_id, account_id) DO NOTHING
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .execute(&mut *tx)
+            .await?;
+
+            let mut records = Vec::with_capacity(requests.len());
+            for request in requests {
+                let kind = request.object_kind.as_str();
+                let existing = sqlx::query(
+                    r#"
+                    SELECT mapi_object_id
+                    FROM mapi_object_identities
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND object_kind = $3
+                      AND canonical_id = $4
+                    LIMIT 1
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(kind)
+                .bind(request.canonical_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+
+                let object_id = if let Some(row) = existing {
+                    row.get::<i64, _>("mapi_object_id") as u64
+                } else {
+                    let global_counter = if let Some(counter) = request.reserved_global_counter {
+                        counter
+                    } else {
+                        let next = sqlx::query_scalar::<_, i64>(
+                            r#"
+                            UPDATE mapi_mailbox_replicas
+                            SET next_global_counter = next_global_counter + 1,
+                                updated_at = NOW()
+                            WHERE tenant_id = $1
+                              AND account_id = $2
+                            RETURNING next_global_counter - 1
+                            "#,
+                        )
+                        .bind(tenant_id)
+                        .bind(account_id)
+                        .fetch_one(&mut *tx)
+                        .await?;
+                        next as u64
+                    };
+                    let object_id = crate::mapi::identity::mapi_store_id(global_counter);
+                    let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
+                    let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
+                    let row = sqlx::query(
+                        r#"
+                        INSERT INTO mapi_object_identities (
+                            tenant_id,
+                            account_id,
+                            object_kind,
+                            canonical_id,
+                            mapi_global_counter,
+                            mapi_object_id,
+                            source_key,
+                            instance_key
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        ON CONFLICT (tenant_id, account_id, object_kind, canonical_id)
+                        DO UPDATE SET updated_at = mapi_object_identities.updated_at
+                        RETURNING mapi_object_id
+                        "#,
+                    )
+                    .bind(tenant_id)
+                    .bind(account_id)
+                    .bind(kind)
+                    .bind(request.canonical_id)
+                    .bind(global_counter as i64)
+                    .bind(object_id as i64)
+                    .bind(source_key)
+                    .bind(instance_key)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    row.get::<i64, _>("mapi_object_id") as u64
+                };
+                records.push(MapiIdentityRecord {
+                    canonical_id: request.canonical_id,
+                    object_id,
+                });
+            }
+            tx.commit().await?;
+            Ok(records)
+        })
+    }
+
     fn fetch_address_book_entries<'a>(
         &'a self,
         principal_account_id: Uuid,

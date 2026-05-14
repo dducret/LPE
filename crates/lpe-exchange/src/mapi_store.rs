@@ -6,8 +6,7 @@ use lpe_storage::{
 use uuid::Uuid;
 
 use crate::store::ExchangeStore;
-
-const STORE_REPLICA_ID: u64 = 1;
+use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
@@ -333,6 +332,16 @@ impl<T: ExchangeStore> MapiStore for T {
                         .await?,
                 );
             }
+            let identity_requests = mapi_identity_requests(&mailboxes, &emails, &contacts, &events);
+            for identity in self
+                .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
+                .await?
+            {
+                crate::mapi::identity::remember_mapi_identity(
+                    identity.canonical_id,
+                    identity.object_id,
+                );
+            }
             Ok(MapiMailStoreSnapshot::new(
                 mailboxes,
                 emails,
@@ -346,6 +355,36 @@ impl<T: ExchangeStore> MapiStore for T {
     }
 }
 
+fn mapi_identity_requests(
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    contacts: &[AccessibleContact],
+    events: &[AccessibleEvent],
+) -> Vec<MapiIdentityRequest> {
+    let mut requests = Vec::new();
+    requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Mailbox,
+        canonical_id: mailbox.id,
+        reserved_global_counter: reserved_folder_counter_for_role(&mailbox.role),
+    }));
+    requests.extend(emails.iter().map(|email| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Message,
+        canonical_id: email.id,
+        reserved_global_counter: None,
+    }));
+    requests.extend(contacts.iter().map(|contact| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Contact,
+        canonical_id: contact.id,
+        reserved_global_counter: None,
+    }));
+    requests.extend(events.iter().map(|event| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::CalendarEvent,
+        canonical_id: event.id,
+        reserved_global_counter: None,
+    }));
+    requests
+}
+
 fn mapi_message_folder_id(email: &JmapEmail, folders: &[MapiFolder]) -> u64 {
     folders
         .iter()
@@ -355,25 +394,13 @@ fn mapi_message_folder_id(email: &JmapEmail, folders: &[MapiFolder]) -> u64 {
 }
 
 fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
-    match mailbox.role.as_str() {
-        "inbox" => mapi_store_id(5),
-        "drafts" => mapi_store_id(14),
-        "outbox" => mapi_store_id(6),
-        "sent" => mapi_store_id(7),
-        "trash" => mapi_store_id(8),
-        _ => mapi_store_id(uuid_global_counter(&mailbox.id)),
-    }
+    reserved_folder_id_for_role(&mailbox.role)
+        .or_else(|| crate::mapi::identity::mapped_mapi_object_id(&mailbox.id))
+        .expect("MAPI folder identity mapping missing")
 }
 
 fn mapi_folder_id_for_role(role: &str) -> u64 {
-    match role {
-        "inbox" => mapi_store_id(5),
-        "drafts" => mapi_store_id(14),
-        "outbox" => mapi_store_id(6),
-        "sent" => mapi_store_id(7),
-        "trash" => mapi_store_id(8),
-        _ => mapi_store_id(1),
-    }
+    reserved_folder_id_for_role(role).unwrap_or(crate::mapi::identity::ROOT_FOLDER_ID)
 }
 
 fn mapi_message_id(email: &JmapEmail) -> u64 {
@@ -381,7 +408,7 @@ fn mapi_message_id(email: &JmapEmail) -> u64 {
 }
 
 fn mapi_item_id(id: &Uuid) -> u64 {
-    mapi_store_id(uuid_global_counter(id))
+    crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI item identity mapping missing")
 }
 
 fn mapi_collaboration_folder_id(
@@ -389,40 +416,49 @@ fn mapi_collaboration_folder_id(
     collection: &CollaborationCollection,
 ) -> u64 {
     match (kind, collection.id.as_str()) {
-        (MapiCollaborationFolderKind::Contacts, "default" | "contacts") => mapi_store_id(15),
-        (MapiCollaborationFolderKind::Calendar, "default" | "calendar") => mapi_store_id(16),
+        (MapiCollaborationFolderKind::Contacts, "default" | "contacts") => {
+            crate::mapi::identity::CONTACTS_FOLDER_ID
+        }
+        (MapiCollaborationFolderKind::Calendar, "default" | "calendar") => {
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        }
         _ => collection
             .id
             .rsplit('-')
             .next()
             .and_then(|value| Uuid::parse_str(value).ok())
-            .map(|id| mapi_store_id(uuid_global_counter(&id)))
+            .and_then(|id| crate::mapi::identity::mapped_mapi_object_id(&id))
             .unwrap_or_else(|| {
                 let seed = match kind {
                     MapiCollaborationFolderKind::Contacts => 17,
                     MapiCollaborationFolderKind::Calendar => 18,
                 };
-                mapi_store_id(seed + stable_text_counter(&collection.id))
+                crate::mapi::identity::mapi_store_id(seed + stable_text_counter(&collection.id))
             }),
     }
-}
-
-const fn mapi_store_id(global_counter: u64) -> u64 {
-    ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
-}
-
-fn uuid_global_counter(id: &Uuid) -> u64 {
-    let bytes = id.as_bytes();
-    let value = u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-    ]) & 0x0000_FFFF_FFFF_FFFF;
-    value.max(0x100)
 }
 
 fn stable_text_counter(value: &str) -> u64 {
     value.bytes().fold(0u64, |acc, byte| {
         acc.wrapping_mul(131).wrapping_add(u64::from(byte))
     }) & 0x0000_FFFF_FFFF_FFFF
+}
+
+fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
+    match role {
+        "inbox" => Some(crate::mapi::identity::INBOX_FOLDER_COUNTER),
+        "drafts" => Some(crate::mapi::identity::DRAFTS_FOLDER_COUNTER),
+        "outbox" => Some(crate::mapi::identity::OUTBOX_FOLDER_COUNTER),
+        "sent" => Some(crate::mapi::identity::SENT_FOLDER_COUNTER),
+        "trash" => Some(crate::mapi::identity::TRASH_FOLDER_COUNTER),
+        "contacts" => Some(crate::mapi::identity::CONTACTS_FOLDER_COUNTER),
+        "calendar" => Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
+        _ => None,
+    }
+}
+
+fn reserved_folder_id_for_role(role: &str) -> Option<u64> {
+    reserved_folder_counter_for_role(role).map(crate::mapi::identity::mapi_store_id)
 }
 
 #[cfg(test)]
@@ -435,6 +471,14 @@ mod tests {
         let mailbox_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
         let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
         let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(17),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(18),
+        );
         let mailbox = JmapMailbox {
             id: mailbox_id,
             parent_id: None,

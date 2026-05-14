@@ -1380,6 +1380,43 @@ CREATE UNIQUE INDEX mapi_sync_checkpoints_hierarchy_idx
     ON mapi_sync_checkpoints (tenant_id, account_id, checkpoint_kind, mapi_replica_guid)
     WHERE mailbox_id IS NULL;
 
+CREATE TABLE mapi_mailbox_replicas (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    replica_guid UUID NOT NULL,
+    next_global_counter BIGINT NOT NULL DEFAULT 17 CHECK (next_global_counter > 16),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id),
+    UNIQUE (tenant_id, account_id, replica_guid),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE TABLE mapi_object_identities (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('mailbox', 'message', 'contact', 'calendar_event')),
+    canonical_id UUID NOT NULL,
+    mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
+    mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
+    source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 24),
+    change_key BYTEA,
+    instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 24),
+    deleted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id),
+    UNIQUE (tenant_id, account_id, mapi_global_counter),
+    UNIQUE (tenant_id, account_id, mapi_object_id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_object_identities_lookup_idx
+    ON mapi_object_identities (tenant_id, account_id, mapi_object_id);
+
+CREATE INDEX mapi_object_identities_source_key_idx
+    ON mapi_object_identities (tenant_id, account_id, source_key);
+
 CREATE TABLE submission_queue (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

@@ -24,6 +24,7 @@ use uuid::Uuid;
 use crate::{
     mapi::MapiEndpoint,
     mapi_mailstore,
+    mapi_store::MapiStore,
     service::{
         error_response, is_rpc_proxy_in_data_channel_request, mark_rpc_proxy_out_endpoint_bind_ack,
         rpc_proxy_in_channel_response_for_buffer, rpc_proxy_in_channel_response_for_endpoint_query,
@@ -31,11 +32,51 @@ use crate::{
     },
     store::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore,
+        ExchangeStore, MapiIdentityRecord, MapiIdentityRequest,
     },
 };
 
 static MAPI_TEST_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
+#[tokio::test]
+async fn mapi_identity_mapping_survives_restart_style_store_reload() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..FakeStore::default()
+    };
+    let mailbox = FakeStore::mailbox(
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "Durable IDs",
+    );
+    let email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        &mailbox.id.to_string(),
+        "custom",
+        "Stable identity",
+    );
+    store.mailboxes.lock().unwrap().push(mailbox);
+    store.emails.lock().unwrap().push(email);
+
+    let first = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let second = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+
+    assert_eq!(first.folders()[0].id, second.folders()[0].id);
+    assert_eq!(first.messages()[0].id, second.messages()[0].id);
+    assert_eq!(
+        crate::mapi::identity::object_id_from_long_term_id(
+            &crate::mapi::identity::long_term_id_from_object_id(first.messages()[0].id).unwrap()
+        ),
+        Some(second.messages()[0].id)
+    );
+}
 
 #[derive(Clone, Default)]
 struct FakeStore {
@@ -67,6 +108,8 @@ struct FakeStore {
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
+    mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
+    next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
@@ -292,6 +335,47 @@ impl AccountAuthStore for FakeStore {
 }
 
 impl ExchangeStore for FakeStore {
+    fn fetch_or_allocate_mapi_identities<'a>(
+        &'a self,
+        _account_id: Uuid,
+        requests: &'a [MapiIdentityRequest],
+    ) -> StoreFuture<'a, Vec<MapiIdentityRecord>> {
+        Box::pin(async move {
+            let mut identities = self.mapi_identities.lock().unwrap();
+            let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
+            if *next_counter < 17 {
+                *next_counter = 17;
+            }
+            let mut records = Vec::with_capacity(requests.len());
+            for request in requests {
+                let object_id = if let Some(existing) = identities.get(&request.canonical_id) {
+                    *existing
+                } else {
+                    let counter = request.reserved_global_counter.unwrap_or_else(|| {
+                        crate::mapi::identity::global_counter_from_store_id(
+                            crate::mapi::identity::legacy_migration_object_id(
+                                &request.canonical_id,
+                            ),
+                        )
+                        .unwrap_or_else(|| {
+                            let value = *next_counter;
+                            *next_counter = next_counter.saturating_add(1);
+                            value
+                        })
+                    });
+                    let object_id = crate::mapi::identity::mapi_store_id(counter);
+                    identities.insert(request.canonical_id, object_id);
+                    object_id
+                };
+                records.push(MapiIdentityRecord {
+                    canonical_id: request.canonical_id,
+                    object_id,
+                });
+            }
+            Ok(records)
+        })
+    }
+
     fn fetch_address_book_entries<'a>(
         &'a self,
         principal_account_id: Uuid,
