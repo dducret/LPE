@@ -60,3 +60,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --manifest-path LPE-CT/Cargo.toml
       - run: cargo test --manifest-path LPE-CT/Cargo.toml -- --ignored --test-threads=1
+      - run: bash LPE-CT/installation/debian-trixie/test-lpe-ct-spool-recovery.sh

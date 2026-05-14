@@ -81,7 +81,7 @@ CREATE TABLE accounts (
     quota_mb INTEGER NOT NULL DEFAULT 4096 CHECK (quota_mb >= 0),
     quota_used_octets BIGINT NOT NULL DEFAULT 0 CHECK (quota_used_octets >= 0),
     gal_visibility TEXT NOT NULL DEFAULT 'tenant' CHECK (gal_visibility IN ('tenant', 'hidden')),
-    directory_kind TEXT NOT NULL DEFAULT 'user' CHECK (directory_kind IN ('user', 'shared', 'resource')),
+    directory_kind TEXT NOT NULL DEFAULT 'person' CHECK (directory_kind IN ('person', 'room', 'equipment')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),

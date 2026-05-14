@@ -711,6 +711,7 @@ fn mailbox_identity_schema_has_generated_normalized_address_helpers() {
         "normalized_primary_email TEXT GENERATED ALWAYS AS (lower(primary_email)) STORED",
         "normalized_primary_email_local_part TEXT GENERATED ALWAYS AS (lower(split_part(primary_email, '@', 1))) STORED",
         "normalized_primary_email_domain TEXT GENERATED ALWAYS AS (lower(split_part(primary_email, '@', 2))) STORED",
+        "directory_kind TEXT NOT NULL DEFAULT 'person' CHECK (directory_kind IN ('person', 'room', 'equipment'))",
         "UNIQUE (tenant_id, normalized_primary_email)",
     ] {
         assert!(

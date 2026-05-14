@@ -391,6 +391,9 @@ specific identity may only reference an identity owned by the submitting or
 delegating account.
 Default identities must be send-enabled, and a primary account email address
 must use the primary address kind.
+`accounts.directory_kind` uses the address-book projection values `person`,
+`room`, and `equipment`; shared mailbox semantics belong to account/mailbox
+kind and delegation fields, not to the directory-kind check.
 
 Aliases route inbound recipient resolution to accounts or groups but do not
 become independent mailbox owners unless backed by an account/shared mailbox.
