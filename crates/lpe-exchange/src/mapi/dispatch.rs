@@ -555,6 +555,10 @@ where
                                         contact_id,
                                     },
                                 );
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request, contact_id,
                                 ));
@@ -630,6 +634,10 @@ where
                                         event_id,
                                     },
                                 );
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request, event_id,
                                 ));
@@ -715,6 +723,10 @@ where
                                 message_id,
                             },
                         );
+                        session.record_notification(MapiNotificationEvent {
+                            folder_id,
+                            kind: MapiNotificationKind::Content,
+                        });
                         responses.extend_from_slice(&rop_save_changes_message_response(
                             &request, message_id,
                         ));
