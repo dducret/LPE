@@ -1283,7 +1283,7 @@ impl Storage {
             r#"
             SELECT
                 q.id AS queue_id,
-                q.message_id,
+                m.id AS message_id,
                 a.primary_email AS account_email,
                 m.subject_normalized AS subject,
                 m.internet_message_id,

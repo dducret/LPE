@@ -796,8 +796,10 @@ fn admin_workspace_and_pst_use_v2_mailbox_membership_schema() {
 
     assert!(
         !ADMIN_STORAGE.contains("outbound_message_queue")
-            && ADMIN_STORAGE.contains("submission_queue"),
-        "admin mail flow views must use the v2 submission queue"
+            && !ADMIN_STORAGE.contains("q.message_id")
+            && ADMIN_STORAGE.contains("submission_queue")
+            && ADMIN_STORAGE.contains("q.sent_mailbox_message_id"),
+        "admin mail flow views must use the v2 submission queue and resolve messages through sent mailbox membership"
     );
 }
 
