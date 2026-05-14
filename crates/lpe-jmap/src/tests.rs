@@ -5308,6 +5308,115 @@ async fn mailbox_get_returns_canonical_system_names_and_roles() {
 }
 
 #[tokio::test]
+async fn mailbox_get_advertises_child_creation_for_writable_owned_mailboxes() {
+    let parent = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![parent.clone()],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "ids": [parent.id.to_string()],
+                            "properties": ["id", "myRights"]
+                        }),
+                        "g".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({
+                            "create": {
+                                "child": {
+                                    "name": "Projects",
+                                    "parentId": parent.id.to_string()
+                                }
+                            }
+                        }),
+                        "s".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["list"][0]["myRights"]["mayCreateChild"],
+        Value::Bool(true)
+    );
+    assert!(response.method_responses[1].1["created"]["child"]["id"].is_string());
+    let created = store.created_mailboxes.lock().unwrap();
+    assert_eq!(created[0].parent_id, Some(parent.id));
+}
+
+#[tokio::test]
+async fn mailbox_get_hides_child_creation_for_read_only_shared_mailboxes() {
+    let parent = FakeStore::inbox_mailbox();
+    let read_only = FakeStore::shared_mailbox_read_only_access(true, false);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![parent.clone()],
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access(), read_only],
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+    let shared_account_id = FakeStore::shared_account().account_id.to_string();
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "accountId": shared_account_id,
+                            "ids": [parent.id.to_string()],
+                            "properties": ["id", "myRights"]
+                        }),
+                        "g".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/set".to_string(),
+                        json!({
+                            "accountId": FakeStore::shared_account().account_id.to_string(),
+                            "create": {
+                                "child": {
+                                    "name": "Projects",
+                                    "parentId": parent.id.to_string()
+                                }
+                            }
+                        }),
+                        "s".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["list"][0]["myRights"]["mayCreateChild"],
+        Value::Bool(false)
+    );
+    assert_eq!(
+        response.method_responses[1].1["notCreated"]["child"]["description"],
+        "write access is not granted on this mailbox account"
+    );
+    assert!(store.created_mailboxes.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mailbox_parent_id_and_subscription_round_trip_through_get_query_and_set() {
     let parent_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
     let child_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();

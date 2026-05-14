@@ -521,7 +521,7 @@ fn mailbox_to_value(
                 "mayRemoveItems": may_draft,
                 "maySetSeen": access.may_write,
                 "maySetKeywords": access.may_write,
-                "mayCreateChild": false,
+                "mayCreateChild": mailbox_account_may_write(access),
                 "mayRename": false,
                 "mayDelete": false,
                 "maySubmit": is_drafts && mailbox_account_may_submit(access),
