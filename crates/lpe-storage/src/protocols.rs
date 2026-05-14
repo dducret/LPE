@@ -754,6 +754,100 @@ impl Storage {
         Ok(())
     }
 
+    async fn find_mailbox_by_name_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        parent_id: Option<Uuid>,
+        display_name: &str,
+    ) -> Result<Option<Uuid>> {
+        let requested_key = MailboxNamePolicy::canonical_key(display_name);
+        let rows = sqlx::query(
+            r#"
+            SELECT id, display_name
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2
+              AND parent_mailbox_id IS NOT DISTINCT FROM $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(parent_id)
+        .fetch_all(&mut **tx)
+        .await?;
+
+        for row in rows {
+            let existing_name = row.try_get::<String, _>("display_name")?;
+            let existing_key = MailboxNamePolicy::canonical_key(&existing_name);
+            if requested_key.as_str() == existing_key.as_str() {
+                return Ok(Some(row.try_get::<Uuid, _>("id")?));
+            }
+            if requested_key.collides_with(&existing_key) {
+                bail!("mailbox already exists");
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn insert_imap_custom_mailbox_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+        parent_id: Option<Uuid>,
+        display_name: &str,
+    ) -> Result<(Uuid, i64)> {
+        Self::ensure_mailbox_name_available_in_tx(
+            tx,
+            tenant_id,
+            account_id,
+            parent_id,
+            display_name,
+            None,
+        )
+        .await?;
+        let next_sort_order = sqlx::query_scalar::<_, i32>(
+            r#"
+            SELECT COALESCE(MAX(sort_order), 0) + 1
+            FROM mailboxes
+            WHERE tenant_id = $1 AND account_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .fetch_one(&mut **tx)
+        .await?;
+
+        let mailbox_id = Uuid::new_v4();
+        let modseq = self
+            .allocate_mail_modseq_in_tx(tx, tenant_id, account_id)
+            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO mailboxes (
+                id, tenant_id, account_id, parent_mailbox_id, role, display_name, sort_order, uid_validity
+            )
+            VALUES ($1, $2, $3, $4, 'custom', $5, $6, $7)
+            "#,
+        )
+        .bind(mailbox_id)
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(parent_id)
+        .bind(display_name)
+        .bind(next_sort_order)
+        .bind(allocate_uid_validity())
+        .execute(&mut **tx)
+        .await?;
+        Self::set_mailbox_subscription_in_tx(
+            tx, tenant_id, account_id, mailbox_id, account_id, true,
+        )
+        .await?;
+
+        Ok((mailbox_id, modseq))
+    }
+
     async fn ensure_mailbox_parent_valid_in_tx(
         tx: &mut sqlx::Transaction<'_, Postgres>,
         tenant_id: &Uuid,
@@ -1012,63 +1106,61 @@ impl Storage {
                 .ok_or_else(|| anyhow!("mailbox creation failed"));
         }
 
-        let name = MailboxPath::parse(name)?.into_string();
-        Self::ensure_mailbox_name_available_in_tx(
-            &mut tx, &tenant_id, account_id, None, &name, None,
-        )
-        .await?;
-
-        let next_sort_order = sqlx::query_scalar::<_, i32>(
-            r#"
-            SELECT COALESCE(MAX(sort_order), 0) + 1
-            FROM mailboxes
-            WHERE tenant_id = $1 AND account_id = $2
-            "#,
-        )
-        .bind(&tenant_id)
-        .bind(account_id)
-        .fetch_one(&mut *tx)
-        .await?;
-
-        let mailbox_id = Uuid::new_v4();
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
-            .await?;
-        sqlx::query(
-            r#"
-            INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, sort_order, uid_validity)
-            VALUES ($1, $2, $3, 'custom', $4, $5, $6)
-            "#,
-        )
-        .bind(mailbox_id)
-        .bind(&tenant_id)
-        .bind(account_id)
-        .bind(&name)
-        .bind(next_sort_order)
-        .bind(allocate_uid_validity())
-        .execute(&mut *tx)
-        .await?;
-        Self::set_mailbox_subscription_in_tx(
-            &mut tx, &tenant_id, account_id, mailbox_id, account_id, true,
-        )
-        .await?;
+        let path = MailboxPath::parse(name)?;
+        let mut parent_id = None;
+        let mut created = Vec::new();
+        for segment in path.segments() {
+            let display_name = segment.as_str();
+            if let Some(existing_id) = Self::find_mailbox_by_name_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                parent_id,
+                display_name,
+            )
+            .await?
+            {
+                parent_id = Some(existing_id);
+                continue;
+            }
+            let (mailbox_id, modseq) = self
+                .insert_imap_custom_mailbox_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    parent_id,
+                    display_name,
+                )
+                .await?;
+            created.push((mailbox_id, display_name.to_string(), parent_id, modseq));
+            parent_id = Some(mailbox_id);
+        }
+        if created.is_empty() {
+            bail!("mailbox already exists");
+        }
+        let (mailbox_id, _, _, _) = created
+            .last()
+            .cloned()
+            .ok_or_else(|| anyhow!("mailbox creation failed"))?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
-        Self::insert_mail_change_log_in_tx(
-            &mut tx,
-            &tenant_id,
-            Some(account_id),
-            Some(mailbox_id),
-            "mailbox",
-            mailbox_id,
-            "created",
-            modseq,
-            &principals,
-            serde_json::json!({"name": name}),
-        )
-        .await?;
+        for (created_id, created_name, created_parent_id, modseq) in created {
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(created_id),
+                "mailbox",
+                created_id,
+                "created",
+                modseq,
+                &principals,
+                serde_json::json!({"name": created_name, "parentId": created_parent_id}),
+            )
+            .await?;
+        }
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
         tx.commit().await?;
 
@@ -1222,12 +1314,55 @@ impl Storage {
             bail!("system mailbox cannot be modified through IMAP");
         }
 
-        let name = MailboxPath::parse(name)?.into_string();
+        let path = MailboxPath::parse(name)?;
+        let mut parent_id = None;
+        let mut created = Vec::new();
+        let final_index = path.segments().len().saturating_sub(1);
+        for segment in path.segments().iter().take(final_index) {
+            let display_name = segment.as_str();
+            if let Some(existing_id) = Self::find_mailbox_by_name_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                parent_id,
+                display_name,
+            )
+            .await?
+            {
+                parent_id = Some(existing_id);
+                continue;
+            }
+            let (created_id, modseq) = self
+                .insert_imap_custom_mailbox_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    parent_id,
+                    display_name,
+                )
+                .await?;
+            created.push((created_id, display_name.to_string(), parent_id, modseq));
+            parent_id = Some(created_id);
+        }
+        let name = path
+            .segments()
+            .last()
+            .ok_or_else(|| anyhow!("mailbox name is required"))?
+            .as_str()
+            .to_string();
+        Self::ensure_mailbox_parent_valid_in_tx(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            Some(mailbox_id),
+            parent_id,
+        )
+        .await?;
         Self::ensure_mailbox_name_available_in_tx(
             &mut tx,
             &tenant_id,
             account_id,
-            None,
+            parent_id,
             &name,
             Some(mailbox_id),
         )
@@ -1240,13 +1375,18 @@ impl Storage {
         sqlx::query(
             r#"
             UPDATE mailboxes
-            SET display_name = $4, sort_order = $5, modseq = GREATEST(modseq + 1, $6), updated_at = NOW()
+            SET parent_mailbox_id = $4,
+                display_name = $5,
+                sort_order = $6,
+                modseq = GREATEST(modseq + 1, $7),
+                updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND id = $3
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(mailbox_id)
+        .bind(parent_id)
         .bind(&name)
         .bind(sort_order)
         .bind(modseq)
@@ -1256,6 +1396,21 @@ impl Storage {
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        for (created_id, created_name, created_parent_id, created_modseq) in created {
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                Some(created_id),
+                "mailbox",
+                created_id,
+                "created",
+                created_modseq,
+                &principals,
+                serde_json::json!({"name": created_name, "parentId": created_parent_id}),
+            )
+            .await?;
+        }
         Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
@@ -1266,7 +1421,7 @@ impl Storage {
             "updated",
             modseq,
             &principals,
-            serde_json::json!({"name": name}),
+            serde_json::json!({"name": name, "parentId": parent_id}),
         )
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;

@@ -11,8 +11,9 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::{
+    mailboxes::render_mailbox_path,
     parse::parse_request_line,
-    render::{render_mailbox_response_name, render_selected_updates, sanitize_imap_text},
+    render::{render_imap_mailbox_response_path, render_selected_updates, sanitize_imap_text},
     store::ImapStore,
 };
 
@@ -491,11 +492,17 @@ impl<S: ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let mailbox = self.resolve_mailbox_by_name(arguments).await?;
+        let principal = self.require_auth()?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
+        let mailbox_path = render_mailbox_path(&mailbox, &mailboxes);
         writer
             .write_all(
                 format!(
                     "* QUOTAROOT {}\r\n",
-                    render_mailbox_response_name(&mailbox, self.utf8_accept_enabled)
+                    render_imap_mailbox_response_path(&mailbox_path, self.utf8_accept_enabled)
                 )
                 .as_bytes(),
             )

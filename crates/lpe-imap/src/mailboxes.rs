@@ -8,8 +8,8 @@ use tracing::info;
 use crate::{
     parse::{parse_mailbox_path, parse_mailbox_path_token, tokenize},
     render::{
-        first_unseen_sequence, mailbox_name_matches, parse_status_items, render_list_flags,
-        render_mailbox_name, render_mailbox_response_name, render_status_response,
+        first_unseen_sequence, mailbox_name_matches, parse_status_items,
+        render_imap_mailbox_response_path, render_list_flags, render_status_response,
         resolve_message_indexes,
     },
     MessageRefKind, SelectedMailbox, Session,
@@ -71,8 +71,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         let mut matched = 0usize;
-        for mailbox in mailboxes {
-            if !mailbox_matches_pattern(&mailbox, &pattern) {
+        for mailbox in &mailboxes {
+            let mailbox_path = render_mailbox_path(mailbox, &mailboxes);
+            if !mailbox_matches_pattern(mailbox, &mailbox_path, &pattern) {
                 continue;
             }
             matched += 1;
@@ -82,7 +83,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                         "* {} {} \"/\" {}\r\n",
                         command_name,
                         render_list_flags(&mailbox.role, legacy_xlist),
-                        render_mailbox_response_name(&mailbox, self.utf8_accept_enabled)
+                        render_imap_mailbox_response_path(&mailbox_path, self.utf8_accept_enabled)
                     )
                     .as_bytes(),
                 )
@@ -117,11 +118,12 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         let mut matched = 0usize;
-        for mailbox in mailboxes {
+        for mailbox in &mailboxes {
             if !mailbox.is_subscribed {
                 continue;
             }
-            if !mailbox_matches_pattern(&mailbox, &pattern) {
+            let mailbox_path = render_mailbox_path(mailbox, &mailboxes);
+            if !mailbox_matches_pattern(mailbox, &mailbox_path, &pattern) {
                 continue;
             }
             matched += 1;
@@ -130,7 +132,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     format!(
                         "* LSUB {} \"/\" {}\r\n",
                         render_list_flags(&mailbox.role, false),
-                        render_mailbox_response_name(&mailbox, self.utf8_accept_enabled)
+                        render_imap_mailbox_response_path(&mailbox_path, self.utf8_accept_enabled)
                     )
                     .as_bytes(),
                 )
@@ -228,8 +230,18 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
     where
         W: AsyncWriteExt + Unpin,
     {
-        let mailbox = self.resolve_mailbox_by_name(arguments).await?;
         let principal = self.require_auth()?;
+        let mailboxes = self
+            .store
+            .ensure_imap_mailboxes(principal.account_id)
+            .await?;
+        let mailbox_path = parse_mailbox_path_token(arguments, "mailbox name is required")?;
+        let mailbox = mailboxes
+            .iter()
+            .find(|candidate| mailbox_matches_path(candidate, &mailboxes, &mailbox_path))
+            .cloned()
+            .ok_or_else(|| anyhow!("mailbox not found"))?;
+        let rendered_path = render_mailbox_path(&mailbox, &mailboxes);
         let emails = self
             .store
             .fetch_imap_emails(principal.account_id, mailbox.id)
@@ -240,7 +252,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         let requested = parse_status_items(arguments)?;
         let response = render_status_response(
-            &mailbox,
+            &rendered_path,
             &emails,
             &requested,
             &state,
@@ -253,7 +265,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .await?;
         writer.flush().await?;
         info!(
-            mailbox = %render_mailbox_name(&mailbox),
+            mailbox = %rendered_path,
             mailbox_role = %mailbox.role,
             messages = emails.len(),
             highest_modseq = state.highest_modseq,
@@ -411,9 +423,11 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         let mailbox = mailboxes
-            .into_iter()
-            .find(|candidate| mailbox_matches_path(candidate, &mailbox_path))
+            .iter()
+            .find(|candidate| mailbox_matches_path(candidate, &mailboxes, &mailbox_path))
+            .cloned()
             .ok_or_else(|| anyhow!("mailbox not found"))?;
+        let selected_mailbox_name = render_mailbox_path(&mailbox, &mailboxes);
         let emails = self
             .store
             .fetch_imap_emails(principal.account_id, mailbox.id)
@@ -425,7 +439,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         let exists = emails.len();
         self.selected = Some(SelectedMailbox {
             mailbox_id: mailbox.id,
-            mailbox_name: mailbox.name.clone(),
+            mailbox_name: selected_mailbox_name.clone(),
             mailbox_role: mailbox.role.clone(),
             emails,
             read_only,
@@ -479,7 +493,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         writer.flush().await?;
         info!(
             command = %command_name,
-            mailbox = %render_mailbox_name(&mailbox),
+            mailbox = %selected_mailbox_name,
             mailbox_role = %mailbox.role,
             exists,
             uid_next = state.uid_next,
@@ -659,14 +673,23 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .ensure_imap_mailboxes(principal.account_id)
             .await?;
         mailboxes
-            .into_iter()
-            .find(|candidate| mailbox_matches_path(candidate, &mailbox_path))
+            .iter()
+            .find(|candidate| mailbox_matches_path(candidate, &mailboxes, mailbox_path))
+            .cloned()
             .ok_or_else(|| anyhow!("mailbox not found"))
     }
 }
 
-fn mailbox_matches_path(mailbox: &JmapMailbox, path: &lpe_domain::MailboxPath) -> bool {
-    mailbox_name_matches(&mailbox.name, &mailbox.role, path.as_str())
+fn mailbox_matches_path(
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    path: &lpe_domain::MailboxPath,
+) -> bool {
+    mailbox_name_matches(
+        &render_mailbox_path(mailbox, mailboxes),
+        &mailbox.role,
+        path.as_str(),
+    )
 }
 
 fn parse_list_pattern(arguments: &str) -> Result<String> {
@@ -681,16 +704,36 @@ fn mailbox_pattern_matches(name: &str, pattern: &str) -> bool {
     MailboxNamePolicy::list_pattern_matches(name, pattern)
 }
 
-fn mailbox_matches_pattern(mailbox: &JmapMailbox, pattern: &str) -> bool {
-    if mailbox_pattern_matches(&render_mailbox_name(mailbox), pattern)
-        || mailbox_pattern_matches(&mailbox.name, pattern)
-    {
+fn mailbox_matches_pattern(mailbox: &JmapMailbox, mailbox_path: &str, pattern: &str) -> bool {
+    if mailbox_pattern_matches(mailbox_path, pattern) {
         return true;
     }
 
     special_mailbox_aliases(&mailbox.role)
         .iter()
         .any(|alias| mailbox_pattern_matches(alias, pattern))
+}
+
+pub(crate) fn render_mailbox_path(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> String {
+    if mailbox.role == "inbox" {
+        return "INBOX".to_string();
+    }
+
+    let mut segments = vec![mailbox.name.clone()];
+    let mut parent_id = mailbox.parent_id;
+    while let Some(id) = parent_id {
+        let Some(parent) = mailboxes.iter().find(|candidate| candidate.id == id) else {
+            break;
+        };
+        if parent.role == "inbox" {
+            segments.push("INBOX".to_string());
+        } else {
+            segments.push(parent.name.clone());
+        }
+        parent_id = parent.parent_id;
+    }
+    segments.reverse();
+    segments.join("/")
 }
 
 fn special_mailbox_aliases(role: &str) -> &'static [&'static str] {

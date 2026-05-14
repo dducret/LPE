@@ -8,7 +8,7 @@ use argon2::{
     Argon2, PasswordHasher,
 };
 use base64::Engine as _;
-use lpe_domain::MailboxNamePolicy;
+use lpe_domain::{MailboxNamePolicy, MailboxPath};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{issue_oauth_access_token, AccountAuthStore, StoreFuture};
 use lpe_storage::{
@@ -402,26 +402,44 @@ impl ImapStore for FakeStore {
             return Box::pin(async move { Ok(created) });
         }
 
-        if mailbox_name_collides(&mailboxes, name, None) {
-            return Box::pin(async move { anyhow::bail!("mailbox already exists") });
-        }
+        let path = match MailboxPath::parse(name) {
+            Ok(path) => path,
+            Err(error) => return Box::pin(async move { anyhow::bail!(error) }),
+        };
+        let mut parent_id = None;
+        let mut created = None;
+        for segment in path.segments() {
+            let name = segment.as_str();
+            if let Some(existing_id) = mailbox_name_match(&mailboxes, name, parent_id) {
+                parent_id = Some(existing_id);
+                continue;
+            }
+            if mailbox_name_collides(&mailboxes, name, parent_id, None) {
+                return Box::pin(async move { anyhow::bail!("mailbox already exists") });
+            }
 
-        let mailbox = mailbox(
-            &Uuid::new_v4().to_string(),
-            "custom",
-            name,
-            mailboxes
-                .iter()
-                .map(|item| item.sort_order)
-                .max()
-                .unwrap_or(0)
-                + 1,
-        );
-        let created = mailbox.clone();
+            let mailbox = mailbox_with_parent(
+                &Uuid::new_v4().to_string(),
+                parent_id,
+                "custom",
+                name,
+                mailboxes
+                    .iter()
+                    .map(|item| item.sort_order)
+                    .max()
+                    .unwrap_or(0)
+                    + 1,
+            );
+            parent_id = Some(mailbox.id);
+            created = Some(mailbox.clone());
+            self.allocate_uid_validity(mailbox.id);
+            self.mailbox_uid_next.lock().unwrap().insert(mailbox.id, 1);
+            mailboxes.push(mailbox);
+        }
+        let Some(created) = created else {
+            return Box::pin(async move { anyhow::bail!("mailbox already exists") });
+        };
         let _ = account_id;
-        self.allocate_uid_validity(mailbox.id);
-        self.mailbox_uid_next.lock().unwrap().insert(mailbox.id, 1);
-        mailboxes.push(mailbox);
         Box::pin(async move { Ok(created) })
     }
 
@@ -433,7 +451,43 @@ impl ImapStore for FakeStore {
         _audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         let mut mailboxes = self.mailboxes.lock().unwrap();
-        if mailbox_name_collides(&mailboxes, name, Some(mailbox_id)) {
+        let path = match MailboxPath::parse(name) {
+            Ok(path) => path,
+            Err(error) => return Box::pin(async move { anyhow::bail!(error) }),
+        };
+        let mut parent_id = None;
+        let final_index = path.segments().len().saturating_sub(1);
+        for segment in path.segments().iter().take(final_index) {
+            let name = segment.as_str();
+            if let Some(existing_id) = mailbox_name_match(&mailboxes, name, parent_id) {
+                parent_id = Some(existing_id);
+                continue;
+            }
+            if mailbox_name_collides(&mailboxes, name, parent_id, None) {
+                return Box::pin(async move { anyhow::bail!("mailbox already exists") });
+            }
+            let created = mailbox_with_parent(
+                &Uuid::new_v4().to_string(),
+                parent_id,
+                "custom",
+                name,
+                mailboxes
+                    .iter()
+                    .map(|item| item.sort_order)
+                    .max()
+                    .unwrap_or(0)
+                    + 1,
+            );
+            parent_id = Some(created.id);
+            self.allocate_uid_validity(created.id);
+            self.mailbox_uid_next.lock().unwrap().insert(created.id, 1);
+            mailboxes.push(created);
+        }
+        if mailbox_parent_creates_cycle(&mailboxes, mailbox_id, parent_id) {
+            return Box::pin(async move { anyhow::bail!("mailbox parentId creates a cycle") });
+        }
+        let name = path.segments().last().unwrap().as_str();
+        if mailbox_name_collides(&mailboxes, name, parent_id, Some(mailbox_id)) {
             return Box::pin(async move { anyhow::bail!("mailbox already exists") });
         }
         let mailbox = mailboxes
@@ -441,7 +495,15 @@ impl ImapStore for FakeStore {
             .find(|mailbox| mailbox.id == mailbox_id)
             .unwrap();
         mailbox.name = name.to_string();
+        mailbox.parent_id = parent_id;
         let renamed = mailbox.clone();
+        let mut emails = self.emails.lock().unwrap();
+        for email in emails
+            .iter_mut()
+            .filter(|email| email.mailbox_id == mailbox_id)
+        {
+            email.mailbox_name = renamed.name.clone();
+        }
         Box::pin(async move { Ok(renamed) })
     }
 
@@ -1280,6 +1342,8 @@ async fn unicode_nested_paths_and_list_wildcards_work_by_segment() {
     let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
     let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
 
+    let create_auto = send_command(&mut stream, "A2A CREATE \"Auto/Child\"\r\n", "A2A").await;
+    assert!(create_auto.contains("A2A OK CREATE completed"));
     let create_projects = send_command(&mut stream, "A3 CREATE \"Projects\"\r\n", "A3").await;
     assert!(create_projects.contains("A3 OK CREATE completed"));
     let create_alpha = send_command(&mut stream, "A4 CREATE \"Projects/Alpha\"\r\n", "A4").await;
@@ -1327,6 +1391,87 @@ async fn unicode_nested_paths_and_list_wildcards_work_by_segment() {
     let suffix = send_command(&mut stream, "A16 LIST \"\" \"*fé\"\r\n", "A16").await;
     assert_eq!(suffix.matches("* LIST ").count(), 1);
     assert!(suffix.contains("\"Café\""));
+
+    let status = send_command(
+        &mut stream,
+        "A17 STATUS \"案件/顧客/Q1\" (MESSAGES UIDNEXT UIDVALIDITY UNSEEN HIGHESTMODSEQ)\r\n",
+        "A17",
+    )
+    .await;
+    assert!(status.contains("* STATUS \"案件/顧客/Q1\""));
+
+    let select = send_command(&mut stream, "A18 SELECT \"案件/顧客/Q1\"\r\n", "A18").await;
+    assert!(select.contains("A18 OK [READ-WRITE] SELECT completed"));
+
+    let delete = send_command(&mut stream, "A19 DELETE \"案件/顧客/Q1\"\r\n", "A19").await;
+    assert!(delete.contains("A19 OK DELETE completed"));
+
+    let mailboxes = store.mailboxes.lock().unwrap();
+    assert!(mailboxes.iter().all(|mailbox| !mailbox.name.contains('/')));
+    let auto_parent = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name == "Auto" && mailbox.parent_id.is_none())
+        .expect("IMAP CREATE should create missing intermediate parent");
+    let auto_child = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name == "Child")
+        .expect("IMAP CREATE should create final child segment");
+    assert_eq!(auto_child.parent_id, Some(auto_parent.id));
+    let projects = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name == "Projects" && mailbox.parent_id.is_none())
+        .expect("Projects parent should exist");
+    let alpha = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name == "Alpha")
+        .expect("Alpha child should exist");
+    assert_eq!(alpha.parent_id, Some(projects.id));
+    drop(mailboxes);
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn imap_nested_rename_moves_parent_and_final_segment() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let create = send_command(&mut stream, "A3 CREATE \"Projects/Alpha\"\r\n", "A3").await;
+    assert!(create.contains("A3 OK CREATE completed"));
+    let rename = send_command(
+        &mut stream,
+        "A4 RENAME \"Projects/Alpha\" \"案件/顧客\"\r\n",
+        "A4",
+    )
+    .await;
+    assert!(rename.contains("A4 OK RENAME completed"), "{rename}");
+
+    let old_list = send_command(&mut stream, "A5 LIST \"\" \"Projects/%\"\r\n", "A5").await;
+    assert_eq!(old_list.matches("* LIST ").count(), 0);
+    let new_list = send_command(&mut stream, "A6 LIST \"\" \"案件/%\"\r\n", "A6").await;
+    assert_eq!(new_list.matches("* LIST ").count(), 1);
+    assert!(new_list.contains("\"案件/顧客\""));
+
+    let mailboxes = store.mailboxes.lock().unwrap();
+    assert!(mailboxes.iter().all(|mailbox| !mailbox.name.contains('/')));
+    let cases = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name == "案件" && mailbox.parent_id.is_none())
+        .expect("rename should create missing target parent");
+    let customer = mailboxes
+        .iter()
+        .find(|mailbox| mailbox.name == "顧客")
+        .expect("renamed mailbox should keep only final segment");
+    assert_eq!(customer.parent_id, Some(cases.id));
+    drop(mailboxes);
 
     task.abort();
 }
@@ -3558,9 +3703,19 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
 }
 
 fn mailbox(id: &str, role: &str, name: &str, sort_order: i32) -> JmapMailbox {
+    mailbox_with_parent(id, None, role, name, sort_order)
+}
+
+fn mailbox_with_parent(
+    id: &str,
+    parent_id: Option<Uuid>,
+    role: &str,
+    name: &str,
+    sort_order: i32,
+) -> JmapMailbox {
     JmapMailbox {
         id: Uuid::parse_str(id).unwrap(),
-        parent_id: None,
+        parent_id,
         role: role.to_string(),
         name: name.to_string(),
         sort_order,
@@ -3583,13 +3738,46 @@ fn system_mailbox_for_name(name: &str) -> Option<(&'static str, &'static str, i3
 fn mailbox_name_collides(
     mailboxes: &[JmapMailbox],
     requested_name: &str,
+    parent_id: Option<Uuid>,
     except_mailbox_id: Option<Uuid>,
 ) -> bool {
     let requested_key = MailboxNamePolicy::canonical_key(requested_name);
     mailboxes.iter().any(|mailbox| {
-        except_mailbox_id.is_none_or(|except| except != mailbox.id)
+        mailbox.parent_id == parent_id
+            && except_mailbox_id.is_none_or(|except| except != mailbox.id)
             && requested_key.collides_with(&MailboxNamePolicy::canonical_key(&mailbox.name))
     })
+}
+
+fn mailbox_name_match(
+    mailboxes: &[JmapMailbox],
+    requested_name: &str,
+    parent_id: Option<Uuid>,
+) -> Option<Uuid> {
+    let requested_key = MailboxNamePolicy::canonical_key(requested_name);
+    mailboxes.iter().find_map(|mailbox| {
+        let existing_key = MailboxNamePolicy::canonical_key(&mailbox.name);
+        (mailbox.parent_id == parent_id && requested_key.as_str() == existing_key.as_str())
+            .then_some(mailbox.id)
+    })
+}
+
+fn mailbox_parent_creates_cycle(
+    mailboxes: &[JmapMailbox],
+    mailbox_id: Uuid,
+    parent_id: Option<Uuid>,
+) -> bool {
+    let mut current = parent_id;
+    while let Some(candidate_id) = current {
+        if candidate_id == mailbox_id {
+            return true;
+        }
+        current = mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == candidate_id)
+            .and_then(|mailbox| mailbox.parent_id);
+    }
+    false
 }
 
 fn email(

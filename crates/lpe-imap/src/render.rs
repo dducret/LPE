@@ -3,7 +3,7 @@ use lpe_domain::{MailboxNamePolicy, MailboxPath};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use lpe_storage::{ImapEmail, ImapMailboxState, ImapMimePart, JmapEmailAddress, JmapMailbox};
+use lpe_storage::{ImapEmail, ImapMailboxState, ImapMimePart, JmapEmailAddress};
 
 use crate::{parse::tokenize, MessageRefKind, SelectedMailbox};
 
@@ -67,7 +67,8 @@ pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
     format!("({})", flags.join(" "))
 }
 
-pub(crate) fn render_mailbox_name(mailbox: &JmapMailbox) -> String {
+#[cfg(test)]
+pub(crate) fn render_mailbox_name(mailbox: &lpe_storage::JmapMailbox) -> String {
     if mailbox.role == "inbox" {
         "INBOX".to_string()
     } else {
@@ -75,8 +76,8 @@ pub(crate) fn render_mailbox_name(mailbox: &JmapMailbox) -> String {
     }
 }
 
-pub(crate) fn render_mailbox_response_name(mailbox: &JmapMailbox, utf8_enabled: bool) -> String {
-    render_imap_mailbox_string(&render_mailbox_name(mailbox), utf8_enabled)
+pub(crate) fn render_imap_mailbox_response_path(value: &str, utf8_enabled: bool) -> String {
+    render_imap_mailbox_string(value, utf8_enabled)
 }
 
 pub(crate) fn render_imap_mailbox_string(value: &str, utf8_enabled: bool) -> String {
@@ -389,7 +390,7 @@ pub(crate) fn render_flags(email: &ImapEmail, mailbox_name: &str) -> String {
 }
 
 pub(crate) fn render_status_response(
-    mailbox: &JmapMailbox,
+    mailbox_name: &str,
     emails: &[ImapEmail],
     requested: &[String],
     state: &ImapMailboxState,
@@ -411,7 +412,7 @@ pub(crate) fn render_status_response(
         .join(" ");
     format!(
         "* STATUS {} ({})\r\n",
-        render_mailbox_response_name(mailbox, utf8_enabled),
+        render_imap_mailbox_response_path(mailbox_name, utf8_enabled),
         items
     )
 }

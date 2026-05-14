@@ -387,7 +387,7 @@ Current regression examples:
 | Area | Tested examples |
 | --- | --- |
 | Shared mailbox-name policy | `Café`, `Cafe\u0301`, `案件`, `📁 Projects`, `مشاريع`, `משימות`, control characters, zero-width invisible characters, U+202E RIGHT-TO-LEFT OVERRIDE, mixed Latin/Cyrillic `pаypаl`, and whole-script confusable skeleton collision for Cyrillic `раураӏ` versus Latin `paypal`. |
-| IMAP workflow | Transcript-style `ENABLE UTF8=ACCEPT`, `CREATE`, `LIST`, `SELECT`, `RENAME`, and `DELETE` coverage for `📁 Projects`, `案件`, `مشاريع`, and `Café`; wildcard hierarchy matching for Unicode paths; canonical-equivalent duplicate rejection for `Cafe\u0301` versus `Café`; confusable sibling rejection for Cyrillic `раураӏ` versus Latin `paypal`. |
+| IMAP workflow | Transcript-style `ENABLE UTF8=ACCEPT`, `CREATE`, `LIST`, `STATUS`, `SELECT`, `RENAME`, and `DELETE` coverage for `📁 Projects`, `案件`, `مشاريع`, `Café`, and nested paths such as `Projects/Alpha` and `案件/顧客`; wildcard hierarchy matching for Unicode paths; canonical parent creation for missing intermediate segments; canonical-equivalent duplicate rejection for `Cafe\u0301` versus `Café`; confusable sibling rejection for Cyrillic `раураӏ` versus Latin `paypal`. |
 | JMAP workflow | `Mailbox/set` create/update normalization for `Cafe\u0301` to `Café`, accepted Unicode names including `案件`, `📁 Projects`, and `مشاريع`, deterministic rejection of controls, `/`, invisible and bidi controls, mixed-script spoof strings, reserved names, canonical-equivalent sibling duplicates, and confusable sibling names; `Mailbox/get` returns stored NFC names. |
 
 ## Implementation Link
@@ -396,7 +396,10 @@ The shared mailbox-name primitives live in
 `crates/lpe-domain/src/mailbox_name.rs`. IMAP path handling, JMAP mailbox
 create/update parsing, storage duplicate checks, and Sieve `fileinto` mailbox
 creation must use that module instead of protocol-local display-name
-normalization.
+normalization. IMAP `CREATE` and `RENAME` store nested paths as canonical
+mailbox hierarchy rows with `parent_mailbox_id`; stored `display_name` remains
+one validated segment, and IMAP renders full paths by joining the parent chain
+with `/`.
 
 ## Non-Goals
 
