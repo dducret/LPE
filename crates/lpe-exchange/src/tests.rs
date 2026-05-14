@@ -10469,6 +10469,63 @@ async fn mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_b
 }
 
 #[tokio::test]
+async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(inbox_id, "inbox", "Inbox");
+    inbox.total_emails = 3;
+    inbox.unread_emails = 1;
+    let change_number = mapi_mailstore::canonical_folder_change_number(&inbox);
+    let change_key = mapi_mailstore::change_key_for_change_number(change_number);
+    let predecessor_change_list = mapi_mailstore::predecessor_change_list(change_number);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(1));
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x02, 0x00, 0x00, 0x00, // hierarchy sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert!(contains_bytes(&response_rops, &change_key));
+    assert!(contains_bytes(&response_rops, &predecessor_change_list));
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest_without_bcc() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "43434343-4343-4343-4343-434343434343";
@@ -11755,6 +11812,92 @@ async fn mapi_over_http_sync_upload_state_round_trips_as_transfer_state() {
     assert!(contains_bytes(&response_rops, &[0x7E, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x82, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, state));
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_upload_state_accumulates_multiple_streams() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let first_state = b"client-idset-given";
+    let second_state = b"client-cnset-seen";
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x4017_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
+    ]);
+    rops.extend_from_slice(&(first_state.len() as u32).to_le_bytes());
+    rops.extend_from_slice(first_state);
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x76, 0x00, 0x02, // RopSynchronizationUploadStateStreamContinue
+    ]);
+    rops.extend_from_slice(&(second_state.len() as u32).to_le_bytes());
+    rops.extend_from_slice(second_state);
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, first_state));
+    assert!(contains_bytes(&response_rops, second_state));
+    let first_offset = response_rops
+        .windows(first_state.len())
+        .position(|window| window == first_state)
+        .unwrap();
+    let second_offset = response_rops
+        .windows(second_state.len())
+        .position(|window| window == second_state)
+        .unwrap();
+    assert!(first_offset < second_offset);
 }
 
 #[tokio::test]

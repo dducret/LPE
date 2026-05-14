@@ -253,6 +253,16 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_CHANGE_KEY,
+            &change_key_for_change_number(change_number),
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list(change_number),
+        );
         write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
     }
 

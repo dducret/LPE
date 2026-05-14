@@ -2351,9 +2351,7 @@ where
                     transfer_position,
                     ..
                 }) => {
-                    if !state_upload_buffer.is_empty() {
-                        *state = std::mem::take(state_upload_buffer);
-                    }
+                    commit_uploaded_sync_state(state, state_upload_buffer);
                     *transfer_buffer = final_incremental_sync_stream(*sync_type);
                     *transfer_position = 0;
                     responses.extend_from_slice(&rop_simple_success_response(&request));
@@ -2363,9 +2361,7 @@ where
                     state_upload_buffer,
                     ..
                 }) => {
-                    if !state_upload_buffer.is_empty() {
-                        *state = std::mem::take(state_upload_buffer);
-                    }
+                    commit_uploaded_sync_state(state, state_upload_buffer);
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 _ => responses.extend_from_slice(&rop_error_response(

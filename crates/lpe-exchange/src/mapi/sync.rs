@@ -79,6 +79,20 @@ pub(in crate::mapi) fn rop_synchronization_get_transfer_state_response(
     response
 }
 
+pub(in crate::mapi) fn commit_uploaded_sync_state(
+    state: &mut Vec<u8>,
+    state_upload_buffer: &mut Vec<u8>,
+) {
+    if state_upload_buffer.is_empty() {
+        return;
+    }
+    if state.is_empty() {
+        *state = std::mem::take(state_upload_buffer);
+    } else {
+        state.extend_from_slice(&std::mem::take(state_upload_buffer));
+    }
+}
+
 pub(in crate::mapi) fn rop_synchronization_import_message_change_response(
     request: &RopRequest,
     message_id: u64,
