@@ -155,6 +155,25 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             );
         }
 
+        let delete_submitted = collect(
+            &mut failures,
+            "submission SQL path for delete replay",
+            exercise_submission_path(&storage, &fixture).await,
+        );
+        if let Some(delete_submitted) = delete_submitted.as_ref() {
+            collect(
+                &mut failures,
+                "MAPI delete cross-protocol visibility",
+                exercise_mapi_delete_cross_protocol_path(
+                    &storage,
+                    pool,
+                    &fixture,
+                    delete_submitted,
+                )
+                .await,
+            );
+        }
+
         collect(
             &mut failures,
             "admin dashboard SQL path",
@@ -1598,6 +1617,157 @@ async fn exercise_mailbox_move_path(
             "mailbox-scoped JMAP Email/query must return the message in mailbox {mailbox_id}"
         );
     }
+
+    Ok(())
+}
+
+async fn exercise_mapi_delete_cross_protocol_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+    submitted: &SubmittedMessage,
+) -> Result<()> {
+    let before_cursor = storage
+        .fetch_jmap_mail_change_cursor(fixture.account_id)
+        .await?
+        .unwrap_or(0);
+    let source = sqlx::query(
+        r#"
+        SELECT id, imap_uid
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.sent_mailbox_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load source membership before scoped delete")?;
+    let source_membership_id: Uuid = source.try_get("id")?;
+    let source_uid: i64 = source.try_get("imap_uid")?;
+
+    storage
+        .delete_jmap_email_from_mailbox(
+            fixture.account_id,
+            submitted.sent_mailbox_id,
+            submitted.message_id,
+            audit(
+                "alice@example.test",
+                "mapi-delete-message",
+                "runtime drift delete",
+            ),
+        )
+        .await
+        .context("delete_jmap_email_from_mailbox")?;
+
+    let jmap = storage
+        .fetch_jmap_emails(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch_jmap_emails after scoped delete")?;
+    anyhow::ensure!(
+        jmap.is_empty(),
+        "JMAP Email/get must not return a message after its final visible membership is deleted"
+    );
+
+    let imap = storage
+        .fetch_imap_emails(fixture.account_id, submitted.sent_mailbox_id)
+        .await
+        .context("fetch_imap_emails after scoped delete")?;
+    anyhow::ensure!(
+        imap.iter().all(|email| email.id != submitted.message_id),
+        "IMAP FETCH source mailbox must not list a MAPI-deleted message"
+    );
+
+    let deleted_membership = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT visibility
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(source_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load membership visibility after scoped delete")?;
+    anyhow::ensure!(
+        deleted_membership == "expunged",
+        "MAPI hard delete must expunge the addressed canonical membership"
+    );
+
+    let tombstone = sqlx::query(
+        r#"
+        SELECT imap_uid, reason
+        FROM tombstones
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND mailbox_message_id = $4
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.sent_mailbox_id)
+    .bind(source_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load scoped delete tombstone")?;
+    anyhow::ensure!(
+        tombstone.try_get::<i64, _>("imap_uid")? == source_uid
+            && tombstone.try_get::<String, _>("reason")? == "delete",
+        "MAPI delete tombstone must preserve source UID and delete reason"
+    );
+
+    let email_changes = storage
+        .replay_jmap_mail_object_changes(fixture.account_id, "Email", before_cursor, 20)
+        .await
+        .context("replay JMAP Email/changes after scoped delete")?
+        .context("JMAP Email/changes replay was not retained after scoped delete")?;
+    anyhow::ensure!(
+        email_changes.iter().any(|change| {
+            change.object_id == submitted.message_id && change.change_kind == "destroyed"
+        }),
+        "JMAP Email/changes must export the MAPI delete as Email destruction"
+    );
+
+    let mapi_delete_replay_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM tombstones tombstone
+        JOIN mail_change_log log
+          ON log.tenant_id = tombstone.tenant_id
+         AND log.cursor = tombstone.change_cursor
+         AND log.object_kind = tombstone.object_kind
+         AND log.object_id = tombstone.object_id
+        WHERE tombstone.tenant_id = $1
+          AND tombstone.account_id = $2
+          AND tombstone.mailbox_id = $3
+          AND tombstone.message_id = $4
+          AND tombstone.change_cursor > $5
+          AND log.change_kind = 'destroyed'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.sent_mailbox_id)
+    .bind(submitted.message_id)
+    .bind(before_cursor)
+    .fetch_one(pool)
+    .await
+    .context("query MAPI tombstone replay rows after JMAP-visible delete")?;
+    anyhow::ensure!(
+        mapi_delete_replay_rows == 1,
+        "MAPI content sync must be able to export the JMAP-visible delete from canonical tombstones"
+    );
 
     Ok(())
 }

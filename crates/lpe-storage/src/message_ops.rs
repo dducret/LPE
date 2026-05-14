@@ -245,6 +245,36 @@ impl Storage {
         target_mailbox_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
+        self.move_jmap_email_membership(account_id, None, message_id, target_mailbox_id, audit)
+            .await
+    }
+
+    pub async fn move_jmap_email_from_mailbox(
+        &self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
+        self.move_jmap_email_membership(
+            account_id,
+            Some(source_mailbox_id),
+            message_id,
+            target_mailbox_id,
+            audit,
+        )
+        .await
+    }
+
+    async fn move_jmap_email_membership(
+        &self,
+        account_id: Uuid,
+        source_mailbox_id: Option<Uuid>,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
         let modseq = self
@@ -257,6 +287,7 @@ impl Storage {
             WHERE tenant_id = $1
               AND account_id = $2
               AND message_id = $3
+              AND ($4::uuid IS NULL OR mailbox_id = $4)
               AND visibility = 'visible'
             ORDER BY updated_at DESC
             LIMIT 1
@@ -265,6 +296,7 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
+        .bind(source_mailbox_id)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("message not found"))?;

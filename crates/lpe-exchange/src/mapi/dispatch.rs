@@ -1128,8 +1128,9 @@ where
                     };
                     let result = if request.rop_id == 0x91 || email.mailbox_role == "trash" {
                         store
-                            .delete_jmap_email(
+                            .delete_jmap_email_from_mailbox(
                                 principal.account_id,
+                                email.mailbox_id,
                                 email.id,
                                 AuditEntryInput {
                                     actor: principal.email.clone(),
@@ -1143,8 +1144,9 @@ where
                         mailboxes.iter().find(|mailbox| mailbox.role == "trash")
                     {
                         store
-                            .move_jmap_email(
+                            .move_jmap_email_from_mailbox(
                                 principal.account_id,
+                                email.mailbox_id,
                                 email.id,
                                 trash_mailbox.id,
                                 AuditEntryInput {
@@ -1157,8 +1159,9 @@ where
                             .map(|_| ())
                     } else {
                         store
-                            .delete_jmap_email(
+                            .delete_jmap_email_from_mailbox(
                                 principal.account_id,
+                                email.mailbox_id,
                                 email.id,
                                 AuditEntryInput {
                                     actor: principal.email.clone(),
@@ -2554,25 +2557,60 @@ where
                     continue;
                 };
                 let mut partial_completion = false;
+                let hard_delete = request.import_delete_hard_delete();
                 for message_id in request.import_delete_message_ids() {
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                     else {
                         partial_completion = true;
                         continue;
                     };
-                    if store
-                        .delete_jmap_email(
-                            principal.account_id,
-                            email.id,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-sync-import-delete".to_string(),
-                                subject: format!("message:{}", email.id),
-                            },
-                        )
-                        .await
-                        .is_err()
+                    let result = if hard_delete || email.mailbox_role == "trash" {
+                        store
+                            .delete_jmap_email_from_mailbox(
+                                principal.account_id,
+                                email.mailbox_id,
+                                email.id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-sync-import-hard-delete".to_string(),
+                                    subject: format!("message:{}", email.id),
+                                },
+                            )
+                            .await
+                            .map(|_| ())
+                    } else if let Some(trash_mailbox) =
+                        mailboxes.iter().find(|mailbox| mailbox.role == "trash")
                     {
+                        store
+                            .move_jmap_email_from_mailbox(
+                                principal.account_id,
+                                email.mailbox_id,
+                                email.id,
+                                trash_mailbox.id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-sync-import-soft-delete".to_string(),
+                                    subject: format!("message:{}->{}", email.id, trash_mailbox.id),
+                                },
+                            )
+                            .await
+                            .map(|_| ())
+                    } else {
+                        store
+                            .delete_jmap_email_from_mailbox(
+                                principal.account_id,
+                                email.mailbox_id,
+                                email.id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-sync-import-delete-without-trash".to_string(),
+                                    subject: format!("message:{}", email.id),
+                                },
+                            )
+                            .await
+                            .map(|_| ())
+                    };
+                    if result.is_err() {
                         partial_completion = true;
                     }
                 }
@@ -2612,8 +2650,9 @@ where
                     continue;
                 };
                 match store
-                    .move_jmap_email(
+                    .move_jmap_email_from_mailbox(
                         principal.account_id,
+                        email.mailbox_id,
                         email.id,
                         target_mailbox.id,
                         AuditEntryInput {

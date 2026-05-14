@@ -1574,6 +1574,10 @@ impl RopRequest {
             .collect()
     }
 
+    pub(in crate::mapi) fn import_delete_hard_delete(&self) -> bool {
+        self.payload.first().is_some_and(|flags| flags & 0x02 != 0)
+    }
+
     pub(in crate::mapi) fn fast_transfer_message_ids(&self) -> Vec<u64> {
         let count = self
             .payload

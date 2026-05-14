@@ -2472,6 +2472,28 @@ impl Storage {
         message_id: Uuid,
         audit: AuditEntryInput,
     ) -> Result<()> {
+        self.delete_jmap_email_memberships(account_id, None, message_id, audit)
+            .await
+    }
+
+    pub async fn delete_jmap_email_from_mailbox(
+        &self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.delete_jmap_email_memberships(account_id, Some(mailbox_id), message_id, audit)
+            .await
+    }
+
+    async fn delete_jmap_email_memberships(
+        &self,
+        account_id: Uuid,
+        mailbox_id_filter: Option<Uuid>,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
@@ -2481,12 +2503,14 @@ impl Storage {
             WHERE tenant_id = $1
               AND account_id = $2
               AND message_id = $3
+              AND ($4::uuid IS NULL OR mailbox_id = $4)
               AND visibility = 'visible'
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
+        .bind(mailbox_id_filter)
         .fetch_all(&mut *tx)
         .await?;
 
@@ -2563,6 +2587,53 @@ impl Storage {
         .bind(modseq)
         .execute(&mut *tx)
         .await?;
+
+        sqlx::query(
+            r#"
+            DELETE FROM mail_search_documents
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_message_id = ANY($3)
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(&membership_ids)
+        .execute(&mut *tx)
+        .await?;
+
+        let mut removed_by_mailbox: HashMap<Uuid, (i32, i32)> = HashMap::new();
+        for row in &rows {
+            let mailbox_id: Uuid = row.try_get("mailbox_id")?;
+            let unread_removed = if row.try_get::<bool, _>("is_seen")? {
+                0
+            } else {
+                1
+            };
+            let entry = removed_by_mailbox.entry(mailbox_id).or_insert((0, 0));
+            entry.0 += 1;
+            entry.1 += unread_removed;
+        }
+        for (mailbox_id, (removed, unread_removed)) in removed_by_mailbox {
+            sqlx::query(
+                r#"
+                UPDATE mailboxes
+                SET total_messages = GREATEST(0, total_messages - $4),
+                    unread_messages = GREATEST(0, unread_messages - $5),
+                    modseq = GREATEST(modseq + 1, $6),
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(removed)
+            .bind(unread_removed)
+            .bind(modseq)
+            .execute(&mut *tx)
+            .await?;
+        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;

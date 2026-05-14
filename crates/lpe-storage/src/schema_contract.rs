@@ -925,7 +925,7 @@ fn imap_uid_state_is_mailbox_scoped_without_global_sequence() {
 
 #[test]
 fn mailbox_moves_create_target_membership_and_tombstone_source_uid() {
-    let move_body = function_body(MESSAGE_OPS_STORAGE, "pub async fn move_jmap_email");
+    let move_body = function_body(MESSAGE_OPS_STORAGE, "async fn move_jmap_email_membership");
     assert!(
         move_body.contains("INSERT INTO mailbox_messages")
             && move_body.contains("UPDATE mailboxes\n            SET uid_next = uid_next + 1")

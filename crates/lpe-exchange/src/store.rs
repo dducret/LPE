@@ -437,6 +437,15 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
 
+    fn move_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
     fn copy_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
@@ -457,6 +466,14 @@ pub trait ExchangeStore: AccountAuthStore {
     fn delete_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
+    fn delete_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
         message_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
@@ -1494,6 +1511,26 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn move_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.move_jmap_email_from_mailbox(
+                account_id,
+                source_mailbox_id,
+                message_id,
+                target_mailbox_id,
+                audit,
+            )
+            .await
+        })
+    }
+
     fn copy_jmap_email<'a>(
         &'a self,
         account_id: Uuid,
@@ -1528,6 +1565,19 @@ impl ExchangeStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move { self.delete_jmap_email(account_id, message_id, audit).await })
+    }
+
+    fn delete_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_jmap_email_from_mailbox(account_id, mailbox_id, message_id, audit)
+                .await
+        })
     }
 
     fn save_draft_message<'a>(

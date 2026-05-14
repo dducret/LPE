@@ -1508,6 +1508,17 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(moved) })
     }
 
+    fn move_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        _source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        self.move_jmap_email(account_id, message_id, target_mailbox_id, audit)
+    }
+
     fn copy_jmap_email<'a>(
         &'a self,
         _account_id: Uuid,
@@ -1581,6 +1592,16 @@ impl ExchangeStore for FakeStore {
             .unwrap()
             .retain(|email| email.id != message_id);
         Box::pin(async move { Ok(()) })
+    }
+
+    fn delete_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        _mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        self.delete_jmap_email(account_id, message_id, audit)
     }
 
     fn save_draft_message<'a>(
@@ -11124,7 +11145,7 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
     rops.push(1);
     rops.extend_from_slice(&[
         0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
-        0x00,
+        0x02,
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&test_mapi_message_id(delete_message_id).to_le_bytes());
@@ -11145,6 +11166,72 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
     assert_eq!(
         deleted_emails.lock().unwrap().as_slice(),
         &[Uuid::parse_str(delete_message_id).unwrap()]
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
+    let message_id = "45454545-4545-4545-4545-454545454545";
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            &inbox_id.to_string(),
+            "inbox",
+            "Soft delete import",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
+        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
+        0x00,
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 0]));
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[(Uuid::parse_str(message_id).unwrap(), trash_id)]
     );
 }
 
