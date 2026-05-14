@@ -25,11 +25,15 @@ struct FakeStore {
 }
 
 impl FakeStore {
+    fn tenant_id() -> Uuid {
+        Uuid::parse_str("11111111-aaaa-aaaa-aaaa-111111111111").unwrap()
+    }
+
     fn new() -> Self {
         Self {
             session: None,
             login: AccountLogin {
-                tenant_id: "tenant-a".to_string(),
+                tenant_id: Self::tenant_id(),
                 account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
                 email: "alice@example.test".to_string(),
                 password_hash: Argon2::default()
@@ -84,7 +88,7 @@ impl AccountAuthStore for FakeStore {
 
     fn append_audit_event<'a>(
         &'a self,
-        _tenant_id: &'a str,
+        _tenant_id: &'a Uuid,
         _entry: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move { Ok(()) })

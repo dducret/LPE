@@ -40,6 +40,10 @@ struct FakeStore {
 }
 
 impl FakeStore {
+    fn tenant_id() -> Uuid {
+        Uuid::parse_str("11111111-aaaa-aaaa-aaaa-111111111111").unwrap()
+    }
+
     fn full_rights() -> CollaborationRights {
         CollaborationRights {
             may_read: true,
@@ -60,7 +64,7 @@ impl FakeStore {
 
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Self::tenant_id(),
             account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -282,7 +286,7 @@ impl AccountAuthStore for FakeStore {
 
     fn append_audit_event<'a>(
         &'a self,
-        _tenant_id: &'a str,
+        _tenant_id: &'a Uuid,
         _entry: lpe_storage::AuditEntryInput,
     ) -> lpe_mail_auth::StoreFuture<'a, ()> {
         Box::pin(async move { Ok(()) })

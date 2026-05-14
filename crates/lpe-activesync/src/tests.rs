@@ -15,8 +15,8 @@ use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState,
     ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
     JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapMailbox, MailboxAccountAccess,
-    SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
-    UpsertClientContactInput, UpsertClientEventInput,
+    JmapEmailMailboxState, SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -49,9 +49,13 @@ struct FakeStore {
 }
 
 impl FakeStore {
+    fn tenant_id() -> Uuid {
+        Uuid::parse_str("11111111-aaaa-aaaa-aaaa-111111111111").unwrap()
+    }
+
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Self::tenant_id(),
             account_id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
@@ -68,7 +72,7 @@ impl FakeStore {
 
     fn login() -> AccountLogin {
         AccountLogin {
-            tenant_id: "tenant-a".to_string(),
+            tenant_id: Self::tenant_id(),
             account_id: Self::account().account_id,
             email: Self::account().email,
             display_name: Self::account().display_name,
@@ -120,6 +124,15 @@ impl FakeStore {
         JmapEmail {
             id: Uuid::parse_str(id).unwrap(),
             thread_id: Uuid::new_v4(),
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: role.to_string(),
+                name: role.to_string(),
+                unread: true,
+                flagged: false,
+                draft: role == "drafts",
+            }],
             mailbox_id,
             mailbox_role: role.to_string(),
             mailbox_name: role.to_string(),
@@ -154,6 +167,7 @@ impl FakeStore {
     fn mailbox_access() -> MailboxAccountAccess {
         let account = Self::account();
         MailboxAccountAccess {
+            tenant_id: account.tenant_id,
             account_id: account.account_id,
             email: account.email,
             display_name: account.display_name,
@@ -167,6 +181,7 @@ impl FakeStore {
 
     fn shared_mailbox_access(may_send_as: bool, may_send_on_behalf: bool) -> MailboxAccountAccess {
         MailboxAccountAccess {
+            tenant_id: Self::tenant_id(),
             account_id: Uuid::parse_str("bbbbbbbb-1111-2222-3333-444444444444").unwrap(),
             email: "shared@example.test".to_string(),
             display_name: "Shared Mailbox".to_string(),
@@ -214,7 +229,7 @@ impl AccountAuthStore for FakeStore {
 
     fn append_audit_event<'a>(
         &'a self,
-        _tenant_id: &'a str,
+        _tenant_id: &'a Uuid,
         _entry: AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move { Ok(()) })
