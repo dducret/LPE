@@ -41,7 +41,9 @@ use crate::{
 
 mod dispatch;
 pub(crate) mod identity;
+mod notifications;
 mod nspi;
+pub(crate) mod permissions;
 mod properties;
 mod rop;
 mod session;

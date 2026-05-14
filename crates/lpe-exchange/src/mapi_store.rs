@@ -5,6 +5,9 @@ use lpe_storage::{
 };
 use uuid::Uuid;
 
+use crate::mapi::permissions::{
+    access_from_rights, reserved_permission_rows, MapiFolderAccess, MapiFolderPermission,
+};
 use crate::store::ExchangeStore;
 use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest};
 
@@ -15,6 +18,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     messages: Vec<MapiMessage>,
     contacts: Vec<MapiContact>,
     events: Vec<MapiEvent>,
+    folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
 }
 
@@ -96,6 +100,7 @@ impl MapiMailStoreSnapshot {
         calendar_collections: Vec<CollaborationCollection>,
         contacts: Vec<AccessibleContact>,
         events: Vec<AccessibleEvent>,
+        folder_permissions: Vec<MapiFolderPermission>,
     ) -> Self {
         let folders = mailboxes
             .into_iter()
@@ -207,6 +212,7 @@ impl MapiMailStoreSnapshot {
             messages,
             contacts,
             events,
+            folder_permissions,
             content_windows: Vec::new(),
         }
     }
@@ -328,6 +334,33 @@ impl MapiMailStoreSnapshot {
             .find(|event| event.folder_id == folder_id && event.id == item_id)
     }
 
+    pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
+        let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) else {
+            return Vec::new();
+        };
+        let mut permissions = reserved_permission_rows(folder.canonical_id);
+        permissions.extend(
+            self.folder_permissions
+                .iter()
+                .filter(|permission| permission.mailbox_id == folder.canonical_id)
+                .cloned(),
+        );
+        permissions
+    }
+
+    pub(crate) fn folder_access_for_principal(
+        &self,
+        folder_id: u64,
+        principal_account_id: Uuid,
+    ) -> Option<MapiFolderAccess> {
+        let folder = self.folders.iter().find(|folder| folder.id == folder_id)?;
+        let permission = self.folder_permissions.iter().find(|permission| {
+            permission.mailbox_id == folder.canonical_id
+                && permission.member_account_id == Some(principal_account_id)
+        })?;
+        Some(access_from_rights(permission.rights))
+    }
+
     #[cfg(test)]
     pub(crate) fn folders(&self) -> &[MapiFolder] {
         &self.folders
@@ -395,6 +428,13 @@ impl<T: ExchangeStore> MapiStore for T {
                     identity.object_id,
                 );
             }
+            let mailbox_ids = mailboxes
+                .iter()
+                .map(|mailbox| mailbox.id)
+                .collect::<Vec<_>>();
+            let folder_permissions = self
+                .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
+                .await?;
             Ok(MapiMailStoreSnapshot::new(
                 mailboxes,
                 emails,
@@ -403,6 +443,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 calendar_collections,
                 contacts,
                 events,
+                folder_permissions,
             ))
         })
     }
@@ -596,6 +637,7 @@ mod tests {
             vec![mailbox],
             vec![email],
             vec![(message_id, vec![attachment])],
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),

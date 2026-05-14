@@ -1,3 +1,5 @@
+use super::notifications::*;
+use super::permissions::*;
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
@@ -334,6 +336,18 @@ where
                         .and_then(MapiObject::folder_id)
                         .unwrap_or(INBOX_FOLDER_ID)
                 });
+                if !snapshot
+                    .folder_access_for_principal(folder_id, principal.account_id)
+                    .map(|access| access.may_write)
+                    .unwrap_or(true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x06,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
                 if snapshot.collaboration_folder_for_id(folder_id).is_none()
                     && folder_row_for_id(folder_id, mailboxes).is_none()
                     && !matches!(
@@ -767,6 +781,18 @@ where
                 let unread = unread_from_read_flags(request.read_flags());
                 let changed = unread.is_some_and(|unread| unread != email.unread);
                 if let Some(unread) = unread {
+                    if !snapshot
+                        .folder_access_for_principal(*folder_id, principal.account_id)
+                        .map(|access| access.may_write)
+                        .unwrap_or(true)
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x11,
+                            request.response_handle_index(),
+                            0x8007_0005,
+                        ));
+                        continue;
+                    }
                     if store
                         .update_jmap_email_flags(
                             principal.account_id,
@@ -790,12 +816,19 @@ where
                         continue;
                     }
                 }
+                if changed {
+                    session.record_notification(MapiNotificationEvent {
+                        folder_id: *folder_id,
+                        kind: MapiNotificationKind::Content,
+                    });
+                }
                 responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
             }
             0x12 => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::HierarchyTable { columns, .. })
                 | Some(MapiObject::ContentsTable { columns, .. })
-                | Some(MapiObject::AttachmentTable { columns, .. }) => {
+                | Some(MapiObject::AttachmentTable { columns, .. })
+                | Some(MapiObject::PermissionTable { columns, .. }) => {
                     *columns = request.property_tags();
                     responses.extend_from_slice(&rop_set_columns_response(&request));
                 }
@@ -1024,6 +1057,10 @@ where
                         responses.extend_from_slice(&rop_create_folder_response(
                             &request, folder_id, false,
                         ));
+                        session.record_notification(MapiNotificationEvent {
+                            folder_id: parent_folder_id,
+                            kind: MapiNotificationKind::Hierarchy,
+                        });
                         output_handles.push(handle);
                     }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
@@ -1081,6 +1118,12 @@ where
                     )
                     .await
                     .is_err();
+                if !partial_completion {
+                    session.record_notification(MapiNotificationEvent {
+                        folder_id: _parent_folder_id,
+                        kind: MapiNotificationKind::Hierarchy,
+                    });
+                }
                 responses.extend_from_slice(&rop_partial_completion_response(
                     0x1D,
                     request.response_handle_index(),
@@ -1100,6 +1143,18 @@ where
                     }
                 };
                 let mut partial_completion = false;
+                if !snapshot
+                    .folder_access_for_principal(folder_id, principal.account_id)
+                    .map(|access| access.may_delete)
+                    .unwrap_or(true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
                 for message_id in request.message_ids() {
                     if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
                         if store
@@ -1175,6 +1230,12 @@ where
                     if result.is_err() {
                         partial_completion = true;
                     }
+                }
+                if !partial_completion {
+                    session.record_notification(MapiNotificationEvent {
+                        folder_id,
+                        kind: MapiNotificationKind::Content,
+                    });
                 }
                 responses.extend_from_slice(&rop_partial_completion_response(
                     request.rop_id,
@@ -2828,6 +2889,61 @@ where
             0x5F => {
                 responses.extend_from_slice(&rop_query_named_properties_response(&request, session))
             }
+            0x29 => {
+                let notification_types = request.notification_types().unwrap_or(0);
+                if !supported_notification_types(notification_types) {
+                    responses.extend_from_slice(&unsupported_rop_response(
+                        0x29,
+                        request.response_handle_index(),
+                    ));
+                    continue;
+                }
+                let registration = notification_registration_from_request(&request);
+                if session.notification_cursor.is_none() {
+                    session.notification_cursor = store
+                        .fetch_mapi_notification_cursor(principal.account_id)
+                        .await
+                        .ok()
+                        .flatten();
+                }
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::NotificationSubscription { registration },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_register_notification_response(&request));
+                output_handles.push(handle);
+            }
+            0x3E => {
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                };
+                if folder_row_for_id(folder_id, mailboxes).is_none()
+                    && role_for_folder_id(folder_id).is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x3E,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::PermissionTable {
+                        folder_id,
+                        columns: default_permission_columns(),
+                        position: 0,
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_get_permissions_table_response(&request));
+                output_handles.push(handle);
+            }
+            0x40 => responses.extend_from_slice(&rop_modify_permissions_response(&request)),
             0x7B => responses.extend_from_slice(&rop_get_store_state_response(&request)),
             0x81 => {
                 if input_object_mut(session, &handle_slots, &request)

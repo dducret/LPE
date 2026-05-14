@@ -1,4 +1,5 @@
 use super::dispatch::*;
+use super::notifications::*;
 use super::properties::*;
 use super::rop::*;
 use super::store_adapter::*;
@@ -20,6 +21,8 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) named_property_ids: HashMap<u16, MapiNamedProperty>,
     pub(in crate::mapi) next_named_property_id: u16,
     pub(in crate::mapi) next_local_replica_sequence: u64,
+    pub(in crate::mapi) notification_cursor: Option<i64>,
+    pub(in crate::mapi) pending_notifications: VecDeque<MapiNotificationEvent>,
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
 }
@@ -121,6 +124,11 @@ pub(in crate::mapi) enum MapiObject {
         next_bookmark: u32,
         position: usize,
     },
+    PermissionTable {
+        folder_id: u64,
+        columns: Vec<u32>,
+        position: usize,
+    },
     Attachment {
         folder_id: u64,
         message_id: u64,
@@ -146,6 +154,9 @@ pub(in crate::mapi) enum MapiObject {
         data: Vec<u8>,
         position: usize,
         writable_target: Option<StreamWriteTarget>,
+    },
+    NotificationSubscription {
+        registration: MapiNotificationRegistration,
     },
     SynchronizationSource {
         folder_id: u64,
@@ -266,6 +277,8 @@ pub(in crate::mapi) fn create_session(
         named_property_ids: HashMap::new(),
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         next_local_replica_sequence: 1,
+        notification_cursor: None,
+        pending_notifications: VecDeque::new(),
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
     };
@@ -500,6 +513,22 @@ impl MapiSession {
         handle
     }
 
+    pub(in crate::mapi) fn record_notification(&mut self, event: MapiNotificationEvent) {
+        if self.handles.values().any(|object| {
+            matches!(
+                object,
+                MapiObject::NotificationSubscription { registration }
+                    if registration_matches_event(registration, event)
+            )
+        }) {
+            self.pending_notifications.push_back(event);
+        }
+    }
+
+    pub(in crate::mapi) fn take_pending_notification(&mut self) -> Option<MapiNotificationEvent> {
+        self.pending_notifications.pop_front()
+    }
+
     pub(in crate::mapi) fn property_id_for_name(
         &mut self,
         property: MapiNamedProperty,
@@ -569,7 +598,9 @@ pub(in crate::mapi) fn normalize_named_property(
 impl MapiObject {
     pub(in crate::mapi) fn folder_id(&self) -> Option<u64> {
         match self {
-            MapiObject::AttachmentStream { .. } => None,
+            MapiObject::AttachmentStream { .. } | MapiObject::NotificationSubscription { .. } => {
+                None
+            }
             MapiObject::Logon => Some(ROOT_FOLDER_ID),
             MapiObject::Folder { folder_id }
             | MapiObject::Message { folder_id, .. }
@@ -581,6 +612,7 @@ impl MapiObject {
             | MapiObject::HierarchyTable { folder_id, .. }
             | MapiObject::ContentsTable { folder_id, .. }
             | MapiObject::AttachmentTable { folder_id, .. }
+            | MapiObject::PermissionTable { folder_id, .. }
             | MapiObject::Attachment { folder_id, .. }
             | MapiObject::PendingAttachment { folder_id, .. }
             | MapiObject::SavedAttachment { folder_id, .. }
@@ -699,6 +731,10 @@ pub(in crate::mapi) fn reset_table_position(object: &mut MapiObject) -> bool {
         } => {
             *position = 0;
             bookmarks.clear();
+            true
+        }
+        MapiObject::PermissionTable { position, .. } => {
+            *position = 0;
             true
         }
         _ => false,

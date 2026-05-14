@@ -22,7 +22,7 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    mapi::MapiEndpoint,
+    mapi::{permissions::MapiFolderPermission, MapiEndpoint},
     mapi_mailstore,
     mapi_store::MapiStore,
     service::{
@@ -34,7 +34,8 @@ use crate::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
         ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiIdentityLookupRecord, MapiIdentityObjectKind,
-        MapiIdentityRecord, MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint,
+        MapiIdentityRecord, MapiIdentityRequest, MapiNotificationPoll, MapiSyncChangeSet,
+        MapiSyncCheckpoint,
     },
 };
 
@@ -170,6 +171,9 @@ struct FakeStore {
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
+    mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
+    mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
+    mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
@@ -598,6 +602,54 @@ impl ExchangeStore for FakeStore {
     ) -> StoreFuture<'a, MapiSyncChangeSet> {
         let changes = self.mapi_sync_changes.lock().unwrap().clone();
         Box::pin(async move { Ok(changes) })
+    }
+
+    fn fetch_mapi_folder_permissions<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiFolderPermission>> {
+        let mut permissions = self.mapi_folder_permissions.lock().unwrap().clone();
+        if permissions.is_empty() {
+            let principal = self.session.clone().unwrap_or_else(FakeStore::account);
+            permissions.extend(mailbox_ids.iter().copied().map(|mailbox_id| {
+                crate::mapi::permissions::owner_permission(
+                    mailbox_id,
+                    &AccountPrincipal {
+                        tenant_id: principal.tenant_id,
+                        account_id,
+                        email: principal.email.clone(),
+                        display_name: principal.display_name.clone(),
+                    },
+                )
+            }));
+        }
+        Box::pin(async move { Ok(permissions) })
+    }
+
+    fn fetch_mapi_notification_cursor<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Option<i64>> {
+        let cursor = *self.mapi_notification_cursor.lock().unwrap();
+        Box::pin(async move { Ok(cursor) })
+    }
+
+    fn poll_mapi_notifications<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _after_cursor: i64,
+    ) -> StoreFuture<'a, MapiNotificationPoll> {
+        let poll = self
+            .mapi_notification_polls
+            .lock()
+            .unwrap()
+            .pop()
+            .unwrap_or(MapiNotificationPoll {
+                event_pending: false,
+                cursor: None,
+            });
+        Box::pin(async move { Ok(poll) })
     }
 
     fn fetch_address_book_entries<'a>(
@@ -10308,13 +10360,31 @@ async fn mapi_over_http_rule_rops_return_rop_specific_protocol_errors() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_permission_rops_return_rop_specific_protocol_errors() {
+async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let delegate_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             inbox_id, "inbox", "Inbox",
         )])),
+        mapi_folder_permissions: Arc::new(Mutex::new(vec![
+            crate::mapi::permissions::owner_permission(
+                Uuid::parse_str(inbox_id).unwrap(),
+                &AccountPrincipal {
+                    tenant_id: FakeStore::account().tenant_id,
+                    account_id: FakeStore::account().account_id,
+                    email: FakeStore::account().email,
+                    display_name: FakeStore::account().display_name,
+                },
+            ),
+            MapiFolderPermission {
+                mailbox_id: Uuid::parse_str(inbox_id).unwrap(),
+                member_account_id: Some(delegate_id),
+                member_name: "Bob Delegate".to_string(),
+                rights: crate::mapi::permissions::rights_from_grant(true, true, false, false),
+            },
+        ])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -10332,8 +10402,118 @@ async fn mapi_over_http_permission_rops_return_rop_specific_protocol_errors() {
     rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[0x3E, 0x00, 0x01, 0x02, 0x00]);
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x6671_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x6672_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    rops.extend_from_slice(&8u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x3E, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &utf16z("Bob Delegate")));
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::permissions::rights_from_grant(true, true, false, false).to_le_bytes()
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_modify_permissions_mutation_is_explicitly_unsupported() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
     rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]);
-    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x0000_0401i32.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x40, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_denies_mutation_without_folder_write_permission() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        mapi_folder_permissions: Arc::new(Mutex::new(vec![MapiFolderPermission {
+            mailbox_id: Uuid::parse_str(inbox_id).unwrap(),
+            member_account_id: Some(account.account_id),
+            member_name: account.display_name,
+            rights: crate::mapi::permissions::rights_from_grant(true, false, false, false),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
 
     let response = service
         .handle_mapi(
@@ -10348,15 +10528,7 @@ async fn mapi_over_http_permission_rops_return_rop_specific_protocol_errors() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x3E, 0x02, 0x02, 0x01, 0x04, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x40, 0x01, 0x02, 0x01, 0x04, 0x80]
-    ));
-    assert!(!contains_bytes(
-        &response_rops,
-        &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]
+        &[0x06, 0x02, 0x05, 0x00, 0x07, 0x80]
     ));
 }
 
@@ -10417,7 +10589,7 @@ async fn mapi_over_http_search_criteria_rops_return_rop_specific_protocol_errors
 }
 
 #[tokio::test]
-async fn mapi_over_http_register_notification_returns_rop_specific_protocol_errors() {
+async fn mapi_over_http_register_notification_returns_protocol_success_handles() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -10461,18 +10633,168 @@ async fn mapi_over_http_register_notification_returns_rop_specific_protocol_erro
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x29, 0x02, 0x02, 0x01, 0x04, 0x80]
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x29, 0x03, 0x02, 0x01, 0x04, 0x80]
-    ));
+    assert!(contains_bytes(&response_rops, &[0x29, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x29, 0x03, 0, 0, 0, 0]));
     assert!(!contains_bytes(
         &response_rops,
         &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_notification_wait_reports_content_event_after_registered_delete() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "99999999-9999-9999-9999-999999999999";
+    let mut inbox = FakeStore::mailbox(inbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            inbox_id,
+            "inbox",
+            "Notification target",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0x0008u16.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.extend_from_slice(&0u64.to_le_bytes());
+    rops.extend_from_slice(&[0x1E, 0x00, 0x01, 0x00, 0x01]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+}
+
+#[tokio::test]
+async fn mapi_over_http_notification_wait_polls_canonical_change_cursor() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![MapiNotificationPoll {
+            event_pending: true,
+            cursor: Some(8),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0x0010u16.to_le_bytes());
+    rops.push(1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+}
+
+#[tokio::test]
+async fn mapi_over_http_notification_wait_reports_hierarchy_event_after_registered_create_folder() {
+    let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        created_mailboxes: created_mailboxes.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0x0104u16.to_le_bytes());
+    rops.push(1);
+    rops.extend_from_slice(&[0x1C, 0x00, 0x01, 0x03, 0x01, 0x01, 0x00, 0x00]);
+    rops.extend_from_slice(&utf16z("MAPI Notifications"));
+    rops.extend_from_slice(&utf16z(""));
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(created_mailboxes.lock().unwrap().len(), 1);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
 }
 
 #[tokio::test]

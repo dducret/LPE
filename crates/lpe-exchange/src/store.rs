@@ -2,13 +2,15 @@ use anyhow::Result;
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, ClientTask, CollaborationCollection, JmapEmail,
-    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, SavedDraftMessage,
-    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    AttachmentUploadInput, AuditEntryInput, CanonicalChangeCategory, ClientTask,
+    CollaborationCollection, JmapEmail, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, SavedDraftMessage, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
+
+use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
@@ -76,6 +78,12 @@ pub(crate) struct MapiSyncCheckpoint {
     pub(crate) last_change_sequence: u64,
     pub(crate) last_modseq: u64,
     pub(crate) cursor_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiNotificationPoll {
+    pub(crate) event_pending: bool,
+    pub(crate) cursor: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,6 +207,23 @@ pub trait ExchangeStore: AccountAuthStore {
         checkpoint_kind: MapiCheckpointKind,
         after_change_sequence: u64,
     ) -> StoreFuture<'a, MapiSyncChangeSet>;
+
+    fn fetch_mapi_folder_permissions<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiFolderPermission>>;
+
+    fn fetch_mapi_notification_cursor<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Option<i64>>;
+
+    fn poll_mapi_notifications<'a>(
+        &'a self,
+        account_id: Uuid,
+        after_cursor: i64,
+    ) -> StoreFuture<'a, MapiNotificationPoll>;
 
     fn fetch_address_book_entries<'a>(
         &'a self,
@@ -906,6 +931,107 @@ impl ExchangeStore for Storage {
             }
 
             Ok(changes)
+        })
+    }
+
+    fn fetch_mapi_folder_permissions<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<MapiFolderPermission>> {
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT tenant_id, primary_email, display_name
+                FROM accounts
+                WHERE id = $1
+                LIMIT 1
+                "#,
+            )
+            .bind(account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+            let principal = lpe_mail_auth::AccountPrincipal {
+                tenant_id: row.get("tenant_id"),
+                account_id,
+                email: row.get("primary_email"),
+                display_name: row.get("display_name"),
+            };
+            let mut permissions = mailbox_ids
+                .iter()
+                .copied()
+                .map(|mailbox_id| owner_permission(mailbox_id, &principal))
+                .collect::<Vec<_>>();
+            if mailbox_ids.is_empty() {
+                return Ok(permissions);
+            }
+
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    g.mailbox_id,
+                    g.grantee_account_id,
+                    grantee.display_name,
+                    g.may_read,
+                    g.may_write,
+                    g.may_delete,
+                    g.may_share
+                FROM mailbox_delegation_grants g
+                JOIN accounts grantee
+                  ON grantee.tenant_id = g.tenant_id
+                 AND grantee.id = g.grantee_account_id
+                WHERE g.tenant_id = $1
+                  AND g.mailbox_id = ANY($2)
+                ORDER BY lower(grantee.primary_email) ASC
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(mailbox_ids)
+            .fetch_all(self.pool())
+            .await?;
+
+            permissions.extend(rows.into_iter().map(|row| MapiFolderPermission {
+                mailbox_id: row.get("mailbox_id"),
+                member_account_id: Some(row.get("grantee_account_id")),
+                member_name: row.get("display_name"),
+                rights: rights_from_grant(
+                    row.get("may_read"),
+                    row.get("may_write"),
+                    row.get("may_delete"),
+                    row.get("may_share"),
+                ),
+            }));
+            Ok(permissions)
+        })
+    }
+
+    fn fetch_mapi_notification_cursor<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Option<i64>> {
+        Box::pin(async move { self.fetch_canonical_change_cursor(account_id).await })
+    }
+
+    fn poll_mapi_notifications<'a>(
+        &'a self,
+        account_id: Uuid,
+        after_cursor: i64,
+    ) -> StoreFuture<'a, MapiNotificationPoll> {
+        Box::pin(async move {
+            let replay = self
+                .replay_canonical_changes(
+                    account_id,
+                    after_cursor,
+                    &[CanonicalChangeCategory::Mail],
+                    100,
+                )
+                .await?;
+            let cursor = replay.change_set.journal_cursor().or(replay.current_cursor);
+            Ok(MapiNotificationPoll {
+                event_pending: replay.truncated || !replay.change_set.is_empty(),
+                cursor,
+            })
         })
     }
 

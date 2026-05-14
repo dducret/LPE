@@ -1,3 +1,4 @@
+use super::permissions::*;
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
@@ -332,6 +333,23 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 .map(|attachment| serialize_attachment_row(attachment, &columns))
                 .collect::<Vec<_>>()
         }
+        Some(MapiObject::PermissionTable {
+            folder_id,
+            columns,
+            position: table_position,
+        }) => {
+            start_position = *table_position;
+            let columns = if columns.is_empty() {
+                default_permission_columns()
+            } else {
+                columns.clone()
+            };
+            snapshot
+                .permissions_for_folder(*folder_id)
+                .into_iter()
+                .map(|permission| serialize_permission_row(&permission, &columns))
+                .collect::<Vec<_>>()
+        }
         _ => Vec::new(),
     };
     let row_count = request.query_row_count().unwrap_or(rows.len());
@@ -359,7 +377,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
         if let Some(
             MapiObject::HierarchyTable { position, .. }
             | MapiObject::ContentsTable { position, .. }
-            | MapiObject::AttachmentTable { position, .. },
+            | MapiObject::AttachmentTable { position, .. }
+            | MapiObject::PermissionTable { position, .. },
         ) = object
         {
             *position = next_position;
@@ -388,6 +407,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
             None => default_message_property_tags(),
         },
         Some(MapiObject::AttachmentTable { .. }) => default_attachment_columns(),
+        Some(MapiObject::PermissionTable { .. }) => default_permission_columns(),
         _ => return rop_error_response(0x37, request.response_handle_index(), 0x8004_0102),
     };
 
@@ -728,6 +748,7 @@ pub(in crate::mapi) fn is_table_object(object: &MapiObject) -> bool {
         MapiObject::HierarchyTable { .. }
             | MapiObject::ContentsTable { .. }
             | MapiObject::AttachmentTable { .. }
+            | MapiObject::PermissionTable { .. }
     )
 }
 
@@ -1123,6 +1144,11 @@ pub(in crate::mapi) fn table_position_and_count(
                 })
                 .count(),
         ),
+        Some(MapiObject::PermissionTable {
+            folder_id,
+            position,
+            ..
+        }) => (*position, snapshot.permissions_for_folder(*folder_id).len()),
         _ => (0, 0),
     }
 }
@@ -1131,7 +1157,8 @@ pub(in crate::mapi) fn table_position_mut(object: &mut MapiObject) -> Option<&mu
     match object {
         MapiObject::HierarchyTable { position, .. }
         | MapiObject::ContentsTable { position, .. }
-        | MapiObject::AttachmentTable { position, .. } => Some(position),
+        | MapiObject::AttachmentTable { position, .. }
+        | MapiObject::PermissionTable { position, .. } => Some(position),
         _ => None,
     }
 }
@@ -1140,7 +1167,8 @@ pub(in crate::mapi) fn table_position(object: &MapiObject) -> Option<usize> {
     match object {
         MapiObject::HierarchyTable { position, .. }
         | MapiObject::ContentsTable { position, .. }
-        | MapiObject::AttachmentTable { position, .. } => Some(*position),
+        | MapiObject::AttachmentTable { position, .. }
+        | MapiObject::PermissionTable { position, .. } => Some(*position),
         _ => None,
     }
 }
@@ -1224,6 +1252,16 @@ pub(in crate::mapi) fn table_row_keys(
                 .map(|attachment| u64::from(attachment.attach_num))
                 .collect()
         }
+        MapiObject::PermissionTable { folder_id, .. } => snapshot
+            .permissions_for_folder(*folder_id)
+            .into_iter()
+            .map(|permission| {
+                permission
+                    .member_account_id
+                    .and_then(|id| crate::mapi::identity::mapped_mapi_object_id(&id))
+                    .unwrap_or(0)
+            })
+            .collect(),
         _ => Vec::new(),
     }
 }

@@ -1418,6 +1418,47 @@ impl RopRequest {
         Some(u64::from_le_bytes(bytes.try_into().ok()?))
     }
 
+    pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {
+        if self.rop_id != 0x40 {
+            return None;
+        }
+        let bytes = self.payload.get(1..3)?;
+        Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    pub(in crate::mapi) fn notification_types(&self) -> Option<u16> {
+        if self.rop_id != 0x29 {
+            return None;
+        }
+        let bytes = self.payload.get(..2)?;
+        Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    pub(in crate::mapi) fn notification_want_whole_store(&self) -> Option<bool> {
+        if self.rop_id != 0x29 {
+            return None;
+        }
+        let offset = if self.notification_types()? & 0x0400 != 0 {
+            3
+        } else {
+            2
+        };
+        Some(self.payload.get(offset).copied()? != 0)
+    }
+
+    pub(in crate::mapi) fn notification_folder_id(&self) -> Option<u64> {
+        if self.rop_id != 0x29 || self.notification_want_whole_store()? {
+            return None;
+        }
+        let offset = if self.notification_types()? & 0x0400 != 0 {
+            4
+        } else {
+            3
+        };
+        let bytes = self.payload.get(offset..offset + 8)?;
+        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+    }
+
     pub(in crate::mapi) fn message_id(&self) -> Option<u64> {
         let bytes = self.payload.get(9..17)?;
         Some(u64::from_le_bytes(bytes.try_into().ok()?))
@@ -2540,8 +2581,15 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let mut payload = vec![cursor.read_u8()?];
             let permissions_count = cursor.read_u16()? as usize;
             payload.extend_from_slice(&(permissions_count as u16).to_le_bytes());
-            if permissions_count != 0 {
-                return Err(anyhow!("unsupported non-empty ModifyPermissions request"));
+            for _ in 0..permissions_count {
+                payload.push(cursor.read_u8()?);
+                let property_count = cursor.read_u16()? as usize;
+                payload.extend_from_slice(&(property_count as u16).to_le_bytes());
+                for _ in 0..property_count {
+                    let (property_tag, value) = parse_tagged_property(cursor)?;
+                    payload.extend_from_slice(&property_tag.to_le_bytes());
+                    write_mapi_value(&mut payload, property_tag, &value);
+                }
             }
             Ok(RopRequest {
                 rop_id,
@@ -3724,6 +3772,8 @@ mod tests {
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
             next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: VecDeque::new(),
             completed_execute_requests: HashMap::new(),
             completed_execute_request_order: VecDeque::new(),
         };

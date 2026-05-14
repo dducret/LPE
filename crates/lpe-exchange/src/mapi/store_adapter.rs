@@ -232,6 +232,13 @@ where
     let events = store
         .fetch_accessible_events_by_ids(account_id, &event_ids)
         .await?;
+    let mailbox_ids = mailboxes
+        .iter()
+        .map(|mailbox| mailbox.id)
+        .collect::<Vec<_>>();
+    let folder_permissions = store
+        .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
+        .await?;
 
     Ok(MapiMailStoreSnapshot::new(
         mailboxes,
@@ -241,6 +248,7 @@ where
         calendar_collections,
         contacts,
         events,
+        folder_permissions,
     )
     .with_content_windows(content_windows))
 }
@@ -523,7 +531,8 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingContact { folder_id, .. }
         | MapiObject::PendingEvent { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
-        | MapiObject::SynchronizationCollector { folder_id, .. } => {
+        | MapiObject::SynchronizationCollector { folder_id, .. }
+        | MapiObject::PermissionTable { folder_id, .. } => {
             push_unique(&mut plan.object_ids, *folder_id);
         }
         MapiObject::Message {
@@ -567,7 +576,9 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *event_id);
         }
-        MapiObject::AttachmentStream { .. } | MapiObject::Logon => {}
+        MapiObject::AttachmentStream { .. }
+        | MapiObject::NotificationSubscription { .. }
+        | MapiObject::Logon => {}
     }
 }
 

@@ -1,4 +1,5 @@
 use super::dispatch::*;
+use super::notifications::*;
 use super::nspi::*;
 use super::rop::*;
 use super::session::*;
@@ -289,7 +290,7 @@ where
             .await
         }
         (MapiEndpoint::Emsmdb, MapiRequestType::NotificationWait) => {
-            notification_wait_response(endpoint, &principal, headers, &request_id)
+            notification_wait_response(store, endpoint, &principal, headers, &request_id).await
         }
         (MapiEndpoint::Nspi, MapiRequestType::Bind) => {
             bind_response(endpoint, &principal, headers, &request_id)
@@ -504,12 +505,16 @@ pub(in crate::mapi) fn disconnect_response(
     )
 }
 
-pub(in crate::mapi) fn notification_wait_response(
+pub(in crate::mapi) async fn notification_wait_response<S>(
+    store: &S,
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
     headers: &HeaderMap,
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+{
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response(
             "NotificationWait",
@@ -551,12 +556,21 @@ pub(in crate::mapi) fn notification_wait_response(
         );
     }
 
+    let mut session = session;
+    let mut event_pending = session.take_pending_notification().is_some();
+    if !event_pending {
+        if let Some(cursor) = session.notification_cursor {
+            if let Ok(poll) = store
+                .poll_mapi_notifications(principal.account_id, cursor)
+                .await
+            {
+                event_pending = poll.event_pending;
+                session.notification_cursor = poll.cursor.or(Some(cursor));
+            }
+        }
+    }
     store_session(session_id.clone(), session);
-    let mut body = Vec::new();
-    write_u32(&mut body, 0);
-    write_u32(&mut body, 0);
-    write_u32(&mut body, 0);
-    write_u32(&mut body, 0);
+    let body = notification_wait_body(event_pending);
     mapi_response_with_cookies(
         "NotificationWait",
         request_id,
