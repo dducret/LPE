@@ -222,12 +222,12 @@ where
         );
         return Ok(response);
     }
-    if !is_mapi_content_type(endpoint, headers) {
+    if !is_mapi_content_type(headers) {
         let response = mapi_diagnostic_response(
             &request_type_label,
             &request_id,
             4,
-            "MAPI requests must use Content-Type application/mapi-http; application/octet-stream is accepted only for NSPI address-book compatibility probes.",
+            "MAPI requests must use Content-Type application/mapi-http or application/octet-stream.",
         );
         let response = finalize_mapi_response(response, headers);
         log_mapi_connection(
@@ -660,7 +660,7 @@ pub(in crate::mapi) fn is_valid_content_length(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-pub(in crate::mapi) fn is_mapi_content_type(endpoint: MapiEndpoint, headers: &HeaderMap) -> bool {
+pub(in crate::mapi) fn is_mapi_content_type(headers: &HeaderMap) -> bool {
     let Some(content_type) = headers
         .get(CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
@@ -671,8 +671,7 @@ pub(in crate::mapi) fn is_mapi_content_type(endpoint: MapiEndpoint, headers: &He
     };
 
     content_type.eq_ignore_ascii_case(MAPI_CONTENT_TYPE)
-        || (endpoint == MapiEndpoint::Nspi
-            && content_type.eq_ignore_ascii_case(MAPI_OCTET_STREAM_CONTENT_TYPE))
+        || content_type.eq_ignore_ascii_case(MAPI_OCTET_STREAM_CONTENT_TYPE)
 }
 
 pub(in crate::mapi) fn mapi_diagnostic_response(

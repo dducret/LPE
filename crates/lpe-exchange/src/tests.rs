@@ -3348,29 +3348,45 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_rejects_octet_stream_emsmdb_request() {
+async fn mapi_over_http_accepts_rca_octet_stream_emsmdb_connect() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
+    let mut headers = mapi_headers_with_content_type("Connect", "application/octet-stream");
+    headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static("214"),
+    );
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_static("3e93d512-7b7b-495a-9eb5-40b5adc4696a:1"),
+    );
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_static("c9a1f6bb-76d3-41a1-8abb-fc60106a4a97:1"),
+    );
 
     let response = service
-        .handle_mapi(
-            MapiEndpoint::Emsmdb,
-            &mapi_headers_with_content_type("Connect", "application/octet-stream"),
-            b"",
-        )
+        .handle_mapi(MapiEndpoint::Emsmdb, &headers, &[0; 214])
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
-    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
-    let body = response_bytes(response).await;
-    let message = String::from_utf8_lossy(&body);
-    assert!(message.contains("Content-Type application/mapi-http"));
-    assert!(message.contains("only for NSPI address-book"));
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response.headers().get("content-type").unwrap(),
+        "application/mapi-http"
+    );
+    let set_cookies = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|value| value.to_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(set_cookies.len(), 2);
 }
 
 #[tokio::test]
