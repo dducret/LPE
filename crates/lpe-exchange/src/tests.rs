@@ -18431,7 +18431,7 @@ async fn create_delete_calendar_item_round_trips_through_sync_folder_items() {
         "FREQ=WEEKLY;BYDAY=MO,WE;COUNT=5"
     );
     assert_eq!(created_events[0].attendees, "Bob, Carol");
-    assert!(created_events[0]
+    assert!(!created_events[0]
         .attendees_json
         .contains("alice@example.test"));
     assert!(created_events[0]

@@ -105,8 +105,8 @@ pub fn parse_calendar_participants_metadata(raw: &str) -> CalendarParticipantsMe
 }
 
 pub fn serialize_calendar_participants_metadata(metadata: &CalendarParticipantsMetadata) -> String {
-    serde_json::to_string(&normalize_calendar_participants_metadata(metadata.clone()))
-        .unwrap_or_else(|_| "{}".to_string())
+    serde_json::to_string(&normalize_calendar_participants_metadata(metadata.clone()).attendees)
+        .unwrap_or_else(|_| "[]".to_string())
 }
 
 pub fn calendar_attendee_labels(metadata: &CalendarParticipantsMetadata) -> String {
@@ -181,4 +181,50 @@ fn normalize_calendar_participants_metadata(
         })
         .collect();
     metadata
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialized_calendar_participants_match_attendees_json_schema() {
+        let serialized = serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+            organizer: Some(CalendarOrganizerMetadata {
+                email: "Alice@Example.Test".to_string(),
+                common_name: "Alice".to_string(),
+            }),
+            attendees: vec![CalendarParticipantMetadata {
+                email: "Bob@Example.Test".to_string(),
+                common_name: "Bob".to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "accepted".to_string(),
+                rsvp: true,
+            }],
+        });
+        let value: Value = serde_json::from_str(&serialized).unwrap();
+
+        assert!(value.is_array());
+        assert_eq!(value[0]["email"], "bob@example.test");
+        assert_eq!(value[0]["common_name"], "Bob");
+        assert_eq!(value[0]["partstat"], "accepted");
+        assert!(!serialized.contains("alice@example.test"));
+    }
+
+    #[test]
+    fn parser_still_accepts_legacy_combined_participant_metadata() {
+        let parsed = parse_calendar_participants_metadata(
+            r#"{"organizer":{"email":"alice@example.test","common_name":"Alice"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false}]}"#,
+        );
+
+        assert_eq!(
+            parsed.organizer,
+            Some(CalendarOrganizerMetadata {
+                email: "alice@example.test".to_string(),
+                common_name: "Alice".to_string(),
+            })
+        );
+        assert_eq!(parsed.attendees.len(), 1);
+        assert_eq!(parsed.attendees[0].email, "bob@example.test");
+    }
 }
