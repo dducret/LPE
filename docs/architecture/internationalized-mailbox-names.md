@@ -269,6 +269,11 @@ problem without requiring users to understand Unicode internals, for example:
 unsafe invisible character`, or `Mailbox name mixes scripts in a way that could
 be confused with another folder`.
 
+Implementation uses the `unicode-security` crate for UTS #39 skeleton and
+mixed-script checks. `unicode-security` 0.1.2 is generated from Unicode 16.0
+data, so LPE retains a narrow current-UTS #39 correction for U+04CF CYRILLIC
+SMALL LETTER PALOCHKA until the crate ships the current mapping to Latin `l`.
+
 ## Bidi Display Policy
 
 LPE stores mailbox names in logical Unicode order and relies on normal Unicode

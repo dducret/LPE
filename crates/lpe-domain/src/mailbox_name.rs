@@ -1,6 +1,7 @@
 use std::{error::Error, fmt};
 
 use unicode_normalization::UnicodeNormalization;
+use unicode_security::{is_potential_mixed_script_confusable_char, skeleton, MixedScript};
 
 pub const MAILBOX_HIERARCHY_DELIMITER: char = '/';
 const MAX_SEGMENT_CHARS: usize = 64;
@@ -74,7 +75,7 @@ impl MailboxDisplayName {
         {
             return Err(MailboxNameError::ReservedName);
         }
-        if has_mixed_latin_greek_or_cyrillic_confusable(&normalized) {
+        if has_mixed_script_confusable(&normalized) {
             return Err(MailboxNameError::ContainsMixedScriptConfusable);
         }
         Ok(Self(normalized))
@@ -166,10 +167,8 @@ impl MailboxCanonicalKey {
     pub fn for_display_name(value: &str) -> Self {
         let normalized = value.nfc().collect::<String>();
         let equality = fold_for_comparison(&normalized);
-        let skeleton = fold_for_comparison(&normalized.nfkc().collect::<String>())
-            .chars()
-            .map(confusable_skeleton_char)
-            .collect();
+        let skeleton_input = fold_for_comparison(&normalized.nfkc().collect::<String>());
+        let skeleton = confusable_skeleton(&skeleton_input);
         Self { equality, skeleton }
     }
 
@@ -390,29 +389,22 @@ fn is_unsafe_invisible(ch: char) -> bool {
     )
 }
 
-fn has_mixed_latin_greek_or_cyrillic_confusable(value: &str) -> bool {
-    let has_latin = value.chars().any(is_latin_letter);
-    let has_greek_or_cyrillic = value.chars().any(is_greek_or_cyrillic_letter);
-    has_latin
-        && has_greek_or_cyrillic
-        && value
-            .chars()
-            .any(|ch| is_greek_or_cyrillic_letter(ch) && confusable_skeleton_char(ch) != ch)
+fn has_mixed_script_confusable(value: &str) -> bool {
+    !value.is_single_script() && value.chars().any(is_potential_mixed_script_confusable_char)
 }
 
-fn is_latin_letter(ch: char) -> bool {
-    matches!(
-        ch as u32,
-        0x0041..=0x005A
-            | 0x0061..=0x007A
-            | 0x00C0..=0x00FF
-            | 0x0100..=0x024F
-            | 0x1E00..=0x1EFF
-    )
-}
-
-fn is_greek_or_cyrillic_letter(ch: char) -> bool {
-    matches!(ch as u32, 0x0370..=0x03FF | 0x0400..=0x052F)
+fn confusable_skeleton(value: &str) -> String {
+    let corrected = value
+        .chars()
+        .map(|ch| match ch {
+            // unicode-security 0.1.2 uses Unicode 16.0 data. Current UTS #39 maps
+            // U+04CF to Latin small l, which preserves the existing whole-script
+            // confusable rejection for Cyrillic paypal-style spoofs.
+            '\u{04cf}' => 'l',
+            _ => ch,
+        })
+        .collect::<String>();
+    skeleton(&corrected).collect()
 }
 
 fn fold_for_comparison(value: &str) -> String {
@@ -458,37 +450,5 @@ fn list_pattern_match_from(
             list_pattern_match_from(name, pattern, name_index + 1, pattern_index + 1)
         }
         _ => false,
-    }
-}
-
-fn confusable_skeleton_char(ch: char) -> char {
-    match ch {
-        'Α' | 'А' | 'а' | 'ɑ' | 'α' => 'a',
-        'Β' | 'В' | 'Ᏼ' | 'β' => 'b',
-        'С' | 'с' | 'Ϲ' | 'ϲ' => 'c',
-        'ԁ' | 'ⅾ' => 'd',
-        'Ε' | 'Е' | 'е' | '℮' => 'e',
-        'Ғ' | 'ғ' => 'f',
-        'ɡ' | 'ց' => 'g',
-        'Η' | 'Н' | 'һ' => 'h',
-        'Ι' | 'І' | 'і' | 'Ӏ' | 'ɩ' | 'ı' | 'Ꭵ' => 'i',
-        'Ј' | 'ј' | 'ϳ' => 'j',
-        'Κ' | 'К' | 'κ' => 'k',
-        'Ꮮ' | 'ⅼ' | 'ӏ' => 'l',
-        'Μ' | 'М' | 'м' => 'm',
-        'Ν' | 'П' | 'ո' | 'п' => 'n',
-        'Ο' | 'О' | 'о' | 'ο' | 'Օ' | 'օ' | '0' => 'o',
-        'Ρ' | 'Р' | 'р' => 'p',
-        'ԛ' => 'q',
-        'Ꭱ' | 'ᴦ' => 'r',
-        'Ѕ' | 'ѕ' | 'Տ' | 'Ⴝ' => 's',
-        'Τ' | 'Т' | 'τ' => 't',
-        'υ' | 'ս' => 'u',
-        'ν' | 'ѵ' => 'v',
-        'ԝ' | 'ա' => 'w',
-        'Χ' | 'Х' | 'х' | 'χ' => 'x',
-        'Υ' | 'У' | 'у' | 'ү' => 'y',
-        'Ζ' | 'Ꮓ' | 'ᴢ' => 'z',
-        _ => ch,
     }
 }
