@@ -3848,6 +3848,49 @@ async fn mapi_over_http_execute_returns_private_mailbox_logon() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_public_folder_logon_is_deferred_without_store_handle() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Public Folders\0";
+    let mut logon_rop = vec![0xFE, 0x00, 0x00, 0x00];
+    logon_rop.extend_from_slice(&0u32.to_le_bytes());
+    logon_rop.extend_from_slice(&0u32.to_le_bytes());
+    logon_rop.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    logon_rop.extend_from_slice(legacy_dn);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rop, &[])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rop = &rop_buffer[2..2 + response_rop_size];
+
+    assert_eq!(response_rop, &[0xFE, 0x00, 0x02, 0x01, 0x04, 0x80]);
+    assert_eq!(rop_buffer.len(), 2 + response_rop_size);
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

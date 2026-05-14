@@ -2963,6 +2963,13 @@ where
                 input_object_mut(session, &handle_slots, &request),
             )),
             0xFE => {
+                if request.payload.first().copied().unwrap_or(0) & 0x01 == 0 {
+                    responses.extend_from_slice(&unsupported_rop_response(
+                        0xFE,
+                        request.response_handle_index(),
+                    ));
+                    continue;
+                }
                 let handle =
                     session.allocate_output_handle(request.output_handle_index, MapiObject::Logon);
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
