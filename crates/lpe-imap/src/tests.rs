@@ -1515,6 +1515,87 @@ async fn malformed_utf8_mailbox_paths_are_rejected() {
 }
 
 #[tokio::test]
+async fn malformed_utf8_command_literals_are_rejected_before_mailbox_validation() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+    let _ = send_command(&mut stream, "A2 ENABLE UTF8=ACCEPT\r\n", "A2").await;
+
+    let create_prompt = send_partial_command(&mut stream, "A3 CREATE {1}\r\n").await;
+    assert!(create_prompt.contains("+ Ready for literal data"));
+    let create = send_raw_command(&mut stream, b"\xff\r\n", "A3").await;
+    assert!(create.contains("A3 BAD invalid UTF-8 in command literal"));
+
+    let mailboxes = store.mailboxes.lock().unwrap();
+    assert!(mailboxes
+        .iter()
+        .all(|mailbox| !mailbox.name.contains('\u{fffd}')));
+    drop(mailboxes);
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn malformed_utf8_quoted_mailbox_commands_are_rejected_cleanly() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let create = send_raw_command(&mut stream, b"A2 CREATE \"\xff\"\r\n", "A2").await;
+    assert!(create.contains("A2 BAD invalid UTF-8 in command line"));
+
+    let noop = send_command(&mut stream, "A3 NOOP\r\n", "A3").await;
+    assert!(noop.contains("A3 OK NOOP completed"));
+
+    let mailboxes = store.mailboxes.lock().unwrap();
+    assert!(mailboxes
+        .iter()
+        .all(|mailbox| !mailbox.name.contains('\u{fffd}')));
+    drop(mailboxes);
+
+    task.abort();
+}
+
+#[tokio::test]
+async fn append_message_literals_remain_byte_oriented() {
+    let store = FakeStore::new();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = ImapServer::with_validator(store.clone(), Validator::new(FakeDetector, 0.8));
+    let task = tokio::spawn(async move { server.serve(listener).await.unwrap() });
+
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    let _ = read_response(&mut stream, None).await;
+    let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
+
+    let literal = b"From: Alice <alice@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Binary body\r\n\r\nBody \xff\r\n";
+    let append_prompt = send_partial_command(
+        &mut stream,
+        &format!("A2 APPEND INBOX {{{}}}\r\n", literal.len()),
+    )
+    .await;
+    assert!(append_prompt.contains("+ Ready for literal data"));
+    let mut framed_literal = literal.to_vec();
+    framed_literal.extend_from_slice(b"\r\n");
+    let append = send_raw_command(&mut stream, &framed_literal, "A2").await;
+    assert!(append.contains("A2 OK [APPENDUID 111 2] APPEND completed"));
+
+    task.abort();
+}
+
+#[tokio::test]
 async fn unicode_spoofing_duplicates_are_rejected_for_imap_create_and_rename() {
     let store = FakeStore::new();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -3847,6 +3928,12 @@ async fn send_partial_command(stream: &mut TcpStream, value: &str) -> String {
 
 async fn send_command(stream: &mut TcpStream, command: &str, tag: &str) -> String {
     stream.write_all(command.as_bytes()).await.unwrap();
+    stream.flush().await.unwrap();
+    read_response(stream, Some(tag)).await
+}
+
+async fn send_raw_command(stream: &mut TcpStream, command: &[u8], tag: &str) -> String {
+    stream.write_all(command).await.unwrap();
     stream.flush().await.unwrap();
     read_response(stream, Some(tag)).await
 }

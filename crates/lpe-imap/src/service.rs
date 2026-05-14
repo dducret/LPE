@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use lpe_magika::{Detector, Validator};
 use lpe_mail_auth::AccountPrincipal;
 use lpe_storage::ImapEmail;
-use std::sync::Arc;
+use std::{str, sync::Arc};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::{TcpListener, TcpStream},
@@ -59,20 +59,46 @@ impl<S: ImapStore, D: Detector> ImapServer<S, D> {
         write_half.flush().await?;
 
         loop {
-            let mut line = String::new();
-            let bytes = reader.read_line(&mut line).await?;
+            let mut raw_line = Vec::new();
+            let bytes = reader.read_until(b'\n', &mut raw_line).await?;
             if bytes == 0 {
                 break;
             }
-            let line = line.trim_end_matches(['\r', '\n']);
+            let line = match decode_command_line(&raw_line) {
+                Ok(line) => line,
+                Err(error) => {
+                    let tag = command_tag_from_bytes(&raw_line).unwrap_or("*");
+                    write_half
+                        .write_all(format!("{tag} BAD {}\r\n", error).as_bytes())
+                        .await?;
+                    write_half.flush().await?;
+                    continue;
+                }
+            };
             if line.is_empty() {
                 continue;
             }
-            let request_command = parse_request_line(line)?.command;
-            let line = if request_command == "APPEND" {
+            let request = parse_request_line(&line)?;
+            let line = if request.command == "APPEND" {
                 line.to_string()
             } else {
-                read_command_literals(&mut reader, &mut write_half, line).await?
+                match read_command_literals(&mut reader, &mut write_half, &line).await {
+                    Ok(line) => line,
+                    Err(error) => {
+                        write_half
+                            .write_all(
+                                format!(
+                                    "{} BAD {}\r\n",
+                                    request.tag,
+                                    sanitize_imap_text(&error.to_string())
+                                )
+                                .as_bytes(),
+                            )
+                            .await?;
+                        write_half.flush().await?;
+                        continue;
+                    }
+                }
             };
             let keep_running = session
                 .handle_request(&mut reader, &mut write_half, &line)
@@ -104,13 +130,39 @@ where
 
         let mut literal = vec![0u8; size];
         reader.read_exact(&mut literal).await?;
-        line = format!("{prefix}\"{}\"", quote_literal_token(&literal));
 
-        let mut rest = String::new();
-        reader.read_line(&mut rest).await?;
-        line.push_str(rest.trim_end_matches(['\r', '\n']));
+        let mut rest = Vec::new();
+        reader.read_until(b'\n', &mut rest).await?;
+        let rest = decode_command_line(&rest)?;
+
+        line = format!("{prefix}\"{}\"", quote_literal_token(&literal)?);
+        line.push_str(&rest);
     }
     Ok(line)
+}
+
+fn decode_command_line(bytes: &[u8]) -> Result<&str> {
+    let trimmed = trim_line_end(bytes);
+    str::from_utf8(trimmed).map_err(|_| anyhow!("invalid UTF-8 in command line"))
+}
+
+fn trim_line_end(mut bytes: &[u8]) -> &[u8] {
+    while matches!(bytes.last(), Some(b'\r' | b'\n')) {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    bytes
+}
+
+fn command_tag_from_bytes(bytes: &[u8]) -> Option<&str> {
+    let bytes = trim_line_end(bytes);
+    let end = bytes
+        .iter()
+        .position(|byte| byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    if end == 0 {
+        return None;
+    }
+    str::from_utf8(&bytes[..end]).ok()
 }
 
 fn trailing_literal(line: &str) -> Result<Option<(&str, usize, bool)>> {
@@ -139,10 +191,11 @@ fn trailing_literal(line: &str) -> Result<Option<(&str, usize, bool)>> {
     Ok(Some((&line[..open_index], size, synchronizing)))
 }
 
-fn quote_literal_token(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes)
+fn quote_literal_token(bytes: &[u8]) -> Result<String> {
+    Ok(str::from_utf8(bytes)
+        .map_err(|_| anyhow!("invalid UTF-8 in command literal"))?
         .replace('\\', "\\\\")
-        .replace('"', "\\\"")
+        .replace('"', "\\\""))
 }
 
 pub async fn serve(listener: TcpListener, store: impl ImapStore) -> Result<()> {
