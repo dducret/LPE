@@ -955,8 +955,26 @@ pub(in crate::mapi) fn folder_row_for_id(
     })
 }
 
+pub(in crate::mapi) const ROP_ERROR_NOT_SUPPORTED: u32 = 0x8004_0102;
+pub(in crate::mapi) const ROP_ERROR_NOT_FOUND: u32 = 0x8004_010F;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopResponseError {
+    pub(in crate::mapi) rop_id: u8,
+    pub(in crate::mapi) handle_index: u8,
+    pub(in crate::mapi) error_code: u32,
+}
+
+impl RopResponseError {
+    pub(in crate::mapi) fn serialize(self) -> Vec<u8> {
+        let mut response = vec![self.rop_id, self.handle_index];
+        write_u32(&mut response, self.error_code);
+        response
+    }
+}
+
 pub(in crate::mapi) fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {
-    rop_error_response(rop_id, handle_index, 0x8004_0102)
+    rop_error_response(rop_id, handle_index, ROP_ERROR_NOT_SUPPORTED)
 }
 
 pub(in crate::mapi) fn rop_error_response(
@@ -964,9 +982,24 @@ pub(in crate::mapi) fn rop_error_response(
     handle_index: u8,
     error_code: u32,
 ) -> Vec<u8> {
-    let mut response = vec![rop_id, handle_index];
-    write_u32(&mut response, error_code);
-    response
+    RopResponseError {
+        rop_id,
+        handle_index,
+        error_code,
+    }
+    .serialize()
+}
+
+pub(in crate::mapi) fn rop_parse_error_response() -> Vec<u8> {
+    rop_error_response(0, 0, ROP_ERROR_NOT_SUPPORTED)
+}
+
+pub(in crate::mapi) fn rop_handle_index_error_response(request: &RopRequest) -> Vec<u8> {
+    rop_error_response(
+        request.rop_id,
+        request.response_handle_index(),
+        ROP_ERROR_NOT_FOUND,
+    )
 }
 
 pub(in crate::mapi) fn rop_buffer_with_response(
@@ -1116,6 +1149,7 @@ impl<'a> Cursor<'a> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct RopRequest {
     pub(in crate::mapi) rop_id: u8,
     pub(in crate::mapi) input_handle_index: Option<u8>,
@@ -1123,7 +1157,233 @@ pub(in crate::mapi) struct RopRequest {
     pub(in crate::mapi) payload: Vec<u8>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) enum TypedRopRequest {
+    Release(RopInputOnlyRequest),
+    OpenFolder(RopOpenFolderRequest),
+    OpenMessage(RopOpenMessageRequest),
+    OpenTable(RopOpenTableRequest),
+    CreateMessage(RopCreateMessageRequest),
+    SaveChangesMessage(RopSaveChangesMessageRequest),
+    SetColumns(RopSetColumnsRequest),
+    Restrict(RopRestrictionRequest),
+    QueryRows(RopQueryRowsRequest),
+    Logon(RopLogonRequest),
+    SupportedRaw(RopSupportedRawRequest),
+    Unsupported(RopUnsupportedRequest),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopInputOnlyRequest {
+    pub(in crate::mapi) rop_id: u8,
+    pub(in crate::mapi) input_handle_index: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopOpenFolderRequest {
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) output_handle_index: u8,
+    pub(in crate::mapi) folder_id: u64,
+    pub(in crate::mapi) open_mode_flags: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopOpenMessageRequest {
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) output_handle_index: u8,
+    pub(in crate::mapi) folder_id: u64,
+    pub(in crate::mapi) open_mode_flags: u8,
+    pub(in crate::mapi) message_id: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopOpenTableRequest {
+    pub(in crate::mapi) rop_id: u8,
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) output_handle_index: u8,
+    pub(in crate::mapi) table_flags: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopCreateMessageRequest {
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) output_handle_index: u8,
+    pub(in crate::mapi) folder_id: u64,
+    pub(in crate::mapi) associated_flag: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopSaveChangesMessageRequest {
+    pub(in crate::mapi) response_handle_index: u8,
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) save_flags: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopSetColumnsRequest {
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) flags: u8,
+    pub(in crate::mapi) property_tags: Vec<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopRestrictionRequest {
+    pub(in crate::mapi) rop_id: u8,
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) flags: u8,
+    pub(in crate::mapi) restriction: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopQueryRowsRequest {
+    pub(in crate::mapi) input_handle_index: u8,
+    pub(in crate::mapi) flags: u8,
+    pub(in crate::mapi) forward_read: bool,
+    pub(in crate::mapi) row_count: u16,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopLogonRequest {
+    pub(in crate::mapi) output_handle_index: u8,
+    pub(in crate::mapi) logon_flags: u8,
+    pub(in crate::mapi) prefix: Vec<u8>,
+    pub(in crate::mapi) essdn: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopSupportedRawRequest {
+    pub(in crate::mapi) rop_id: u8,
+    pub(in crate::mapi) input_handle_index: Option<u8>,
+    pub(in crate::mapi) output_handle_index: Option<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct RopUnsupportedRequest {
+    pub(in crate::mapi) rop_id: u8,
+    pub(in crate::mapi) input_handle_index: Option<u8>,
+    pub(in crate::mapi) reserved: bool,
+}
+
+impl TypedRopRequest {
+    pub(in crate::mapi) fn rop_id(&self) -> u8 {
+        match self {
+            Self::Release(request) => request.rop_id,
+            Self::OpenFolder(_) => 0x02,
+            Self::OpenMessage(_) => 0x03,
+            Self::OpenTable(request) => request.rop_id,
+            Self::CreateMessage(_) => 0x06,
+            Self::SaveChangesMessage(_) => 0x0C,
+            Self::SetColumns(_) => 0x12,
+            Self::Restrict(request) => request.rop_id,
+            Self::QueryRows(_) => 0x15,
+            Self::Logon(_) => 0xFE,
+            Self::SupportedRaw(request) => request.rop_id,
+            Self::Unsupported(request) => request.rop_id,
+        }
+    }
+
+    pub(in crate::mapi) fn unsupported_is_terminal(&self) -> bool {
+        matches!(self, Self::Unsupported(_))
+    }
+}
+
 impl RopRequest {
+    pub(in crate::mapi) fn typed(&self) -> TypedRopRequest {
+        match self.rop_id {
+            0x01 => TypedRopRequest::Release(RopInputOnlyRequest {
+                rop_id: self.rop_id,
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+            }),
+            0x02 => TypedRopRequest::OpenFolder(RopOpenFolderRequest {
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                output_handle_index: self.output_handle_index.unwrap_or(0),
+                folder_id: self.folder_id().unwrap_or(0),
+                open_mode_flags: self.payload.get(8).copied().unwrap_or(0),
+            }),
+            0x03 => TypedRopRequest::OpenMessage(RopOpenMessageRequest {
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                output_handle_index: self.output_handle_index.unwrap_or(0),
+                folder_id: self.folder_id().unwrap_or(0),
+                open_mode_flags: self.payload.get(8).copied().unwrap_or(0),
+                message_id: self.message_id().unwrap_or(0),
+            }),
+            0x04 | 0x05 | 0x21 => TypedRopRequest::OpenTable(RopOpenTableRequest {
+                rop_id: self.rop_id,
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                output_handle_index: self.output_handle_index.unwrap_or(0),
+                table_flags: self.payload.first().copied().unwrap_or(0),
+            }),
+            0x06 => TypedRopRequest::CreateMessage(RopCreateMessageRequest {
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                output_handle_index: self.output_handle_index.unwrap_or(0),
+                folder_id: self.folder_id().unwrap_or(0),
+                associated_flag: self.payload.get(8).copied().unwrap_or(0),
+            }),
+            0x0C => TypedRopRequest::SaveChangesMessage(RopSaveChangesMessageRequest {
+                response_handle_index: self.output_handle_index.unwrap_or(0),
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                save_flags: self.payload.first().copied().unwrap_or(0),
+            }),
+            0x12 => TypedRopRequest::SetColumns(RopSetColumnsRequest {
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                flags: self.payload.first().copied().unwrap_or(0),
+                property_tags: self.property_tags(),
+            }),
+            0x14 | 0x4F => {
+                let size = self
+                    .payload
+                    .get(1..3)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u16::from_le_bytes)
+                    .map(usize::from)
+                    .unwrap_or(0);
+                TypedRopRequest::Restrict(RopRestrictionRequest {
+                    rop_id: self.rop_id,
+                    input_handle_index: self.input_handle_index.unwrap_or(0),
+                    flags: self.payload.first().copied().unwrap_or(0),
+                    restriction: self.payload.get(3..3 + size).unwrap_or_default().to_vec(),
+                })
+            }
+            0x15 => TypedRopRequest::QueryRows(RopQueryRowsRequest {
+                input_handle_index: self.input_handle_index.unwrap_or(0),
+                flags: self.payload.first().copied().unwrap_or(0),
+                forward_read: self.query_forward_read(),
+                row_count: self.query_row_count().unwrap_or(0).min(u16::MAX as usize) as u16,
+            }),
+            0xFE => {
+                let essdn_size = self
+                    .payload
+                    .get(9..11)
+                    .and_then(|bytes| bytes.try_into().ok())
+                    .map(u16::from_le_bytes)
+                    .map(usize::from)
+                    .unwrap_or(0);
+                TypedRopRequest::Logon(RopLogonRequest {
+                    output_handle_index: self.output_handle_index.unwrap_or(0),
+                    logon_flags: self.payload.first().copied().unwrap_or(0),
+                    prefix: self.payload.get(1..9).unwrap_or_default().to_vec(),
+                    essdn: self
+                        .payload
+                        .get(11..11 + essdn_size)
+                        .unwrap_or_default()
+                        .to_vec(),
+                })
+            }
+            rop_id if rop_id_is_supported_by_dispatch(rop_id) => {
+                TypedRopRequest::SupportedRaw(RopSupportedRawRequest {
+                    rop_id,
+                    input_handle_index: self.input_handle_index,
+                    output_handle_index: self.output_handle_index,
+                })
+            }
+            rop_id => TypedRopRequest::Unsupported(RopUnsupportedRequest {
+                rop_id,
+                input_handle_index: self.input_handle_index,
+                reserved: rop_id_is_reserved(rop_id),
+            }),
+        }
+    }
+
     pub(in crate::mapi) fn input_handle_index(&self) -> Option<u8> {
         self.input_handle_index
     }
@@ -1860,6 +2120,142 @@ pub(in crate::mapi) fn parse_property_value_for_tag(
     property_tag: u32,
 ) -> Result<MapiValue> {
     parse_mapi_property_value(cursor, property_tag)
+}
+
+pub(in crate::mapi) fn rop_id_is_reserved(rop_id: u8) -> bool {
+    matches!(
+        rop_id,
+        0x00 | 0x28 | 0x3C | 0x3D | 0x62 | 0x65 | 0x6A | 0x71
+    )
+}
+
+pub(in crate::mapi) fn rop_id_is_supported_by_dispatch(rop_id: u8) -> bool {
+    matches!(
+        rop_id,
+        0x01 | 0x02
+            | 0x03
+            | 0x04
+            | 0x05
+            | 0x06
+            | 0x07
+            | 0x08
+            | 0x09
+            | 0x0A
+            | 0x0B
+            | 0x0C
+            | 0x0D
+            | 0x0E
+            | 0x0F
+            | 0x10
+            | 0x11
+            | 0x12
+            | 0x13
+            | 0x14
+            | 0x15
+            | 0x16
+            | 0x17
+            | 0x18
+            | 0x19
+            | 0x1A
+            | 0x1B
+            | 0x1C
+            | 0x1D
+            | 0x1E
+            | 0x1F
+            | 0x20
+            | 0x21
+            | 0x22
+            | 0x23
+            | 0x24
+            | 0x25
+            | 0x26
+            | 0x27
+            | 0x29
+            | 0x2B
+            | 0x2C
+            | 0x2D
+            | 0x2E
+            | 0x2F
+            | 0x30
+            | 0x31
+            | 0x32
+            | 0x33
+            | 0x34
+            | 0x35
+            | 0x36
+            | 0x37
+            | 0x38
+            | 0x3A
+            | 0x3B
+            | 0x3E
+            | 0x3F
+            | 0x40
+            | 0x41
+            | 0x42
+            | 0x43
+            | 0x44
+            | 0x45
+            | 0x47
+            | 0x48
+            | 0x49
+            | 0x4A
+            | 0x4B
+            | 0x4C
+            | 0x4D
+            | 0x4E
+            | 0x4F
+            | 0x50
+            | 0x51
+            | 0x52
+            | 0x53
+            | 0x54
+            | 0x55
+            | 0x56
+            | 0x57
+            | 0x58
+            | 0x59
+            | 0x5A
+            | 0x5B
+            | 0x5C
+            | 0x5D
+            | 0x5E
+            | 0x5F
+            | 0x60
+            | 0x61
+            | 0x63
+            | 0x64
+            | 0x66
+            | 0x68
+            | 0x69
+            | 0x6B
+            | 0x6C
+            | 0x6D
+            | 0x6F
+            | 0x70
+            | 0x72
+            | 0x73
+            | 0x74
+            | 0x75
+            | 0x76
+            | 0x77
+            | 0x78
+            | 0x79
+            | 0x7A
+            | 0x7B
+            | 0x7E
+            | 0x7F
+            | 0x80
+            | 0x81
+            | 0x82
+            | 0x86
+            | 0x89
+            | 0x90
+            | 0x91
+            | 0x92
+            | 0x93
+            | 0xA3
+            | 0xFE
+    )
 }
 
 pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
@@ -2620,7 +3016,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x09 | 0x16 | 0x17 | 0x37 | 0x4A | 0x52 | 0x68 | 0x6D | 0x7B | 0x81 => {
+        0x09 | 0x16 | 0x17 | 0x37 | 0x47 | 0x4A | 0x52 | 0x68 | 0x6D | 0x7B | 0x81 => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3209,6 +3605,100 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
     }
 }
 
+#[allow(dead_code)]
+pub(in crate::mapi) fn serialize_rop_request(request: &RopRequest) -> Result<Vec<u8>> {
+    let mut buffer = vec![request.rop_id, 0];
+    match request.typed() {
+        TypedRopRequest::Release(request) => buffer.push(request.input_handle_index),
+        TypedRopRequest::OpenFolder(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.output_handle_index);
+            write_u64(&mut buffer, request.folder_id);
+            buffer.push(request.open_mode_flags);
+        }
+        TypedRopRequest::OpenMessage(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.output_handle_index);
+            write_u16(&mut buffer, 0);
+            write_u64(&mut buffer, request.folder_id);
+            buffer.push(request.open_mode_flags);
+            write_u64(&mut buffer, request.message_id);
+        }
+        TypedRopRequest::OpenTable(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.output_handle_index);
+            buffer.push(request.table_flags);
+        }
+        TypedRopRequest::CreateMessage(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.output_handle_index);
+            write_u16(&mut buffer, 0);
+            write_u64(&mut buffer, request.folder_id);
+            buffer.push(request.associated_flag);
+        }
+        TypedRopRequest::SaveChangesMessage(request) => {
+            buffer.push(request.response_handle_index);
+            buffer.push(request.input_handle_index);
+            buffer.push(request.save_flags);
+        }
+        TypedRopRequest::SetColumns(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.flags);
+            write_u16(
+                &mut buffer,
+                request.property_tags.len().min(u16::MAX as usize) as u16,
+            );
+            for property_tag in request.property_tags {
+                write_u32(&mut buffer, property_tag);
+            }
+        }
+        TypedRopRequest::Restrict(request) if request.rop_id == 0x14 => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.flags);
+            write_u16(
+                &mut buffer,
+                request.restriction.len().min(u16::MAX as usize) as u16,
+            );
+            buffer.extend_from_slice(&request.restriction);
+        }
+        TypedRopRequest::QueryRows(request) => {
+            buffer.push(request.input_handle_index);
+            buffer.push(request.flags);
+            buffer.push(request.forward_read as u8);
+            write_u16(&mut buffer, request.row_count);
+        }
+        TypedRopRequest::Logon(request) => {
+            buffer.push(request.output_handle_index);
+            buffer.push(request.logon_flags);
+            buffer.extend_from_slice(&request.prefix);
+            write_u16(
+                &mut buffer,
+                request.essdn.len().min(u16::MAX as usize) as u16,
+            );
+            buffer.extend_from_slice(&request.essdn);
+        }
+        TypedRopRequest::SupportedRaw(request) => {
+            return Err(anyhow!(
+                "ROP 0x{:02X} request serialization is not typed yet",
+                request.rop_id
+            ));
+        }
+        TypedRopRequest::Restrict(request) => {
+            return Err(anyhow!(
+                "ROP 0x{:02X} request serialization is not typed yet",
+                request.rop_id
+            ));
+        }
+        TypedRopRequest::Unsupported(request) => {
+            return Err(anyhow!(
+                "unsupported ROP 0x{:02X} request serialization",
+                request.rop_id
+            ));
+        }
+    }
+    Ok(buffer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::transport::MAPI_SESSION_MAX_AGE_SECONDS;
@@ -3256,5 +3746,96 @@ mod tests {
             1_778_046_495
         );
         assert_eq!(gwart_time_marker(SystemTime::UNIX_EPOCH), 1);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn golden_open_folder_rop_round_trips_through_typed_parser() {
+        let folder_id = 0x1122_3344_5566_7788u64;
+        let mut golden = vec![0x02, 0x00, 0x00, 0x01];
+        golden.extend_from_slice(&folder_id.to_le_bytes());
+        golden.push(0x00);
+
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            request.typed(),
+            TypedRopRequest::OpenFolder(RopOpenFolderRequest {
+                input_handle_index: 0,
+                output_handle_index: 1,
+                folder_id,
+                open_mode_flags: 0,
+            })
+        );
+        assert_eq!(serialize_rop_request(&request).unwrap(), golden);
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn golden_set_columns_rop_round_trips_through_typed_parser() {
+        let golden = vec![
+            0x12, 0x00, 0x02, 0x00, 0x02, 0x00, 0x1F, 0x00, 0x37, 0x00, 0x03, 0x00, 0x0E, 0x0C,
+        ];
+
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            request.typed(),
+            TypedRopRequest::SetColumns(RopSetColumnsRequest {
+                input_handle_index: 2,
+                flags: 0,
+                property_tags: vec![0x0037_001F, 0x0C0E_0003],
+            })
+        );
+        assert_eq!(serialize_rop_request(&request).unwrap(), golden);
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn malformed_supported_rop_buffer_fails_without_partial_request() {
+        let mut cursor = Cursor::new(&[0x02, 0x00, 0x00, 0x01, 0x88, 0x77]);
+
+        assert!(read_rop_request(&mut cursor).is_err());
+    }
+
+    #[test]
+    pub(in crate::mapi) fn malformed_handle_table_is_rejected() {
+        assert!(read_handle_table(&[0x01, 0x02, 0x03]).is_err());
+        assert_eq!(
+            read_handle_table(&[0x6E, 0x00, 0x00, 0x00]).unwrap(),
+            vec![0x6E]
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn invalid_input_handle_index_serializes_common_rop_error() {
+        let request = RopRequest {
+            rop_id: 0x04,
+            input_handle_index: Some(7),
+            output_handle_index: Some(1),
+            payload: vec![0],
+        };
+        let handles = read_handle_table(&[0x6E, 0x00, 0x00, 0x00]).unwrap();
+
+        assert_eq!(input_handle(&handles, &request), None);
+        assert_eq!(
+            rop_handle_index_error_response(&request),
+            vec![0x04, 0x07, 0x0F, 0x01, 0x04, 0x80]
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn reserved_rop_is_terminal_and_uses_common_unsupported_response() {
+        let mut cursor = Cursor::new(&[0x28, 0x00, 0x03, 0xAA]);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert!(request.typed().unsupported_is_terminal());
+        assert_eq!(request.input_handle_index(), Some(3));
+        assert!(serialize_rop_request(&request).is_err());
+        assert_eq!(
+            unsupported_rop_response(0x28, request.response_handle_index()),
+            vec![0x28, 0x03, 0x02, 0x01, 0x04, 0x80]
+        );
     }
 }

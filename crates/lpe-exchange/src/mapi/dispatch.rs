@@ -173,10 +173,24 @@ where
     V: Detector,
 {
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
-        return rop_buffer_with_response(unsupported_rop_response(0, 0), &[]);
+        return rop_buffer_with_response(rop_parse_error_response(), &[]);
     };
     let extended = is_rpc_header_ext_rop_buffer(rop_buffer);
-    let mut handle_slots = read_handle_table(handle_table);
+    let mut handle_slots = match read_handle_table(handle_table) {
+        Ok(handle_slots) => handle_slots,
+        Err(_) => {
+            let response = if extended {
+                rop_buffer_with_response_spec(rop_parse_error_response(), &[])
+            } else {
+                rop_buffer_with_response(rop_parse_error_response(), &[])
+            };
+            return if extended {
+                rpc_header_ext_rop_buffer(response)
+            } else {
+                response
+            };
+        }
+    };
 
     let mut cursor = Cursor::new(requests);
     let mut responses = Vec::new();
@@ -186,11 +200,12 @@ where
         let request = match read_rop_request(&mut cursor) {
             Ok(request) => request,
             Err(_) => {
-                responses.extend_from_slice(&unsupported_rop_response(0, 0));
+                responses.extend_from_slice(&rop_parse_error_response());
                 break;
             }
         };
-        match request.rop_id {
+        let typed_request = request.typed();
+        match typed_request.rop_id() {
             0x01 => release_handle_slot(session, &mut handle_slots, &request),
             0x02 => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
@@ -259,6 +274,10 @@ where
                 }
             }
             0x04 => {
+                if input_handle(&handle_slots, &request).is_none() {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                }
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(|object| object.folder_id())
                     .unwrap_or(ROOT_FOLDER_ID);
@@ -283,6 +302,10 @@ where
                 output_handles.push(handle);
             }
             0x05 => {
+                if input_handle(&handle_slots, &request).is_none() {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                }
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(|object| object.folder_id())
                     .unwrap_or(INBOX_FOLDER_ID);
@@ -2679,6 +2702,9 @@ where
                 rop_id,
                 request.response_handle_index(),
             )),
+        }
+        if typed_request.unsupported_is_terminal() {
+            break;
         }
     }
     let response_handles =

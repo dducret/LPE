@@ -72,6 +72,14 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 | `/rpc/rpcproxy.dll` | authenticated RPC/HTTP mailbox transport path |
 | MAPI identity | store-backed projection from canonical UUIDs to replica GUID, FID, MID, LongTermID, source key, change key, and instance key values |
 
+| MAPI ROP parser / dispatch boundary | Current support |
+| --- | --- |
+| ROP ID handling | `rop.rs` maps parsed ROP buffers to typed request views for the currently supported dispatch surface and keeps unknown or reserved `RopId` values on the unsupported path described by [MS-OXCROPS 2.2.2](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/6c623489-576d-45ef-9288-5b62b73c6961). Unsupported or reserved ROPs return a single common ROP error response instead of letting trailing bytes be interpreted as more ROPs. |
+| Request / response buffers | `rop.rs` owns request parsing, selected typed request serialization for golden fixtures, and common ROP error serialization. `dispatch.rs` consumes parsed request boundaries and must not walk raw request bytes for supported ROPs. |
+| Handle table contract | Execute request handle tables are parsed as 32-bit slots. Malformed handle-table byte counts fail the ROP batch predictably, and hierarchy/content table opens now return ROP handle-index errors when the input handle slot is missing or invalid. |
+| Rows and restrictions | Table rows continue to use the MS-OXCDATA property-row and restriction codecs, including `StandardPropertyRow` and bounded restriction parsing for table filters. Unsupported restriction forms fail through the ROP property/table error path rather than being coerced. |
+| Deferred / unsupported parsed ROPs | Deferred ROPs listed in the unsupported matrix remain parseable only to the documented bounded request length and return ROP-specific protocol errors without canonical mailbox side effects. |
+
 | MAPI property area | Current support |
 | --- | --- |
 | Property tags | `properties.rs` parses a property tag into a 16-bit property ID and a 16-bit MS-OXCDATA property type. IDs `0x8001..0xFFFE` are treated as named-property IDs. |

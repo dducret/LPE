@@ -25,7 +25,9 @@ pub(in crate::mapi) fn plan_mapi_store_access(
     let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
         return MapiAccessPlan::full();
     };
-    let handle_slots = read_handle_table(handle_table);
+    let Ok(handle_slots) = read_handle_table(handle_table) else {
+        return MapiAccessPlan::full();
+    };
     let mut plan = MapiAccessPlan {
         requires_full_snapshot: false,
         object_ids: Vec::new(),

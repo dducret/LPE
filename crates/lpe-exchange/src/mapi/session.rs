@@ -693,11 +693,14 @@ pub(in crate::mapi) fn reset_table_position(object: &mut MapiObject) -> bool {
     }
 }
 
-pub(in crate::mapi) fn read_handle_table(handle_table: &[u8]) -> Vec<u32> {
-    handle_table
+pub(in crate::mapi) fn read_handle_table(handle_table: &[u8]) -> Result<Vec<u32>> {
+    if handle_table.len() % 4 != 0 {
+        return Err(anyhow!("ROP handle table length is not a multiple of 4"));
+    }
+    Ok(handle_table
         .chunks_exact(4)
         .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
