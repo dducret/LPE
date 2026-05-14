@@ -140,6 +140,18 @@ impl MapiPropertyType {
     }
 }
 
+pub(in crate::mapi) fn canonical_property_storage_tag(property_tag: u32) -> u32 {
+    let tag = MapiPropertyTag::new(property_tag);
+    if tag.property_id() >= FIRST_NAMED_PROPERTY_ID {
+        return property_tag;
+    }
+    match tag.property_type() {
+        Some(MapiPropertyType::String8) => (property_tag & 0xFFFF_0000) | 0x001F,
+        Some(MapiPropertyType::MultipleString8) => (property_tag & 0xFFFF_0000) | 0x101F,
+        _ => property_tag,
+    }
+}
+
 pub(in crate::mapi) const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 pub(in crate::mapi) const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
@@ -160,6 +172,7 @@ pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
 pub(in crate::mapi) const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
 pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
+pub(in crate::mapi) const PID_TAG_BODY_STRING8: u32 = 0x1000_001E;
 pub(in crate::mapi) const PID_TAG_BODY_W: u32 = 0x1000_001F;
 pub(in crate::mapi) const PID_TAG_BODY_HTML_W: u32 = 0x1013_001F;
 pub(in crate::mapi) const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;
@@ -392,6 +405,7 @@ pub(in crate::mapi) fn mailbox_property_value(
     mailbox: &JmapMailbox,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mailbox.name.clone())),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
@@ -434,6 +448,7 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
     folder: &MapiCollaborationFolder,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(folder.collection.display_name.clone())),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(folder.item_count)),
@@ -473,6 +488,7 @@ pub(in crate::mapi) fn email_property_value(
     email: &JmapEmail,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
@@ -533,6 +549,7 @@ pub(in crate::mapi) fn contact_property_value(
     folder_id: u64,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
         PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
@@ -588,6 +605,7 @@ pub(in crate::mapi) fn event_property_value(
     folder_id: u64,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
@@ -627,6 +645,7 @@ pub(in crate::mapi) fn attachment_property_value(
     attachment: &MapiAttachment,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
         PID_TAG_ATTACH_NUM => Some(MapiValue::U32(attachment.attach_num)),
         PID_TAG_ATTACH_FILENAME_W | PID_TAG_ATTACH_LONG_FILENAME_W => {
@@ -862,14 +881,16 @@ pub(in crate::mapi) async fn open_stream_data<S: ExchangeStore>(
             attachment_stream_data(store, principal, session, input_handle, open_mode, snapshot)
                 .await
         }
-        PID_TAG_BODY_W | PID_TAG_BODY_HTML_W | PID_TAG_HTML_BINARY => message_body_stream_data(
-            session,
-            input_handle,
-            property_tag,
-            open_mode,
-            mailboxes,
-            emails,
-        ),
+        PID_TAG_BODY_STRING8 | PID_TAG_BODY_W | PID_TAG_BODY_HTML_W | PID_TAG_HTML_BINARY => {
+            message_body_stream_data(
+                session,
+                input_handle,
+                property_tag,
+                open_mode,
+                mailboxes,
+                emails,
+            )
+        }
         _ => None,
     }
 }
@@ -904,6 +925,7 @@ pub(in crate::mapi) fn message_body_stream_data(
 
     let stream = match (property_tag, open_mode) {
         (_, 2) => Vec::new(),
+        (PID_TAG_BODY_STRING8, _) => string8z_bytes(&body_text),
         (PID_TAG_BODY_W, _) => utf16z_bytes(&body_text),
         (PID_TAG_BODY_HTML_W, _) => utf16z_bytes(body_html.as_deref().unwrap_or("")),
         (PID_TAG_HTML_BINARY, _) => body_html.unwrap_or_default().into_bytes(),
@@ -927,6 +949,15 @@ pub(in crate::mapi) fn utf16z_bytes(value: &str) -> Vec<u8> {
         .flat_map(u16::to_le_bytes)
         .collect::<Vec<_>>();
     bytes.extend_from_slice(&0u16.to_le_bytes());
+    bytes
+}
+
+pub(in crate::mapi) fn string8z_bytes(value: &str) -> Vec<u8> {
+    let mut bytes = value
+        .bytes()
+        .map(|byte| if byte.is_ascii() { byte } else { b'?' })
+        .collect::<Vec<_>>();
+    bytes.push(0);
     bytes
 }
 
@@ -1047,7 +1078,7 @@ pub(in crate::mapi) fn sync_stream_target(
             if let Some(MapiObject::PendingMessage { properties, .. }) =
                 session.handles.get_mut(&handle)
             {
-                properties.insert(property_tag, value);
+                properties.insert(canonical_property_storage_tag(property_tag), value);
                 Some(())
             } else {
                 None
@@ -1061,12 +1092,21 @@ pub(in crate::mapi) fn stream_property_value(
     data: Vec<u8>,
 ) -> Option<MapiValue> {
     match property_tag {
+        PID_TAG_BODY_STRING8 => Some(MapiValue::String(decode_string8_stream_value(&data))),
         PID_TAG_BODY_W | PID_TAG_BODY_HTML_W => {
             Some(MapiValue::String(decode_utf16_stream_value(&data)?))
         }
         PID_TAG_HTML_BINARY => Some(MapiValue::Binary(data)),
         _ => None,
     }
+}
+
+pub(in crate::mapi) fn decode_string8_stream_value(data: &[u8]) -> String {
+    let value = data
+        .strip_suffix(&[0])
+        .or_else(|| data.strip_suffix(&[0, 0]))
+        .unwrap_or(data);
+    String::from_utf8_lossy(value).into_owned()
 }
 
 pub(in crate::mapi) fn decode_utf16_stream_value(data: &[u8]) -> Option<String> {
@@ -1540,6 +1580,7 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
 pub(in crate::mapi) fn mapi_submit_from_email(
     principal: &AccountPrincipal,
     email: &JmapEmail,
+    attachments: Vec<AttachmentUploadInput>,
 ) -> SubmitMessageInput {
     SubmitMessageInput {
         draft_message_id: Some(email.id),
@@ -1561,7 +1602,7 @@ pub(in crate::mapi) fn mapi_submit_from_email(
         size_octets: i64::try_from(email.size_octets).unwrap_or(i64::MAX),
         unread: Some(email.unread),
         flagged: Some(email.flagged),
-        attachments: Vec::new(),
+        attachments,
     }
 }
 
@@ -1782,6 +1823,10 @@ pub(in crate::mapi) fn apply_mapi_property_values(
     object: Option<&mut MapiObject>,
     values: Vec<(u32, MapiValue)>,
 ) -> Result<()> {
+    let values = values
+        .into_iter()
+        .map(|(tag, value)| (canonical_property_storage_tag(tag), value))
+        .collect::<Vec<_>>();
     match object {
         Some(MapiObject::PendingMessage { properties, .. }) => {
             properties.extend(values);
@@ -1814,16 +1859,20 @@ pub(in crate::mapi) fn delete_mapi_properties(
     object: Option<&mut MapiObject>,
     property_tags: &[u32],
 ) -> Result<()> {
+    let property_tags = property_tags
+        .iter()
+        .flat_map(|tag| [*tag, canonical_property_storage_tag(*tag)])
+        .collect::<Vec<_>>();
     match object {
         Some(MapiObject::PendingMessage { properties, .. }) => {
-            for tag in property_tags {
+            for tag in &property_tags {
                 properties.remove(tag);
             }
             Ok(())
         }
         Some(MapiObject::PendingContact { properties, .. })
         | Some(MapiObject::PendingEvent { properties, .. }) => {
-            for tag in property_tags {
+            for tag in &property_tags {
                 properties.remove(tag);
             }
             Ok(())
@@ -1831,7 +1880,7 @@ pub(in crate::mapi) fn delete_mapi_properties(
         Some(MapiObject::PendingAttachment {
             properties, data, ..
         }) => {
-            for tag in property_tags {
+            for tag in &property_tags {
                 properties.remove(tag);
                 if *tag == PID_TAG_ATTACH_DATA_BINARY {
                     data.clear();

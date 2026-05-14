@@ -1656,10 +1656,11 @@ pub(in crate::mapi) fn pending_message_property_value(
     properties: &HashMap<u32, MapiValue>,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    let lookup_tag = canonical_property_storage_tag(property_tag);
     properties
-        .get(&property_tag)
+        .get(&lookup_tag)
         .cloned()
-        .or_else(|| match property_tag {
+        .or_else(|| match lookup_tag {
             PID_TAG_NORMALIZED_SUBJECT_W => properties.get(&PID_TAG_SUBJECT_W).cloned(),
             PID_TAG_SUBJECT_W => properties.get(&PID_TAG_NORMALIZED_SUBJECT_W).cloned(),
             PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),

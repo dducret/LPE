@@ -2014,7 +2014,10 @@ pub(in crate::mapi) fn parse_pending_recipient_row(
     let mut cursor = Cursor::new(row);
     let mut values = HashMap::new();
     for column in columns {
-        values.insert(*column, parse_property_value_for_tag(&mut cursor, *column)?);
+        values.insert(
+            canonical_property_storage_tag(*column),
+            parse_property_value_for_tag(&mut cursor, *column)?,
+        );
     }
     let recipient_type = values
         .get(&PID_TAG_RECIPIENT_TYPE)
@@ -2129,7 +2132,7 @@ pub(in crate::mapi) fn parse_tagged_property_value(cursor: &mut Cursor<'_>) -> R
 pub(in crate::mapi) fn parse_tagged_property(cursor: &mut Cursor<'_>) -> Result<(u32, MapiValue)> {
     let property_tag = cursor.read_u32()?;
     let value = parse_property_value_for_tag(cursor, property_tag)?;
-    Ok((property_tag, value))
+    Ok((canonical_property_storage_tag(property_tag), value))
 }
 
 pub(in crate::mapi) fn parse_named_property(cursor: &mut Cursor<'_>) -> Result<MapiNamedProperty> {

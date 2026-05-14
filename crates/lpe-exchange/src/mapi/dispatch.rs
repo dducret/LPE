@@ -1810,7 +1810,29 @@ where
                         };
                         let protected_email =
                             protected_emails.iter().find(|loaded| loaded.id == email.id);
-                        mapi_submit_from_email(principal, protected_email.unwrap_or(email))
+                        let source_email = protected_email.unwrap_or(email);
+                        let attachments = match mapi_submit_attachments_from_email(
+                            store,
+                            principal.account_id,
+                            source_email,
+                        )
+                        .await
+                        {
+                            Ok(attachments) => attachments,
+                            Err(error) => {
+                                warn!(
+                                    error = %error,
+                                    "failed to load attachments for MAPI draft submit"
+                                );
+                                responses.extend_from_slice(&rop_error_response(
+                                    request.rop_id,
+                                    request.response_handle_index(),
+                                    0x8004_010F,
+                                ));
+                                continue;
+                            }
+                        };
+                        mapi_submit_from_email(principal, source_email, attachments)
                     }
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
@@ -2997,6 +3019,43 @@ where
     } else {
         response
     }
+}
+
+async fn mapi_submit_attachments_from_email<S>(
+    store: &S,
+    account_id: Uuid,
+    email: &JmapEmail,
+) -> Result<Vec<AttachmentUploadInput>>
+where
+    S: ExchangeStore,
+{
+    if !email.has_attachments {
+        return Ok(Vec::new());
+    }
+
+    let attachments = store
+        .fetch_message_attachments(account_id, email.id)
+        .await?;
+    let mut uploads = Vec::with_capacity(attachments.len());
+    for attachment in attachments {
+        let Some(content) = store
+            .fetch_attachment_content(account_id, &attachment.file_reference)
+            .await?
+        else {
+            return Err(anyhow::anyhow!(
+                "missing attachment content for {}",
+                attachment.file_reference
+            ));
+        };
+        uploads.push(AttachmentUploadInput {
+            file_name: content.file_name,
+            media_type: content.media_type,
+            disposition: None,
+            content_id: None,
+            blob_bytes: content.blob_bytes,
+        });
+    }
+    Ok(uploads)
 }
 
 async fn mapi_message_ids_for_deleted_changes<S>(
