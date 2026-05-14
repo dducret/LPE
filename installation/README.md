@@ -650,12 +650,15 @@ publication returns an Outlook autodiscover XML response containing `IMAP`,
 an Autodiscover v2 JSON response for single-protocol endpoint probes, an
 opt-in `WEB` EWS discovery block when
 `LPE_AUTOCONFIG_EWS_ENABLED` is enabled, an opt-in `mapiHttp` block when
-`LPE_AUTOCONFIG_MAPI_ENABLED` is enabled, a legacy top-level `EXCH` provider
-only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an
-explicitly published EWS or MAPI surface, and a legacy top-level `EXPR`
-provider only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` is also enabled
-with `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` and a real `/rpc/rpcproxy.dll`
-Outlook Anywhere path. `OPTIONS
+both `LPE_AUTOCONFIG_MAPI_ENABLED` and
+`LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are enabled, a legacy top-level
+`EXCH` provider only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also
+enabled with an explicitly published EWS or fully gated MAPI surface, and a
+legacy top-level `EXPR` provider only when
+`LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` is also enabled with
+`LPE_AUTOCONFIG_RPC_PROXY_ENABLED`,
+`LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`, and a real
+`/rpc/rpcproxy.dll` Outlook Anywhere path. `OPTIONS
 /Microsoft-Server-ActiveSync` returns the `ms-asprotocolversions` and
 `ms-asprotocolcommands` headers; when sent without mailbox credentials it may
 return a `401` `Basic realm="LPE ActiveSync"` challenge with those headers.
@@ -686,15 +689,15 @@ For public client auto-configuration, the exposed front end must remain `LPE-CT`
 - Outlook support is a `0.2.0` goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, `0.2.0` deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` plus Outlook Anywhere / RPC over HTTP release path
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are the `0.2.0` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` is explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED` and `LPE_AUTOCONFIG_RPC_PROXY_ENABLED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
+- `MAPI over HTTP` routes are the `0.2.0` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or fully gated MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
 - MAPI over HTTP session context, request-id replay protection, ROP handles, and FastTransfer / ICS handles are in-process state on the core `LPE` node. Multi-node deployments must keep `/mapi/emsmdb`, `/mapi/nspi`, and `/rpc/rpcproxy.dll` traffic sticky to the same active core node for the life of the MAPI session, or expect Outlook to reconnect through fresh `Connect` / `Bind` / `Logon` probes after a restart or failover.
 - Outlook Anywhere / RPC over HTTP is required when legacy `EXPR` is published; `/rpc/rpcproxy.dll` must be routed by `LPE-CT` to the core exchange adapter and must not be replaced by a static web-server response.
 - The public `/rpc/rpcproxy.dll` route must use streaming proxy settings equivalent to `/mapi/`: long read/send timeouts, `proxy_buffering off`, `proxy_request_buffering off`, and `client_max_body_size 0`. RCA `RPC_IN_DATA` opens a long upload channel with a very large advertised request body; without the explicit body-size override, nginx can reject the mailbox-store channel with `413` before the core service can drain it.
-- Microsoft Remote Connectivity Analyzer Outlook Connectivity expects top-level `EXCH` and `EXPR` provider sections; the errors "The EXCH provider section is missing from the Autodiscover response" or "The EXPR Provider section is missing in the Autodiscover response" mean that provider metadata is not published. For the EWS compatibility path, set `LPE_AUTOCONFIG_EWS_ENABLED=true`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED=true`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=true`, and `LPE_AUTOCONFIG_RPC_PROXY_ENABLED=true`
+- Microsoft Remote Connectivity Analyzer Outlook Connectivity expects top-level `EXCH` and `EXPR` provider sections; the errors "The EXCH provider section is missing from the Autodiscover response" or "The EXPR Provider section is missing in the Autodiscover response" mean that provider metadata is not published. Do not turn on `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` only to satisfy RCA discovery. Enable it only after local MAPI/HTTP tests, live RCA readiness, Microsoft Remote Connectivity Analyzer Outlook Connectivity, and real Outlook profile/sync/reconnect evidence all pass. For the EWS compatibility path, set `LPE_AUTOCONFIG_EWS_ENABLED=true`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED=true`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED=true`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED=true`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED=true` only after that evidence is recorded.
 - no client `SMTP` endpoint should be advertised unless the authenticated `LPE-CT` submission listener is configured, exposed on `465`, and covered by the public certificate
 - the internal `LPE -> LPE-CT` relay must never be advertised as a client-submission endpoint
 
-The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, and `LPE_AUTOCONFIG_MAPI_NSPI_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
+The `LPE_PUBLIC_SCHEME`, `LPE_PUBLIC_HOSTNAME`, `LPE_AUTOCONFIG_IMAP_HOST`, `LPE_AUTOCONFIG_IMAP_PORT`, `LPE_AUTOCONFIG_SMTP_HOST`, `LPE_AUTOCONFIG_SMTP_PORT`, `LPE_AUTOCONFIG_SMTP_SOCKET_TYPE`, `LPE_AUTOCONFIG_EWS_ENABLED`, `LPE_AUTOCONFIG_EWS_URL`, `LPE_AUTOCONFIG_MAPI_ENABLED`, `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`, `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_MAPI_EMSMDB_URL`, and `LPE_AUTOCONFIG_MAPI_NSPI_URL` variables let you align the published HTTP/XML settings with the real public hostname. The detailed behavior is documented in `docs/architecture/client-autoconfiguration.md`.
 
 For Microsoft Remote Connectivity Analyzer troubleshooting, run `LPE` with
 `RUST_LOG=info` and preferably `LPE_LOG_FORMAT=json`. The core service emits
