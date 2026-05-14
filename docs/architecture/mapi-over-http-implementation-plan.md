@@ -142,4 +142,5 @@ The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardP
 - Every implementation ticket in this document maps to one or more Microsoft specification sections.
 - New MAPI behavior must add tests for the request type, ROP group, identity/property/sync/session behavior, or deferred parseability it changes.
 - New MAPI behavior must preserve canonical `LPE` submission, `Sent`, mailbox, contact, calendar, task, rights, and protected `Bcc` boundaries.
+- MAPI mutation changes for send, draft, move, copy, delete, flags, attachments, or protected recipients must pass the cross-protocol storage gate proving IMAP and JMAP observe the same canonical state, including no MAPI-only `Sent`, `Outbox`, search, or sync state.
 - Public `mapiHttp`, `EXCH`, and `EXPR` publication remains gated by the existing architecture and client-autoconfiguration rules.

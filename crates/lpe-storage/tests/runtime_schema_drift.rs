@@ -2,8 +2,8 @@ use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AuditEntryInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    AttachmentUploadInput, AuditEntryInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob,
+    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -135,6 +135,12 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
                 exercise_index_plan_paths(pool, &fixture, submitted).await,
             );
         }
+
+        collect(
+            &mut failures,
+            "MAPI cross-protocol interoperability gate",
+            exercise_mapi_cross_protocol_interoperability_gate(&storage, pool, &fixture).await,
+        );
 
         collect(
             &mut failures,
@@ -1617,6 +1623,286 @@ async fn exercise_mailbox_move_path(
             "mailbox-scoped JMAP Email/query must return the message in mailbox {mailbox_id}"
         );
     }
+
+    Ok(())
+}
+
+async fn exercise_mapi_cross_protocol_interoperability_gate(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let submitted = storage
+        .submit_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "mapi".to_string(),
+                from_display: Some("Alice MAPI".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "bob@example.test".to_string(),
+                    display_name: Some("Bob Example".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: vec![SubmittedRecipientInput {
+                    address: "mapi-hidden@example.test".to_string(),
+                    display_name: Some("Hidden MAPI".to_string()),
+                }],
+                subject: "MAPI interoperability gate".to_string(),
+                body_text: "MAPI gate searchable body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!("<mapi-gate-{}@example.test>", Uuid::new_v4())),
+                mime_blob_ref: None,
+                size_octets: 256,
+                unread: Some(false),
+                flagged: Some(false),
+                attachments: vec![AttachmentUploadInput {
+                    file_name: "mapi-gate.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    disposition: Some("attachment".to_string()),
+                    content_id: None,
+                    blob_bytes: b"%PDF-mapi-gate".to_vec(),
+                }],
+            },
+            audit(
+                "alice@example.test",
+                "mapi-submit-message",
+                "MAPI gate submit",
+            ),
+        )
+        .await
+        .context("submit MAPI-sourced canonical message")?;
+
+    let queue_protocol = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT source_protocol
+        FROM submission_queue
+        WHERE tenant_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(submitted.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("load MAPI submission source protocol")?;
+    anyhow::ensure!(
+        queue_protocol == "mapi",
+        "MAPI send must use canonical submission_queue source_protocol=mapi"
+    );
+
+    let membership = sqlx::query(
+        r#"
+        SELECT id, imap_uid, modseq, is_seen, is_flagged
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.sent_mailbox_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load MAPI sent membership")?;
+    let sent_membership_id: Uuid = membership.try_get("id")?;
+    let sent_uid: i64 = membership.try_get("imap_uid")?;
+    let sent_modseq: i64 = membership.try_get("modseq")?;
+    anyhow::ensure!(
+        membership.try_get::<bool, _>("is_seen")?
+            && !membership.try_get::<bool, _>("is_flagged")?,
+        "MAPI canonical Sent membership must start with submitted read/flag state"
+    );
+
+    let jmap_email = storage
+        .fetch_jmap_emails(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch JMAP projection for MAPI sent message")?
+        .into_iter()
+        .next()
+        .context("MAPI sent message missing from JMAP projection")?;
+    anyhow::ensure!(
+        jmap_email.mailbox_ids == vec![submitted.sent_mailbox_id]
+            && jmap_email.mailbox_role == "sent"
+            && jmap_email.delivery_status == "queued"
+            && jmap_email.has_attachments,
+        "JMAP projection must expose the single canonical Sent message with queued submission and attachment state"
+    );
+    anyhow::ensure!(
+        jmap_email.bcc.is_empty(),
+        "normal JMAP projection must not expose MAPI submitted Bcc recipients"
+    );
+
+    let protected_jmap = storage
+        .fetch_jmap_emails_with_protected_bcc(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch protected JMAP projection for MAPI sent message")?;
+    anyhow::ensure!(
+        protected_jmap.iter().any(|email| email
+            .bcc
+            .iter()
+            .any(|recipient| recipient.address == "mapi-hidden@example.test")),
+        "explicit protected fetch must retain the MAPI submitted Bcc recipient"
+    );
+
+    let imap_email = storage
+        .fetch_imap_emails(fixture.account_id, submitted.sent_mailbox_id)
+        .await
+        .context("fetch IMAP projection for MAPI sent message")?
+        .into_iter()
+        .find(|email| email.id == submitted.message_id)
+        .context("MAPI sent message missing from IMAP Sent projection")?;
+    anyhow::ensure!(
+        i64::from(imap_email.uid) == sent_uid && i64::try_from(imap_email.modseq)? == sent_modseq,
+        "IMAP projection must expose the canonical UID and modseq for the MAPI sent membership"
+    );
+    anyhow::ensure!(
+        imap_email.bcc.is_empty()
+            && imap_email.has_attachments
+            && imap_email
+                .mime_parts
+                .iter()
+                .any(|part| part.file_name.as_deref() == Some("mapi-gate.pdf")),
+        "IMAP projection must hide Bcc while exposing canonical attachment metadata"
+    );
+
+    let attachment_blob_status = sqlx::query(
+        r#"
+        SELECT b.extraction_status, COUNT(j.id) AS job_count
+        FROM attachments a
+        JOIN blobs b
+          ON b.tenant_id = a.tenant_id
+         AND b.domain_id = a.domain_id
+         AND b.id = a.blob_id
+         AND b.blob_kind = a.blob_kind
+        LEFT JOIN attachment_extraction_jobs j
+          ON j.tenant_id = a.tenant_id
+         AND j.blob_id = a.blob_id
+         AND j.blob_kind = a.blob_kind
+        WHERE a.tenant_id = $1
+          AND a.account_id = $2
+          AND a.mailbox_message_id = $3
+          AND a.message_id = $4
+        GROUP BY b.extraction_status
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(sent_membership_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("load MAPI sent attachment blob status")?;
+    anyhow::ensure!(
+        attachment_blob_status.try_get::<String, _>("extraction_status")? == "queued"
+            && attachment_blob_status.try_get::<i64, _>("job_count")? == 1,
+        "PDF attachment submitted through MAPI must enter the canonical attachment extraction queue"
+    );
+
+    let hidden_search = storage
+        .query_jmap_email_ids(fixture.account_id, None, Some("mapi-hidden"), 0, 10)
+        .await
+        .context("query JMAP search for MAPI Bcc recipient")?;
+    anyhow::ensure!(
+        !hidden_search.ids.contains(&submitted.message_id),
+        "MAPI submitted Bcc recipient must not be searchable through JMAP"
+    );
+
+    let hidden_ai_projection_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM document_projections
+        WHERE tenant_id = $1
+          AND owner_account_id = $2
+          AND source_object_id = $3
+          AND (
+              participants_visible ILIKE '%mapi-hidden%'
+              OR body_text ILIKE '%mapi-hidden%'
+              OR preview ILIKE '%mapi-hidden%'
+          )
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("query AI projections for MAPI Bcc recipient")?;
+    anyhow::ensure!(
+        hidden_ai_projection_count == 0,
+        "AI-facing document projections must not contain MAPI submitted Bcc recipients"
+    );
+
+    storage
+        .update_jmap_email_flags(
+            fixture.account_id,
+            submitted.message_id,
+            Some(true),
+            Some(true),
+            audit(
+                "alice@example.test",
+                "mapi-set-read-flags",
+                "MAPI gate flags",
+            ),
+        )
+        .await
+        .context("apply MAPI-style flag mutation through canonical store")?;
+
+    let flagged_membership = sqlx::query(
+        r#"
+        SELECT imap_uid, modseq, is_seen, is_flagged
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(sent_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load MAPI sent membership after flag mutation")?;
+    anyhow::ensure!(
+        flagged_membership.try_get::<i64, _>("imap_uid")? == sent_uid
+            && flagged_membership.try_get::<i64, _>("modseq")? > sent_modseq
+            && !flagged_membership.try_get::<bool, _>("is_seen")?
+            && flagged_membership.try_get::<bool, _>("is_flagged")?,
+        "MAPI flag mutation must preserve IMAP UID, advance modseq, and update canonical flags"
+    );
+
+    let updated_imap = storage
+        .fetch_imap_emails(fixture.account_id, submitted.sent_mailbox_id)
+        .await
+        .context("fetch IMAP projection after MAPI flag mutation")?
+        .into_iter()
+        .find(|email| email.id == submitted.message_id)
+        .context("MAPI sent message missing from IMAP after flag mutation")?;
+    anyhow::ensure!(
+        i64::from(updated_imap.uid) == sent_uid
+            && updated_imap.modseq > u64::try_from(sent_modseq)?
+            && updated_imap.unread
+            && updated_imap.flagged,
+        "IMAP projection must reflect MAPI flag mutation without UID churn"
+    );
+
+    let updated_jmap = storage
+        .fetch_jmap_emails(fixture.account_id, &[submitted.message_id])
+        .await
+        .context("fetch JMAP projection after MAPI flag mutation")?
+        .into_iter()
+        .next()
+        .context("MAPI sent message missing from JMAP after flag mutation")?;
+    anyhow::ensure!(
+        updated_jmap.unread && updated_jmap.flagged && updated_jmap.bcc.is_empty(),
+        "JMAP projection must reflect MAPI flag mutation while still hiding protected Bcc"
+    );
 
     Ok(())
 }

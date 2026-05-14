@@ -120,6 +120,21 @@ contacts, calendars, tasks, blobs, push, and submission over canonical LPE state
 | Contacts/calendars/tasks | Core LPE collaboration state | ignored | JMAP collaboration methods where exposed |
 | Client discovery | Autoconfiguration policy | IMAP may be published only as implemented mailbox access, with client `SMTP` only when real authenticated submission exists | JMAP publishes only JMAP endpoints; Exchange/MAPI discovery remains separately gated and opt-in |
 
+## MAPI Cross-Protocol Interoperability Gate
+
+MAPI over HTTP remains a compatibility adapter over the same canonical state used
+by IMAP and JMAP. The gate below is required before widening MAPI mutation
+behavior or publishing MAPI as a default Outlook desktop path.
+
+| MAPI mutation area | IMAP invariant | JMAP invariant | Required evidence |
+| --- | --- | --- | --- |
+| Send and opened-draft submit through `RopSubmitMessage` or `RopTransportSend` | The sent item appears once in canonical `Sent`; no IMAP-local `Sent` or `Outbox` exists; the Sent membership has a stable mailbox UID and mod-sequence. | `Email/get`, `Email/query`, and `EmailSubmission/get` observe the same canonical message/submission; normal responses do not expose protected `Bcc`. | `lpe-exchange` MAPI lifecycle tests and `lpe-storage` runtime cross-protocol gate using `source_protocol = 'mapi'`. |
+| Draft create/save/import | Drafts are ordinary canonical `Drafts` mailbox memberships and can be fetched or deleted through IMAP semantics without protocol-local draft state. | `Email/get` reports canonical `Drafts` membership and mailbox state; later submission removes the source draft through the canonical delete path. | MAPI create/save/import tests plus storage draft/delete replay coverage. |
+| Move, copy, and delete | Move preserves the source UID on the tombstoned source membership and allocates a target UID from target mailbox `UIDNEXT`; hard delete exports a tombstone with the source UID; copy creates an additional canonical visible membership. | Unscoped `Email/query` returns one id per canonical message, mailbox-scoped queries reflect visible memberships, and `Email/changes` reports moves as updates and final deletes as destruction. | Storage move/copy/delete cross-protocol checks and MAPI ROP move/delete/import tests. |
+| Flags and read state | MAPI read/flag mutations update canonical mailbox-message flags, preserve the IMAP UID, and advance the mod-sequence. | `Email/get` keyword/read projections reflect the same canonical flags. | `RopSetReadFlags`, ICS read-state import, and storage runtime flag-mutation checks. |
+| Attachments | Attachment tables and body fetches expose canonical MIME/attachment metadata; supported text-extraction formats follow `docs/architecture/attachments-v1.md`. | Blob and Email body-part projections use canonical blob/attachment records; attachment text remains Bcc-safe. | MAPI attachment stream/table tests and storage runtime attachment queue checks. |
+| Protected `Bcc` | `FETCH`, `SEARCH`, logs, diagnostics, and normal projections do not expose or match protected `Bcc`. | `Email/get`, `Email/query`, snippets, and AI-facing document projections exclude `Bcc`; protected access requires an explicit boundary. | IMAP/JMAP Bcc tests, MAPI recipient/manifest tests, schema contract checks, and the storage runtime cross-protocol gate. |
+
 ## References
 
 - Microsoft Learn: POP3 and IMAP4 in Exchange Server.

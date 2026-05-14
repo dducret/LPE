@@ -6898,6 +6898,14 @@ async fn mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end() {
     {
         let canonical = emails.lock().unwrap();
         assert!(canonical.iter().all(|email| email.id != draft_message_id));
+        assert_eq!(
+            canonical
+                .iter()
+                .filter(|email| email.mailbox_role == "sent")
+                .count(),
+            1
+        );
+        assert!(canonical.iter().all(|email| email.mailbox_role != "outbox"));
         let sent = canonical
             .iter()
             .find(|email| email.mailbox_role == "sent")
