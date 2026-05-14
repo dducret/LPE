@@ -11152,6 +11152,56 @@ async fn mapi_over_http_denies_mutation_without_folder_write_permission() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_denies_contents_table_without_folder_read_permission() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        mapi_folder_permissions: Arc::new(Mutex::new(vec![MapiFolderPermission {
+            mailbox_id: Uuid::parse_str(inbox_id).unwrap(),
+            member_account_id: Some(account.account_id),
+            member_name: account.display_name,
+            rights: crate::mapi::permissions::rights_from_grant(false, false, false, false),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x05, 0x02, 0x05, 0x00, 0x07, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_search_criteria_rops_return_rop_specific_protocol_errors() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {

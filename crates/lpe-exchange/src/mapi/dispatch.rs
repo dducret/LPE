@@ -311,6 +311,18 @@ where
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(|object| object.folder_id())
                     .unwrap_or(INBOX_FOLDER_ID);
+                if !snapshot
+                    .folder_access_for_principal(folder_id, principal.account_id)
+                    .map(|access| access.may_read)
+                    .unwrap_or(true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x05,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::ContentsTable {
