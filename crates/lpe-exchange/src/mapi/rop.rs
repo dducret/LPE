@@ -3231,6 +3231,7 @@ mod tests {
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
             next_local_replica_sequence: 1,
             completed_execute_requests: HashMap::new(),
+            completed_execute_request_order: VecDeque::new(),
         };
         let stale = MapiSession {
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1),

@@ -406,8 +406,11 @@ pub(in crate::mapi) fn connect_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let session_id = reconnect_session(endpoint, principal, headers)
-        .unwrap_or_else(|| create_session(endpoint, principal));
+    let session_id = match reconnect_session(endpoint, principal, headers, "Connect", request_id) {
+        Ok(Some(session_id)) => session_id,
+        Ok(None) => create_session(endpoint, principal),
+        Err(response) => return response,
+    };
     let cookies = session_context_cookies(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);

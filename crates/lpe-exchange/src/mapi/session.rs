@@ -21,6 +21,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_named_property_id: u16,
     pub(in crate::mapi) next_local_replica_sequence: u64,
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
+    pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,23 +197,42 @@ pub(in crate::mapi) fn begin_active_session_request(
     }
 }
 
+pub(in crate::mapi) fn session_request_is_active(session_id: &str) -> bool {
+    let guard = active_session_requests()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    guard.contains(session_id)
+}
+
 pub(in crate::mapi) fn reconnect_session(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
     headers: &HeaderMap,
-) -> Option<String> {
-    let previous_session_id = request_cookie(endpoint, headers)?;
+    request_type: &str,
+    request_id: &str,
+) -> std::result::Result<Option<String>, Response> {
+    let Some(previous_session_id) = request_cookie(endpoint, headers) else {
+        return Ok(None);
+    };
+    if session_request_is_active(&previous_session_id) {
+        return Err(mapi_diagnostic_response(
+            request_type,
+            request_id,
+            15,
+            "MAPI session already has an active request",
+        ));
+    }
     let Some(session) = remove_session(&previous_session_id) else {
-        return None;
+        return Ok(None);
     };
     if !session_matches(&session, endpoint, principal) {
         store_session(previous_session_id, session);
-        return None;
+        return Ok(None);
     }
 
     let session_id = Uuid::new_v4().to_string();
     store_session(session_id.clone(), session);
-    Some(session_id)
+    Ok(Some(session_id))
 }
 
 pub(in crate::mapi) fn create_session(
@@ -235,6 +255,7 @@ pub(in crate::mapi) fn create_session(
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
         next_local_replica_sequence: 1,
         completed_execute_requests: HashMap::new(),
+        completed_execute_request_order: VecDeque::new(),
     };
     let mut guard = sessions()
         .lock()
@@ -419,10 +440,17 @@ pub(in crate::mapi) fn cache_execute_response(
     rop_fingerprint: u64,
     response_body: &[u8],
 ) {
-    if session.completed_execute_requests.len() >= MAX_CACHED_EXECUTE_REQUESTS {
-        if let Some(oldest_key) = session.completed_execute_requests.keys().min().cloned() {
-            session.completed_execute_requests.remove(&oldest_key);
+    if !session.completed_execute_requests.contains_key(request_id) {
+        while session.completed_execute_requests.len() >= MAX_CACHED_EXECUTE_REQUESTS {
+            if let Some(oldest_key) = session.completed_execute_request_order.pop_front() {
+                session.completed_execute_requests.remove(&oldest_key);
+            } else {
+                break;
+            }
         }
+        session
+            .completed_execute_request_order
+            .push_back(request_id.to_string());
     }
     session.completed_execute_requests.insert(
         request_id.to_string(),
@@ -670,4 +698,81 @@ pub(in crate::mapi) fn read_handle_table(handle_table: &[u8]) -> Vec<u32> {
         .chunks_exact(4)
         .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn principal() -> AccountPrincipal {
+        AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "user@example.test".to_string(),
+            display_name: "User".to_string(),
+        }
+    }
+
+    #[test]
+    fn reconnect_session_rejects_active_context() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let _active = begin_active_session_request(&session_id).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            HeaderValue::from_str(&format!("MapiContext={session_id}")).unwrap(),
+        );
+
+        let Err(response) = reconnect_session(
+            MapiEndpoint::Emsmdb,
+            &principal,
+            &headers,
+            "Connect",
+            "{11111111-2222-3333-4444-555555555555}:1",
+        ) else {
+            panic!("active session reconnect should be rejected");
+        };
+
+        assert_eq!(
+            response_header(&response, "x-requesttype").unwrap(),
+            "Connect"
+        );
+        assert_eq!(
+            response_header(&response, "x-requestid").unwrap(),
+            "{11111111-2222-3333-4444-555555555555}:1"
+        );
+        assert_eq!(response_header(&response, "x-responsecode").unwrap(), "15");
+        remove_session(&session_id);
+    }
+
+    #[test]
+    fn execute_replay_cache_evicts_oldest_inserted_request_id() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let mut session = remove_session(&session_id).unwrap();
+
+        for index in 0..=MAX_CACHED_EXECUTE_REQUESTS {
+            cache_execute_response(
+                &mut session,
+                &format!("{{11111111-2222-3333-4444-555555555555}}:{index}"),
+                index as u64,
+                &[index as u8],
+            );
+        }
+
+        assert!(!session
+            .completed_execute_requests
+            .contains_key("{11111111-2222-3333-4444-555555555555}:0"));
+        assert!(session
+            .completed_execute_requests
+            .contains_key("{11111111-2222-3333-4444-555555555555}:1"));
+        assert!(session.completed_execute_requests.contains_key(&format!(
+            "{{11111111-2222-3333-4444-555555555555}}:{MAX_CACHED_EXECUTE_REQUESTS}"
+        )));
+        assert_eq!(
+            session.completed_execute_requests.len(),
+            MAX_CACHED_EXECUTE_REQUESTS
+        );
+    }
 }
