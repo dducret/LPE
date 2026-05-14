@@ -162,6 +162,23 @@ fn collaboration_grant_storage_uses_concrete_grant_tables() {
 }
 
 #[test]
+fn default_task_list_upsert_targets_partial_role_index() {
+    assert!(
+        SCHEMA.contains("CREATE UNIQUE INDEX task_lists_owner_role_idx")
+            && SCHEMA.contains(
+                "ON task_lists (tenant_id, owner_account_id, role)\n    WHERE role <> 'custom'"
+            ),
+        "task list default-role uniqueness must remain a partial index"
+    );
+    assert!(
+        TASKS_STORAGE.contains(
+            "ON CONFLICT (tenant_id, owner_account_id, role)\n            WHERE role <> 'custom'"
+        ),
+        "default task-list bootstrap must target the same partial unique index predicate"
+    );
+}
+
+#[test]
 fn grant_changes_emit_canonical_rights_journal_entries() {
     assert!(
         CHANGE_STORAGE.contains("pub(crate) async fn emit_mail_delegation_change")

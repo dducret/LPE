@@ -1389,7 +1389,9 @@ impl Storage {
             r#"
             INSERT INTO task_lists (id, tenant_id, owner_account_id, display_name, role, sort_order)
             VALUES ($1, $2, $3, $4, $5, 0)
-            ON CONFLICT (tenant_id, owner_account_id, role) DO UPDATE SET
+            ON CONFLICT (tenant_id, owner_account_id, role)
+            WHERE role <> 'custom'
+            DO UPDATE SET
                 display_name = task_lists.display_name
             RETURNING
                 id,
