@@ -15,6 +15,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     messages: Vec<MapiMessage>,
     contacts: Vec<MapiContact>,
     events: Vec<MapiEvent>,
+    content_windows: Vec<MapiContentTableWindow>,
 }
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,15 @@ pub(crate) struct MapiAttachment {
     pub(crate) file_name: String,
     pub(crate) media_type: String,
     pub(crate) size_octets: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapiContentTableWindow {
+    pub(crate) folder_id: u64,
+    pub(crate) view_signature: u64,
+    pub(crate) offset: usize,
+    pub(crate) total: usize,
+    pub(crate) message_ids: Vec<Uuid>,
 }
 
 impl MapiMailStoreSnapshot {
@@ -197,7 +207,16 @@ impl MapiMailStoreSnapshot {
             messages,
             contacts,
             events,
+            content_windows: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_content_windows(
+        mut self,
+        content_windows: Vec<MapiContentTableWindow>,
+    ) -> Self {
+        self.content_windows = content_windows;
+        self
     }
 
     pub(crate) fn mailboxes(&self) -> Vec<JmapMailbox> {
@@ -212,6 +231,40 @@ impl MapiMailStoreSnapshot {
             .iter()
             .map(|message| message.email.clone())
             .collect()
+    }
+
+    pub(crate) fn content_table_window_emails(
+        &self,
+        folder_id: u64,
+        view_signature: u64,
+        offset: usize,
+        limit: usize,
+    ) -> Option<(usize, Vec<&JmapEmail>)> {
+        let window = self.content_windows.iter().find(|window| {
+            window.folder_id == folder_id
+                && window.view_signature == view_signature
+                && window.offset == offset
+                && (window.message_ids.len() >= limit
+                    || offset + window.message_ids.len() >= window.total)
+        })?;
+        let emails = window
+            .message_ids
+            .iter()
+            .filter_map(|id| {
+                self.messages
+                    .iter()
+                    .find(|message| message.canonical_id == *id)
+                    .map(|message| &message.email)
+            })
+            .collect::<Vec<_>>();
+        Some((window.total, emails))
+    }
+
+    pub(crate) fn content_table_total(&self, folder_id: u64, view_signature: u64) -> Option<usize> {
+        self.content_windows
+            .iter()
+            .find(|window| window.folder_id == folder_id && window.view_signature == view_signature)
+            .map(|window| window.total)
     }
 
     pub(crate) fn attachments_for_message(

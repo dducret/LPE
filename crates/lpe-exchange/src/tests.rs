@@ -32,7 +32,8 @@ use crate::{
     },
     store::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, MapiCheckpointKind, MapiIdentityLookupRecord, MapiIdentityObjectKind,
+        ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
+        MapiContentTableSortField, MapiIdentityLookupRecord, MapiIdentityObjectKind,
         MapiIdentityRecord, MapiIdentityRequest, MapiSyncCheckpoint,
     },
 };
@@ -172,6 +173,32 @@ struct FakeStore {
     omit_principal_from_directory: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
+}
+
+fn display_to_for_test(email: &JmapEmail) -> String {
+    email
+        .to
+        .iter()
+        .map(|address| {
+            address
+                .display_name
+                .as_deref()
+                .unwrap_or(&address.address)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn test_message_flags(email: &JmapEmail) -> u32 {
+    let mut flags = 0u32;
+    if !email.unread {
+        flags |= 0x0000_0001;
+    }
+    if email.has_attachments {
+        flags |= 0x0000_0010;
+    }
+    flags
 }
 
 #[derive(Clone)]
@@ -1168,6 +1195,81 @@ impl ExchangeStore for FakeStore {
                 ids,
             })
         })
+    }
+
+    fn query_mapi_content_table_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        query: MapiContentTableQuery,
+    ) -> StoreFuture<'a, MapiContentTableQueryResult> {
+        let mut emails = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|email| email.mailbox_id == query.mailbox_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !query.sort_orders.is_empty() {
+            emails.sort_by(|left, right| {
+                for sort in &query.sort_orders {
+                    let ordering = match sort.field {
+                        MapiContentTableSortField::ReceivedAt => {
+                            left.received_at.cmp(&right.received_at)
+                        }
+                        MapiContentTableSortField::Subject => left
+                            .subject
+                            .to_ascii_lowercase()
+                            .cmp(&right.subject.to_ascii_lowercase()),
+                        MapiContentTableSortField::SenderName => left
+                            .from_display
+                            .as_deref()
+                            .unwrap_or(&left.from_address)
+                            .to_ascii_lowercase()
+                            .cmp(
+                                &right
+                                    .from_display
+                                    .as_deref()
+                                    .unwrap_or(&right.from_address)
+                                    .to_ascii_lowercase(),
+                            ),
+                        MapiContentTableSortField::SenderEmail => left
+                            .from_address
+                            .to_ascii_lowercase()
+                            .cmp(&right.from_address.to_ascii_lowercase()),
+                        MapiContentTableSortField::DisplayTo => display_to_for_test(left)
+                            .to_ascii_lowercase()
+                            .cmp(&display_to_for_test(right).to_ascii_lowercase()),
+                        MapiContentTableSortField::MessageSize => {
+                            left.size_octets.cmp(&right.size_octets)
+                        }
+                        MapiContentTableSortField::HasAttachments => {
+                            left.has_attachments.cmp(&right.has_attachments)
+                        }
+                        MapiContentTableSortField::MessageFlags => {
+                            test_message_flags(left).cmp(&test_message_flags(right))
+                        }
+                    };
+                    let ordering = if sort.descending {
+                        ordering.reverse()
+                    } else {
+                        ordering
+                    };
+                    if ordering != std::cmp::Ordering::Equal {
+                        return ordering;
+                    }
+                }
+                right.id.cmp(&left.id)
+            });
+        }
+        let total = emails.len() as u64;
+        let ids = emails
+            .into_iter()
+            .skip(query.position as usize)
+            .take(query.limit as usize)
+            .map(|email| email.id)
+            .collect();
+        Box::pin(async move { Ok(MapiContentTableQueryResult { ids, total }) })
     }
 
     fn fetch_jmap_emails<'a>(
@@ -7155,6 +7257,63 @@ async fn mapi_over_http_open_message_uses_targeted_store_lookup() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &utf16z("Targeted open")));
+    assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn mapi_over_http_query_rows_uses_paged_content_table_lookup() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 3;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                "87878787-8787-8787-8787-878787878787",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Paged first",
+            ),
+            FakeStore::email(
+                "88888888-8888-8888-8888-888888888888",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Paged second",
+            ),
+            FakeStore::email(
+                "89898989-8989-8989-8989-898989898989",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Paged third",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let queried_jmap_email_ids = store.queried_jmap_email_ids.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_query_subject_rows(&mut rops, 1, 2, 1);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &utf16z("Paged first")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Paged second")));
     assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 0);
 }
 

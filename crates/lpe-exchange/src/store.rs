@@ -87,6 +87,38 @@ pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) directory_kind: ExchangeAddressBookDirectoryKind,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiContentTableQuery {
+    pub(crate) mailbox_id: Uuid,
+    pub(crate) position: u64,
+    pub(crate) limit: u64,
+    pub(crate) sort_orders: Vec<MapiContentTableSort>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiContentTableQueryResult {
+    pub(crate) ids: Vec<Uuid>,
+    pub(crate) total: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MapiContentTableSort {
+    pub(crate) field: MapiContentTableSortField,
+    pub(crate) descending: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MapiContentTableSortField {
+    ReceivedAt,
+    Subject,
+    SenderName,
+    SenderEmail,
+    DisplayTo,
+    MessageSize,
+    HasAttachments,
+    MessageFlags,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ExchangeAddressBookEntryKind {
     Account,
@@ -316,6 +348,12 @@ pub trait ExchangeStore: AccountAuthStore {
         position: u64,
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery>;
+
+    fn query_mapi_content_table_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        query: MapiContentTableQuery,
+    ) -> StoreFuture<'a, MapiContentTableQueryResult>;
 
     fn fetch_jmap_emails<'a>(
         &'a self,
@@ -1125,6 +1163,102 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn query_mapi_content_table_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        query: MapiContentTableQuery,
+    ) -> StoreFuture<'a, MapiContentTableQueryResult> {
+        Box::pin(async move {
+            let tenant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT tenant_id
+                FROM accounts
+                WHERE id = $1
+                LIMIT 1
+                "#,
+            )
+            .bind(account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+
+            let total = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(DISTINCT mm.message_id)
+                FROM mailbox_messages mm
+                WHERE mm.tenant_id = $1
+                  AND mm.account_id = $2
+                  AND mm.mailbox_id = $3
+                  AND mm.visibility = 'visible'
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(query.mailbox_id)
+            .fetch_one(self.pool())
+            .await?;
+
+            let order_by = mapi_content_table_order_by(&query.sort_orders);
+            let sql = format!(
+                r#"
+                WITH row_source AS (
+                    SELECT
+                        m.id,
+                        m.received_at,
+                        lower(COALESCE(m.normalized_subject, '')) AS subject_key,
+                        lower(COALESCE(fr.display_name, fr.address, '')) AS sender_name_key,
+                        lower(COALESCE(fr.address, '')) AS sender_email_key,
+                        lower(COALESCE(to_rollup.display_to, '')) AS display_to_key,
+                        m.size_octets,
+                        m.has_attachments,
+                        ((CASE WHEN mm.is_seen THEN 1 ELSE 0 END)
+                            + (CASE WHEN m.has_attachments THEN 16 ELSE 0 END)) AS message_flags
+                    FROM mailbox_messages mm
+                    JOIN messages m
+                      ON m.tenant_id = mm.tenant_id
+                     AND m.id = mm.message_id
+                    LEFT JOIN message_recipients fr
+                      ON fr.tenant_id = m.tenant_id
+                     AND fr.message_id = m.id
+                     AND fr.role = 'from'
+                    LEFT JOIN LATERAL (
+                        SELECT string_agg(COALESCE(NULLIF(r.display_name, ''), r.address), '; ' ORDER BY r.ordinal) AS display_to
+                        FROM message_recipients r
+                        WHERE r.tenant_id = m.tenant_id
+                          AND r.message_id = m.id
+                          AND r.role = 'to'
+                    ) to_rollup ON TRUE
+                    WHERE mm.tenant_id = $1
+                      AND mm.account_id = $2
+                      AND mm.mailbox_id = $3
+                      AND mm.visibility = 'visible'
+                )
+                SELECT id
+                FROM row_source
+                ORDER BY {order_by}
+                OFFSET $4
+                LIMIT $5
+                "#
+            );
+            let ids = sqlx::query(&sql)
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(query.mailbox_id)
+                .bind(query.position as i64)
+                .bind(query.limit as i64)
+                .fetch_all(self.pool())
+                .await?
+                .into_iter()
+                .map(|row| row.try_get("id"))
+                .collect::<std::result::Result<Vec<Uuid>, sqlx::Error>>()?;
+
+            Ok(MapiContentTableQueryResult {
+                ids,
+                total: total.max(0) as u64,
+            })
+        })
+    }
+
     fn fetch_jmap_emails<'a>(
         &'a self,
         account_id: Uuid,
@@ -1263,6 +1397,32 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, SubmittedMessage> {
         Box::pin(async move { self.submit_message(input, audit).await })
     }
+}
+
+fn mapi_content_table_order_by(sort_orders: &[MapiContentTableSort]) -> String {
+    if sort_orders.is_empty() {
+        return "received_at DESC, id DESC".to_string();
+    }
+
+    let mut clauses = sort_orders
+        .iter()
+        .map(|sort| {
+            let column = match sort.field {
+                MapiContentTableSortField::ReceivedAt => "received_at",
+                MapiContentTableSortField::Subject => "subject_key",
+                MapiContentTableSortField::SenderName => "sender_name_key",
+                MapiContentTableSortField::SenderEmail => "sender_email_key",
+                MapiContentTableSortField::DisplayTo => "display_to_key",
+                MapiContentTableSortField::MessageSize => "size_octets",
+                MapiContentTableSortField::HasAttachments => "has_attachments",
+                MapiContentTableSortField::MessageFlags => "message_flags",
+            };
+            let direction = if sort.descending { "DESC" } else { "ASC" };
+            format!("{column} {direction}")
+        })
+        .collect::<Vec<_>>();
+    clauses.push("id DESC".to_string());
+    clauses.join(", ")
 }
 
 fn task_matches_collection(task: &ClientTask, collection_id: &str) -> bool {

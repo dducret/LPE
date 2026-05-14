@@ -28,7 +28,9 @@ pub(in crate::mapi) fn folder_message_count(
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return folder.item_count;
     }
-    emails_for_folder(folder_id, mailboxes, emails).len() as u32
+    folder_row_for_id(folder_id, mailboxes)
+        .map(|mailbox| mailbox.total_emails)
+        .unwrap_or_else(|| emails_for_folder(folder_id, mailboxes, emails).len() as u32)
 }
 
 pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
@@ -181,6 +183,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
     write_u32(&mut response, 0);
     response.push(0x02);
     let mut start_position = 0usize;
+    let mut position_base = 0usize;
     let rows = match object {
         Some(MapiObject::HierarchyTable {
             folder_id,
@@ -270,12 +273,35 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     }
                 }
             } else {
-                let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-                rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
-                sort_emails(&mut rows, sort_orders);
-                rows.into_iter()
-                    .map(|email| serialize_message_row(email, &columns))
-                    .collect::<Vec<_>>()
+                let window_offset = if request.query_forward_read() {
+                    start_position
+                } else {
+                    start_position.saturating_sub(request.query_row_count().unwrap_or(0))
+                };
+                if let Some((_, window_emails)) = snapshot.content_table_window_emails(
+                    *folder_id,
+                    table_view_signature(sort_orders, restriction.as_ref()),
+                    window_offset,
+                    request.query_row_count().unwrap_or(0),
+                ) {
+                    position_base = window_offset;
+                    start_position = if request.query_forward_read() {
+                        0
+                    } else {
+                        window_emails.len()
+                    };
+                    window_emails
+                        .into_iter()
+                        .map(|email| serialize_message_row(email, &columns))
+                        .collect::<Vec<_>>()
+                } else {
+                    let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                    rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+                    sort_emails(&mut rows, sort_orders);
+                    rows.into_iter()
+                        .map(|email| serialize_message_row(email, &columns))
+                        .collect::<Vec<_>>()
+                }
             }
         }
         Some(MapiObject::AttachmentTable {
@@ -316,7 +342,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
             .skip(start_position)
             .take(row_count)
             .collect::<Vec<_>>();
-        let next_position = start_position.saturating_add(selected.len());
+        let next_position =
+            position_base.saturating_add(start_position.saturating_add(selected.len()));
         (selected, next_position)
     } else {
         let end_position = start_position.min(rows.len());
@@ -326,7 +353,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
             .rev()
             .cloned()
             .collect::<Vec<_>>();
-        (selected, selected_start)
+        (selected, position_base.saturating_add(selected_start))
     };
     if !request.query_no_advance() {
         if let Some(
@@ -565,6 +592,93 @@ pub(in crate::mapi) fn compare_case_insensitive(left: &str, right: &str) -> Orde
     left.to_ascii_lowercase().cmp(&right.to_ascii_lowercase())
 }
 
+pub(in crate::mapi) fn table_view_signature(
+    sort_orders: &[MapiSortOrder],
+    restriction: Option<&MapiRestriction>,
+) -> u64 {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    fn push_bytes(hash: &mut u64, bytes: &[u8]) {
+        for byte in bytes {
+            *hash = (*hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    fn push_restriction(hash: &mut u64, restriction: &MapiRestriction) {
+        match restriction {
+            MapiRestriction::And(children) => {
+                push_bytes(hash, b"and");
+                for child in children {
+                    push_restriction(hash, child);
+                }
+            }
+            MapiRestriction::Or(children) => {
+                push_bytes(hash, b"or");
+                for child in children {
+                    push_restriction(hash, child);
+                }
+            }
+            MapiRestriction::Not(child) => {
+                push_bytes(hash, b"not");
+                push_restriction(hash, child);
+            }
+            MapiRestriction::Content {
+                property_tag,
+                value,
+            } => {
+                push_bytes(hash, b"content");
+                push_bytes(hash, &property_tag.to_le_bytes());
+                push_bytes(hash, value.as_bytes());
+            }
+            MapiRestriction::Property {
+                relop,
+                property_tag,
+                value,
+            } => {
+                push_bytes(hash, b"property");
+                push_bytes(hash, &[*relop]);
+                push_bytes(hash, &property_tag.to_le_bytes());
+                push_bytes(hash, format!("{value:?}").as_bytes());
+            }
+            MapiRestriction::Bitmask {
+                property_tag,
+                mask,
+                must_be_nonzero,
+            } => {
+                push_bytes(hash, b"bitmask");
+                push_bytes(hash, &property_tag.to_le_bytes());
+                push_bytes(hash, &mask.to_le_bytes());
+                push_bytes(hash, &[*must_be_nonzero as u8]);
+            }
+            MapiRestriction::Size {
+                relop,
+                property_tag,
+                size,
+            } => {
+                push_bytes(hash, b"size");
+                push_bytes(hash, &[*relop]);
+                push_bytes(hash, &property_tag.to_le_bytes());
+                push_bytes(hash, &size.to_le_bytes());
+            }
+            MapiRestriction::Exist { property_tag } => {
+                push_bytes(hash, b"exist");
+                push_bytes(hash, &property_tag.to_le_bytes());
+            }
+        }
+    }
+
+    let mut hash = FNV_OFFSET;
+    for sort_order in sort_orders {
+        push_bytes(&mut hash, &sort_order.property_tag.to_le_bytes());
+        push_bytes(&mut hash, &[sort_order.order]);
+    }
+    if let Some(restriction) = restriction {
+        push_restriction(&mut hash, restriction);
+    }
+    hash
+}
+
 pub(in crate::mapi) fn serialize_attachment_row(
     attachment: &MapiAttachment,
     columns: &[u32],
@@ -673,15 +787,27 @@ pub(in crate::mapi) fn rop_seek_row_response(
 pub(in crate::mapi) fn rop_create_bookmark_response(
     request: &RopRequest,
     object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(0x1B, request.response_handle_index(), 0x8004_0102);
     };
+    let row_key = table_row_keys(object, mailboxes, emails, snapshot)
+        .get(table_position(object).unwrap_or(0))
+        .copied();
     let Some((position, bookmarks, next_bookmark)) = table_bookmark_state_mut(object) else {
         return rop_error_response(0x1B, request.response_handle_index(), 0x8004_0102);
     };
     let bookmark = next_bookmark.to_le_bytes().to_vec();
-    bookmarks.insert(bookmark.clone(), *position);
+    bookmarks.insert(
+        bookmark.clone(),
+        TableBookmark {
+            position: *position,
+            row_key,
+        },
+    );
     *next_bookmark = next_bookmark.saturating_add(1).max(1);
 
     let mut response = vec![0x1B, request.response_handle_index()];
@@ -701,12 +827,24 @@ pub(in crate::mapi) fn rop_seek_row_bookmark_response(
     let Some(object) = object else {
         return rop_error_response(0x19, request.response_handle_index(), 0x8004_0102);
     };
-    let total_rows = table_position_and_count(Some(object), mailboxes, emails, snapshot).1;
+    let row_keys = table_row_keys(object, mailboxes, emails, snapshot);
+    let total_rows = row_keys.len();
     let Some((position, bookmarks, _next_bookmark)) = table_bookmark_state_mut(object) else {
         return rop_error_response(0x19, request.response_handle_index(), 0x8004_0102);
     };
-    let Some(base_position) = bookmarks.get(request.bookmark()).copied() else {
+    let Some(bookmark) = bookmarks.get(request.bookmark()).cloned() else {
         return rop_error_response(0x19, request.response_handle_index(), 0x8004_0405);
+    };
+    let mut row_no_longer_visible = false;
+    let base_position = match bookmark.row_key {
+        Some(row_key) => row_keys
+            .iter()
+            .position(|key| *key == row_key)
+            .unwrap_or_else(|| {
+                row_no_longer_visible = true;
+                bookmark.position.min(total_rows)
+            }),
+        None => bookmark.position.min(total_rows),
     };
 
     let requested_rows = request.bookmark_row_count().unwrap_or(0);
@@ -717,7 +855,7 @@ pub(in crate::mapi) fn rop_seek_row_bookmark_response(
 
     let mut response = vec![0x19, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.push(0);
+    response.push(row_no_longer_visible as u8);
     response.push((request.bookmark_want_row_moved_count() && rows_sought != requested_rows) as u8);
     response.extend_from_slice(
         &if request.bookmark_want_row_moved_count() {
@@ -952,14 +1090,22 @@ pub(in crate::mapi) fn table_position_and_count(
             folder_id,
             position,
             restriction,
+            sort_orders,
             ..
-        }) => (
-            *position,
-            emails_for_folder(*folder_id, mailboxes, emails)
-                .into_iter()
-                .filter(|email| restriction_matches_email(restriction.as_ref(), email))
-                .count(),
-        ),
+        }) => {
+            let total = snapshot
+                .content_table_total(
+                    *folder_id,
+                    table_view_signature(sort_orders, restriction.as_ref()),
+                )
+                .unwrap_or_else(|| {
+                    emails_for_folder(*folder_id, mailboxes, emails)
+                        .into_iter()
+                        .filter(|email| restriction_matches_email(restriction.as_ref(), email))
+                        .count()
+                });
+            (*position, total)
+        }
         Some(MapiObject::AttachmentTable {
             folder_id,
             message_id,
@@ -990,9 +1136,18 @@ pub(in crate::mapi) fn table_position_mut(object: &mut MapiObject) -> Option<&mu
     }
 }
 
+pub(in crate::mapi) fn table_position(object: &MapiObject) -> Option<usize> {
+    match object {
+        MapiObject::HierarchyTable { position, .. }
+        | MapiObject::ContentsTable { position, .. }
+        | MapiObject::AttachmentTable { position, .. } => Some(*position),
+        _ => None,
+    }
+}
+
 pub(in crate::mapi) fn table_bookmark_state_mut(
     object: &mut MapiObject,
-) -> Option<(&mut usize, &mut HashMap<Vec<u8>, usize>, &mut u32)> {
+) -> Option<(&mut usize, &mut HashMap<Vec<u8>, TableBookmark>, &mut u32)> {
     match object {
         MapiObject::HierarchyTable {
             position,
@@ -1007,6 +1162,69 @@ pub(in crate::mapi) fn table_bookmark_state_mut(
             ..
         } => Some((position, bookmarks, next_bookmark)),
         _ => None,
+    }
+}
+
+pub(in crate::mapi) fn table_row_keys(
+    object: &MapiObject,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u64> {
+    match object {
+        MapiObject::HierarchyTable {
+            folder_id,
+            sort_orders,
+            restriction,
+            ..
+        } if is_root_hierarchy_folder(*folder_id) => {
+            let mut rows = mailboxes.iter().collect::<Vec<_>>();
+            rows.retain(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox));
+            sort_mailboxes(&mut rows, sort_orders);
+            let mut keys = rows.into_iter().map(mapi_folder_id).collect::<Vec<_>>();
+            let mut collaboration_rows = snapshot
+                .collaboration_folders()
+                .iter()
+                .filter(|folder| {
+                    restriction_matches_collaboration_folder(restriction.as_ref(), folder)
+                })
+                .collect::<Vec<_>>();
+            sort_collaboration_folders(&mut collaboration_rows, sort_orders);
+            keys.extend(collaboration_rows.into_iter().map(|folder| folder.id));
+            keys
+        }
+        MapiObject::ContentsTable {
+            folder_id,
+            sort_orders,
+            restriction,
+            ..
+        } => {
+            let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+            rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+            sort_emails(&mut rows, sort_orders);
+            rows.into_iter().map(mapi_message_id).collect()
+        }
+        MapiObject::AttachmentTable {
+            folder_id,
+            message_id,
+            sort_orders,
+            restriction,
+            ..
+        } => {
+            let mut rows = snapshot
+                .attachments_for_message(*folder_id, *message_id)
+                .unwrap_or_default()
+                .iter()
+                .collect::<Vec<_>>();
+            rows.retain(|attachment| {
+                restriction_matches_attachment(restriction.as_ref(), attachment)
+            });
+            sort_attachments(&mut rows, sort_orders);
+            rows.into_iter()
+                .map(|attachment| u64::from(attachment.attach_num))
+                .collect()
+        }
+        _ => Vec::new(),
     }
 }
 

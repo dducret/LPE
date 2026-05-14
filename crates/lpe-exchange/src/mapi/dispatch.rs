@@ -914,6 +914,9 @@ where
             0x1B => responses.extend_from_slice(&rop_create_bookmark_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
             )),
             0x37 => responses.extend_from_slice(&rop_query_columns_all_response(
                 &request,

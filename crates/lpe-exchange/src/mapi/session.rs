@@ -57,6 +57,12 @@ pub(in crate::mapi) enum StreamWriteError {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct TableBookmark {
+    pub(in crate::mapi) position: usize,
+    pub(in crate::mapi) row_key: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) enum MapiObject {
     Logon,
     Folder {
@@ -92,7 +98,7 @@ pub(in crate::mapi) enum MapiObject {
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
-        bookmarks: HashMap<Vec<u8>, usize>,
+        bookmarks: HashMap<Vec<u8>, TableBookmark>,
         next_bookmark: u32,
         position: usize,
     },
@@ -101,7 +107,7 @@ pub(in crate::mapi) enum MapiObject {
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
-        bookmarks: HashMap<Vec<u8>, usize>,
+        bookmarks: HashMap<Vec<u8>, TableBookmark>,
         next_bookmark: u32,
         position: usize,
     },
@@ -111,7 +117,7 @@ pub(in crate::mapi) enum MapiObject {
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
-        bookmarks: HashMap<Vec<u8>, usize>,
+        bookmarks: HashMap<Vec<u8>, TableBookmark>,
         next_bookmark: u32,
         position: usize,
     },

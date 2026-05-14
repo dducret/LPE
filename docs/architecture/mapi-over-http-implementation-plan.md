@@ -78,6 +78,19 @@ The MAPI store adapter resolves protocol identifiers and source keys through `ma
 | Recipient table mutation | pending MAPI session state until save, then `message_recipients` / protected `Bcc` persistence through canonical save/import paths | Visible recipients remain visible canonical metadata; `Bcc` stays protected and out of user search/sync projections. |
 | Sync checkpoints | `mapi_sync_checkpoints` plus canonical change logs, tombstones, and modseqs | Checkpoints store protocol cursor position only; they are not mailbox content or Outlook-owned state. |
 
+## Table Projection Support
+
+The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardPropertyRow`, `Restriction`, and `SortOrder` structures while keeping table rows as projections over canonical `LPE` data.
+
+| Table behavior | Supported scope | Storage behavior |
+| --- | --- | --- |
+| Hierarchy tables | Root and IPM subtree child folders, including canonical mail folders and collaboration folders. | Uses mailbox and collaboration collection projections; no mailbox-message scan is required. |
+| Contents tables | Mail, contact, and calendar contents projections with caller-selected columns. | Mail contents `QueryRows` without a restriction and with supported sort keys uses a paged PostgreSQL ID query before fetching only returned rows. Contacts and calendar contents remain snapshot-backed. |
+| Attachment tables | Canonical message attachment rows with caller-selected columns. | Uses the addressed message attachment set only. |
+| Supported SQL-backed mail sorts | `PidTagMessageDeliveryTime`, `PidTagLastModificationTime`, `PidTagSubject`, `PidTagNormalizedSubject`, `PidTagSenderName`, `PidTagSenderEmailAddress`, `PidTagDisplayTo`, `PidTagMessageSize`, `PidTagHasAttachments`, and `PidTagMessageFlags`, ascending or descending. | Sorts are translated to PostgreSQL `ORDER BY` with a stable message-id tie-breaker. |
+| Restrictions | MS-OXCDATA `AND`, `OR`, `NOT`, content, property, bitmask, size, and exist restrictions parse and evaluate for implemented projected properties. | Restricted mail contents currently use the bounded in-memory fallback because only a subset of arbitrary restriction trees maps cleanly to SQL. Unsupported restriction forms return protocol errors instead of being coerced. |
+| Bookmarks | Contents and hierarchy bookmarks remember stable row identity plus cursor offset. | Sort, restrict, and reset invalidate bookmarks; if a bookmarked row is no longer visible, seek reports that condition and moves from the stored offset. |
+
 ## Planned Implementation Tickets
 
 | Ticket | Scope | Spec sections that define acceptance | Verification target |
