@@ -14,6 +14,7 @@ use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPe
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
+    Account,
     Mailbox,
     Message,
     Contact,
@@ -23,6 +24,7 @@ pub(crate) enum MapiIdentityObjectKind {
 impl MapiIdentityObjectKind {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::Account => "account",
             Self::Mailbox => "mailbox",
             Self::Message => "message",
             Self::Contact => "contact",
@@ -1106,7 +1108,8 @@ impl ExchangeStore for Storage {
                             .to_ascii_lowercase()
                             .cmp(&right.email.to_ascii_lowercase())
                     })
-                    .then_with(|| address_book_entry_id(left).cmp(&address_book_entry_id(right)))
+                    .then_with(|| (left.entry_kind as u8).cmp(&(right.entry_kind as u8)))
+                    .then_with(|| left.id.cmp(&right.id))
             });
             Ok(entries)
         })
@@ -1766,16 +1769,6 @@ fn directory_kind_from_storage(value: String) -> ExchangeAddressBookDirectoryKin
     }
 }
 
-fn address_book_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
-    let bytes = entry.id.as_bytes();
-    let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-    match entry.entry_kind {
-        ExchangeAddressBookEntryKind::Account => value | 0x8000_0000,
-        ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
-    }
-    .max(2)
-}
-
 async fn mapi_tenant_id_for_account(storage: &Storage, account_id: Uuid) -> Result<Uuid> {
     sqlx::query_scalar::<_, Uuid>(
         r#"
@@ -1793,6 +1786,7 @@ async fn mapi_tenant_id_for_account(storage: &Storage, account_id: Uuid) -> Resu
 
 fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdentityLookupRecord> {
     let object_kind = match row.get::<String, _>("object_kind").as_str() {
+        "account" => MapiIdentityObjectKind::Account,
         "mailbox" => MapiIdentityObjectKind::Mailbox,
         "message" => MapiIdentityObjectKind::Message,
         "contact" => MapiIdentityObjectKind::Contact,

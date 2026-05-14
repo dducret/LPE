@@ -504,16 +504,22 @@ impl ExchangeStore for FakeStore {
                     *existing
                 } else {
                     let counter = request.reserved_global_counter.unwrap_or_else(|| {
-                        crate::mapi::identity::global_counter_from_store_id(
-                            crate::mapi::identity::legacy_migration_object_id(
-                                &request.canonical_id,
-                            ),
-                        )
-                        .unwrap_or_else(|| {
+                        if request.object_kind == MapiIdentityObjectKind::Account {
                             let value = *next_counter;
                             *next_counter = next_counter.saturating_add(1);
                             value
-                        })
+                        } else {
+                            crate::mapi::identity::global_counter_from_store_id(
+                                crate::mapi::identity::legacy_migration_object_id(
+                                    &request.canonical_id,
+                                ),
+                            )
+                            .unwrap_or_else(|| {
+                                let value = *next_counter;
+                                *next_counter = next_counter.saturating_add(1);
+                                value
+                            })
+                        }
                     });
                     let object_id = crate::mapi::identity::mapi_store_id(counter);
                     identities.insert(request.canonical_id, object_id);
@@ -13218,14 +13224,56 @@ async fn mapi_over_http_get_matches_uses_complete_utf16_lookup_value() {
     assert_eq!(body[8], 0);
     assert_eq!(body[9], 1);
     assert_eq!(u32::from_le_bytes(body[10..14].try_into().unwrap()), 1);
-    assert_eq!(
-        u32::from_le_bytes(body[14..18].try_into().unwrap()),
-        0xedc3_32f7
-    );
+    let matched_id = u32::from_le_bytes(body[14..18].try_into().unwrap());
+    assert_ne!(matched_id, 0);
+    assert_eq!(matched_id & 0x8000_0000, 0x8000_0000);
+    assert_ne!(matched_id, 0xedc3_32f7);
     assert_eq!(body[18], 1);
     assert!(contains_bytes(&body, &utf16z("test@l-p-e.ch")));
     assert!(!contains_bytes(&body, &utf16z("fabien@l-p-e.ch")));
     assert!(!contains_bytes(&body, &utf16z("Fabien")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_minimal_ids_use_identity_mapping_not_uuid_prefix() {
+    let mut first = FakeStore::account();
+    first.account_id = Uuid::parse_str("11111111-1111-0000-0000-000000000001").unwrap();
+    first.email = "first@example.test".to_string();
+    first.display_name = "First".to_string();
+
+    let mut second = FakeStore::account();
+    second.account_id = Uuid::parse_str("11111111-1111-0000-0000-000000000002").unwrap();
+    second.email = "second@example.test".to_string();
+    second.display_name = "Second".to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![first, second])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let first_request = b"first@example.test\0";
+    let first_headers = nspi_bound_headers(&service, "GetMatches").await;
+    let first_response = service
+        .handle_mapi(MapiEndpoint::Nspi, &first_headers, first_request)
+        .await
+        .unwrap();
+    let first_body = response_bytes(first_response).await;
+    let first_id = u32::from_le_bytes(first_body[14..18].try_into().unwrap());
+
+    let second_request = b"second@example.test\0";
+    let second_headers = nspi_bound_headers(&service, "GetMatches").await;
+    let second_response = service
+        .handle_mapi(MapiEndpoint::Nspi, &second_headers, second_request)
+        .await
+        .unwrap();
+    let second_body = response_bytes(second_response).await;
+    let second_id = u32::from_le_bytes(second_body[14..18].try_into().unwrap());
+
+    assert_ne!(first_id, second_id);
+    assert_ne!(first_id, 0x9111_1111);
+    assert_ne!(second_id, 0x9111_1111);
 }
 
 #[tokio::test]
@@ -13442,10 +13490,10 @@ async fn mapi_over_http_dn_to_mid_resolves_outlook_unprefixed_legacy_dn_to_princ
     assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
     assert_eq!(body[8], 1);
     assert_eq!(u32::from_le_bytes(body[9..13].try_into().unwrap()), 1);
-    assert_eq!(
-        u32::from_le_bytes(body[13..17].try_into().unwrap()),
-        0xaaaa_aaaa
-    );
+    let matched_id = u32::from_le_bytes(body[13..17].try_into().unwrap());
+    assert_ne!(matched_id, 0);
+    assert_eq!(matched_id & 0x8000_0000, 0x8000_0000);
+    assert_ne!(matched_id, 0xaaaa_aaaa);
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
 }
 

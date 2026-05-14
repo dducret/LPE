@@ -298,7 +298,7 @@ fn mapi_identity_mapping_is_store_backed() {
 
     let identities = table_definition("mapi_object_identities");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('mailbox', 'message', 'contact', 'calendar_event'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event'))",
         "canonical_id UUID NOT NULL",
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",

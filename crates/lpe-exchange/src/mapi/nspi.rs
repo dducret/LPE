@@ -31,7 +31,9 @@ where
             nspi_props_response(store, principal, request, "GetProps", request_id).await
         }
         MapiRequestType::GetSpecialTable => nspi_special_table_response(request_id),
-        MapiRequestType::GetTemplateInfo => nspi_template_info_response(principal, request_id),
+        MapiRequestType::GetTemplateInfo => {
+            nspi_template_info_response(store, principal, request_id).await
+        }
         MapiRequestType::ModLinkAtt => nspi_disabled_mutation_response(
             "ModLinkAtt",
             request_id,
@@ -56,7 +58,7 @@ where
             resolve_names_response(store, principal, request, request_id).await
         }
         MapiRequestType::ResortRestriction => {
-            nspi_minimal_ids_response("ResortRestriction", principal, request_id)
+            nspi_minimal_ids_response("ResortRestriction", store, principal, request_id).await
         }
         MapiRequestType::SeekEntries => {
             nspi_rowset_response(store, principal, request, "SeekEntries", request_id).await
@@ -146,6 +148,22 @@ where
             );
         }
     };
+    if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
+        return mapi_diagnostic_response(
+            "ResolveNames",
+            request_id,
+            4,
+            &format!("failed to project address book identifiers: {error}"),
+        );
+    }
+    if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
+        return mapi_diagnostic_response(
+            "ResolveNames",
+            request_id,
+            4,
+            &format!("failed to project authenticated address book identifier: {error}"),
+        );
+    }
     let principal_entry = principal_address_book_entry(principal);
     let matched = requested_names
         .first()
@@ -292,6 +310,22 @@ where
             );
         }
     };
+    if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
+        return mapi_diagnostic_response(
+            "DNToMId",
+            request_id,
+            4,
+            &format!("failed to project address book identifiers: {error}"),
+        );
+    }
+    if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
+        return mapi_diagnostic_response(
+            "DNToMId",
+            request_id,
+            4,
+            &format!("failed to project authenticated address book identifier: {error}"),
+        );
+    }
     let values = scan_address_book_lookup_values(request);
     let matched_mid = values
         .first()
@@ -358,6 +392,14 @@ where
             );
         }
     };
+    if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
+        return mapi_diagnostic_response(
+            request_type,
+            request_id,
+            4,
+            &format!("failed to project address book identifiers: {error}"),
+        );
+    }
     let entry = nspi_requested_entry(request, &entries).or_else(|| {
         (!nspi_request_has_entry_selector(request))
             .then(|| {
@@ -405,6 +447,14 @@ where
             );
         }
     };
+    if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
+        return mapi_diagnostic_response(
+            request_type,
+            request_id,
+            4,
+            &format!("failed to project address book identifiers: {error}"),
+        );
+    }
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -444,6 +494,14 @@ where
             );
         }
     };
+    if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
+        return mapi_diagnostic_response(
+            "GetMatches",
+            request_id,
+            4,
+            &format!("failed to project address book identifiers: {error}"),
+        );
+    }
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -468,11 +526,23 @@ where
     mapi_response("GetMatches", request_id, 0, body, None)
 }
 
-pub(in crate::mapi) fn nspi_minimal_ids_response(
+pub(in crate::mapi) async fn nspi_minimal_ids_response<S>(
     request_type: &str,
+    store: &S,
     principal: &AccountPrincipal,
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+{
+    if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
+        return mapi_diagnostic_response(
+            request_type,
+            request_id,
+            4,
+            &format!("failed to project authenticated address book identifier: {error}"),
+        );
+    }
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -515,10 +585,22 @@ pub(in crate::mapi) fn nspi_special_table_response(request_id: &str) -> Response
     mapi_response("GetSpecialTable", request_id, 0, body, None)
 }
 
-pub(in crate::mapi) fn nspi_template_info_response(
+pub(in crate::mapi) async fn nspi_template_info_response<S>(
+    store: &S,
     principal: &AccountPrincipal,
     request_id: &str,
-) -> Response {
+) -> Response
+where
+    S: ExchangeStore,
+{
+    if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
+        return mapi_diagnostic_response(
+            "GetTemplateInfo",
+            request_id,
+            4,
+            &format!("failed to project authenticated address book identifier: {error}"),
+        );
+    }
     let entry = principal_address_book_entry(principal);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -604,7 +686,84 @@ pub(in crate::mapi) fn nspi_entry_value(
     }
 }
 
+pub(in crate::mapi) async fn allocate_nspi_entry_identities<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    entries: &[ExchangeAddressBookEntry],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let requests = entries
+        .iter()
+        .map(nspi_identity_request)
+        .collect::<Vec<_>>();
+    remember_nspi_identity_records(store, principal, &requests).await
+}
+
+pub(in crate::mapi) async fn allocate_principal_nspi_identity<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let entry = principal_address_book_entry(principal);
+    let request = nspi_identity_request(&entry);
+    remember_nspi_identity_records(store, principal, &[request]).await
+}
+
+async fn remember_nspi_identity_records<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    requests: &[MapiIdentityRequest],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    if requests.is_empty() {
+        return Ok(());
+    }
+    for record in store
+        .fetch_or_allocate_mapi_identities(principal.account_id, requests)
+        .await?
+    {
+        identity::remember_mapi_identity(record.canonical_id, record.object_id);
+    }
+    Ok(())
+}
+
+fn nspi_identity_request(entry: &ExchangeAddressBookEntry) -> MapiIdentityRequest {
+    MapiIdentityRequest {
+        object_kind: match entry.entry_kind {
+            ExchangeAddressBookEntryKind::Account => MapiIdentityObjectKind::Account,
+            ExchangeAddressBookEntryKind::Contact => MapiIdentityObjectKind::Contact,
+        },
+        canonical_id: entry.id,
+        reserved_global_counter: None,
+    }
+}
+
 pub(in crate::mapi) fn nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
+    identity::mapped_mapi_object_id(&entry.id)
+        .and_then(|object_id| nspi_minimal_id_from_object_id(object_id, entry.entry_kind))
+        .unwrap_or_else(|| legacy_nspi_entry_id(entry))
+}
+
+pub(in crate::mapi) fn nspi_minimal_id_from_object_id(
+    object_id: u64,
+    entry_kind: ExchangeAddressBookEntryKind,
+) -> Option<u32> {
+    let counter = identity::global_counter_from_store_id(object_id)? as u32;
+    let value = (counter & 0x3FFF_FFFF)
+        | match entry_kind {
+            ExchangeAddressBookEntryKind::Account => 0x8000_0000,
+            ExchangeAddressBookEntryKind::Contact => 0x4000_0000,
+        };
+    (value >= 2).then_some(value)
+}
+
+fn legacy_nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
     let bytes = entry.id.as_bytes();
     let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     match entry.entry_kind {
