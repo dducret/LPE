@@ -6,7 +6,11 @@ This document is the Microsoft specification-to-`LPE` planning matrix for the gu
 
 The plan is documentation-only. It does not change runtime behavior. `LPE` remains the canonical store for mailboxes, contacts, calendars, tasks, rights, submission, and user-visible state, while MAPI over HTTP stays an authenticated Outlook desktop compatibility surface over that canonical state.
 
-The Microsoft protocol specifications were checked on 2026-05-14. The cited specifications define wire contracts and data structures, but they do not define Outlook's exact tolerance for partial Exchange compatibility. Real Outlook profile creation, cached-mode synchronization, reconnect, and RCA evidence remain required release gates.
+The Microsoft protocol specifications were checked on 2026-05-14. The cited specifications define wire contracts and data structures, but they do not define Outlook's exact tolerance for partial Exchange compatibility. Real Outlook 2016 and Outlook 2019 profile creation, cached-mode synchronization, reconnect, and RCA evidence remain required release gates.
+
+MAPI over HTTP is the first Outlook desktop Exchange-account path for this work. Outlook Anywhere / RPC over HTTP is a legacy compatibility shim for later `EXPR` publication and must not drive the initial MAPI over HTTP implementation order.
+
+Single-node sticky MAPI sessions are acceptable for the first Outlook 2016 / 2019 lab gate. Cross-process session replay, durable session migration, and load-balanced session failover remain production hardening.
 
 ## Source Set
 
@@ -65,6 +69,7 @@ The Microsoft protocol specifications were checked on 2026-05-14. The cited spec
 | Change facts | Change keys, predecessor lists, read state, recipient facts, attachment facts, and move/delete/import records must be derived from canonical change rows and tombstones. | [MS-OXCFXICS 2.2.1.2.7](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/20f096eb-5614-4a5b-a7d7-73c4f3cacfd3), [MS-OXCFXICS 3.3.4.3](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/ea4eaddd-90af-4238-8df7-1819146fddc1) | `MAPI-SYNC-02` |
 | Session handles | ROP handles and FastTransfer/ICS contexts are session-scoped resources and must be released or expired with the session. | [MS-OXCFXICS 2.2.3](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/50d462aa-67ed-48d3-bead-a3d8b110bcfb), [MS-OXCROPS 2.2.2](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/6c623489-576d-45ef-9288-5b62b73c6961) | `MAPI-SESSION-01` |
 | Request replay | `X-RequestId`, sequence cookies, and request bodies must prevent duplicate canonical mutations while allowing valid reconnect/profile retry behavior. | [MS-OXCMAPIHTTP 2.2.2.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/2e717239-a22b-4508-a2ee-af64ffc090a2), [MS-OXCMAPIHTTP 2.2.3.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/cb1f2c87-eb69-418f-9e59-c30c179615a0) | `MAPI-SESSION-01` |
+| First-lab session model | Session cookies, handles, request replay caches, and FastTransfer/ICS contexts may be held in single-node sticky in-process state for the Outlook 2016 / 2019 lab gate. | Engineering constraint for the initial LPE lab gate; production multi-node behavior is intentionally deferred. | `MAPI-SESSION-01` |
 
 ## Outlook 2016 / 2019 Cached Mode ICS Property Baseline
 
@@ -169,4 +174,5 @@ The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardP
 - New MAPI behavior must add tests for the request type, ROP group, identity/property/sync/session behavior, or deferred parseability it changes.
 - New MAPI behavior must preserve canonical `LPE` submission, `Sent`, mailbox, contact, calendar, task, rights, and protected `Bcc` boundaries.
 - MAPI mutation changes for send, draft, move, copy, delete, flags, attachments, or protected recipients must pass the cross-protocol storage gate proving IMAP and JMAP observe the same canonical state, including no MAPI-only `Sent`, `Outbox`, search, or sync state.
-- Public `mapiHttp`, MAPI-backed `EXCH`, and `EXPR` publication remains gated by the existing architecture and client-autoconfiguration rules, including `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`.
+- Public `mapiHttp` and MAPI-backed `EXCH` publication remains gated by the existing architecture and client-autoconfiguration rules, including `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`.
+- Legacy `EXPR` publication additionally requires the later RPC/HTTP compatibility shim gate and must not block the first MAPI over HTTP implementation path.

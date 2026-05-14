@@ -20,14 +20,14 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - `POST /mapi/nspi`
 - MAPI implementation modules under `crates/lpe-exchange/src/mapi/`:
   - `transport.rs` owns MAPI/HTTP request validation, response envelopes, cookies, diagnostics, and endpoint routing.
-  - `session.rs` owns authenticated session state, handle tables, request replay caches, and RPC/HTTP EMSMDB context execution.
+  - `session.rs` owns authenticated session state, handle tables, request replay caches, and, for the later legacy shim, RPC/HTTP EMSMDB context execution.
   - `dispatch.rs` owns Execute request decoding and ROP dispatch against canonical `LPE` state.
   - `rop.rs` owns ROP buffer parsing, ROP response encoding, and low-level cursor helpers.
   - `tables.rs` owns hierarchy, contents, attachment, contact, and calendar table projections.
   - `properties.rs` owns property tags, named properties, value conversion, streams, and canonical property application.
   - `sync.rs` owns replica identifiers, FastTransfer/ICS buffers, manifests, and sync object mapping.
   - `nspi.rs` owns address-book request handling and tenant-visible NSPI projections.
-- Outlook Anywhere / RPC over HTTP endpoint:
+- Outlook Anywhere / RPC over HTTP legacy-shim endpoint:
   - `/rpc/rpcproxy.dll`
 - Authentication:
   - mailbox account authentication
@@ -49,7 +49,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
   - `EWS` publication requires `LPE_AUTOCONFIG_EWS_ENABLED`
   - `mapiHttp` publication requires the MAPI profile/sync/reconnect release gate, live RCA evidence, real Outlook desktop profile-creation evidence, `LPE_AUTOCONFIG_MAPI_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`; an Outlook `X-MapiHttpCapability` probe does not publish MAPI without the explicit deployment flag and final gate
   - legacy `EXCH` publication requires `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED`
-  - legacy `EXPR` publication requires `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`
+  - legacy `EXPR` publication requires `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`; this is a later legacy compatibility gate and not the first MAPI over HTTP publication path
 
 ## Reference Table/List
 
@@ -69,7 +69,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 | --- | --- |
 | `EMSMDB` | mailbox tables, message content, flags, folders, sync state |
 | `NSPI` | account/contact address-book visibility |
-| `/rpc/rpcproxy.dll` | authenticated RPC/HTTP mailbox transport path |
+| `/rpc/rpcproxy.dll` | later legacy authenticated RPC/HTTP mailbox transport shim for `EXPR` publication |
 | MAPI identity | store-backed projection from canonical UUIDs to replica GUID, FID, MID, LongTermID, source key, change key, and instance key values |
 | Folder permissions | `RopGetPermissionsTable` projects canonical mailbox delegation grants into a bounded folder permission table with `PidTagMemberId`, `PidTagMemberName`, and `PidTagMemberRights`; mailbox owners map to full owner rights, delegates map from canonical `may_read`, `may_write`, `may_delete`, and `may_share`, while `Default` and `Anonymous` rows are exposed with no rights |
 | Notifications | `RopRegisterNotification` registers session-scoped content or hierarchy watches for the supported notification bitmask, and `NotificationWait` returns protocol-shaped no-event or event-pending responses from registered session events and the canonical mail change cursor |
@@ -99,8 +99,8 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 | folder and message tables | open folder, hierarchy table, contents table, query all available columns, set columns, sort/restrict/seek/query rows, and query position return canonical folder/message data |
 | draft/send | create/open message, set properties, recipients, save changes, submit, and canonical `Sent` visibility use core submission |
 | cross-protocol mutation gate | MAPI send, draft, move, copy, delete, flag, attachment, and protected `Bcc` paths must leave one canonical state that IMAP and JMAP projections agree on; no MAPI-only `Sent`, `Outbox`, search, or sync state is allowed |
-| reconnect | session cookies, idle `PING`, and request IDs maintain bounded authenticated state; reconnect can reissue `Connect`, `Logon`, and sync probes |
-| RPC proxy | `/rpc/rpcproxy.dll` authenticates and maps Outlook Anywhere mailbox transport probes to the same canonical MAPI path |
+| reconnect | session cookies, idle `PING`, and request IDs maintain bounded authenticated state; reconnect can reissue `Connect`, `Logon`, and sync probes; single-node sticky sessions are acceptable for the first Outlook 2016 / 2019 lab gate |
+| RPC proxy | `/rpc/rpcproxy.dll` authenticates and maps Outlook Anywhere mailbox transport probes to the same canonical MAPI path only for the later legacy `EXPR` shim gate |
 
 | Exchange / MAPI behavior | Current LPE implementation | Test coverage | Remaining gap |
 | --- | --- | --- | --- |

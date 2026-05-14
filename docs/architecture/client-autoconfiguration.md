@@ -13,7 +13,7 @@
 - Publish `ActiveSync` only for clients that support `Exchange ActiveSync`.
 - Do not advertise `ActiveSync` as the Outlook for Windows desktop Exchange route.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` only when the MAPI profile, sync, reconnect, request-id replay, live RCA, and real Outlook desktop profile-creation gates pass and both `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true. A client `X-MapiHttpCapability` probe never publishes MAPI by itself.
+- Publish `mapiHttp` only when the MAPI profile, sync, reconnect, request-id replay, Outlook 2016 / 2019 cached-mode lab, live RCA, and real Outlook desktop profile-creation gates pass and both `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true. A client `X-MapiHttpCapability` probe never publishes MAPI by itself.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.
@@ -86,7 +86,7 @@
 
 | Readiness command | Scope |
 | --- | --- |
-| `python tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` | `IMAP`, `EWS`, `EXCH`, `EXPR`, `mapiHttp`, canonical `Sent`, `NSPI`, RPC proxy |
+| `python tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` | `IMAP`, `EWS`, `EXCH`, `mapiHttp`, canonical `Sent`, `NSPI`, and RPC proxy checks when legacy `EXPR` / RPC publication is being validated |
 | `python tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures` | EWS autodiscover, authentication, canonical send-to-`Sent`, contact/calendar create-read-delete |
 
 ## Outlook Publication Evidence Checklist
@@ -97,5 +97,6 @@ Keep `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED=false` until all items are true
 - `cargo test -p lpe-admin-api` and `cargo test -p lpe-exchange` pass for the exact revision being deployed.
 - `tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` passes against the public `LPE-CT` HTTPS edge.
 - Microsoft Remote Connectivity Analyzer Outlook Connectivity passes from the Internet against the same account and host.
-- A supported Outlook for Windows desktop build creates an Exchange account profile through Autodiscover, performs cached-mode mailbox synchronization, reconnects after session restart, resolves address-book entries through NSPI, sends mail through canonical submission, and shows the authoritative message in `Sent`.
-- `/rpc/rpcproxy.dll` is routed through the public edge with streaming proxy settings and passes authenticated mailbox-store endpoint checks before `EXPR` metadata is enabled.
+- Outlook 2016 and Outlook 2019 each create an Exchange account profile through Autodiscover, perform cached-mode mailbox synchronization, close and reopen without a full-cache wipe, resolve address-book entries through NSPI, send mail through canonical submission, and show the authoritative message in `Sent`.
+- Single-node sticky MAPI sessions are acceptable for the first Outlook 2016 / 2019 lab gate. Cross-process session replay remains production hardening, not a blocker for the first lab gate.
+- `/rpc/rpcproxy.dll` is routed through the public edge with streaming proxy settings and passes authenticated mailbox-store endpoint checks before legacy `EXPR` metadata is enabled; this is a later legacy compatibility gate, not the first MAPI over HTTP publication path.

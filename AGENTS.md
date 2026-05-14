@@ -118,7 +118,8 @@ Native Outlook and mobile support is a first-class requirement.
 - Outlook for Windows desktop currently uses `IMAP` unless an administrator explicitly enables the bounded `EWS` or guarded `MAPI over HTTP` interoperability surfaces documented for the deployment
 - protocol planning must treat both Outlook desktop `IMAP` interoperability and `ActiveSync` mobile compatibility labs as flagship requirements before introducing new client protocols
 - `EWS` is the active `0.2.0` Exchange compatibility adapter; it must stay bounded to documented canonical mailbox, contacts, calendar, and submission behavior until its limits are explicitly widened
-- `MAPI over HTTP` is the future Outlook desktop Exchange route; it must stay behind authenticated endpoints and opt-in autodiscover publication until Outlook desktop profile creation, EMSMDB, NSPI, session context, and canonical mailbox synchronization are proven in interoperability testing
+- `MAPI over HTTP` is the future Outlook desktop Exchange route; implement it first for Outlook 2016 and Outlook 2019 cached-mode interoperability, keep it behind authenticated endpoints and opt-in autodiscover publication until Outlook desktop profile creation, EMSMDB, NSPI, session context, and canonical mailbox synchronization are proven in interoperability testing, and treat Outlook Anywhere / RPC over HTTP as a later legacy compatibility shim for `EXPR` publication rather than the first implementation path
+- single-node sticky MAPI session state is acceptable for the first Outlook 2016 / 2019 lab gate; cross-process session replay and load-balanced failover are production hardening
 - `IMAP` + `SMTP` + autodiscover is the current Outlook desktop path, but must not be treated as the final Outlook adoption story
 - every client layer must use the canonical `LPE` submission and synchronization model
 - no client layer may implement parallel `Sent` or `Outbox` logic

@@ -1210,7 +1210,14 @@ def check_mapi_emsmdb_sent_sync_manifest(
     response_rops = mapi_execute_response_rops(mapi_http_binary_payload(execute.body), "MAPI EMSMDB sync Execute")
     require(contains_bytes(response_rops, bytes([0x70, 0x02, 0, 0, 0, 0])), "MAPI EMSMDB sync did not configure a synchronization source")
     require(contains_bytes(response_rops, bytes([0x4E, 0x02, 0, 0, 0, 0])), "MAPI EMSMDB sync did not return a FastTransfer buffer")
-    require(contains_bytes(response_rops, b"LPE-MAPI-SYNC\0"), "MAPI EMSMDB sync did not return an LPE sync manifest")
+    require(
+        not contains_bytes(response_rops, b"LPE-MAPI-SYNC\0"),
+        "MAPI EMSMDB sync returned the deprecated LPE-private sync manifest marker",
+    )
+    require(
+        contains_bytes(response_rops, (0x4012_0003).to_bytes(4, "little")),
+        "MAPI EMSMDB sync did not return an MS-OXCFXICS IncrSyncChg marker",
+    )
     require(
         contains_bytes(response_rops, expected_subject.encode("utf-8")),
         "MAPI EMSMDB sync manifest did not expose the EWS-created canonical Sent message",
