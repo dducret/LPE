@@ -66,6 +66,15 @@ struct FakeStore {
 
 struct FakePushListener;
 
+fn fake_filter_hash(filter: Option<&Value>) -> String {
+    filter.map(Value::to_string).unwrap_or_default()
+}
+
+fn fake_sort_hash(sort: Option<&Vec<Value>>) -> String {
+    sort.and_then(|sort| serde_json::to_string(sort).ok())
+        .unwrap_or_default()
+}
+
 #[derive(Clone)]
 struct FakeDetector {
     results: Arc<Mutex<Vec<Result<MagikaDetection, String>>>>,
@@ -654,8 +663,8 @@ impl JmapStore for FakeStore {
         &self,
         account_id: Uuid,
         method_name: &str,
-        _filter: Option<Value>,
-        _sort: Option<Vec<Value>>,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
         last_change_sequence: i64,
         snapshot_ids: &[String],
     ) -> Result<Option<Uuid>> {
@@ -669,8 +678,8 @@ impl JmapStore for FakeStore {
                 id: state_id,
                 account_id,
                 method_name: method_name.to_string(),
-                filter_hash: "test-filter".to_string(),
-                sort_hash: "test-sort".to_string(),
+                filter_hash: fake_filter_hash(filter.as_ref()),
+                sort_hash: fake_sort_hash(sort.as_ref()),
                 last_change_sequence,
                 snapshot_ids: snapshot_ids.to_vec(),
             },
@@ -683,10 +692,19 @@ impl JmapStore for FakeStore {
         _account_id: Uuid,
         _method_name: &str,
         state_id: Uuid,
-        _filter: Option<Value>,
-        _sort: Option<Vec<Value>>,
+        filter: Option<Value>,
+        sort: Option<Vec<Value>>,
     ) -> Result<Option<JmapStoredQueryState>> {
-        Ok(self.query_states.lock().unwrap().get(&state_id).cloned())
+        Ok(self
+            .query_states
+            .lock()
+            .unwrap()
+            .get(&state_id)
+            .filter(|state| {
+                state.filter_hash == fake_filter_hash(filter.as_ref())
+                    && state.sort_hash == fake_sort_hash(sort.as_ref())
+            })
+            .cloned())
     }
 
     async fn replay_canonical_changes(
@@ -3696,6 +3714,87 @@ async fn stored_mailbox_query_state_keeps_snapshot_out_of_token_and_paginates_ch
         .unwrap();
     assert_eq!(
         decode_query_state(final_query_state).unwrap().cursor,
+        Some(8)
+    );
+}
+
+#[tokio::test]
+async fn stored_mailbox_query_changes_reloads_filtered_snapshot() {
+    let query_states = Arc::new(Mutex::new(HashMap::new()));
+    let filter = json!({"role": "inbox"});
+    let initial = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+            canonical_change_cursor: Some(7),
+            persist_query_states: true,
+            query_states: Arc::clone(&query_states),
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let initial_response = initial
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/query".to_string(),
+                    json!({"filter": filter}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let query_state = initial_response.method_responses[0].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let updated = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            canonical_change_cursor: Some(8),
+            persist_query_states: true,
+            query_states,
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let response = updated
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/queryChanges".to_string(),
+                    json!({
+                        "sinceQueryState": query_state,
+                        "filter": {"role": "inbox"}
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "Mailbox/queryChanges");
+    assert_eq!(response.method_responses[0].1["hasMoreChanges"], false);
+    assert_eq!(
+        response.method_responses[0].1["removed"],
+        json!([FakeStore::inbox_mailbox().id.to_string()])
+    );
+    assert_eq!(
+        decode_query_state(
+            response.method_responses[0].1["newQueryState"]
+                .as_str()
+                .unwrap()
+        )
+        .unwrap()
+        .cursor,
         Some(8)
     );
 }

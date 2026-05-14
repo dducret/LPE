@@ -785,7 +785,8 @@ fn admin_workspace_and_pst_use_v2_mailbox_membership_schema() {
             !source.contains("messages m ON m.mailbox_id")
                 && !source.contains("JOIN mailboxes mb ON mb.id = m.mailbox_id")
                 && !source.contains("m.delivery_status")
-                && !source.contains("m.from_address"),
+                && !source.contains("m.from_address")
+                && !source.contains("m.subject_normalized"),
             "{name} must not query retired v1 message projection columns"
         );
         assert!(

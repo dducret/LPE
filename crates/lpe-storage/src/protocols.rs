@@ -3277,7 +3277,7 @@ impl Storage {
                 m.id,
                 concat_ws(
                     '|',
-                    m.subject_normalized,
+                    m.normalized_subject,
                     COALESCE(left(b.body_text, 160), ''),
                     COALESCE(b.content_hash, ''),
                     to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
@@ -3363,7 +3363,7 @@ impl Storage {
                 m.id,
                 concat_ws(
                     '|',
-                    m.subject_normalized,
+                    m.normalized_subject,
                     COALESCE(left(b.body_text, 160), ''),
                     COALESCE(b.content_hash, ''),
                     to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),

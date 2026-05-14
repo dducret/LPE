@@ -184,7 +184,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             if let Some(state_id) = previous.state_id.as_deref().map(parse_uuid).transpose()? {
                 let stored = self
                     .store
-                    .fetch_jmap_query_state(account_id, "Mailbox/query", state_id, None, None)
+                    .fetch_jmap_query_state(
+                        account_id,
+                        "Mailbox/query",
+                        state_id,
+                        filter_state.clone(),
+                        sort_state.clone(),
+                    )
                     .await?
                     .ok_or_else(|| anyhow!("queryState is no longer available"))?;
                 previous_cursor = stored.last_change_sequence;

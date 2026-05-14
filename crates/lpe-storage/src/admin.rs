@@ -1285,7 +1285,7 @@ impl Storage {
                 q.id AS queue_id,
                 m.id AS message_id,
                 a.primary_email AS account_email,
-                m.subject_normalized AS subject,
+                m.normalized_subject AS subject,
                 m.internet_message_id,
                 q.status,
                 q.status AS delivery_status,
@@ -1350,7 +1350,7 @@ impl Storage {
             SELECT
                 m.id AS message_id,
                 m.internet_message_id,
-                m.subject_normalized AS subject,
+                m.normalized_subject AS subject,
                 COALESCE(fr.address, '') AS sender,
                 a.primary_email AS account_email,
                 mb.display_name AS mailbox,
@@ -1417,7 +1417,7 @@ impl Storage {
             WHERE m.tenant_id = $1
               AND (
                 lower(COALESCE(fr.address, '')) LIKE $2
-                OR lower(m.subject_normalized) LIKE $2
+                OR lower(m.normalized_subject) LIKE $2
                 OR lower(COALESCE(m.internet_message_id, '')) LIKE $2
                 OR lower(a.primary_email) LIKE $2
                 OR lower(COALESCE(q.latest_trace_id, '')) LIKE $2

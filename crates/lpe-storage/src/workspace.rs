@@ -116,7 +116,7 @@ impl Storage {
                       AND r.message_id = m.id
                       AND r.role = 'cc'
                 ), '') AS cc_recipients,
-                m.subject_normalized AS subject,
+                m.normalized_subject AS subject,
                 COALESCE(left(b.body_text, 160), '') AS preview,
                 to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS received_at,
                 to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'HH24:MI') AS time_label,
