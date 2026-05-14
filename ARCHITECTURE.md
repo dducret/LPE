@@ -89,6 +89,7 @@ The important non-negotiable rules are:
 - `docs/architecture/activesync-mvp.md`
 - `docs/architecture/ews-mapi-mvp.md`
 - `docs/architecture/mapi-over-http-implementation-plan.md`
+- `docs/architecture/nspi-support-matrix.md`
 - `docs/architecture/ews-interoperability-matrix.md`
 - `docs/architecture/imap-mvp.md`
 - `docs/architecture/sieve-managesieve-mvp.md`

@@ -654,14 +654,13 @@ impl ExchangeStore for FakeStore {
 
     fn fetch_address_book_entries<'a>(
         &'a self,
-        principal_account_id: Uuid,
+        principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>> {
-        let principal = self
-            .session
-            .clone()
-            .filter(|account| account.account_id == principal_account_id);
+        let principal_account = self.session.clone().filter(|account| {
+            account.tenant_id == principal.tenant_id && account.account_id == principal.account_id
+        });
         let mut accounts = self.directory_accounts.lock().unwrap().clone();
-        if let Some(principal) = principal {
+        if let Some(principal) = &principal_account {
             if !self.omit_principal_from_directory
                 && !accounts
                     .iter()
@@ -683,6 +682,10 @@ impl ExchangeStore for FakeStore {
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
             })
             .collect::<Vec<_>>();
+        let principal_account_id = principal_account
+            .as_ref()
+            .map(|account| account.account_id)
+            .unwrap_or_default();
         let visible_collection_ids = self
             .contact_collections
             .lock()
@@ -12762,6 +12765,42 @@ async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_resolve_names_ranks_exact_contact_before_partial_account() {
+    let mut partial = FakeStore::account();
+    partial.account_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    partial.email = "bob.alias@example.test".to_string();
+    partial.display_name = "Bob Example Alias".to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![partial])),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "Bob Contact",
+            "bob@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = resolve_names_request("bob@example.test", &[0x3003_001F, 0x3001_001F]);
+    let headers = nspi_bound_headers(&service, "ResolveNames").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
+    assert!(contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Bob Contact")));
+    assert!(!contains_bytes(&body, &utf16z("bob.alias@example.test")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -12838,6 +12877,25 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
     assert_eq!(body[21], 0);
+    assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
+
+    let matches_request = resolve_names_request("mallory@other.test", &[0x3003_001F, 0x3001_001F]);
+    let matches_headers = nspi_bound_headers(&service, "GetMatches").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &matches_headers, &matches_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[9], 0);
+    assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
+
+    let props_headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &props_headers, &matches_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 0);
     assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
 }
 

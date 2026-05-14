@@ -3,6 +3,74 @@ use super::session::*;
 use super::transport::*;
 use super::*;
 
+pub(in crate::mapi) async fn handle_nspi_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request: &[u8],
+    request_type: MapiRequestType,
+    request_id: &str,
+) -> Response
+where
+    S: ExchangeStore,
+{
+    match request_type {
+        MapiRequestType::Bind => bind_response(MapiEndpoint::Nspi, principal, headers, request_id),
+        MapiRequestType::Unbind => {
+            disconnect_response(MapiEndpoint::Nspi, principal, headers, request_id, "Unbind")
+        }
+        MapiRequestType::CompareMids => nspi_u32_result_response("CompareMIds", request_id, 0),
+        MapiRequestType::DnToMid => {
+            nspi_dn_to_mid_response(store, principal, request, request_id).await
+        }
+        MapiRequestType::GetMatches => {
+            nspi_matches_response(store, principal, request, request_id).await
+        }
+        MapiRequestType::GetPropList => nspi_property_tags_response("GetPropList", request_id),
+        MapiRequestType::GetProps => {
+            nspi_props_response(store, principal, request, "GetProps", request_id).await
+        }
+        MapiRequestType::GetSpecialTable => nspi_special_table_response(request_id),
+        MapiRequestType::GetTemplateInfo => nspi_template_info_response(principal, request_id),
+        MapiRequestType::ModLinkAtt => nspi_disabled_mutation_response(
+            "ModLinkAtt",
+            request_id,
+            "NSPI link-attribute mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
+        ),
+        MapiRequestType::ModProps => nspi_disabled_mutation_response(
+            "ModProps",
+            request_id,
+            "NSPI property mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
+        ),
+        MapiRequestType::GetAddressBookUrl => {
+            endpoint_url_response("GetAddressBookUrl", request_id, headers, "/mapi/nspi/")
+        }
+        MapiRequestType::GetMailboxUrl => {
+            endpoint_url_response("GetMailboxUrl", request_id, headers, "/mapi/emsmdb/")
+        }
+        MapiRequestType::QueryColumns => nspi_property_tags_response("QueryColumns", request_id),
+        MapiRequestType::QueryRows => {
+            nspi_rowset_response(store, principal, request, "QueryRows", request_id).await
+        }
+        MapiRequestType::ResolveNames => {
+            resolve_names_response(store, principal, request, request_id).await
+        }
+        MapiRequestType::ResortRestriction => {
+            nspi_minimal_ids_response("ResortRestriction", principal, request_id)
+        }
+        MapiRequestType::SeekEntries => {
+            nspi_rowset_response(store, principal, request, "SeekEntries", request_id).await
+        }
+        MapiRequestType::UpdateStat => nspi_update_stat_response(request_id),
+        other => mapi_diagnostic_response(
+            other.header_value(),
+            request_id,
+            5,
+            "request type is not valid for the NSPI endpoint",
+        ),
+    }
+}
+
 pub(in crate::mapi) fn bind_response(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
@@ -67,7 +135,7 @@ where
 {
     let columns = resolve_names_columns(request);
     let requested_names = resolve_names_requested_values(request);
-    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+    let entries = match store.fetch_address_book_entries(principal).await {
         Ok(entries) => entries,
         Err(error) => {
             return mapi_diagnostic_response(
@@ -213,7 +281,7 @@ pub(in crate::mapi) async fn nspi_dn_to_mid_response<S>(
 where
     S: ExchangeStore,
 {
-    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+    let entries = match store.fetch_address_book_entries(principal).await {
         Ok(entries) => entries,
         Err(error) => {
             return mapi_diagnostic_response(
@@ -279,7 +347,7 @@ pub(in crate::mapi) async fn nspi_props_response<S>(
 where
     S: ExchangeStore,
 {
-    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+    let entries = match store.fetch_address_book_entries(principal).await {
         Ok(entries) => entries,
         Err(error) => {
             return mapi_diagnostic_response(
@@ -291,9 +359,13 @@ where
         }
     };
     let entry = nspi_requested_entry(request, &entries).or_else(|| {
-        entries
-            .iter()
-            .find(|entry| nspi_entry_is_principal(entry, principal))
+        (!nspi_request_has_entry_selector(request))
+            .then(|| {
+                entries
+                    .iter()
+                    .find(|entry| nspi_entry_is_principal(entry, principal))
+            })
+            .flatten()
     });
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -322,7 +394,7 @@ pub(in crate::mapi) async fn nspi_rowset_response<S>(
 where
     S: ExchangeStore,
 {
-    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+    let entries = match store.fetch_address_book_entries(principal).await {
         Ok(entries) => nspi_filter_entries_for_request(entries, request),
         Err(error) => {
             return mapi_diagnostic_response(
@@ -361,7 +433,7 @@ pub(in crate::mapi) async fn nspi_matches_response<S>(
 where
     S: ExchangeStore,
 {
-    let entries = match store.fetch_address_book_entries(principal.account_id).await {
+    let entries = match store.fetch_address_book_entries(principal).await {
         Ok(entries) => nspi_filter_entries_for_request(entries, request),
         Err(error) => {
             return mapi_diagnostic_response(
@@ -685,6 +757,11 @@ pub(in crate::mapi) fn nspi_requested_entry<'a>(
         })
 }
 
+pub(in crate::mapi) fn nspi_request_has_entry_selector(request: &[u8]) -> bool {
+    !nspi_requested_entry_ids(request).is_empty()
+        || !scan_address_book_lookup_values(request).is_empty()
+}
+
 pub(in crate::mapi) fn nspi_filter_entries_for_request(
     entries: Vec<ExchangeAddressBookEntry>,
     request: &[u8],
@@ -705,46 +782,70 @@ pub(in crate::mapi) fn nspi_match_entry<'a>(
 ) -> Option<&'a ExchangeAddressBookEntry> {
     entries
         .iter()
-        .find(|entry| nspi_entry_matches(entry, value) && nspi_entry_exact_match(entry, value))
-        .or_else(|| {
-            entries
-                .iter()
-                .find(|entry| nspi_entry_matches(entry, value))
+        .filter_map(|entry| {
+            Some((
+                nspi_entry_match_rank(entry, value)?,
+                match entry.entry_kind {
+                    ExchangeAddressBookEntryKind::Account => 0u8,
+                    ExchangeAddressBookEntryKind::Contact => 1u8,
+                },
+                entry.display_name.to_ascii_lowercase(),
+                entry.email.to_ascii_lowercase(),
+                nspi_entry_id(entry),
+                entry,
+            ))
         })
-}
-
-pub(in crate::mapi) fn nspi_entry_exact_match(
-    entry: &ExchangeAddressBookEntry,
-    value: &str,
-) -> bool {
-    let value = normalize_nspi_lookup_value(value);
-    let legacy_dn = nspi_entry_legacy_dn(entry).to_ascii_lowercase();
-    let unprefixed_legacy_dn = nspi_entry_unprefixed_legacy_dn(entry).to_ascii_lowercase();
-    value == entry.email.to_ascii_lowercase()
-        || value == entry.display_name.to_ascii_lowercase()
-        || value == legacy_dn
-        || value == unprefixed_legacy_dn
-        || value == format!("smtp:{}", entry.email.to_ascii_lowercase())
-        || value == format!("=smtp:{}", entry.email.to_ascii_lowercase())
+        .min_by(|left, right| {
+            left.0
+                .cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.3.cmp(&right.3))
+                .then_with(|| left.4.cmp(&right.4))
+        })
+        .map(|(_, _, _, _, _, entry)| entry)
 }
 
 pub(in crate::mapi) fn nspi_entry_matches(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
+    nspi_entry_match_rank(entry, value).is_some()
+}
+
+pub(in crate::mapi) fn nspi_entry_match_rank(
+    entry: &ExchangeAddressBookEntry,
+    value: &str,
+) -> Option<u8> {
     let value = normalize_nspi_lookup_value(value);
     if value.is_empty() {
-        return false;
+        return None;
     }
-    nspi_entry_exact_match(entry, &value)
-        || entry
-            .display_name
-            .to_ascii_lowercase()
-            .contains(value.as_str())
-        || entry.email.to_ascii_lowercase().contains(value.as_str())
-        || nspi_entry_legacy_dn(entry)
-            .to_ascii_lowercase()
-            .contains(value.as_str())
-        || nspi_entry_unprefixed_legacy_dn(entry)
-            .to_ascii_lowercase()
-            .contains(value.as_str())
+    let email = entry.email.to_ascii_lowercase();
+    let display_name = entry.display_name.to_ascii_lowercase();
+    let legacy_dn = nspi_entry_legacy_dn(entry).to_ascii_lowercase();
+    let unprefixed_legacy_dn = nspi_entry_unprefixed_legacy_dn(entry).to_ascii_lowercase();
+
+    if value == email {
+        Some(0)
+    } else if value == display_name {
+        Some(1)
+    } else if value == legacy_dn || value == unprefixed_legacy_dn {
+        Some(2)
+    } else if email.starts_with(value.as_str()) {
+        Some(10)
+    } else if display_name.starts_with(value.as_str()) {
+        Some(11)
+    } else if legacy_dn.starts_with(value.as_str())
+        || unprefixed_legacy_dn.starts_with(value.as_str())
+    {
+        Some(12)
+    } else if email.contains(value.as_str()) {
+        Some(20)
+    } else if display_name.contains(value.as_str()) {
+        Some(21)
+    } else if legacy_dn.contains(value.as_str()) || unprefixed_legacy_dn.contains(value.as_str()) {
+        Some(22)
+    } else {
+        None
+    }
 }
 
 pub(in crate::mapi) fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {

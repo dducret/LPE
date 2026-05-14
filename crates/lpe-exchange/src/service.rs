@@ -709,10 +709,7 @@ where
     }
 
     async fn resolve_names(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
-        let entries = self
-            .store
-            .fetch_address_book_entries(principal.account_id)
-            .await?;
+        let entries = self.store.fetch_address_book_entries(principal).await?;
         Ok(resolve_names_response(principal, request, &entries))
     }
 
@@ -8802,7 +8799,7 @@ async fn rpc_proxy_address_book_entries<S>(
 where
     S: ExchangeStore,
 {
-    match store.fetch_address_book_entries(principal.account_id).await {
+    match store.fetch_address_book_entries(principal).await {
         Ok(entries) => entries,
         Err(_) => Vec::new(),
     }

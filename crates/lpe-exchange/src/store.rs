@@ -1,5 +1,5 @@
 use anyhow::Result;
-use lpe_mail_auth::{AccountAuthStore, StoreFuture};
+use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, CanonicalChangeCategory, ClientTask,
@@ -227,7 +227,7 @@ pub trait ExchangeStore: AccountAuthStore {
 
     fn fetch_address_book_entries<'a>(
         &'a self,
-        principal_account_id: Uuid,
+        principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>>;
 
     fn fetch_accessible_contact_collections<'a>(
@@ -1037,18 +1037,20 @@ impl ExchangeStore for Storage {
 
     fn fetch_address_book_entries<'a>(
         &'a self,
-        principal_account_id: Uuid,
+        principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>> {
         Box::pin(async move {
-            let tenant_id = sqlx::query_scalar::<_, String>(
+            let tenant_id = sqlx::query_scalar::<_, Uuid>(
                 r#"
                 SELECT tenant_id
                 FROM accounts
-                WHERE id = $1
+                WHERE tenant_id = $1
+                  AND id = $2
                 LIMIT 1
                 "#,
             )
-            .bind(principal_account_id)
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
             .fetch_optional(self.pool())
             .await?
             .ok_or_else(|| anyhow::anyhow!("account not found"))?;
@@ -1060,9 +1062,9 @@ impl ExchangeStore for Storage {
                   AND status = 'active'
                   AND gal_visibility = 'tenant'
                 ORDER BY lower(display_name) ASC, lower(primary_email) ASC, id ASC
-                "#,
+            "#,
             )
-            .bind(&tenant_id)
+            .bind(tenant_id)
             .fetch_all(self.pool())
             .await?;
 
@@ -1078,7 +1080,7 @@ impl ExchangeStore for Storage {
                 .collect::<Vec<_>>();
 
             entries.extend(
-                self.fetch_accessible_contacts(principal_account_id)
+                self.fetch_accessible_contacts(principal.account_id)
                     .await?
                     .into_iter()
                     .filter(|contact| {

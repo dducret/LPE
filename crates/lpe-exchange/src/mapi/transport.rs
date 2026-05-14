@@ -292,67 +292,11 @@ where
         (MapiEndpoint::Emsmdb, MapiRequestType::NotificationWait) => {
             notification_wait_response(store, endpoint, &principal, headers, &request_id).await
         }
-        (MapiEndpoint::Nspi, MapiRequestType::Bind) => {
-            bind_response(endpoint, &principal, headers, &request_id)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::Unbind) => {
-            disconnect_response(endpoint, &principal, headers, &request_id, "Unbind")
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::CompareMids) => {
-            nspi_u32_result_response("CompareMIds", &request_id, 0)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::DnToMid) => {
-            nspi_dn_to_mid_response(store, &principal, _body, &request_id).await
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::GetMatches) => {
-            nspi_matches_response(store, &principal, _body, &request_id).await
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::GetPropList) => {
-            nspi_property_tags_response("GetPropList", &request_id)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::GetProps) => {
-            nspi_props_response(store, &principal, _body, "GetProps", &request_id).await
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::GetSpecialTable) => {
-            nspi_special_table_response(&request_id)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::GetTemplateInfo) => {
-            nspi_template_info_response(&principal, &request_id)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::ModLinkAtt) => nspi_disabled_mutation_response(
-            "ModLinkAtt",
-            &request_id,
-            "NSPI link-attribute mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
-        ),
-        (MapiEndpoint::Nspi, MapiRequestType::ModProps) => nspi_disabled_mutation_response(
-            "ModProps",
-            &request_id,
-            "NSPI property mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
-        ),
-        (MapiEndpoint::Nspi, MapiRequestType::GetAddressBookUrl) => {
-            endpoint_url_response("GetAddressBookUrl", &request_id, headers, "/mapi/nspi/")
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::GetMailboxUrl) => {
-            endpoint_url_response("GetMailboxUrl", &request_id, headers, "/mapi/emsmdb/")
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::QueryColumns) => {
-            nspi_property_tags_response("QueryColumns", &request_id)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::QueryRows) => {
-            nspi_rowset_response(store, &principal, _body, "QueryRows", &request_id).await
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::ResolveNames) => {
-            resolve_names_response(store, &principal, _body, &request_id).await
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::ResortRestriction) => {
-            nspi_minimal_ids_response("ResortRestriction", &principal, &request_id)
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::SeekEntries) => {
-            nspi_rowset_response(store, &principal, _body, "SeekEntries", &request_id).await
-        }
-        (MapiEndpoint::Nspi, MapiRequestType::UpdateStat) => nspi_update_stat_response(&request_id),
         (_, MapiRequestType::Ping) => {
             ping_response(endpoint, &principal, headers, _body, &request_id)
+        }
+        (MapiEndpoint::Nspi, request_type) => {
+            handle_nspi_request(store, &principal, headers, _body, request_type, &request_id).await
         }
         (_, MapiRequestType::Unsupported(value)) => mapi_diagnostic_response(
             &value,
@@ -365,12 +309,6 @@ where
             &request_id,
             5,
             "request type is not valid for the EMSMDB endpoint",
-        ),
-        (MapiEndpoint::Nspi, other) => mapi_diagnostic_response(
-            other.header_value(),
-            &request_id,
-            5,
-            "request type is not valid for the NSPI endpoint",
         ),
     };
 
