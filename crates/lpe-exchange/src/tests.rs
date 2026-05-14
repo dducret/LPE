@@ -13603,6 +13603,57 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_nspi_requested_string8_columns_stay_tenant_scoped() {
+    let mut same_tenant = FakeStore::account();
+    same_tenant.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    same_tenant.email = "bob@example.test".to_string();
+    same_tenant.display_name = "Bob".to_string();
+
+    let mut other_tenant = FakeStore::account();
+    other_tenant.tenant_id = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
+    other_tenant.account_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    other_tenant.email = "mallory@other.test".to_string();
+    other_tenant.display_name = "Mallory".to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![same_tenant, other_tenant])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut request = Vec::new();
+    for tag in [0x3003_001Eu32, 0x3001_001E, 0x3002_001E] {
+        request.extend_from_slice(&tag.to_le_bytes());
+    }
+
+    let query_headers = nspi_bound_headers(&service, "QueryRows").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &query_headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert!(contains_bytes(&body, &0x3003_001Eu32.to_le_bytes()));
+    assert!(contains_bytes(&body, b"alice@example.test\0"));
+    assert!(contains_bytes(&body, b"bob@example.test\0"));
+    assert!(contains_bytes(&body, b"SMTP\0"));
+    assert!(!contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(!contains_bytes(&body, b"mallory@other.test"));
+
+    let props_headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &props_headers, &request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, &0x3001_001Eu32.to_le_bytes()));
+    assert!(contains_bytes(&body, b"alice@example.test\0"));
+    assert!(contains_bytes(&body, b"Alice\0"));
+    assert!(!contains_bytes(&body, &utf16z("Alice")));
+    assert!(!contains_bytes(&body, b"mallory@other.test"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_get_matches_uses_complete_utf16_lookup_value() {
     let mut principal = FakeStore::account();
     principal.account_id = Uuid::parse_str("f732c3ed-7780-4011-8c67-36b9215bd913").unwrap();

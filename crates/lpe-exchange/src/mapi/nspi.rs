@@ -1,3 +1,4 @@
+use super::properties::write_ascii_z;
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
@@ -124,6 +125,18 @@ pub(in crate::mapi) const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
     0x3000_0003, // PidTagRowId
     0x3004_001F, // PidTagComment
     0x3002_001F, // PidTagAddressType / legacy bootstrap metadata
+];
+
+const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
+    0x3001_001E, // PidTagDisplayName string8
+    0x39FE_001E, // PidTagSmtpAddress string8
+    0x3003_001E, // PidTagEmailAddress string8
+    0x3A00_001E, // PidTagAccount string8
+    0x3004_001E, // PidTagComment string8
+    0x3002_001E, // PidTagAddressType string8
+    0x3005_001E, // PidTagAddressBookDisplayNamePrintable / legacy DN string8
+    0x3005_001F, // PidTagAddressBookDisplayNamePrintable / legacy DN
+    0x3900_0003, // PidTagDisplayType
 ];
 
 pub(in crate::mapi) async fn resolve_names_response<S>(
@@ -371,6 +384,33 @@ pub(in crate::mapi) fn nspi_property_tags_response(
     mapi_response(request_type, request_id, 0, body, None)
 }
 
+pub(in crate::mapi) fn nspi_requested_property_tags(request: &[u8]) -> Vec<u32> {
+    let mut tags = Vec::new();
+    let mut offset = 0usize;
+    while offset + 4 <= request.len() {
+        let tag = u32::from_le_bytes([
+            request[offset],
+            request[offset + 1],
+            request[offset + 2],
+            request[offset + 3],
+        ]);
+        if nspi_property_tag_is_supported(tag) && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+        offset += 4;
+    }
+    if tags.is_empty() {
+        NSPI_BOOTSTRAP_PROPERTY_TAGS.to_vec()
+    } else {
+        tags
+    }
+}
+
+pub(in crate::mapi) fn nspi_property_tag_is_supported(tag: u32) -> bool {
+    NSPI_BOOTSTRAP_PROPERTY_TAGS.contains(&tag)
+        || NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS.contains(&tag)
+}
+
 pub(in crate::mapi) async fn nspi_props_response<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -400,6 +440,7 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
+    let tags = nspi_requested_property_tags(request);
     let entry = nspi_requested_entry(request, &entries).or_else(|| {
         (!nspi_request_has_entry_selector(request))
             .then(|| {
@@ -415,10 +456,7 @@ where
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     if let Some(entry) = entry {
         body.push(1);
-        body.extend_from_slice(&nspi_entry_property_value_list(
-            entry,
-            NSPI_BOOTSTRAP_PROPERTY_TAGS,
-        ));
+        body.extend_from_slice(&nspi_entry_property_value_list(entry, &tags));
     } else {
         body.push(0);
     }
@@ -455,19 +493,17 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
+    let tags = nspi_requested_property_tags(request);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     body.push(0);
     body.push((!entries.is_empty()) as u8);
     if !entries.is_empty() {
-        write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
+        write_large_property_tag_array(&mut body, &tags);
         write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
         for entry in &entries {
-            body.extend_from_slice(&nspi_resolved_entry_row(
-                entry,
-                NSPI_BOOTSTRAP_PROPERTY_TAGS,
-            ));
+            body.extend_from_slice(&nspi_resolved_entry_row(entry, &tags));
         }
     }
     write_u32(&mut body, 0);
@@ -502,6 +538,7 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
+    let tags = nspi_requested_property_tags(request);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -513,13 +550,10 @@ where
     }
     body.push((!entries.is_empty()) as u8);
     if !entries.is_empty() {
-        write_large_property_tag_array(&mut body, NSPI_BOOTSTRAP_PROPERTY_TAGS);
+        write_large_property_tag_array(&mut body, &tags);
         write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
         for entry in &entries {
-            body.extend_from_slice(&nspi_resolved_entry_row(
-                entry,
-                NSPI_BOOTSTRAP_PROPERTY_TAGS,
-            ));
+            body.extend_from_slice(&nspi_resolved_entry_row(entry, &tags));
         }
     }
     write_u32(&mut body, 0);
@@ -668,18 +702,18 @@ pub(in crate::mapi) fn nspi_entry_value(
     property_tag: u32,
 ) -> NspiValue<'_> {
     match property_tag {
-        0x3001_001F => NspiValue::String(&entry.display_name),
-        0x39FE_001F => NspiValue::String(&entry.email),
-        0x3003_001F => NspiValue::String(&entry.email),
-        0x3A00_001F => NspiValue::String(&entry.display_name),
+        0x3001_001F | 0x3001_001E => NspiValue::String(&entry.display_name),
+        0x39FE_001F | 0x39FE_001E => NspiValue::String(&entry.email),
+        0x3003_001F | 0x3003_001E => NspiValue::String(&entry.email),
+        0x3A00_001F | 0x3A00_001E => NspiValue::String(&entry.display_name),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
         0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
         0x3000_0003 => NspiValue::U32(nspi_entry_id(entry)),
-        0x3004_001F => NspiValue::String(&entry.email),
-        0x3002_001F => NspiValue::String("SMTP"),
-        0x3005_001F => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
+        0x3004_001F | 0x3004_001E => NspiValue::String(&entry.email),
+        0x3002_001F | 0x3002_001E => NspiValue::String("SMTP"),
+        0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
         _ => match property_tag & 0xFFFF {
-            0x001F => NspiValue::String(""),
+            0x001F | 0x001E => NspiValue::String(""),
             0x0003 => NspiValue::U32(0),
             _ => NspiValue::U32(0),
         },
@@ -820,6 +854,14 @@ pub(in crate::mapi) fn write_address_book_property_value(
     value: &NspiValue<'_>,
 ) {
     match (property_tag & 0xFFFF, value) {
+        (0x001E, NspiValue::String(value)) => {
+            body.push(0xFF);
+            write_ascii_z(body, value);
+        }
+        (0x001E, NspiValue::OwnedString(value)) => {
+            body.push(0xFF);
+            write_ascii_z(body, value);
+        }
         (0x001F, NspiValue::String(value)) => {
             body.push(0xFF);
             write_utf16z(body, value);
@@ -1017,7 +1059,7 @@ pub(in crate::mapi) fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {
             request[offset + 2],
             request[offset + 3],
         ]);
-        if value >= 2 && !ids.contains(&value) {
+        if value >= 2 && !nspi_property_tag_is_supported(value) && !ids.contains(&value) {
             ids.push(value);
         }
         offset += 4;
