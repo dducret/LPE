@@ -79,6 +79,27 @@ pub(crate) struct MapiSyncCheckpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiSyncChangeSet {
+    pub(crate) current_change_sequence: u64,
+    pub(crate) current_modseq: u64,
+    pub(crate) changed_mailbox_ids: Vec<Uuid>,
+    pub(crate) changed_message_ids: Vec<Uuid>,
+    pub(crate) deleted_message_ids: Vec<Uuid>,
+}
+
+impl Default for MapiSyncChangeSet {
+    fn default() -> Self {
+        Self {
+            current_change_sequence: 0,
+            current_modseq: 1,
+            changed_mailbox_ids: Vec::new(),
+            changed_message_ids: Vec::new(),
+            deleted_message_ids: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) id: Uuid,
     pub(crate) display_name: String,
@@ -170,6 +191,14 @@ pub trait ExchangeStore: AccountAuthStore {
         last_modseq: u64,
         cursor_json: serde_json::Value,
     ) -> StoreFuture<'a, MapiSyncCheckpoint>;
+
+    fn fetch_mapi_sync_changes<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+        after_change_sequence: u64,
+    ) -> StoreFuture<'a, MapiSyncChangeSet>;
 
     fn fetch_address_book_entries<'a>(
         &'a self,
@@ -741,6 +770,125 @@ impl ExchangeStore for Storage {
             tx.commit().await?;
 
             mapi_sync_checkpoint_from_row(row)
+        })
+    }
+
+    fn fetch_mapi_sync_changes<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+        after_change_sequence: u64,
+    ) -> StoreFuture<'a, MapiSyncChangeSet> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let cursor = sqlx::query(
+                r#"
+                SELECT
+                    COALESCE(MAX(cursor), 0) AS current_change_sequence,
+                    COALESCE(MAX(modseq), 1) AS current_modseq
+                FROM mail_change_log
+                WHERE tenant_id = $1
+                  AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+                  AND (retained_until IS NULL OR retained_until > NOW())
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .fetch_one(self.pool())
+            .await?;
+            let mut changes = MapiSyncChangeSet {
+                current_change_sequence: cursor.get::<i64, _>("current_change_sequence") as u64,
+                current_modseq: cursor.get::<i64, _>("current_modseq") as u64,
+                ..Default::default()
+            };
+
+            let rows = sqlx::query(
+                r#"
+                SELECT object_kind, object_id, mailbox_id, change_kind, summary_json
+                FROM mail_change_log
+                WHERE tenant_id = $1
+                  AND cursor > $2
+                  AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
+                  AND (retained_until IS NULL OR retained_until > NOW())
+                  AND (
+                    ($4 = 'hierarchy' AND object_kind = 'mailbox')
+                    OR (
+                        $4 IN ('content', 'read_state')
+                        AND object_kind IN ('mailbox_message', 'attachment')
+                        AND ($5::uuid IS NULL OR mailbox_id = $5 OR mailbox_id IS NULL)
+                    )
+                  )
+                ORDER BY cursor ASC
+                LIMIT 1000
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(after_change_sequence as i64)
+            .bind(account_id)
+            .bind(checkpoint_kind.as_str())
+            .bind(mailbox_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            for row in rows {
+                let object_kind = row.get::<String, _>("object_kind");
+                let change_kind = row.get::<String, _>("change_kind");
+                let summary_json = row.get::<serde_json::Value, _>("summary_json");
+                match object_kind.as_str() {
+                    "mailbox" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            continue;
+                        }
+                        push_unique_uuid(&mut changes.changed_mailbox_ids, object_id);
+                    }
+                    "mailbox_message" | "attachment" => {
+                        let Some(message_id) = summary_json
+                            .get("messageId")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|value| Uuid::parse_str(value).ok())
+                        else {
+                            continue;
+                        };
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(&mut changes.deleted_message_ids, message_id);
+                        } else {
+                            push_unique_uuid(&mut changes.changed_message_ids, message_id);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if checkpoint_kind != MapiCheckpointKind::Hierarchy {
+                let tombstones = sqlx::query(
+                    r#"
+                    SELECT message_id
+                    FROM tombstones
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND object_kind = 'mailbox_message'
+                      AND change_cursor > $3
+                      AND ($4::uuid IS NULL OR mailbox_id = $4)
+                      AND message_id IS NOT NULL
+                      AND (retained_until IS NULL OR retained_until > NOW())
+                    ORDER BY change_cursor ASC
+                    LIMIT 1000
+                    "#,
+                )
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(after_change_sequence as i64)
+                .bind(mailbox_id)
+                .fetch_all(self.pool())
+                .await?;
+                for row in tombstones {
+                    push_unique_uuid(&mut changes.deleted_message_ids, row.get("message_id"));
+                }
+            }
+
+            Ok(changes)
         })
     }
 
@@ -1493,4 +1641,10 @@ fn mapi_sync_checkpoint_from_row(row: sqlx::postgres::PgRow) -> Result<MapiSyncC
         last_modseq: row.get::<i64, _>("last_modseq") as u64,
         cursor_json: row.get("cursor_json"),
     })
+}
+
+fn push_unique_uuid(values: &mut Vec<Uuid>, value: Uuid) {
+    if !values.contains(&value) {
+        values.push(value);
+    }
 }

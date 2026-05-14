@@ -34,7 +34,7 @@ use crate::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
         ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiIdentityLookupRecord, MapiIdentityObjectKind,
-        MapiIdentityRecord, MapiIdentityRequest, MapiSyncCheckpoint,
+        MapiIdentityRecord, MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint,
     },
 };
 
@@ -169,6 +169,7 @@ struct FakeStore {
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
+    mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
@@ -586,6 +587,17 @@ impl ExchangeStore for FakeStore {
             .unwrap()
             .insert((mailbox_id, checkpoint_kind), checkpoint.clone());
         Box::pin(async move { Ok(checkpoint) })
+    }
+
+    fn fetch_mapi_sync_changes<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _mailbox_id: Option<Uuid>,
+        _checkpoint_kind: MapiCheckpointKind,
+        _after_change_sequence: u64,
+    ) -> StoreFuture<'a, MapiSyncChangeSet> {
+        let changes = self.mapi_sync_changes.lock().unwrap().clone();
+        Box::pin(async move { Ok(changes) })
     }
 
     fn fetch_address_book_entries<'a>(
@@ -2070,15 +2082,28 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
-    let marker = b"LPE-MAPI-SYNC\0";
-    let start = bytes
-        .windows(marker.len())
-        .position(|window| window == marker)?;
-    let counts = bytes.get(start + marker.len() + 8..start + marker.len() + 16)?;
-    Some((
-        u32::from_le_bytes(counts[0..4].try_into().ok()?),
-        u32::from_le_bytes(counts[4..8].try_into().ok()?),
-    ))
+    let change_marker = 0x4012_0003u32.to_le_bytes();
+    let folder_id_tag = 0x6748_0014u32.to_le_bytes();
+    let message_id_tag = 0x674A_0014u32.to_le_bytes();
+    let mut folder_count = 0;
+    let mut message_count = 0;
+    let mut offset = 0;
+    while offset + 8 <= bytes.len() {
+        if bytes[offset..offset + 4] == change_marker {
+            let tag = &bytes[offset + 4..offset + 8];
+            if tag == folder_id_tag {
+                folder_count += 1;
+            } else if tag == message_id_tag {
+                message_count += 1;
+            }
+        }
+        offset += 1;
+    }
+    if folder_count == 0 && message_count == 0 {
+        None
+    } else {
+        Some((folder_count, message_count))
+    }
 }
 
 fn mapi_sync_manifest_message_state(bytes: &[u8], subject: &str) -> Option<(u32, u32)> {
@@ -2086,28 +2111,24 @@ fn mapi_sync_manifest_message_state(bytes: &[u8], subject: &str) -> Option<(u32,
     let subject_start = bytes
         .windows(subject.len())
         .position(|window| window == subject)?;
-    if subject_start < 10 {
-        return None;
-    }
-    let subject_len = u16::from_le_bytes(
-        bytes
-            .get(subject_start - 2..subject_start)?
-            .try_into()
-            .ok()?,
-    ) as usize;
-    if subject_len != subject.len() {
-        return None;
-    }
+    let flags_tag = 0x0E07_0003u32.to_le_bytes();
+    let flag_status_tag = 0x1090_0003u32.to_le_bytes();
+    let flags_start = bytes[..subject_start]
+        .windows(flags_tag.len())
+        .rposition(|window| window == flags_tag)?;
+    let flag_status_start = bytes[..subject_start]
+        .windows(flag_status_tag.len())
+        .rposition(|window| window == flag_status_tag)?;
     Some((
         u32::from_le_bytes(
             bytes
-                .get(subject_start - 10..subject_start - 6)?
+                .get(flags_start + 4..flags_start + 8)?
                 .try_into()
                 .ok()?,
         ),
         u32::from_le_bytes(
             bytes
-                .get(subject_start - 6..subject_start - 2)?
+                .get(flag_status_start + 4..flag_status_start + 8)?
                 .try_into()
                 .ok()?,
         ),
@@ -6733,7 +6754,7 @@ async fn mapi_over_http_mail_lifecycle_uses_canonical_state_end_to_end() {
 
     assert_eq!(sync_response.status(), StatusCode::OK);
     let sync_response_rops = response_rops_from_execute_response(sync_response).await;
-    assert!(contains_bytes(&sync_response_rops, b"LPE-MAPI-SYNC\0"));
+    assert!(!contains_bytes(&sync_response_rops, b"LPE-MAPI-SYNC\0"));
     assert!(contains_bytes(
         &sync_response_rops,
         lifecycle_subject.as_bytes()
@@ -9270,7 +9291,7 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
+    assert!(!contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
     assert!(contains_bytes(&response_rops, b"Sync manifest message"));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
 }
@@ -9418,6 +9439,136 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
     assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((2, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombstone() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let unchanged_id = Uuid::parse_str("41414141-4141-4141-4141-414141414141").unwrap();
+    let changed_id = Uuid::parse_str("42424242-4242-4242-4242-424242424242").unwrap();
+    let deleted_id = Uuid::parse_str("43434343-4343-4343-4343-434343434343").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 2;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                &unchanged_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Checkpoint unchanged",
+            ),
+            FakeStore::email(
+                &changed_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Checkpoint changed",
+            ),
+        ])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+            10,
+            4,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 12,
+        current_modseq: 6,
+        changed_message_ids: vec![changed_id],
+        deleted_message_ids: vec![deleted_id],
+        ..Default::default()
+    };
+
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
+    assert!(contains_bytes(&response_rops, b"Checkpoint changed"));
+    assert!(!contains_bytes(&response_rops, b"Checkpoint unchanged"));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x4013_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &test_mapi_message_id(&deleted_id.to_string()).to_le_bytes()
+    ));
+
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 12);
+    assert_eq!(checkpoint.last_modseq, 6);
+
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 12,
+        current_modseq: 6,
+        ..Default::default()
+    };
+    let restarted = ExchangeService::new(store);
+    let connect = restarted
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut restarted_headers = mapi_headers("Execute");
+    restarted_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut restart_rops = Vec::new();
+    append_rop_open_folder(&mut restart_rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_sync_manifest_get_buffer(&mut restart_rops, 1, 2, 4096);
+    let response = restarted
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &restarted_headers,
+            &execute_body(&rop_buffer(&restart_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
+    assert!(!contains_bytes(&response_rops, b"Checkpoint changed"));
+    assert!(!contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x403A_0003u32.to_le_bytes()
+    ));
 }
 
 #[tokio::test]

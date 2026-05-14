@@ -41,33 +41,9 @@ pub(in crate::mapi) fn rop_fast_transfer_source_copy_response(request: &RopReque
 }
 
 pub(in crate::mapi) fn final_incremental_sync_stream(sync_type: u8) -> Vec<u8> {
-    let mut stream = Vec::new();
-    write_u32(&mut stream, 0x403A_0003); // IncrSyncStateBegin
-    write_fast_transfer_binary_property(&mut stream, 0x4017_0102, &empty_replguid_idset());
-    write_fast_transfer_binary_property(&mut stream, 0x6796_0102, &empty_replguid_idset());
-    if sync_type == 0x01 {
-        write_fast_transfer_binary_property(&mut stream, 0x67DA_0102, &empty_replguid_idset());
-        write_fast_transfer_binary_property(&mut stream, 0x67D2_0102, &empty_replguid_idset());
-    }
-    write_u32(&mut stream, 0x403B_0003); // IncrSyncStateEnd
+    let mut stream = mapi_mailstore::final_sync_state_stream(sync_type, 1);
     write_u32(&mut stream, 0x4014_0003); // IncrSyncEnd
     stream
-}
-
-pub(in crate::mapi) fn empty_replguid_idset() -> Vec<u8> {
-    let mut idset = mapi_mailstore::STORE_REPLICA_GUID.to_vec();
-    idset.push(0);
-    idset
-}
-
-pub(in crate::mapi) fn write_fast_transfer_binary_property(
-    stream: &mut Vec<u8>,
-    property_tag: u32,
-    value: &[u8],
-) {
-    write_u32(stream, property_tag);
-    write_u32(stream, value.len().min(u32::MAX as usize) as u32);
-    stream.extend_from_slice(value);
 }
 
 pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_response(
@@ -185,6 +161,54 @@ pub(in crate::mapi) fn sync_emails_for(
     emails_for_folder(folder_id, mailboxes, emails)
         .into_iter()
         .cloned()
+        .collect()
+}
+
+pub(in crate::mapi) fn sync_checkpoint_kind(sync_type: u8) -> MapiCheckpointKind {
+    if sync_type == 0x02 {
+        MapiCheckpointKind::Hierarchy
+    } else {
+        MapiCheckpointKind::Content
+    }
+}
+
+pub(in crate::mapi) fn sync_checkpoint_mailbox_id(
+    folder_id: u64,
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+) -> Option<Uuid> {
+    if sync_type == 0x02 {
+        return None;
+    }
+    mailboxes
+        .iter()
+        .find(|mailbox| mapi_folder_id(mailbox) == folder_id)
+        .map(|mailbox| mailbox.id)
+}
+
+pub(in crate::mapi) fn changed_sync_mailboxes(
+    mailboxes: Vec<JmapMailbox>,
+    changed_ids: &[Uuid],
+) -> Vec<JmapMailbox> {
+    if changed_ids.is_empty() {
+        return Vec::new();
+    }
+    mailboxes
+        .into_iter()
+        .filter(|mailbox| changed_ids.contains(&mailbox.id))
+        .collect()
+}
+
+pub(in crate::mapi) fn changed_sync_emails(
+    emails: Vec<JmapEmail>,
+    changed_ids: &[Uuid],
+) -> Vec<JmapEmail> {
+    if changed_ids.is_empty() {
+        return Vec::new();
+    }
+    emails
+        .into_iter()
+        .filter(|email| changed_ids.contains(&email.id))
         .collect()
 }
 

@@ -5,6 +5,28 @@ pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+const INCR_SYNC_CHG: u32 = 0x4012_0003;
+const INCR_SYNC_DEL: u32 = 0x4013_0003;
+const INCR_SYNC_END: u32 = 0x4014_0003;
+const INCR_SYNC_READ: u32 = 0x402F_0003;
+const INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
+const INCR_SYNC_STATE_END: u32 = 0x403B_0003;
+const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
+const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
+const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
+const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
+const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
+const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+const PID_TAG_MID: u32 = 0x674A_0014;
+const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
+const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
+const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
+const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
+const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
+const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
+const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
@@ -127,6 +149,7 @@ pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
 }
 
 pub(crate) fn sync_state_token_with_attachments(
+    sync_type: u8,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
@@ -142,31 +165,34 @@ pub(crate) fn sync_state_token_with_attachments(
         }))
         .max()
         .unwrap_or(1);
-    let mut token = b"LPE-MAPI-SYNC-STATE\0".to_vec();
-    token.extend_from_slice(&(mailboxes.len().min(u32::MAX as usize) as u32).to_le_bytes());
-    token.extend_from_slice(&(emails.len().min(u32::MAX as usize) as u32).to_le_bytes());
-    token.extend_from_slice(&max_change.to_le_bytes());
-    token
+    final_sync_state_stream(sync_type, max_change)
 }
 
 pub(crate) fn sync_manifest_buffer_with_attachments(
+    sync_type: u8,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
+    deleted_message_ids: &[u64],
+    final_change_sequence: u64,
 ) -> Vec<u8> {
-    let mut buffer = b"LPE-MAPI-SYNC\0".to_vec();
-    buffer.extend_from_slice(&folder_id.to_le_bytes());
-    buffer.extend_from_slice(&(mailboxes.len().min(u32::MAX as usize) as u32).to_le_bytes());
-    buffer.extend_from_slice(&(emails.len().min(u32::MAX as usize) as u32).to_le_bytes());
-
+    let mut buffer = Vec::new();
     let mut folders = mailboxes.iter().collect::<Vec<_>>();
     folders.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
     for mailbox in folders {
         let change_number = canonical_folder_change_number(mailbox);
         let source_key = source_key_for_uuid(&mailbox.id);
-        write_prefixed_bytes(&mut buffer, &source_key);
-        buffer.extend_from_slice(&change_number.to_le_bytes());
+        write_u32(&mut buffer, INCR_SYNC_CHG);
+        write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+        write_i64(
+            &mut buffer,
+            crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(folder_id) as i64,
+        );
+        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
+        write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
+        write_i64(&mut buffer, change_number as i64);
+        write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
     }
 
     let mut messages = emails.iter().collect::<Vec<_>>();
@@ -180,13 +206,31 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         let attachments = attachments_for_message(email.id, attachment_facts);
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let source_key = source_key_for_uuid(&email.id);
-        write_prefixed_bytes(&mut buffer, &source_key);
-        buffer.extend_from_slice(&change_number.to_le_bytes());
-        buffer.extend_from_slice(&canonical_message_flags(email).to_le_bytes());
-        buffer.extend_from_slice(&canonical_flag_status(email).to_le_bytes());
-        write_prefixed_bytes(&mut buffer, email.subject.as_bytes());
-        write_prefixed_bytes(&mut buffer, &change_key_for_change_number(change_number));
-        write_prefixed_bytes(&mut buffer, &predecessor_change_list(change_number));
+        write_u32(&mut buffer, INCR_SYNC_CHG);
+        write_u32(&mut buffer, PID_TAG_MID);
+        write_i64(
+            &mut buffer,
+            crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0) as i64,
+        );
+        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
+        write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
+        write_i64(&mut buffer, change_number as i64);
+        write_u32(&mut buffer, PID_TAG_MESSAGE_FLAGS);
+        write_i32(&mut buffer, canonical_message_flags(email) as i32);
+        write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
+        write_i32(&mut buffer, canonical_flag_status(email) as i32);
+        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
+        write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_CHANGE_KEY,
+            &change_key_for_change_number(change_number),
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list(change_number),
+        );
         write_visible_recipient_facts(&mut buffer, email);
         buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
         let mut attachments = attachments.iter().collect::<Vec<_>>();
@@ -203,7 +247,47 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             write_prefixed_bytes(&mut buffer, attachment.file_reference.as_bytes());
         }
     }
+
+    if !deleted_message_ids.is_empty() {
+        write_u32(&mut buffer, INCR_SYNC_DEL);
+        write_binary_property(
+            &mut buffer,
+            META_TAG_IDSET_DELETED,
+            &replid_idset_from_object_ids(deleted_message_ids),
+        );
+    }
+
+    if sync_type != 0x02 {
+        for email in emails.iter().filter(|email| !email.unread) {
+            write_u32(&mut buffer, INCR_SYNC_READ);
+            write_u32(&mut buffer, PID_TAG_MID);
+            write_i64(
+                &mut buffer,
+                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0) as i64,
+            );
+        }
+    }
+
+    buffer.extend_from_slice(&final_sync_state_stream(
+        sync_type,
+        final_change_sequence.max(1),
+    ));
+    write_u32(&mut buffer, INCR_SYNC_END);
     buffer
+}
+
+pub(crate) fn final_sync_state_stream(sync_type: u8, max_change: u64) -> Vec<u8> {
+    let idset = replguid_idset_from_change(max_change);
+    let mut token = Vec::new();
+    write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
+    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset);
+    write_binary_property(&mut token, META_TAG_CNSET_SEEN, &idset);
+    if sync_type == 0x01 {
+        write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, &idset);
+        write_binary_property(&mut token, META_TAG_CNSET_READ, &idset);
+    }
+    write_u32(&mut token, INCR_SYNC_STATE_END);
+    token
 }
 
 pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
@@ -355,6 +439,57 @@ fn hash_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
 fn write_prefixed_bytes(buffer: &mut Vec<u8>, bytes: &[u8]) {
     buffer.extend_from_slice(&(bytes.len().min(u16::MAX as usize) as u16).to_le_bytes());
     buffer.extend_from_slice(&bytes[..bytes.len().min(u16::MAX as usize)]);
+}
+
+fn write_u32(buffer: &mut Vec<u8>, value: u32) {
+    buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_i32(buffer: &mut Vec<u8>, value: i32) {
+    buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_i64(buffer: &mut Vec<u8>, value: i64) {
+    buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_binary_property(buffer: &mut Vec<u8>, property_tag: u32, value: &[u8]) {
+    write_u32(buffer, property_tag);
+    write_u32(buffer, value.len().min(u32::MAX as usize) as u32);
+    buffer.extend_from_slice(value);
+}
+
+fn write_utf16_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) {
+    write_u32(buffer, property_tag);
+    let mut bytes = value
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    bytes.extend_from_slice(&0u16.to_le_bytes());
+    buffer.extend_from_slice(&bytes);
+}
+
+fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) {
+    write_u32(buffer, property_tag);
+    buffer.extend_from_slice(value.as_bytes());
+    buffer.push(0);
+}
+
+fn replguid_idset_from_change(change: u64) -> Vec<u8> {
+    let mut idset = STORE_REPLICA_GUID.to_vec();
+    idset.extend_from_slice(&change.max(1).to_le_bytes());
+    idset.push(0);
+    idset
+}
+
+fn replid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
+    let mut idset = Vec::new();
+    idset.extend_from_slice(&1u16.to_le_bytes());
+    for id in ids {
+        idset.extend_from_slice(&id.to_le_bytes());
+    }
+    idset.push(0);
+    idset
 }
 
 #[cfg(test)]

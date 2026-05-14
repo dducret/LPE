@@ -35,7 +35,7 @@ use crate::{
     },
     store::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, MapiIdentityObjectKind, MapiIdentityRequest,
+        ExchangeStore, MapiCheckpointKind, MapiIdentityObjectKind, MapiIdentityRequest,
     },
 };
 

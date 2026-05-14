@@ -78,6 +78,14 @@ The MAPI store adapter resolves protocol identifiers and source keys through `ma
 | Recipient table mutation | pending MAPI session state until save, then `message_recipients` / protected `Bcc` persistence through canonical save/import paths | Visible recipients remain visible canonical metadata; `Bcc` stays protected and out of user search/sync projections. |
 | Sync checkpoints | `mapi_sync_checkpoints` plus canonical change logs, tombstones, and modseqs | Checkpoints store protocol cursor position only; they are not mailbox content or Outlook-owned state. |
 
+## MAPI Sync State Format
+
+`EMSMDB` ICS download state is serialized as a bounded MS-OXCFXICS FastTransfer stream, not as an `LPE`-private payload. The stream uses the documented synchronization markers `IncrSyncChg`, `IncrSyncDel`, `IncrSyncRead`, `IncrSyncStateBegin`, `IncrSyncStateEnd`, and `IncrSyncEnd`, with message and folder identity projected through `PidTagSourceKey`, `PidTagMid`, `PidTagFolderId`, `PidTagChangeNumber`, `PidTagChangeKey`, and `PidTagPredecessorChangeList`.
+
+Final and checkpoint state is represented with the ICS state meta-properties `MetaTagIdsetGiven`, `MetaTagCnsetSeen`, `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead` as REPLGUID-scoped binary IDSET payloads over the canonical `LPE` replica GUID. Deleted or moved-out messages are exported as `IncrSyncDel` with `MetaTagIdsetDeleted` over the MAPI message IDs derived from canonical identity mappings.
+
+`mapi_sync_checkpoints` stores only the durable cursor needed to resume a synchronization scope: `checkpoint_kind`, optional `mailbox_id`, the MAPI replica GUID, last canonical change sequence, last mail modseq, and a small JSON cursor descriptor. Hierarchy checkpoints are account-wide. Content and read-state checkpoints are mailbox-scoped. On `RopSynchronizationConfigure`, `LPE` reads the checkpoint and replays `mail_change_log` plus `tombstones` after the stored cursor; after `RopFastTransferSourceGetBuffer` drains the ICS download stream, it advances the checkpoint. Upload/import ROPs mutate canonical mailbox state and rely on the same change-log/tombstone path for subsequent download reconciliation.
+
 ## Table Projection Support
 
 The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardPropertyRow`, `Restriction`, and `SortOrder` structures while keeping table rows as projections over canonical `LPE` data.

@@ -149,6 +149,10 @@ pub(in crate::mapi) enum MapiObject {
     },
     SynchronizationSource {
         folder_id: u64,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+        checkpoint_change_sequence: u64,
+        checkpoint_modseq: u64,
         sync_type: u8,
         state: Vec<u8>,
         state_upload_buffer: Vec<u8>,
@@ -157,6 +161,8 @@ pub(in crate::mapi) enum MapiObject {
     },
     SynchronizationCollector {
         folder_id: u64,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
         state: Vec<u8>,
         state_upload_buffer: Vec<u8>,
     },

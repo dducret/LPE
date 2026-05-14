@@ -1977,25 +1977,96 @@ where
                     continue;
                 };
                 let sync_type = request.sync_type();
-                let sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
-                let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
+                let checkpoint_kind = sync_checkpoint_kind(sync_type);
+                let checkpoint_mailbox_id =
+                    sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
+                let checkpoint = match store
+                    .fetch_mapi_sync_checkpoint(
+                        principal.account_id,
+                        checkpoint_mailbox_id,
+                        checkpoint_kind,
+                    )
+                    .await
+                {
+                    Ok(checkpoint) => checkpoint,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x70,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                };
+                let since = checkpoint
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.last_change_sequence)
+                    .unwrap_or(0);
+                let changes = match store
+                    .fetch_mapi_sync_changes(
+                        principal.account_id,
+                        checkpoint_mailbox_id,
+                        checkpoint_kind,
+                        since,
+                    )
+                    .await
+                {
+                    Ok(changes) => changes,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x70,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                };
+                let all_sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
+                let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
+                let (sync_mailboxes, sync_emails) = if checkpoint.is_some() {
+                    (
+                        changed_sync_mailboxes(all_sync_mailboxes, &changes.changed_mailbox_ids),
+                        changed_sync_emails(all_sync_emails, &changes.changed_message_ids),
+                    )
+                } else {
+                    (all_sync_mailboxes, all_sync_emails)
+                };
                 let sync_attachment_facts =
                     sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+                let deleted_message_ids = if checkpoint.is_some() {
+                    mapi_message_ids_for_deleted_changes(
+                        store,
+                        principal,
+                        &changes.deleted_message_ids,
+                    )
+                    .await
+                    .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
                 let state = mapi_mailstore::sync_state_token_with_attachments(
+                    sync_type,
                     &sync_mailboxes,
                     &sync_emails,
                     &sync_attachment_facts,
                 );
                 let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_attachments(
+                    sync_type,
                     folder_id,
                     &sync_mailboxes,
                     &sync_emails,
                     &sync_attachment_facts,
+                    &deleted_message_ids,
+                    changes.current_change_sequence,
                 );
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
                         folder_id,
+                        mailbox_id: checkpoint_mailbox_id,
+                        checkpoint_kind,
+                        checkpoint_change_sequence: changes.current_change_sequence,
+                        checkpoint_modseq: changes.current_modseq,
                         sync_type,
                         state,
                         state_upload_buffer: Vec::new(),
@@ -2038,6 +2109,10 @@ where
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
                         folder_id,
+                        mailbox_id: None,
+                        checkpoint_kind: MapiCheckpointKind::Content,
+                        checkpoint_change_sequence: 0,
+                        checkpoint_modseq: 1,
                         sync_type: 0,
                         state: Vec::new(),
                         state_upload_buffer: Vec::new(),
@@ -2072,6 +2147,10 @@ where
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
                         folder_id,
+                        mailbox_id: None,
+                        checkpoint_kind: MapiCheckpointKind::Content,
+                        checkpoint_change_sequence: 0,
+                        checkpoint_modseq: 1,
                         sync_type: 0,
                         state: Vec::new(),
                         state_upload_buffer: Vec::new(),
@@ -2085,17 +2164,44 @@ where
             }
             0x4E => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource {
+                    mailbox_id,
+                    checkpoint_kind,
+                    checkpoint_change_sequence,
+                    checkpoint_modseq,
                     sync_type,
                     transfer_buffer,
                     transfer_position,
                     ..
                 }) => {
-                    let _ = *sync_type;
-                    responses.extend_from_slice(&rop_fast_transfer_source_get_buffer_response(
+                    let response = rop_fast_transfer_source_get_buffer_response(
                         &request,
                         transfer_buffer,
                         transfer_position,
-                    ));
+                    );
+                    let completed = *transfer_position >= transfer_buffer.len();
+                    let checkpoint = (
+                        *mailbox_id,
+                        *checkpoint_kind,
+                        *checkpoint_change_sequence,
+                        *checkpoint_modseq,
+                        *sync_type,
+                    );
+                    responses.extend_from_slice(&response);
+                    if completed && (checkpoint.4 == 0x01 || checkpoint.4 == 0x02) {
+                        let _ = store
+                            .store_mapi_sync_checkpoint(
+                                principal.account_id,
+                                checkpoint.0,
+                                checkpoint.1,
+                                checkpoint.2,
+                                checkpoint.3,
+                                serde_json::json!({
+                                    "syncType": checkpoint.4,
+                                    "source": "emsmdb-ics-download"
+                                }),
+                            )
+                            .await;
+                    }
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
                     0x4E,
@@ -2197,6 +2303,8 @@ where
                     request.output_handle_index,
                     MapiObject::SynchronizationCollector {
                         folder_id,
+                        mailbox_id: sync_checkpoint_mailbox_id(folder_id, 0x01, mailboxes),
+                        checkpoint_kind: MapiCheckpointKind::Content,
                         state: Vec::new(),
                         state_upload_buffer: Vec::new(),
                     },
@@ -2222,6 +2330,7 @@ where
                     let sync_attachment_facts =
                         sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
                     mapi_mailstore::sync_state_token_with_attachments(
+                        0x01,
                         &sync_mailboxes,
                         &sync_emails,
                         &sync_attachment_facts,
@@ -2233,6 +2342,10 @@ where
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
                         folder_id,
+                        mailbox_id: sync_checkpoint_mailbox_id(folder_id, 0x01, mailboxes),
+                        checkpoint_kind: MapiCheckpointKind::Content,
+                        checkpoint_change_sequence: 0,
+                        checkpoint_modseq: 1,
                         sync_type: 0,
                         state: transfer_buffer.clone(),
                         state_upload_buffer: Vec::new(),
@@ -2722,6 +2835,34 @@ where
     } else {
         response
     }
+}
+
+async fn mapi_message_ids_for_deleted_changes<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    message_ids: &[Uuid],
+) -> Result<Vec<u64>>
+where
+    S: ExchangeStore,
+{
+    let requests = message_ids
+        .iter()
+        .map(|message_id| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Message,
+            canonical_id: *message_id,
+            reserved_global_counter: None,
+        })
+        .collect::<Vec<_>>();
+    let identities = store
+        .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
+        .await?;
+    for identity in &identities {
+        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+    }
+    Ok(identities
+        .into_iter()
+        .map(|identity| identity.object_id)
+        .collect())
 }
 
 async fn remember_created_mapi_identity<S>(
