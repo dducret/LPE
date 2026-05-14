@@ -3370,36 +3370,45 @@ async fn mapi_over_http_rejects_octet_stream_emsmdb_request() {
     let body = response_bytes(response).await;
     let message = String::from_utf8_lossy(&body);
     assert!(message.contains("Content-Type application/mapi-http"));
-    assert!(message.contains("only for NSPI Bind"));
+    assert!(message.contains("only for NSPI address-book"));
 }
 
 #[tokio::test]
-async fn mapi_over_http_rejects_octet_stream_non_bind_nspi_request() {
+async fn mapi_over_http_accepts_rca_octet_stream_resolve_names_probe() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
+    let mut headers = nspi_bound_headers(&service, "ResolveNames").await;
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static("103"),
+    );
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_static("520bfd13-f3a9-45c4-abec-6ef0a2541db9:2"),
+    );
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_static("c9a1f6bb-76d3-41a1-8abb-fc60106a4a97:1"),
+    );
 
     let response = service
-        .handle_mapi(
-            MapiEndpoint::Nspi,
-            &mapi_headers_with_content_type("QueryRows", "application/octet-stream"),
-            b"",
-        )
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &[0; 103])
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get("x-requesttype").unwrap(),
-        "QueryRows"
+        "ResolveNames"
     );
-    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
-    let body = response_bytes(response).await;
-    let message = String::from_utf8_lossy(&body);
-    assert!(message.contains("Content-Type application/mapi-http"));
-    assert!(message.contains("only for NSPI Bind"));
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
 }
 
 #[tokio::test]
