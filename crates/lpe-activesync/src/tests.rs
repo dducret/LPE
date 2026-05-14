@@ -841,6 +841,29 @@ async fn options_challenges_anonymous_requests() {
             .and_then(|value| value.to_str().ok()),
         Some("Basic realm=\"LPE ActiveSync\"")
     );
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-server-activesync")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversions")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolcommands")
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            "FolderSync,GetItemEstimate,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+        )
+    );
 }
 
 #[tokio::test]
@@ -898,6 +921,89 @@ fn post_authentication_errors_return_http_challenge() {
             .get(axum::http::header::WWW_AUTHENTICATE)
             .and_then(|value| value.to_str().ok()),
         Some("Basic realm=\"LPE ActiveSync\"")
+    );
+}
+
+#[tokio::test]
+async fn provision_returns_policy_key_and_lightweight_policy_document() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(14, "Provision");
+        let mut device_information = WbxmlNode::new(18, "DeviceInformation");
+        device_information.push(WbxmlNode::with_text(18, "Set", "1"));
+        root.push(device_information);
+        let mut policies = WbxmlNode::new(14, "Policies");
+        let mut policy = WbxmlNode::new(14, "Policy");
+        policy.push(WbxmlNode::with_text(
+            14,
+            "PolicyType",
+            "MS-EAS-Provisioning-WBXML",
+        ));
+        policies.push(policy);
+        root.push(policies);
+        root
+    });
+
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Provision".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+    let body = decode_response_body(response).await;
+    let policy = body
+        .child("Policies")
+        .unwrap()
+        .child("Policy")
+        .unwrap();
+
+    assert_eq!(body.child("Status").unwrap().text_value(), "1");
+    assert_eq!(
+        body.child("DeviceInformation")
+            .unwrap()
+            .child("Status")
+            .unwrap()
+            .text_value(),
+        "1"
+    );
+    assert_eq!(
+        policy.child("PolicyType").unwrap().text_value(),
+        "MS-EAS-Provisioning-WBXML"
+    );
+    assert_eq!(policy.child("Status").unwrap().text_value(), "1");
+    assert!(!policy.child("PolicyKey").unwrap().text_value().is_empty());
+    assert_eq!(
+        policy
+            .child("Data")
+            .unwrap()
+            .child("EASProvisionDoc")
+            .unwrap()
+            .child("AttachmentsEnabled")
+            .unwrap()
+            .text_value(),
+        "1"
+    );
+    assert_eq!(
+        policy
+            .child("Data")
+            .unwrap()
+            .child("EASProvisionDoc")
+            .unwrap()
+            .child("DevicePasswordEnabled")
+            .unwrap()
+            .text_value(),
+        "0"
     );
 }
 
@@ -972,10 +1078,11 @@ fn wbxml_roundtrip_preserves_get_item_estimate_tokens() {
 
 #[tokio::test]
 async fn folder_sync_returns_mail_and_collaboration_collections() {
+    let inbox = FakeStore::inbox_mailbox();
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: vec![
-            FakeStore::inbox_mailbox(),
+            inbox.clone(),
             FakeStore::draft_mailbox(),
             FakeStore::sent_mailbox(),
         ],
@@ -1003,6 +1110,54 @@ async fn folder_sync_returns_mail_and_collaboration_collections() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+    let first_body = decode_response_body(response).await;
+    let changes = first_body.child("Changes").unwrap();
+    assert_eq!(changes.child("Count").unwrap().text_value(), "5");
+    assert!(changes.children_named("Add").iter().any(|change| {
+        change.child("ServerId").unwrap().text_value() == inbox.id.to_string()
+            && change.child("ParentId").unwrap().text_value() == "0"
+            && change.child("DisplayName").unwrap().text_value() == "Inbox"
+            && change.child("Type").unwrap().text_value() == "2"
+    }));
+    assert!(changes.children_named("Add").iter().any(|change| {
+        change.child("ServerId").unwrap().text_value() == "contacts"
+            && change.child("ParentId").unwrap().text_value() == "0"
+            && change.child("DisplayName").unwrap().text_value() == "Contacts"
+            && change.child("Type").unwrap().text_value() == "9"
+    }));
+
+    let stable_request = encode_wbxml(&{
+        let mut node = WbxmlNode::new(7, "FolderSync");
+        node.push(WbxmlNode::with_text(
+            7,
+            "SyncKey",
+            first_body.child("SyncKey").unwrap().text_value(),
+        ));
+        node
+    });
+    let stable_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("FolderSync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &stable_request,
+        )
+        .await
+        .unwrap();
+    let stable_body = decode_response_body(stable_response).await;
+    assert_eq!(
+        stable_body
+            .child("Changes")
+            .unwrap()
+            .child("Count")
+            .unwrap()
+            .text_value(),
+        "0"
+    );
 }
 
 #[tokio::test]

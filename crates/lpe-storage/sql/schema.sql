@@ -256,6 +256,188 @@ CREATE TABLE server_administrators (
     FOREIGN KEY (tenant_id, domain_id) REFERENCES domains (tenant_id, id) ON DELETE CASCADE
 );
 
+CREATE TABLE server_settings (
+    tenant_id UUID PRIMARY KEY,
+    primary_hostname TEXT NOT NULL DEFAULT 'localhost',
+    admin_bind_address TEXT NOT NULL DEFAULT '127.0.0.1:8080',
+    smtp_bind_address TEXT NOT NULL DEFAULT '0.0.0.0:25',
+    imap_bind_address TEXT NOT NULL DEFAULT '0.0.0.0:143',
+    jmap_bind_address TEXT NOT NULL DEFAULT '0.0.0.0:8081',
+    default_locale TEXT NOT NULL DEFAULT 'en' CHECK (default_locale IN ('en', 'fr', 'de', 'it', 'es')),
+    max_message_size_mb INTEGER NOT NULL DEFAULT 64 CHECK (max_message_size_mb >= 8),
+    tls_mode TEXT NOT NULL DEFAULT 'required',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+);
+
+CREATE TABLE security_settings (
+    tenant_id UUID PRIMARY KEY,
+    password_login_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    mfa_required_for_admins BOOLEAN NOT NULL DEFAULT TRUE,
+    session_timeout_minutes INTEGER NOT NULL DEFAULT 45 CHECK (session_timeout_minutes >= 5),
+    audit_retention_days INTEGER NOT NULL DEFAULT 365 CHECK (audit_retention_days >= 30),
+    oidc_login_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    oidc_provider_label TEXT NOT NULL DEFAULT 'Corporate SSO',
+    oidc_auto_link_by_email BOOLEAN NOT NULL DEFAULT TRUE,
+    mailbox_password_login_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    mailbox_oidc_login_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    mailbox_oidc_provider_label TEXT NOT NULL DEFAULT 'Mailbox SSO',
+    mailbox_oidc_auto_link_by_email BOOLEAN NOT NULL DEFAULT TRUE,
+    mailbox_app_passwords_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+);
+
+CREATE TABLE admin_oidc_config (
+    tenant_id UUID PRIMARY KEY,
+    issuer_url TEXT NOT NULL DEFAULT '',
+    authorization_endpoint TEXT NOT NULL DEFAULT '',
+    token_endpoint TEXT NOT NULL DEFAULT '',
+    userinfo_endpoint TEXT NOT NULL DEFAULT '',
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '',
+    scopes TEXT NOT NULL DEFAULT 'openid profile email',
+    claim_email TEXT NOT NULL DEFAULT 'email',
+    claim_display_name TEXT NOT NULL DEFAULT 'name',
+    claim_subject TEXT NOT NULL DEFAULT 'sub',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+);
+
+CREATE TABLE account_oidc_config (
+    tenant_id UUID PRIMARY KEY,
+    issuer_url TEXT NOT NULL DEFAULT '',
+    authorization_endpoint TEXT NOT NULL DEFAULT '',
+    token_endpoint TEXT NOT NULL DEFAULT '',
+    userinfo_endpoint TEXT NOT NULL DEFAULT '',
+    client_id TEXT NOT NULL DEFAULT '',
+    client_secret TEXT NOT NULL DEFAULT '',
+    scopes TEXT NOT NULL DEFAULT 'openid profile email',
+    claim_email TEXT NOT NULL DEFAULT 'email',
+    claim_display_name TEXT NOT NULL DEFAULT 'name',
+    claim_subject TEXT NOT NULL DEFAULT 'sub',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+);
+
+CREATE TABLE admin_oidc_identities (
+    tenant_id UUID NOT NULL,
+    issuer_url TEXT NOT NULL CHECK (btrim(issuer_url) <> ''),
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+    admin_email TEXT NOT NULL CHECK (admin_email = lower(btrim(admin_email)) AND admin_email <> ''),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, issuer_url, subject),
+    FOREIGN KEY (tenant_id, admin_email) REFERENCES server_administrators (tenant_id, email) ON DELETE CASCADE
+);
+
+CREATE INDEX admin_oidc_identities_admin_idx
+    ON admin_oidc_identities (tenant_id, admin_email);
+
+CREATE INDEX admin_oidc_identities_provider_subject_idx
+    ON admin_oidc_identities (issuer_url, subject);
+
+CREATE TABLE account_oidc_identities (
+    tenant_id UUID NOT NULL,
+    issuer_url TEXT NOT NULL CHECK (btrim(issuer_url) <> ''),
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+    account_email TEXT NOT NULL CHECK (
+        account_email = btrim(account_email)
+        AND split_part(account_email, '@', 1) <> ''
+        AND split_part(account_email, '@', 2) <> ''
+        AND split_part(account_email, '@', 3) = ''
+    ),
+    normalized_account_email TEXT GENERATED ALWAYS AS (lower(account_email)) STORED,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, issuer_url, subject),
+    FOREIGN KEY (tenant_id, account_email) REFERENCES accounts (tenant_id, primary_email) ON DELETE CASCADE
+);
+
+CREATE INDEX account_oidc_identities_account_idx
+    ON account_oidc_identities (tenant_id, normalized_account_email);
+
+CREATE INDEX account_oidc_identities_provider_subject_idx
+    ON account_oidc_identities (issuer_url, subject);
+
+CREATE TABLE admin_auth_factors (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    admin_email TEXT NOT NULL CHECK (admin_email = lower(btrim(admin_email)) AND admin_email <> ''),
+    factor_type TEXT NOT NULL CHECK (factor_type IN ('totp')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'revoked')),
+    secret_ciphertext TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    verified_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    CHECK ((status = 'active' AND verified_at IS NOT NULL) OR status <> 'active'),
+    FOREIGN KEY (tenant_id, admin_email) REFERENCES admin_credentials (tenant_id, email) ON DELETE CASCADE
+);
+
+CREATE INDEX admin_auth_factors_admin_idx
+    ON admin_auth_factors (tenant_id, admin_email, factor_type, status);
+
+CREATE TABLE account_auth_factors (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_email TEXT NOT NULL CHECK (
+        account_email = btrim(account_email)
+        AND split_part(account_email, '@', 1) <> ''
+        AND split_part(account_email, '@', 2) <> ''
+        AND split_part(account_email, '@', 3) = ''
+    ),
+    normalized_account_email TEXT GENERATED ALWAYS AS (lower(account_email)) STORED,
+    factor_type TEXT NOT NULL CHECK (factor_type IN ('totp')),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'revoked')),
+    secret_ciphertext TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    verified_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    CHECK ((status = 'active' AND verified_at IS NOT NULL) OR status <> 'active'),
+    FOREIGN KEY (tenant_id, account_email) REFERENCES account_credentials (tenant_id, account_email) ON DELETE CASCADE
+);
+
+CREATE INDEX account_auth_factors_account_idx
+    ON account_auth_factors (tenant_id, normalized_account_email, factor_type, status);
+
+CREATE TABLE account_app_passwords (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_email TEXT NOT NULL CHECK (
+        account_email = btrim(account_email)
+        AND split_part(account_email, '@', 1) <> ''
+        AND split_part(account_email, '@', 2) <> ''
+        AND split_part(account_email, '@', 3) = ''
+    ),
+    normalized_account_email TEXT GENERATED ALWAYS AS (lower(account_email)) STORED,
+    label TEXT NOT NULL CHECK (btrim(label) <> ''),
+    password_hash TEXT NOT NULL CHECK (btrim(password_hash) <> ''),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, account_email) REFERENCES account_credentials (tenant_id, account_email) ON DELETE CASCADE
+);
+
+CREATE INDEX account_app_passwords_account_idx
+    ON account_app_passwords (tenant_id, normalized_account_email, status, created_at DESC);
+
+CREATE TABLE local_ai_settings (
+    tenant_id UUID PRIMARY KEY,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    provider TEXT NOT NULL DEFAULT 'stub-local',
+    model TEXT NOT NULL DEFAULT 'gemma3-local',
+    offline_only BOOLEAN NOT NULL DEFAULT TRUE,
+    indexing_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+);
+
 CREATE TABLE account_sync_state (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,

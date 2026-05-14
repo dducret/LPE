@@ -648,6 +648,40 @@ fn platform_administration_uses_real_tenant_uuid_not_string_pseudo_tenant() {
 }
 
 #[test]
+fn admin_settings_and_auth_runtime_tables_exist_in_core_schema() {
+    for required_table in [
+        "server_settings",
+        "security_settings",
+        "admin_oidc_config",
+        "account_oidc_config",
+        "admin_oidc_identities",
+        "account_oidc_identities",
+        "admin_auth_factors",
+        "account_auth_factors",
+        "account_app_passwords",
+        "local_ai_settings",
+    ] {
+        let definition = table_definition(required_table);
+        assert!(
+            definition.contains("tenant_id"),
+            "{required_table} must be tenant-scoped core administration state"
+        );
+    }
+
+    assert_schema_contains_all(&[
+        "CREATE TABLE server_settings",
+        "primary_hostname TEXT NOT NULL DEFAULT 'localhost'",
+        "default_locale TEXT NOT NULL DEFAULT 'en' CHECK (default_locale IN ('en', 'fr', 'de', 'it', 'es'))",
+        "CREATE TABLE security_settings",
+        "password_login_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+        "mailbox_app_passwords_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+        "CREATE TABLE admin_auth_factors",
+        "CREATE TABLE account_app_passwords",
+        "CREATE TABLE local_ai_settings",
+    ]);
+}
+
+#[test]
 fn admin_domain_account_and_audit_paths_bind_uuid_tenant_ids() {
     assert!(
         ADMIN_STORAGE.contains("let tenant_id = PLATFORM_TENANT_ID;")

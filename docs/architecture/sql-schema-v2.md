@@ -369,6 +369,19 @@ Core identity tables are:
 - `account_identities`
 - `mailbox_delegation_grants`
 - `sender_rights`
+- `admin_credentials`
+- `admin_sessions`
+- `server_administrators`
+- `server_settings`
+- `security_settings`
+- `admin_oidc_config`
+- `account_oidc_config`
+- `admin_oidc_identities`
+- `account_oidc_identities`
+- `admin_auth_factors`
+- `account_auth_factors`
+- `account_app_passwords`
+- `local_ai_settings`
 
 `account_identities` represents JMAP/EWS/MAPI send identities. Submission must
 validate the authenticated actor against ownership, `send_as`, or
@@ -489,6 +502,16 @@ collaboration, rights, or user-visible state.
 - `admin_credentials`
 - `admin_sessions`
 - `server_administrators`
+- `server_settings`
+- `security_settings`
+- `admin_oidc_config`
+- `account_oidc_config`
+- `admin_oidc_identities`
+- `account_oidc_identities`
+- `admin_auth_factors`
+- `account_auth_factors`
+- `account_app_passwords`
+- `local_ai_settings`
 - `storage_policy_assignments`
 - `audit_events`
 
