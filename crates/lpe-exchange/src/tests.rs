@@ -13277,6 +13277,46 @@ async fn mapi_over_http_bind_creates_nspi_session() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_bind_accepts_rca_bare_guid_headers() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut headers = mapi_headers("Bind");
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        HeaderValue::from_static("application/octet-stream"),
+    );
+    headers.insert(
+        axum::http::header::CONTENT_LENGTH,
+        HeaderValue::from_static("45"),
+    );
+    headers.insert(
+        "x-requestid",
+        HeaderValue::from_static("8efcc291-b798-442e-b608-bd3f6c67b78b:1"),
+    );
+    headers.insert(
+        "x-clientinfo",
+        HeaderValue::from_static("c9a1f6bb-76d3-41a1-8abb-fc60106a4a97:1"),
+    );
+    let request = [0u8; 45];
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Bind");
+    assert_eq!(
+        response.headers().get("x-requestid").unwrap(),
+        "8efcc291-b798-442e-b608-bd3f6c67b78b:1"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+}
+
+#[tokio::test]
 async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

@@ -36,7 +36,7 @@ Reserved or otherwise unsupported ROPs are terminal within the current ROP reque
 
 ## Request Type Matrix
 
-The HTTP envelope uses `Content-Type: application/mapi-http`; `application/octet-stream` is accepted only for authenticated `NSPI` `Bind` compatibility probes and must not be treated as a general MAPI request content type.
+The HTTP envelope uses `Content-Type: application/mapi-http`; `application/octet-stream` is accepted only for authenticated `NSPI` `Bind` compatibility probes and must not be treated as a general MAPI request content type. `X-RequestId` and `X-ClientInfo` accept the documented `{GUID}:counter` form and the Microsoft RCA bare `GUID:counter` variant, while other malformed values remain invalid headers.
 
 | Endpoint | Request type | LPE requirement | Spec basis | Implementation coverage |
 | --- | --- | --- | --- | --- |

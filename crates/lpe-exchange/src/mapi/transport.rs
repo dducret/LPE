@@ -617,12 +617,13 @@ pub(in crate::mapi) fn request_id(headers: &HeaderMap) -> Option<String> {
 }
 
 pub(in crate::mapi) fn is_guid_counter_header(value: &str) -> bool {
-    let Some(rest) = value.strip_prefix('{') else {
+    let Some((raw_guid, counter)) = value.rsplit_once(':') else {
         return false;
     };
-    let Some((guid, counter)) = rest.split_once("}:") else {
-        return false;
-    };
+    let guid = raw_guid
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or(raw_guid);
     !counter.is_empty()
         && counter.bytes().all(|byte| byte.is_ascii_digit())
         && Uuid::parse_str(guid).is_ok()
