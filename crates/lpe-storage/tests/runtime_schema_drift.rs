@@ -2,8 +2,9 @@ use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob,
-    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    AttachmentUploadInput, AuditEntryInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    NewAccount, NewDomain, NewMailbox, NewPstTransferJob, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -114,6 +115,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "mailbox SQL path",
             exercise_mailbox_path(&storage, &fixture).await,
+        );
+        collect(
+            &mut failures,
+            "mailbox canonical name storage guards",
+            exercise_mailbox_name_policy_storage_guards(&storage, pool, &fixture).await,
         );
 
         let submitted = collect(
@@ -554,6 +560,25 @@ fn expect_constraint_failure<T>(
     Ok(())
 }
 
+fn expect_anyhow_failure<T>(label: &str, result: Result<T>) -> Result<()> {
+    anyhow::ensure!(result.is_err(), "{label} unexpectedly succeeded");
+    Ok(())
+}
+
+fn jmap_create_input(
+    account_id: Uuid,
+    name: &str,
+    parent_id: Option<Uuid>,
+) -> JmapMailboxCreateInput {
+    JmapMailboxCreateInput {
+        account_id,
+        name: name.to_string(),
+        parent_id,
+        sort_order: None,
+        is_subscribed: true,
+    }
+}
+
 fn hex64(value: u8) -> String {
     format!("{value:064x}")
 }
@@ -723,6 +748,223 @@ async fn exercise_mailbox_path(storage: &Storage, fixture: &RuntimeFixture) -> R
         .fetch_imap_mailbox_state(fixture.account_id, fixture.inbox_id)
         .await
         .context("fetch_imap_mailbox_state")?;
+    Ok(())
+}
+
+async fn exercise_mailbox_name_policy_storage_guards(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let cafe = storage
+        .create_jmap_mailbox(
+            jmap_create_input(fixture.account_id, "Café", None),
+            audit("test-admin", "mailbox.create", "storage guard café"),
+        )
+        .await
+        .context("create NFC mailbox through direct JMAP storage API")?;
+    anyhow::ensure!(
+        cafe.name == "Café",
+        "direct JMAP storage create must persist mailbox names in NFC"
+    );
+    let imap_nfc = storage
+        .create_imap_mailbox(
+            fixture.account_id,
+            "IMAP Cafe\u{301}",
+            audit("test-admin", "mailbox.create", "storage guard imap nfc"),
+        )
+        .await
+        .context("create decomposed mailbox through direct IMAP storage API")?;
+    anyhow::ensure!(
+        imap_nfc.name == "IMAP Café",
+        "direct IMAP storage create must persist mailbox names in NFC"
+    );
+
+    expect_anyhow_failure(
+        "direct JMAP storage create rejects canonical-equivalent sibling",
+        storage
+            .create_jmap_mailbox(
+                jmap_create_input(fixture.account_id, "Cafe\u{301}", None),
+                audit(
+                    "test-admin",
+                    "mailbox.create",
+                    "storage guard decomposed café",
+                ),
+            )
+            .await,
+    )?;
+
+    let jmap_rename_source = storage
+        .create_jmap_mailbox(
+            jmap_create_input(fixture.account_id, "JMAP Rename Source", None),
+            audit(
+                "test-admin",
+                "mailbox.create",
+                "storage guard jmap rename source",
+            ),
+        )
+        .await
+        .context("create source mailbox for JMAP rename guard")?;
+    expect_anyhow_failure(
+        "direct JMAP storage rename rejects canonical-equivalent sibling",
+        storage
+            .update_jmap_mailbox(
+                JmapMailboxUpdateInput {
+                    account_id: fixture.account_id,
+                    mailbox_id: jmap_rename_source.id,
+                    name: Some("Cafe\u{301}".to_string()),
+                    parent_id: None,
+                    sort_order: None,
+                    is_subscribed: None,
+                },
+                audit(
+                    "test-admin",
+                    "mailbox.update",
+                    "storage guard jmap decomposed café",
+                ),
+            )
+            .await,
+    )?;
+
+    let imap_rename_source = storage
+        .create_imap_mailbox(
+            fixture.account_id,
+            "IMAP Rename Source",
+            audit(
+                "test-admin",
+                "mailbox.create",
+                "storage guard imap rename source",
+            ),
+        )
+        .await
+        .context("create source mailbox for IMAP rename guard")?;
+    expect_anyhow_failure(
+        "direct IMAP storage rename rejects canonical-equivalent sibling",
+        storage
+            .rename_imap_mailbox(
+                fixture.account_id,
+                imap_rename_source.id,
+                "Cafe\u{301}",
+                audit(
+                    "test-admin",
+                    "mailbox.rename",
+                    "storage guard imap decomposed café",
+                ),
+            )
+            .await,
+    )?;
+
+    let parent_a = storage
+        .create_jmap_mailbox(
+            jmap_create_input(fixture.account_id, "Storage Guard Parent A", None),
+            audit("test-admin", "mailbox.create", "storage guard parent a"),
+        )
+        .await
+        .context("create first parent mailbox")?;
+    let parent_b = storage
+        .create_jmap_mailbox(
+            jmap_create_input(fixture.account_id, "Storage Guard Parent B", None),
+            audit("test-admin", "mailbox.create", "storage guard parent b"),
+        )
+        .await
+        .context("create second parent mailbox")?;
+    storage
+        .create_jmap_mailbox(
+            jmap_create_input(fixture.account_id, "Parent Scoped Café", Some(parent_a.id)),
+            audit(
+                "test-admin",
+                "mailbox.create",
+                "storage guard scoped café a",
+            ),
+        )
+        .await
+        .context("create first parent-scoped mailbox")?;
+    let scoped_sibling = storage
+        .create_jmap_mailbox(
+            jmap_create_input(
+                fixture.account_id,
+                "Parent Scoped Cafe\u{301}",
+                Some(parent_b.id),
+            ),
+            audit(
+                "test-admin",
+                "mailbox.create",
+                "storage guard scoped café b",
+            ),
+        )
+        .await
+        .context("same NFC display name under a different parent should be allowed")?;
+    anyhow::ensure!(
+        scoped_sibling.name == "Parent Scoped Café",
+        "direct JMAP storage create must normalize child mailbox names to NFC"
+    );
+
+    storage
+        .create_jmap_mailbox(
+            jmap_create_input(fixture.account_id, "paypal", None),
+            audit("test-admin", "mailbox.create", "storage guard paypal"),
+        )
+        .await
+        .context("create baseline mailbox for confusable sibling guard")?;
+    expect_anyhow_failure(
+        "direct JMAP storage create rejects confusable sibling",
+        storage
+            .create_jmap_mailbox(
+                jmap_create_input(
+                    fixture.account_id,
+                    "\u{440}\u{430}\u{443}\u{440}\u{430}\u{04cf}",
+                    None,
+                ),
+                audit(
+                    "test-admin",
+                    "mailbox.create",
+                    "storage guard confusable paypal",
+                ),
+            )
+            .await,
+    )?;
+
+    expect_anyhow_failure(
+        "direct JMAP storage rename rejects reserved role spoof",
+        storage
+            .update_jmap_mailbox(
+                JmapMailboxUpdateInput {
+                    account_id: fixture.account_id,
+                    mailbox_id: jmap_rename_source.id,
+                    name: Some("ІNBOX".to_string()),
+                    parent_id: None,
+                    sort_order: None,
+                    is_subscribed: None,
+                },
+                audit(
+                    "test-admin",
+                    "mailbox.update",
+                    "storage guard reserved spoof",
+                ),
+            )
+            .await,
+    )?;
+
+    let stored_decomposed_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mailboxes
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND display_name LIKE '%' || $3 || '%'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind("\u{301}")
+    .fetch_one(pool)
+    .await
+    .context("count decomposed mailbox display names")?;
+    anyhow::ensure!(
+        stored_decomposed_count == 0,
+        "direct storage APIs must store NFC display_name values"
+    );
+
     Ok(())
 }
 

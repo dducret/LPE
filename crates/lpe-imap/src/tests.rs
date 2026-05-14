@@ -28,6 +28,49 @@ use crate::{store::ImapStore, ImapServer};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+fn assert_documented_capabilities(capability: &str) {
+    let tokens = capability
+        .lines()
+        .find_map(|line| line.strip_prefix("* CAPABILITY "))
+        .expect("CAPABILITY response line");
+    let has_token = |expected: &str| {
+        tokens
+            .split_whitespace()
+            .any(|token| token.eq_ignore_ascii_case(expected))
+    };
+
+    for required in [
+        "IMAP4rev2",
+        "AUTH=PLAIN",
+        "AUTH=LOGIN",
+        "AUTH=XOAUTH2",
+        "SASL-IR",
+        "ID",
+        "IDLE",
+        "MOVE",
+        "NAMESPACE",
+        "UIDPLUS",
+        "CONDSTORE",
+        "ENABLE",
+        "UTF8=ACCEPT",
+        "ACL",
+        "SPECIAL-USE",
+        "UNSELECT",
+    ] {
+        assert!(
+            has_token(required),
+            "CAPABILITY missing documented token {required}: {capability}"
+        );
+    }
+
+    for unsupported in ["IMAP4rev1", "QRESYNC"] {
+        assert!(
+            !has_token(unsupported),
+            "CAPABILITY advertised unsupported token {unsupported}: {capability}"
+        );
+    }
+}
+
 #[derive(Clone)]
 struct FakeDetector;
 
@@ -938,6 +981,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(greeting.contains("* OK LPE IMAP ready"));
 
     let capability = send_command(&mut stream, "A0 CAPABILITY\r\n", "A0").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("AUTH=PLAIN"));
     assert!(capability.contains("AUTH=LOGIN"));
     assert!(capability.contains("CONDSTORE"));
@@ -1176,6 +1220,7 @@ async fn utf8_accept_enables_utf8_mailbox_response_quoting() {
     assert!(!list_before_enable.contains("\"Café\""));
 
     let capability = send_command(&mut stream, "A4 CAPABILITY\r\n", "A4").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("IMAP4rev2"));
     assert!(capability.contains("UTF8=ACCEPT"));
 
@@ -1747,6 +1792,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(greeting.contains("* OK LPE IMAP ready"));
 
     let capability = send_command(&mut stream, "OL1 CAPABILITY\r\n", "OL1").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("AUTH=PLAIN"));
     assert!(capability.contains("IDLE"));
     assert!(capability.contains("MOVE"));
@@ -2016,6 +2062,7 @@ async fn thunderbird_copy_to_trash_then_expunge_removes_source_only() {
     let mut stream = TcpStream::connect(address).await.unwrap();
     let _ = read_response(&mut stream, None).await;
     let capability = send_command(&mut stream, "TB1 CAPABILITY\r\n", "TB1").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("SPECIAL-USE"));
     assert!(capability.contains("UIDPLUS"));
     assert!(capability.contains("MOVE"));
@@ -2099,6 +2146,7 @@ async fn thunderbird_delete_draft_by_move_to_trash_removes_drafts_copy() {
     let mut stream = TcpStream::connect(address).await.unwrap();
     let _ = read_response(&mut stream, None).await;
     let capability = send_command(&mut stream, "TB1 CAPABILITY\r\n", "TB1").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("MOVE"));
     assert!(capability.contains("UIDPLUS"));
     let id = send_command(
@@ -2487,6 +2535,7 @@ async fn outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable() {
     let mut stream = TcpStream::connect(address).await.unwrap();
     let _ = read_response(&mut stream, None).await;
     let capability = send_command(&mut stream, "OL1 CAPABILITY\r\n", "OL1").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("CONDSTORE"));
     assert!(capability.contains("UIDPLUS"));
 
@@ -2686,6 +2735,7 @@ async fn condstore_rejects_invalid_tokens_and_keeps_qresync_unadvertised() {
     let _ = read_response(&mut stream, None).await;
 
     let capability = send_command(&mut stream, "A1 CAPABILITY\r\n", "A1").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("CONDSTORE"));
     assert!(!capability.contains("QRESYNC"));
 
@@ -3185,6 +3235,7 @@ async fn reconnect_select_refreshes_from_canonical_mailbox_state() {
     let mut first_stream = TcpStream::connect(address).await.unwrap();
     let _ = read_response(&mut first_stream, None).await;
     let first_capability = send_command(&mut first_stream, "OL1 CAPABILITY\r\n", "OL1").await;
+    assert_documented_capabilities(&first_capability);
     assert!(first_capability.contains("CONDSTORE"));
     let first_id = send_command(
         &mut first_stream,
@@ -3225,6 +3276,7 @@ async fn reconnect_select_refreshes_from_canonical_mailbox_state() {
     let mut second_stream = TcpStream::connect(address).await.unwrap();
     let _ = read_response(&mut second_stream, None).await;
     let reconnect_capability = send_command(&mut second_stream, "RX1 CAPABILITY\r\n", "RX1").await;
+    assert_documented_capabilities(&reconnect_capability);
     assert!(reconnect_capability.contains("CONDSTORE"));
     let _ = send_command(
         &mut second_stream,
@@ -3711,6 +3763,7 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
     let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
 
     let capability = send_command(&mut stream, "A2 CAPABILITY\r\n", "A2").await;
+    assert_documented_capabilities(&capability);
     assert!(capability.contains("ACL"));
 
     let setacl = send_command(

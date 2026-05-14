@@ -349,6 +349,10 @@ Unicode policy:
 - Store a canonical equality key for sibling uniqueness.
 - Store a UTS #39 security skeleton or equivalent indexed comparison artifact
   if needed for efficient strict confusable checks.
+- Treat the current SQL `normalized_display_name` generated as
+  `lower(display_name)` only as a legacy compatibility guard. It is not the
+  canonical Unicode identity, NFC, case-folding, reserved-name, or confusable
+  policy.
 - Enforce uniqueness by parent, account-visible namespace, and canonical
   equality key.
 - Enforce one role mailbox per account for JMAP compatibility.

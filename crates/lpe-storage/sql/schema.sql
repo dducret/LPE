@@ -274,6 +274,8 @@ CREATE TABLE mailboxes (
     role TEXT NOT NULL DEFAULT 'custom'
         CHECK (role IN ('inbox', 'sent', 'drafts', 'trash', 'archive', 'junk', 'custom')),
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    -- Runtime storage APIs enforce NFC, canonical-key, and confusable mailbox-name policy.
+    -- This lower(...) column is only the remaining SQL compatibility guard, not Unicode identity.
     normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
     sort_order INTEGER NOT NULL DEFAULT 0,
     retention_days INTEGER NOT NULL DEFAULT 365 CHECK (retention_days >= 0),
