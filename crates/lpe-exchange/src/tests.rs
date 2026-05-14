@@ -10979,6 +10979,56 @@ async fn mapi_over_http_rule_rops_return_rop_specific_protocol_errors() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_non_empty_modify_rules_is_terminal_without_canonical_side_effects() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[0x41, 0x00, 0x01, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x41, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x06, 0x02, 0, 0, 0, 0, 0]
+    ));
+    assert!(imported_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let delegate_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();

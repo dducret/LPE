@@ -1369,6 +1369,13 @@ impl RopRequest {
                         .to_vec(),
                 })
             }
+            0x41 if self.modify_rules_count().unwrap_or(0) != 0 => {
+                TypedRopRequest::Unsupported(RopUnsupportedRequest {
+                    rop_id: self.rop_id,
+                    input_handle_index: self.input_handle_index,
+                    reserved: false,
+                })
+            }
             rop_id if rop_id_is_supported_by_dispatch(rop_id) => {
                 TypedRopRequest::SupportedRaw(RopSupportedRawRequest {
                     rop_id,
@@ -1420,6 +1427,14 @@ impl RopRequest {
 
     pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {
         if self.rop_id != 0x40 {
+            return None;
+        }
+        let bytes = self.payload.get(1..3)?;
+        Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    pub(in crate::mapi) fn modify_rules_count(&self) -> Option<u16> {
+        if self.rop_id != 0x41 {
             return None;
         }
         let bytes = self.payload.get(1..3)?;
@@ -2606,9 +2621,6 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let mut payload = vec![cursor.read_u8()?];
             let rules_count = cursor.read_u16()? as usize;
             payload.extend_from_slice(&(rules_count as u16).to_le_bytes());
-            if rules_count != 0 {
-                return Err(anyhow!("unsupported non-empty ModifyRules request"));
-            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
