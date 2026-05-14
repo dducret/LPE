@@ -426,6 +426,41 @@ CREATE TABLE account_app_passwords (
 CREATE INDEX account_app_passwords_account_idx
     ON account_app_passwords (tenant_id, normalized_account_email, status, created_at DESC);
 
+CREATE TABLE sieve_scripts (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    name TEXT NOT NULL CHECK (btrim(name) <> ''),
+    normalized_name TEXT GENERATED ALWAYS AS (lower(name)) STORED,
+    content TEXT NOT NULL CHECK (btrim(content) <> ''),
+    is_active BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, account_id, normalized_name),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX sieve_scripts_active_account_idx
+    ON sieve_scripts (tenant_id, account_id)
+    WHERE is_active = TRUE;
+
+CREATE INDEX sieve_scripts_account_idx
+    ON sieve_scripts (tenant_id, account_id, normalized_name);
+
+CREATE TABLE sieve_vacation_responses (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    sender_address TEXT NOT NULL CHECK (sender_address = lower(btrim(sender_address)) AND sender_address <> ''),
+    response_key TEXT NOT NULL CHECK (response_key ~ '^[0-9a-f]{64}$'),
+    last_sent_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, sender_address, response_key),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX sieve_vacation_responses_last_sent_idx
+    ON sieve_vacation_responses (tenant_id, account_id, last_sent_at);
+
 CREATE TABLE local_ai_settings (
     tenant_id UUID PRIMARY KEY,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,

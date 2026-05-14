@@ -108,6 +108,13 @@ for hierarchy sync and folder-list projections.
 `jmap_push_journal_retention_days` for tenant-domain JMAP push replay cleanup.
 Those fields are schema fields, not admin-only view state.
 
+`sieve_scripts` owns per-account Sieve documents and the single active script
+selection used by inbound filtering and EWS OOF projection. OOF compatibility
+must write the canonical active Sieve vacation script instead of maintaining an
+EWS-local automatic-replies table. `sieve_vacation_responses` owns vacation
+auto-reply suppression state keyed by account, sender, and vacation response
+content.
+
 UID allocation must update the mailbox row and insert membership rows in the
 same transaction. Expunge removes the live membership row only after writing a
 tombstone row.

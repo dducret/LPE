@@ -676,6 +676,8 @@ fn admin_settings_and_auth_runtime_tables_exist_in_core_schema() {
         "admin_auth_factors",
         "account_auth_factors",
         "account_app_passwords",
+        "sieve_scripts",
+        "sieve_vacation_responses",
         "local_ai_settings",
     ] {
         let definition = table_definition(required_table);
@@ -694,6 +696,10 @@ fn admin_settings_and_auth_runtime_tables_exist_in_core_schema() {
         "mailbox_app_passwords_enabled BOOLEAN NOT NULL DEFAULT TRUE",
         "CREATE TABLE admin_auth_factors",
         "CREATE TABLE account_app_passwords",
+        "CREATE TABLE sieve_scripts",
+        "normalized_name TEXT GENERATED ALWAYS AS (lower(name)) STORED",
+        "CREATE UNIQUE INDEX sieve_scripts_active_account_idx",
+        "CREATE TABLE sieve_vacation_responses",
         "CREATE TABLE local_ai_settings",
     ]);
 }
