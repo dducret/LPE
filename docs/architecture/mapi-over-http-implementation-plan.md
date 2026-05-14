@@ -28,6 +28,8 @@ Single-node sticky MAPI sessions are acceptable for the first Outlook 2016 / 201
 
 ## Request Type Matrix
 
+The HTTP envelope uses `Content-Type: application/mapi-http`; `application/octet-stream` is accepted only for authenticated `NSPI` `Bind` compatibility probes and must not be treated as a general MAPI request content type.
+
 | Endpoint | Request type | LPE requirement | Spec basis | Planned ticket |
 | --- | --- | --- | --- | --- |
 | `/mapi/emsmdb` | `Connect` | Establish an authenticated mailbox session and return mailbox-context metadata without exposing unauthenticated mailbox state. | [MS-OXCMAPIHTTP 2.2.3.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/cb1f2c87-eb69-418f-9e59-c30c179615a0), [MS-OXCMAPIHTTP 2.2.4](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/22073d61-1311-45bb-a247-9a0e6af8666f) | `MAPI-HTTP-01`, `MAPI-SESSION-01` |

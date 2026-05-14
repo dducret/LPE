@@ -3336,6 +3336,61 @@ async fn mapi_over_http_accepts_outlook_octet_stream_bind_probe() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_rejects_octet_stream_emsmdb_request() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &mapi_headers_with_content_type("Connect", "application/octet-stream"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Connect");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    let body = response_bytes(response).await;
+    let message = String::from_utf8_lossy(&body);
+    assert!(message.contains("Content-Type application/mapi-http"));
+    assert!(message.contains("only for NSPI Bind"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_rejects_octet_stream_non_bind_nspi_request() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &mapi_headers_with_content_type("QueryRows", "application/octet-stream"),
+            b"",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("x-requesttype").unwrap(),
+        "QueryRows"
+    );
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "4");
+    let body = response_bytes(response).await;
+    let message = String::from_utf8_lossy(&body);
+    assert!(message.contains("Content-Type application/mapi-http"));
+    assert!(message.contains("only for NSPI Bind"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_disconnect_consumes_emsmdb_session() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
