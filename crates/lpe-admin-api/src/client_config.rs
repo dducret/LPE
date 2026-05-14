@@ -276,6 +276,10 @@ impl PublishedEndpoints {
         self.mapi_enabled && self.outlook_interop_gate_passed
     }
 
+    fn mapi_http_autodiscover_selected(&self) -> bool {
+        self.mapi_http_requested && self.mapi_autodiscover_enabled()
+    }
+
     fn exch_autodiscover_enabled(&self) -> bool {
         self.legacy_exch_autodiscover_enabled && self.exchange_autodiscover_enabled()
     }
@@ -446,17 +450,17 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
-    if config.ews_enabled && !config.mapi_http_requested {
+    if config.ews_enabled && !config.mapi_http_autodiscover_selected() {
         xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
     }
     if (config.exch_autodiscover_enabled() || config.expr_autodiscover_enabled())
-        && !config.mapi_http_requested
+        && !config.mapi_http_autodiscover_selected()
     {
         xml.push_str(&render_exchange_provider_autodiscover_protocols(
             config, email,
         ));
     }
-    if config.mapi_autodiscover_enabled() && config.mapi_http_requested {
+    if config.mapi_http_autodiscover_selected() {
         xml.push_str(&render_mapi_http_autodiscover_protocol(config));
     }
 
@@ -1628,6 +1632,39 @@ mod tests {
         assert!(config.legacy_exch_autodiscover_enabled);
         assert!(config.legacy_expr_autodiscover_enabled);
         assert!(config.rpc_proxy_enabled);
+        assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
+        assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+
+        std::env::remove_var("LPE_AUTOCONFIG_EWS_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_RPC_PROXY_ENABLED");
+    }
+
+    #[test]
+    fn legacy_exchange_autodiscover_survives_mapi_capability_header_without_mapi_publication() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_AUTOCONFIG_EWS_ENABLED", "true");
+        std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
+        std::env::set_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_RPC_PROXY_ENABLED", "true");
+        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
+        std::env::remove_var("LPE_PUBLIC_SCHEME");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        headers.insert("x-mapihttpcapability", "1".parse().unwrap());
+        let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(config.ews_enabled);
+        assert!(config.mapi_http_requested);
+        assert!(!config.mapi_autodiscover_enabled());
         assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
         assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
         assert!(xml.contains("<EwsUrl>https://mail.example.test/EWS/Exchange.asmx</EwsUrl>"));
