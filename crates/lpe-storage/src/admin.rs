@@ -363,7 +363,7 @@ impl Storage {
                 INSERT INTO mailboxes (
                     id, tenant_id, account_id, role, display_name, sort_order, retention_days, uid_validity
                 )
-                VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 365, $4)
+                VALUES ($1, $2, $3, 'inbox', 'INBOX', 0, 365, $4)
                 "#,
             )
             .bind(Uuid::new_v4())

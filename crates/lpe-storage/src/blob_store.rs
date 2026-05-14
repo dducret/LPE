@@ -2108,7 +2108,7 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, uid_validity)
-            VALUES ($1, $2, $3, 'inbox', 'Inbox', 1)
+            VALUES ($1, $2, $3, 'inbox', 'INBOX', 1)
             "#,
         )
         .bind(mailbox_id)
@@ -4589,7 +4589,7 @@ mod tests {
         sqlx::query(
             r#"
             INSERT INTO mailboxes (id, tenant_id, account_id, role, display_name, uid_validity)
-            VALUES ($1, $2, $3, 'inbox', 'Inbox', 1)
+            VALUES ($1, $2, $3, 'inbox', 'INBOX', 1)
             "#,
         )
         .bind(mailbox_id)

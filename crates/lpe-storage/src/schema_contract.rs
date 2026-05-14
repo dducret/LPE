@@ -1001,6 +1001,23 @@ fn mailbox_hierarchy_and_subscriptions_are_canonical_storage() {
 }
 
 #[test]
+fn system_mailbox_creation_uses_canonical_backend_names() {
+    assert!(
+        PROTOCOLS_STORAGE.contains("\"inbox\", \"INBOX\", 0, 365")
+            && PROTOCOLS_STORAGE.contains("\"trash\", \"Trash\", 30, 365"),
+        "IMAP mailbox bootstrap must store canonical system display names"
+    );
+    assert!(
+        ADMIN_STORAGE.contains("'inbox', 'INBOX', 0, 365"),
+        "new account creation must store canonical INBOX display name"
+    );
+    assert!(
+        INBOUND_STORAGE.contains("\"inbox\",\n                        \"INBOX\""),
+        "inbound final delivery must create the canonical INBOX display name"
+    );
+}
+
+#[test]
 fn runtime_access_paths_have_scaling_indexes() {
     assert_schema_contains_all(&[
         "CREATE INDEX mailbox_messages_visible_uid_idx",

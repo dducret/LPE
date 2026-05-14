@@ -212,10 +212,10 @@ impl MailboxNamePolicy {
 
     pub fn canonical_system_display_name(role: &str) -> Option<&'static str> {
         match role {
-            "inbox" => Some("Inbox"),
+            "inbox" => Some("INBOX"),
             "drafts" => Some("Drafts"),
             "sent" => Some("Sent"),
-            "trash" => Some("Deleted"),
+            "trash" => Some("Trash"),
             "junk" => Some("Junk"),
             "archive" => Some("Archive"),
             _ => None,

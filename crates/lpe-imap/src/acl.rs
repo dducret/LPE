@@ -8,7 +8,9 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     parse::tokenize,
-    render::{render_imap_mailbox_string, sanitize_imap_quoted, sanitize_imap_text},
+    render::{
+        render_imap_mailbox_string, render_mailbox_name, sanitize_imap_quoted, sanitize_imap_text,
+    },
     Session,
 };
 
@@ -62,7 +64,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(
                 format!(
                     "* ACL {} {}\r\n",
-                    render_imap_mailbox_string(&mailbox.name, self.utf8_accept_enabled),
+                    render_imap_mailbox_string(
+                        &render_mailbox_name(&mailbox),
+                        self.utf8_accept_enabled
+                    ),
                     entries.join(" ")
                 )
                 .as_bytes(),
@@ -91,7 +96,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(
                 format!(
                     "* MYRIGHTS {} {}\r\n",
-                    render_imap_mailbox_string(&mailbox.name, self.utf8_accept_enabled),
+                    render_imap_mailbox_string(
+                        &render_mailbox_name(&mailbox),
+                        self.utf8_accept_enabled
+                    ),
                     OWNER_RIGHTS
                 )
                 .as_bytes(),
@@ -123,7 +131,10 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(
                 format!(
                     "* LISTRIGHTS {} \"{}\" \"\" {}\r\n",
-                    render_imap_mailbox_string(&mailbox.name, self.utf8_accept_enabled),
+                    render_imap_mailbox_string(
+                        &render_mailbox_name(&mailbox),
+                        self.utf8_accept_enabled
+                    ),
                     sanitize_imap_quoted(&tokens[1]),
                     ASSIGNABLE_RIGHTS
                 )

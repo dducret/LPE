@@ -645,13 +645,13 @@ impl Storage {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         self.ensure_account_exists(&mut tx, &tenant_id, account_id)
             .await?;
-        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "inbox", "Inbox", 0, 365)
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "inbox", "INBOX", 0, 365)
             .await?;
         self.ensure_mailbox(&mut tx, &tenant_id, account_id, "drafts", "Drafts", 10, 365)
             .await?;
         self.ensure_mailbox(&mut tx, &tenant_id, account_id, "sent", "Sent", 20, 365)
             .await?;
-        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "trash", "Deleted", 30, 365)
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "trash", "Trash", 30, 365)
             .await?;
         tx.commit().await?;
 

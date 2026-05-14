@@ -359,7 +359,7 @@ impl FakeStore {
             id: Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap(),
             parent_id: None,
             role: "inbox".to_string(),
-            name: "Inbox".to_string(),
+            name: "INBOX".to_string(),
             sort_order: 0,
             total_emails: 1,
             unread_emails: 1,
@@ -5256,6 +5256,55 @@ async fn mailbox_get_returns_nfc_unicode_names_as_json_strings() {
         response.method_responses[0].1["list"][0]["name"],
         Value::String("Café".to_string())
     );
+}
+
+#[tokio::test]
+async fn mailbox_get_returns_canonical_system_names_and_roles() {
+    let trash_id = Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![
+            FakeStore::inbox_mailbox(),
+            JmapMailbox {
+                id: trash_id,
+                parent_id: None,
+                role: "trash".to_string(),
+                name: "Trash".to_string(),
+                sort_order: 30,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+        ],
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/get".to_string(),
+                    json!({"properties": ["name", "role"]}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let list = response.method_responses[0].1["list"].as_array().unwrap();
+    assert!(list
+        .iter()
+        .any(|mailbox| mailbox["name"] == "INBOX" && mailbox["role"] == "inbox"));
+    assert!(list
+        .iter()
+        .any(|mailbox| mailbox["name"] == "Trash" && mailbox["role"] == "trash"));
 }
 
 #[tokio::test]

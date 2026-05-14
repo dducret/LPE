@@ -67,7 +67,6 @@ pub(crate) fn render_list_flags(role: &str, legacy_xlist: bool) -> String {
     format!("({})", flags.join(" "))
 }
 
-#[cfg(test)]
 pub(crate) fn render_mailbox_name(mailbox: &lpe_storage::JmapMailbox) -> String {
     if mailbox.role == "inbox" {
         "INBOX".to_string()
@@ -1369,7 +1368,7 @@ mod tests {
             thread_id: Uuid::new_v4(),
             mailbox_id: Uuid::new_v4(),
             mailbox_role: "inbox".to_string(),
-            mailbox_name: "Inbox".to_string(),
+            mailbox_name: "INBOX".to_string(),
             received_at: "2026-05-03T10:00:00Z".to_string(),
             sent_at: None,
             from_address: String::new(),
@@ -1418,7 +1417,7 @@ mod tests {
             thread_id: Uuid::new_v4(),
             mailbox_id: Uuid::new_v4(),
             mailbox_role: "inbox".to_string(),
-            mailbox_name: "Inbox".to_string(),
+            mailbox_name: "INBOX".to_string(),
             received_at: "2026-05-03T10:00:00Z".to_string(),
             sent_at: None,
             from_address: "sender@example.test".to_string(),
@@ -1477,7 +1476,7 @@ mod tests {
             thread_id: Uuid::new_v4(),
             mailbox_id: Uuid::new_v4(),
             mailbox_role: "inbox".to_string(),
-            mailbox_name: "Inbox".to_string(),
+            mailbox_name: "INBOX".to_string(),
             received_at: "2026-05-03T10:00:00Z".to_string(),
             sent_at: None,
             from_address: "sender@example.test".to_string(),
@@ -1530,7 +1529,7 @@ mod tests {
             thread_id: Uuid::new_v4(),
             mailbox_id: Uuid::new_v4(),
             mailbox_role: "inbox".to_string(),
-            mailbox_name: "Inbox".to_string(),
+            mailbox_name: "INBOX".to_string(),
             received_at: "2026-05-03T10:00:00Z".to_string(),
             sent_at: None,
             from_address: "sender@example.test".to_string(),

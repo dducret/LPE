@@ -287,3 +287,31 @@ fn mailbox_display_name_rejects_reserved_name_spoofing() {
         Some("trash")
     );
 }
+
+#[test]
+fn canonical_system_display_names_are_standard_backend_names() {
+    assert_eq!(
+        MailboxNamePolicy::canonical_system_display_name("inbox"),
+        Some("INBOX")
+    );
+    assert_eq!(
+        MailboxNamePolicy::canonical_system_display_name("sent"),
+        Some("Sent")
+    );
+    assert_eq!(
+        MailboxNamePolicy::canonical_system_display_name("drafts"),
+        Some("Drafts")
+    );
+    assert_eq!(
+        MailboxNamePolicy::canonical_system_display_name("trash"),
+        Some("Trash")
+    );
+    assert_eq!(
+        MailboxNamePolicy::canonical_system_display_name("junk"),
+        Some("Junk")
+    );
+    assert_eq!(
+        MailboxNamePolicy::canonical_system_display_name("archive"),
+        Some("Archive")
+    );
+}

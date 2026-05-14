@@ -152,7 +152,7 @@ impl Storage {
                         &tenant_id,
                         account_id,
                         "inbox",
-                        "Inbox",
+                        "INBOX",
                         0,
                         DEFAULT_SIEVE_MAILBOX_RETENTION_DAYS,
                     )

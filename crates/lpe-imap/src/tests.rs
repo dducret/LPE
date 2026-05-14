@@ -77,10 +77,10 @@ impl FakeStore {
                 status: "active".to_string(),
             },
             mailboxes: Arc::new(Mutex::new(vec![
-                mailbox(&inbox_id.to_string(), "inbox", "Inbox", 0),
+                mailbox(&inbox_id.to_string(), "inbox", "INBOX", 0),
                 mailbox(&sent_id.to_string(), "sent", "Sent", 20),
                 mailbox(&drafts_id.to_string(), "drafts", "Drafts", 10),
-                mailbox(&trash_id.to_string(), "trash", "Deleted", 30),
+                mailbox(&trash_id.to_string(), "trash", "Trash", 30),
             ])),
             emails: Arc::new(Mutex::new(vec![
                 email(
@@ -89,7 +89,7 @@ impl FakeStore {
                     2,
                     "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
                     "inbox",
-                    "Inbox",
+                    "INBOX",
                     "Welcome",
                     true,
                     false,
@@ -958,7 +958,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
-    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
 
     let select = send_command(&mut stream, "A3 SELECT Inbox\r\n", "A3").await;
     assert!(select.contains("* 1 EXISTS"));
@@ -1017,7 +1017,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
 
     let list_custom = send_command(&mut stream, "A8 LIST \"\" \"*\"\r\n", "A8").await;
     assert!(list_custom.contains("\"Projects\""));
-    assert!(list_custom.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(list_custom.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
     assert!(!list_custom.contains("\"Deleted Items\""));
     assert!(list_custom.contains("\"Junk Email\""));
     assert!(list_custom.contains("\"Outlook Parent/Child\""));
@@ -1563,7 +1563,7 @@ async fn mailbox_aliases_discover_and_select_canonical_special_folders() {
             4,
             trash_id,
             "trash",
-            "Deleted",
+            "Trash",
             "Deleted unread",
             true,
             false,
@@ -1574,7 +1574,7 @@ async fn mailbox_aliases_discover_and_select_canonical_special_folders() {
             5,
             trash_id,
             "trash",
-            "Deleted",
+            "Trash",
             "Deleted seen",
             false,
             false,
@@ -1599,12 +1599,12 @@ async fn mailbox_aliases_discover_and_select_canonical_special_folders() {
 
     let list_trash = send_command(&mut stream, "A2 LIST \"\" \"Trash\"\r\n", "A2").await;
     assert_eq!(list_trash.matches("* LIST ").count(), 1);
-    assert!(list_trash.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(list_trash.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
 
     let xlist_deleted_items =
         send_command(&mut stream, "A3 XLIST \"\" \"Deleted Items\"\r\n", "A3").await;
     assert_eq!(xlist_deleted_items.matches("* XLIST ").count(), 1);
-    assert!(xlist_deleted_items.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(xlist_deleted_items.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
 
     let status = send_command(
         &mut stream,
@@ -1613,7 +1613,7 @@ async fn mailbox_aliases_discover_and_select_canonical_special_folders() {
     )
     .await;
     assert!(status.contains(
-        "* STATUS \"Deleted\" (MESSAGES 2 RECENT 0 UIDNEXT 9 UIDVALIDITY 444 UNSEEN 1 HIGHESTMODSEQ 5)"
+        "* STATUS \"Trash\" (MESSAGES 2 RECENT 0 UIDNEXT 9 UIDVALIDITY 444 UNSEEN 1 HIGHESTMODSEQ 5)"
     ));
 
     let select_deleted_items =
@@ -1708,7 +1708,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(lsub.contains("* LSUB (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(lsub.contains("* LSUB (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(lsub.contains("* LSUB (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
-    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(lsub.contains("* LSUB (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
 
     let unsubscribe = send_command(&mut stream, "OL7 UNSUBSCRIBE Inbox\r\n", "OL7").await;
     assert!(unsubscribe.contains("OL7 OK UNSUBSCRIBE completed"));
@@ -1717,14 +1717,14 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(list.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(list.contains("* LIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
-    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
 
     let list_inbox = send_command(&mut stream, "OL8A LIST \"\" \"INBOX\"\r\n", "OL8A").await;
     assert_eq!(list_inbox.matches("* LIST ").count(), 1);
     assert!(list_inbox.contains("* LIST (\\HasNoChildren) \"/\" \"INBOX\""));
     assert!(!list_inbox.contains("\"Sent\""));
     assert!(!list_inbox.contains("\"Drafts\""));
-    assert!(!list_inbox.contains("\"Deleted\""));
+    assert!(!list_inbox.contains("\"Trash\""));
 
     let list_root = send_command(&mut stream, "OL8B LIST \"\" \"\"\r\n", "OL8B").await;
     assert!(list_root.contains("* LIST (\\Noselect) \"/\" \"\""));
@@ -1733,13 +1733,13 @@ async fn outlook_first_login_list_select_sync_transcript() {
     assert!(xlist.contains("* XLIST (\\HasNoChildren \\Inbox) \"/\" \"INBOX\""));
     assert!(xlist.contains("* XLIST (\\HasNoChildren \\Sent) \"/\" \"Sent\""));
     assert!(xlist.contains("* XLIST (\\HasNoChildren \\Drafts) \"/\" \"Drafts\""));
-    assert!(xlist.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(xlist.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
     assert!(xlist.contains("OL8X OK XLIST completed"));
 
     let xlist_deleted_items =
         send_command(&mut stream, "OL8Y XLIST \"\" \"Deleted Items\"\r\n", "OL8Y").await;
     assert_eq!(xlist_deleted_items.matches("* XLIST ").count(), 1);
-    assert!(xlist_deleted_items.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(xlist_deleted_items.contains("* XLIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
 
     let examine = send_command(&mut stream, "OL8E EXAMINE Inbox\r\n", "OL8E").await;
     assert!(examine.contains("OL8E OK [READ-ONLY] EXAMINE completed"));
@@ -1956,14 +1956,14 @@ async fn thunderbird_copy_to_trash_then_expunge_removes_source_only() {
     let namespace = send_command(&mut stream, "TB4 NAMESPACE\r\n", "TB4").await;
     assert!(namespace.contains("* NAMESPACE ((\"\" \"/\")) NIL NIL"));
     let list = send_command(&mut stream, "TB5 LIST \"\" \"*\"\r\n", "TB5").await;
-    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Deleted\""));
+    assert!(list.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
     let trash_status = send_command(
         &mut stream,
         "TB6 STATUS \"Deleted Items\" (MESSAGES UIDNEXT UIDVALIDITY)\r\n",
         "TB6",
     )
     .await;
-    assert!(trash_status.contains("* STATUS \"Deleted\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 444)"));
+    assert!(trash_status.contains("* STATUS \"Trash\" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 444)"));
 
     let select_inbox = send_command(&mut stream, "TB7 SELECT Inbox\r\n", "TB7").await;
     assert!(select_inbox.contains("* 1 EXISTS"));
@@ -2347,7 +2347,7 @@ async fn outlook_uid_search_refreshes_selected_mailbox_before_fetch() {
             4,
             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
             "inbox",
-            "Inbox",
+            "INBOX",
             "Arrived after select",
             true,
             false,
@@ -2384,7 +2384,7 @@ async fn outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable() {
                 uid as u64 + 1,
                 inbox_id,
                 "inbox",
-                "Inbox",
+                "INBOX",
                 &format!("Message-{uid:04}"),
                 uid % 3 == 0,
                 uid % 5 == 0,
@@ -2455,7 +2455,7 @@ async fn outlook_large_mailbox_refresh_keeps_uid_fetch_and_search_stable() {
         386,
         inbox_id,
         "inbox",
-        "Inbox",
+        "INBOX",
         "Message-0385",
         true,
         false,
@@ -2673,7 +2673,7 @@ async fn search_and_uid_search_use_canonical_visible_fields_without_bcc() {
             4,
             inbox_id,
             "inbox",
-            "Inbox",
+            "INBOX",
             "Flagged unread",
             true,
             true,
@@ -2695,7 +2695,7 @@ async fn search_and_uid_search_use_canonical_visible_fields_without_bcc() {
             5,
             inbox_id,
             "inbox",
-            "Inbox",
+            "INBOX",
             "Deleted old",
             false,
             false,
@@ -2882,7 +2882,7 @@ async fn fetch_renders_canonical_multipart_mime_without_bcc() {
         let mut emails = store.emails.lock().unwrap();
         let message = emails
             .iter_mut()
-            .find(|email| email.mailbox_name == "Inbox")
+            .find(|email| email.mailbox_name == "INBOX")
             .unwrap();
         message.body_text = "Plain cafe body".to_string();
         message.body_html_sanitized = Some("<p>Plain cafe body</p>".to_string());
@@ -3063,7 +3063,7 @@ async fn noop_and_check_emit_selected_mailbox_refresh_updates() {
             next_modseq,
             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
             "inbox",
-            "Inbox",
+            "INBOX",
             "Arrived during session",
             true,
             false,
@@ -3134,7 +3134,7 @@ async fn reconnect_select_refreshes_from_canonical_mailbox_state() {
             next_modseq,
             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
             "inbox",
-            "Inbox",
+            "INBOX",
             "Arrived before reconnect",
             true,
             false,
@@ -3196,7 +3196,7 @@ async fn idle_reports_selected_mailbox_flag_changes() {
         let mut emails = store.emails.lock().unwrap();
         let inbox_email = emails
             .iter_mut()
-            .find(|email| email.mailbox_name == "Inbox")
+            .find(|email| email.mailbox_name == "INBOX")
             .unwrap();
         inbox_email.unread = false;
         inbox_email.flagged = true;
@@ -3237,7 +3237,7 @@ async fn store_survives_concurrent_selected_mailbox_removal() {
             4,
             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
             "inbox",
-            "Inbox",
+            "INBOX",
             "Follow-up",
             true,
             false,
@@ -3313,7 +3313,7 @@ async fn idle_reports_replacement_when_selected_mailbox_membership_changes_witho
         let mut emails = store.emails.lock().unwrap();
         let moved = emails
             .iter_mut()
-            .find(|email| email.mailbox_name == "Inbox")
+            .find(|email| email.mailbox_name == "INBOX")
             .unwrap();
         moved.mailbox_id = reference_id;
         moved.mailbox_role.clear();
@@ -3326,7 +3326,7 @@ async fn idle_reports_replacement_when_selected_mailbox_membership_changes_witho
             replacement_modseq,
             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
             "inbox",
-            "Inbox",
+            "INBOX",
             "Replacement",
             true,
             false,
@@ -3641,11 +3641,11 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
     assert!(setacl.contains("A3 OK SETACL completed"));
 
     let getacl = send_command(&mut stream, "A4 GETACL Inbox\r\n", "A4").await;
-    assert!(getacl.contains("* ACL \"Inbox\" alice@example.test lrswiteapb"));
+    assert!(getacl.contains("* ACL \"INBOX\" alice@example.test lrswiteapb"));
     assert!(getacl.contains("bob@example.test lrswitepb"));
 
     let myrights = send_command(&mut stream, "A5 MYRIGHTS Inbox\r\n", "A5").await;
-    assert!(myrights.contains("* MYRIGHTS \"Inbox\" lrswiteapb"));
+    assert!(myrights.contains("* MYRIGHTS \"INBOX\" lrswiteapb"));
 
     let listrights = send_command(
         &mut stream,
@@ -3653,7 +3653,7 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
         "A6",
     )
     .await;
-    assert!(listrights.contains("* LISTRIGHTS \"Inbox\" \"bob@example.test\" \"\" lrswiteapb"));
+    assert!(listrights.contains("* LISTRIGHTS \"INBOX\" \"bob@example.test\" \"\" lrswiteapb"));
 
     let remove_send_as =
         send_command(&mut stream, "A7 SETACL Inbox bob@example.test -p\r\n", "A7").await;
@@ -3668,7 +3668,7 @@ async fn acl_commands_project_canonical_mailbox_and_sender_delegation() {
     assert!(deleteacl.contains("A9 OK DELETEACL completed"));
 
     let getacl_after_delete = send_command(&mut stream, "A10 GETACL Inbox\r\n", "A10").await;
-    assert!(getacl_after_delete.contains("* ACL \"Inbox\" alice@example.test lrswiteapb"));
+    assert!(getacl_after_delete.contains("* ACL \"INBOX\" alice@example.test lrswiteapb"));
     assert!(!getacl_after_delete.contains("bob@example.test"));
 
     let invalid_send_only = send_command(
@@ -3727,10 +3727,10 @@ fn mailbox_with_parent(
 
 fn system_mailbox_for_name(name: &str) -> Option<(&'static str, &'static str, i32)> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "inbox" => Some(("inbox", "Inbox", 0)),
+        "inbox" => Some(("inbox", "INBOX", 0)),
         "draft" | "drafts" => Some(("drafts", "Drafts", 10)),
         "sent" | "sent items" | "sent messages" => Some(("sent", "Sent", 20)),
-        "deleted" | "deleted items" | "trash" => Some(("trash", "Deleted", 30)),
+        "deleted" | "deleted items" | "trash" => Some(("trash", "Trash", 30)),
         _ => None,
     }
 }
