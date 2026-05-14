@@ -3665,6 +3665,40 @@ async fn mapi_over_http_execute_accepts_release_rop() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_execute_stops_batch_after_reserved_rop() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = vec![0x28, 0x00, 0x00, 0xAA];
+    rops.extend_from_slice(&[0x01, 0x00, 0x00]);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    assert_eq!(
+        response_rops_from_execute_response(response).await,
+        vec![0x28, 0x00, 0x02, 0x01, 0x04, 0x80]
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_and_replay_refresh_session_cookies() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

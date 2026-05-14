@@ -14,6 +14,8 @@ Single-node sticky MAPI sessions are acceptable for the first Outlook 2016 / 201
 
 Successful EMSMDB `Execute` responses refresh both the `MapiContext` session cookie and the matching `MapiSequence` cookie so request replay and later session-bound requests can continue with a complete single-node in-process session context.
 
+Reserved or otherwise unsupported ROPs are terminal within the current ROP request buffer: the server returns one parseable unsupported ROP error and does not execute later ROP bytes from that batch.
+
 ## Source Set
 
 | Specification | Required use in `LPE` | Planning notes |

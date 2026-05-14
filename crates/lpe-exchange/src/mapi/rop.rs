@@ -3647,11 +3647,16 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             } else {
                 None
             };
+            let payload = if rop_id_is_reserved(rop_id) {
+                cursor.read_bytes(cursor.remaining())?.to_vec()
+            } else {
+                Vec::new()
+            };
             Ok(RopRequest {
                 rop_id,
                 input_handle_index,
                 output_handle_index: None,
-                payload: Vec::new(),
+                payload,
             })
         }
     }
@@ -3886,6 +3891,7 @@ mod tests {
 
         assert!(request.typed().unsupported_is_terminal());
         assert_eq!(request.input_handle_index(), Some(3));
+        assert_eq!(cursor.remaining(), 0);
         assert!(serialize_rop_request(&request).is_err());
         assert_eq!(
             unsupported_rop_response(0x28, request.response_handle_index()),
