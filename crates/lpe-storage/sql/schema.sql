@@ -1400,7 +1400,7 @@ CREATE TABLE mapi_object_identities (
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
     source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 24),
-    change_key BYTEA,
+    change_key BYTEA NOT NULL CHECK (octet_length(change_key) = 24),
     instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 24),
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

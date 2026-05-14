@@ -144,6 +144,7 @@ pub(in crate::mapi) const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 pub(in crate::mapi) const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
+pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
@@ -165,10 +166,13 @@ pub(in crate::mapi) const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;
 pub(in crate::mapi) const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 pub(in crate::mapi) const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 pub(in crate::mapi) const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
+pub(in crate::mapi) const PID_TAG_HIERARCHY_CHANGE_NUMBER: u32 = 0x663E_0003;
 pub(in crate::mapi) const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 pub(in crate::mapi) const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 pub(in crate::mapi) const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 pub(in crate::mapi) const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME: u32 = 0x6709_0040;
+pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
 pub(in crate::mapi) const PID_TAG_SERIALIZED_REPLID_GUID_MAP: u32 = 0x6638_0102;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 pub(in crate::mapi) const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
@@ -394,6 +398,15 @@ pub(in crate::mapi) fn mailbox_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME_MAX
+        | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
+            mapi_mailstore::canonical_folder_change_number(mailbox),
+        ))),
+        PID_TAG_HIERARCHY_CHANGE_NUMBER => Some(MapiValue::U32(
+            mapi_mailstore::canonical_folder_change_number(mailbox).min(u64::from(u32::MAX)) as u32,
+        )),
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
             &mailbox.id,
         ))),
@@ -427,6 +440,15 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME_MAX
+        | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
+            folder.id,
+        ))),
+        PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+            Some(MapiValue::U32(folder.id.min(u64::from(u32::MAX)) as u32))
+        }
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
@@ -457,9 +479,11 @@ pub(in crate::mapi) fn email_property_value(
             Some(MapiValue::String(email.subject.clone()))
         }
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),
-        PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
-            Some(MapiValue::String(email.received_at.clone()))
-        }
+        PID_TAG_MESSAGE_DELIVERY_TIME
+        | PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
+        )),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),

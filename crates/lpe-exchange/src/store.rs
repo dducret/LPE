@@ -595,6 +595,7 @@ impl ExchangeStore for Storage {
                     };
                     let object_id = crate::mapi::identity::mapi_store_id(global_counter);
                     let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
+                    let change_key = crate::mapi::identity::change_key_for_change_number(object_id);
                     let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
                     let row = sqlx::query(
                         r#"
@@ -606,9 +607,10 @@ impl ExchangeStore for Storage {
                             mapi_global_counter,
                             mapi_object_id,
                             source_key,
+                            change_key,
                             instance_key
                         )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                         ON CONFLICT (tenant_id, account_id, object_kind, canonical_id)
                         DO UPDATE SET updated_at = mapi_object_identities.updated_at
                         RETURNING mapi_object_id
@@ -621,6 +623,7 @@ impl ExchangeStore for Storage {
                     .bind(global_counter as i64)
                     .bind(object_id as i64)
                     .bind(source_key)
+                    .bind(change_key)
                     .bind(instance_key)
                     .fetch_one(&mut *tx)
                     .await?;

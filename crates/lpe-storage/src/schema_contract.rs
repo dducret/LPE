@@ -303,7 +303,7 @@ fn mapi_identity_mapping_is_store_backed() {
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
         "source_key BYTEA NOT NULL CHECK (octet_length(source_key) = 24)",
-        "change_key BYTEA",
+        "change_key BYTEA NOT NULL CHECK (octet_length(change_key) = 24)",
         "instance_key BYTEA NOT NULL CHECK (octet_length(instance_key) = 24)",
         "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id)",
         "UNIQUE (tenant_id, account_id, mapi_global_counter)",

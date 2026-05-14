@@ -27,6 +27,10 @@ const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
 const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
+const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
+const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
+const FILETIME_2026_01_01: u64 =
+    (WINDOWS_UNIX_EPOCH_OFFSET_SECONDS as u64 + 1_767_225_600) * FILETIME_TICKS_PER_SECOND;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
@@ -146,6 +150,63 @@ pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
     list.extend_from_slice(&(change_number.saturating_sub(1)).to_le_bytes());
     list.extend_from_slice(&change_number.to_le_bytes());
     list
+}
+
+pub(crate) fn filetime_from_rfc3339_utc(value: &str) -> u64 {
+    parse_rfc3339_utc_seconds(value)
+        .map(|seconds| {
+            (seconds + WINDOWS_UNIX_EPOCH_OFFSET_SECONDS).max(0) as u64 * FILETIME_TICKS_PER_SECOND
+        })
+        .unwrap_or_default()
+}
+
+pub(crate) fn filetime_from_change_number(change_number: u64) -> u64 {
+    FILETIME_2026_01_01 + (change_number % 31_536_000) * FILETIME_TICKS_PER_SECOND
+}
+
+fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20 || bytes.get(4) != Some(&b'-') || bytes.get(7) != Some(&b'-') {
+        return None;
+    }
+    if bytes.get(10) != Some(&b'T') || bytes.get(13) != Some(&b':') {
+        return None;
+    }
+    if bytes.get(16) != Some(&b':') || bytes.get(19) != Some(&b'Z') {
+        return None;
+    }
+    let year = parse_digits(bytes.get(0..4)?)? as i32;
+    let month = parse_digits(bytes.get(5..7)?)? as i32;
+    let day = parse_digits(bytes.get(8..10)?)? as i32;
+    let hour = parse_digits(bytes.get(11..13)?)? as i64;
+    let minute = parse_digits(bytes.get(14..16)?)? as i64;
+    let second = parse_digits(bytes.get(17..19)?)? as i64;
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    Some(days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
+fn parse_digits(bytes: &[u8]) -> Option<u32> {
+    bytes.iter().try_fold(0u32, |value, byte| {
+        byte.is_ascii_digit()
+            .then_some(value * 10 + u32::from(byte - b'0'))
+    })
+}
+
+fn days_from_civil(mut year: i32, month: i32, day: i32) -> i64 {
+    year -= i32::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_position = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_position + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    i64::from(era * 146_097 + day_of_era - 719_468)
 }
 
 pub(crate) fn sync_state_token_with_attachments(

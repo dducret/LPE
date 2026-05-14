@@ -87,6 +87,10 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_SUBFOLDERS,
         PID_TAG_MESSAGE_CLASS_W,
         PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME_MAX,
+        PID_TAG_HIERARCHY_CHANGE_NUMBER,
+        PID_TAG_HIER_REV,
         PID_TAG_SOURCE_KEY,
         PID_TAG_PARENT_SOURCE_KEY,
         PID_TAG_CHANGE_KEY,
@@ -107,6 +111,7 @@ pub(in crate::mapi) fn default_message_property_tags() -> Vec<u32> {
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_FLAG_STATUS,
         PID_TAG_MESSAGE_SIZE,
+        PID_TAG_LOCAL_COMMIT_TIME,
         PID_TAG_SENDER_NAME_W,
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
         PID_TAG_DISPLAY_TO_W,
@@ -1305,7 +1310,16 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
-            PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
+            PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME_MAX
+            | PID_TAG_HIER_REV => write_u64(
+                &mut row,
+                mapi_mailstore::filetime_from_change_number(ROOT_FOLDER_ID),
+            ),
+            PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+                write_u32(&mut row, ROOT_FOLDER_ID.min(u64::from(u32::MAX)) as u32)
+            }
             PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
                 &mapi_mailstore::source_key_for_store_id(ROOT_FOLDER_ID),
@@ -1339,7 +1353,17 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
-            PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
+            PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME_MAX
+            | PID_TAG_HIER_REV => write_u64(
+                &mut row,
+                mapi_mailstore::filetime_from_change_number(IPM_SUBTREE_FOLDER_ID),
+            ),
+            PID_TAG_HIERARCHY_CHANGE_NUMBER => write_u32(
+                &mut row,
+                IPM_SUBTREE_FOLDER_ID.min(u64::from(u32::MAX)) as u32,
+            ),
             PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
                 &mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
@@ -1456,7 +1480,6 @@ pub(in crate::mapi) fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u3
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(0),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
-            PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
             _ => match mailbox_property_value(mailbox, *column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
@@ -1482,7 +1505,6 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row(
             PID_TAG_MESSAGE_CLASS_W => {
                 write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
             }
-            PID_TAG_LAST_MODIFICATION_TIME => write_u64(&mut row, 0),
             _ => match collaboration_folder_property_value(folder, *column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
@@ -1501,9 +1523,12 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                 write_utf16z(&mut row, &email.subject)
             }
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPM.Note"),
-            PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
-                write_u64(&mut row, 0)
-            }
+            PID_TAG_MESSAGE_DELIVERY_TIME
+            | PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME => write_u64(
+                &mut row,
+                mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
+            ),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
             PID_TAG_MESSAGE_SIZE => {
                 write_u32(&mut row, email.size_octets.clamp(0, u32::MAX as i64) as u32)

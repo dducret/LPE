@@ -9249,8 +9249,10 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
     let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
     inbox.total_emails = 1;
+    let folder_change = mapi_mailstore::canonical_folder_change_number(&inbox);
     let mut email = FakeStore::email(message_id, mailbox_id, "inbox", "Cached mode message");
     email.flagged = true;
+    let message_commit_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
@@ -9279,6 +9281,16 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
+        0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the folder
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&0x6709_0040u32.to_le_bytes());
+    rops.extend_from_slice(&0x670A_0040u32.to_le_bytes());
+    rops.extend_from_slice(&0x663E_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x4082_0040u32.to_le_bytes());
+    rops.extend_from_slice(&0x65E2_0102u32.to_le_bytes());
+    rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
@@ -9289,11 +9301,12 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         0x07, 0x00, 0x02, // RopGetPropertiesSpecific
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
-    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&6u16.to_le_bytes());
     rops.extend_from_slice(&0x65E0_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x65E1_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x65E2_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x67A4_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x6709_0040u32.to_le_bytes());
     rops.extend_from_slice(&0x1090_0003u32.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
@@ -9309,6 +9322,18 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::STORE_REPLICA_GUID
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::filetime_from_change_number(folder_change).to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &(folder_change.min(u64::from(u32::MAX)) as u32).to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &message_commit_time.to_le_bytes()
     ));
     assert!(contains_bytes(&response_rops, &2i32.to_le_bytes()));
 }
@@ -11899,17 +11924,18 @@ async fn mapi_over_http_execute_handles_mailbox_store_bootstrap_rops() {
 
     let props_list_offset = 8;
     assert_eq!(response_rops[props_list_offset], 0x09);
+    let folder_property_count = 17usize;
     assert_eq!(
         u16::from_le_bytes(
             response_rops[props_list_offset + 6..props_list_offset + 8]
                 .try_into()
                 .unwrap()
         ),
-        13
+        folder_property_count as u16
     );
     assert!(contains_bytes(response_rops, &0x6748_0014u32.to_le_bytes()));
 
-    let contents_offset = props_list_offset + 8 + 13 * 4;
+    let contents_offset = props_list_offset + 8 + folder_property_count * 4;
     assert_eq!(response_rops[contents_offset], 0x05);
     assert_eq!(response_rops[contents_offset + 1], 0x02);
     assert_eq!(
