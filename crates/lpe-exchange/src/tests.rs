@@ -3665,6 +3665,43 @@ async fn mapi_over_http_execute_accepts_release_rop() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_execute_and_replay_refresh_session_cookies() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&[0x01, 0x00, 0x00], &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let execute_cookie = mapi_cookie_header(&response);
+    assert!(execute_cookie.contains("MapiContext="));
+    assert!(execute_cookie.contains("MapiSequence="));
+
+    let mut replay_headers = execute_headers;
+    replay_headers.insert("cookie", HeaderValue::from_str(&execute_cookie).unwrap());
+    let replay = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &replay_headers, &request)
+        .await
+        .unwrap();
+    assert_eq!(replay.headers().get("x-responsecode").unwrap(), "0");
+    let replay_cookie = mapi_cookie_header(&replay);
+    assert!(replay_cookie.contains("MapiContext="));
+    assert!(replay_cookie.contains("MapiSequence="));
+}
+
+#[tokio::test]
 async fn mapi_over_http_rejects_concurrent_session_request_with_invalid_sequence() {
     let load_started = Arc::new(tokio::sync::Notify::new());
     let load_continue = Arc::new(tokio::sync::Notify::new());

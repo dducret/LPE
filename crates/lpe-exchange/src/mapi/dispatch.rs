@@ -88,12 +88,12 @@ where
     if let Some(cached) = session.completed_execute_requests.get(request_id).cloned() {
         if cached.rop_fingerprint == rop_fingerprint {
             store_session(session_id.clone(), session);
-            return mapi_response(
+            return mapi_response_with_cookies(
                 "Execute",
                 request_id,
                 0,
                 cached.response_body,
-                Some(session_cookie(endpoint, &session_id, false)),
+                session_context_cookies(endpoint, &session_id, false),
             );
         }
         store_session(session_id.clone(), session);
@@ -136,12 +136,12 @@ where
     let response_body = execute_success_body(rop_buffer, Vec::new());
     cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
     store_session(session_id.clone(), session);
-    mapi_response(
+    mapi_response_with_cookies(
         "Execute",
         request_id,
         0,
         response_body,
-        Some(session_cookie(endpoint, &session_id, false)),
+        session_context_cookies(endpoint, &session_id, false),
     )
 }
 

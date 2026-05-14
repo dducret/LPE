@@ -12,6 +12,8 @@ MAPI over HTTP is the first Outlook desktop Exchange-account path for this work.
 
 Single-node sticky MAPI sessions are acceptable for the first Outlook 2016 / 2019 lab gate. Cross-process session replay, durable session migration, and load-balanced session failover remain production hardening.
 
+Successful EMSMDB `Execute` responses refresh both the `MapiContext` session cookie and the matching `MapiSequence` cookie so request replay and later session-bound requests can continue with a complete single-node in-process session context.
+
 ## Source Set
 
 | Specification | Required use in `LPE` | Planning notes |
