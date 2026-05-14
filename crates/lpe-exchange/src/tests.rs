@@ -4998,6 +4998,84 @@ async fn mapi_over_http_query_rows_lists_canonical_mailbox_folders() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_sort_table_orders_combined_hierarchy_rows() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Zulu Mail",
+        )])),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default",
+            "contacts",
+            "Alpha Contacts",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x13, 0x00, 0x02, 0x00, // RopSortTable
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x15, 0x02, 0, 0, 0, 0, 0x02, 2, 0]
+    ));
+    let alpha = utf16z("Alpha Contacts");
+    let zulu = utf16z("Zulu Mail");
+    let alpha_offset = response_rops
+        .windows(alpha.len())
+        .position(|window| window == alpha)
+        .unwrap();
+    let zulu_offset = response_rops
+        .windows(zulu.len())
+        .position(|window| window == zulu)
+        .unwrap();
+
+    assert!(alpha_offset < zulu_offset);
+}
+
+#[tokio::test]
 async fn mapi_over_http_contents_table_lists_canonical_messages() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 1;

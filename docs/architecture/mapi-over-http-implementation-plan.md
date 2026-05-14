@@ -132,6 +132,7 @@ The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardP
 | Table behavior | Supported scope | Storage behavior |
 | --- | --- | --- |
 | Hierarchy tables | Root and IPM subtree child folders, including canonical mail folders and collaboration folders. | Uses mailbox and collaboration collection projections; no mailbox-message scan is required. |
+| Hierarchy table ordering | Canonical mailbox folders and collaboration folders are sorted as one projected row set when `RopSortTable` is active. | Prevents folder-family grouping from overriding caller-selected table sort order; no separate MAPI folder store is introduced. |
 | Contents tables | Mail, contact, and calendar contents projections with caller-selected columns. | Mail contents `QueryRows` without a restriction and with supported sort keys uses a paged PostgreSQL ID query before fetching only returned rows. Contacts and calendar contents remain snapshot-backed. |
 | Attachment tables | Canonical message attachment rows with caller-selected columns. | Uses the addressed message attachment set only. |
 | Permission tables | Folder permission rows for `Default`, `Anonymous`, mailbox owner, and canonical mailbox delegation grantees. Supported columns are `PidTagMemberId`, `PidTagMemberName`, and `PidTagMemberRights`. | Uses existing `mailbox_delegation_grants`; no Exchange-specific ACL store is added. |

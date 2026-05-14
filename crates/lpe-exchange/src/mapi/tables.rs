@@ -99,6 +99,107 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
     ]
 }
 
+#[derive(Clone, Copy)]
+enum HierarchyRow<'a> {
+    Mailbox(&'a JmapMailbox),
+    Collaboration(&'a MapiCollaborationFolder),
+}
+
+fn hierarchy_rows<'a>(
+    mailboxes: &'a [JmapMailbox],
+    snapshot: &'a MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    sort_orders: &[MapiSortOrder],
+) -> Vec<HierarchyRow<'a>> {
+    let mut rows = mailboxes
+        .iter()
+        .filter(|mailbox| restriction_matches_mailbox(restriction, mailbox))
+        .map(HierarchyRow::Mailbox)
+        .chain(
+            snapshot
+                .collaboration_folders()
+                .iter()
+                .filter(|folder| restriction_matches_collaboration_folder(restriction, folder))
+                .map(HierarchyRow::Collaboration),
+        )
+        .collect::<Vec<_>>();
+    sort_hierarchy_rows(&mut rows, sort_orders);
+    rows
+}
+
+fn sort_hierarchy_rows(rows: &mut [HierarchyRow<'_>], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_DISPLAY_NAME_W => compare_case_insensitive(
+                    hierarchy_row_display_name(left),
+                    hierarchy_row_display_name(right),
+                ),
+                PID_TAG_CONTENT_COUNT => {
+                    hierarchy_row_content_count(left).cmp(&hierarchy_row_content_count(right))
+                }
+                PID_TAG_CONTENT_UNREAD_COUNT => {
+                    hierarchy_row_unread_count(left).cmp(&hierarchy_row_unread_count(right))
+                }
+                PID_TAG_FOLDER_ID => hierarchy_row_id(left).cmp(&hierarchy_row_id(right)),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        hierarchy_row_id(left).cmp(&hierarchy_row_id(right))
+    });
+}
+
+fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
+    match row {
+        HierarchyRow::Mailbox(mailbox) => &mailbox.name,
+        HierarchyRow::Collaboration(folder) => &folder.collection.display_name,
+    }
+}
+
+fn hierarchy_row_content_count(row: &HierarchyRow<'_>) -> u32 {
+    match row {
+        HierarchyRow::Mailbox(mailbox) => mailbox.total_emails,
+        HierarchyRow::Collaboration(folder) => folder.item_count,
+    }
+}
+
+fn hierarchy_row_unread_count(row: &HierarchyRow<'_>) -> u32 {
+    match row {
+        HierarchyRow::Mailbox(mailbox) => mailbox.unread_emails,
+        HierarchyRow::Collaboration(_) => 0,
+    }
+}
+
+fn hierarchy_row_id(row: &HierarchyRow<'_>) -> u64 {
+    match row {
+        HierarchyRow::Mailbox(mailbox) => mapi_folder_id(mailbox),
+        HierarchyRow::Collaboration(folder) => folder.id,
+    }
+}
+
+fn hierarchy_row_matches(row: &HierarchyRow<'_>, restriction: Option<&MapiRestriction>) -> bool {
+    match row {
+        HierarchyRow::Mailbox(mailbox) => restriction_matches_mailbox(restriction, mailbox),
+        HierarchyRow::Collaboration(folder) => {
+            restriction_matches_collaboration_folder(restriction, folder)
+        }
+    }
+}
+
+fn serialize_hierarchy_row(row: HierarchyRow<'_>, columns: &[u32]) -> Vec<u8> {
+    match row {
+        HierarchyRow::Mailbox(mailbox) => serialize_folder_row(mailbox, columns),
+        HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
+    }
+}
+
 pub(in crate::mapi) fn default_message_property_tags() -> Vec<u32> {
     vec![
         PID_TAG_MID,
@@ -205,27 +306,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            let mut rows = mailboxes.iter().collect::<Vec<_>>();
-            rows.retain(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox));
-            sort_mailboxes(&mut rows, sort_orders);
-            let mut serialized = rows
+            hierarchy_rows(mailboxes, snapshot, restriction.as_ref(), sort_orders)
                 .into_iter()
-                .map(|mailbox| serialize_folder_row(mailbox, &columns))
-                .collect::<Vec<_>>();
-            let mut collaboration_rows = snapshot
-                .collaboration_folders()
-                .iter()
-                .filter(|folder| {
-                    restriction_matches_collaboration_folder(restriction.as_ref(), folder)
-                })
-                .collect::<Vec<_>>();
-            sort_collaboration_folders(&mut collaboration_rows, sort_orders);
-            serialized.extend(
-                collaboration_rows
-                    .into_iter()
-                    .map(|folder| serialize_collaboration_folder_row(folder, &columns)),
-            );
-            serialized
+                .map(|row| serialize_hierarchy_row(row, &columns))
+                .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
             folder_id,
@@ -425,28 +509,6 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
     response
 }
 
-pub(in crate::mapi) fn sort_mailboxes(rows: &mut [&JmapMailbox], sort_orders: &[MapiSortOrder]) {
-    if sort_orders.is_empty() {
-        return;
-    }
-    rows.sort_by(|left, right| {
-        for sort_order in sort_orders {
-            let ordering = match sort_order.property_tag {
-                PID_TAG_DISPLAY_NAME_W => compare_case_insensitive(&left.name, &right.name),
-                PID_TAG_CONTENT_COUNT => left.total_emails.cmp(&right.total_emails),
-                PID_TAG_CONTENT_UNREAD_COUNT => left.unread_emails.cmp(&right.unread_emails),
-                PID_TAG_FOLDER_ID => mapi_folder_id(left).cmp(&mapi_folder_id(right)),
-                _ => Ordering::Equal,
-            };
-            let ordering = apply_sort_direction(ordering, sort_order.order);
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        Ordering::Equal
-    });
-}
-
 pub(in crate::mapi) fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiSortOrder]) {
     if sort_orders.is_empty() {
         return;
@@ -503,33 +565,6 @@ pub(in crate::mapi) fn sort_attachments(
                     compare_case_insensitive(&left.media_type, &right.media_type)
                 }
                 PID_TAG_ATTACH_SIZE => left.size_octets.cmp(&right.size_octets),
-                _ => Ordering::Equal,
-            };
-            let ordering = apply_sort_direction(ordering, sort_order.order);
-            if ordering != Ordering::Equal {
-                return ordering;
-            }
-        }
-        Ordering::Equal
-    });
-}
-
-pub(in crate::mapi) fn sort_collaboration_folders(
-    rows: &mut [&MapiCollaborationFolder],
-    sort_orders: &[MapiSortOrder],
-) {
-    if sort_orders.is_empty() {
-        return;
-    }
-    rows.sort_by(|left, right| {
-        for sort_order in sort_orders {
-            let ordering = match sort_order.property_tag {
-                PID_TAG_DISPLAY_NAME_W => compare_case_insensitive(
-                    &left.collection.display_name,
-                    &right.collection.display_name,
-                ),
-                PID_TAG_CONTENT_COUNT => left.item_count.cmp(&right.item_count),
-                PID_TAG_FOLDER_ID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
             };
             let ordering = apply_sort_direction(ordering, sort_order.order);
@@ -978,20 +1013,13 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else {
                 columns.clone()
             };
-            let mut rows = mailboxes.iter().collect::<Vec<_>>();
-            rows.retain(|mailbox| restriction_matches_mailbox(table_restriction.as_ref(), mailbox));
-            sort_mailboxes(&mut rows, sort_orders);
-            if let Some((index, mailbox)) =
-                find_row(rows.as_slice(), *position, request, |mailbox| {
-                    restriction_matches_mailbox(Some(&restriction), mailbox)
-                })
+            let rows = hierarchy_rows(mailboxes, snapshot, table_restriction.as_ref(), sort_orders);
+            if let Some((index, row)) =
+                find_hierarchy_row(rows.as_slice(), *position, request, Some(&restriction))
             {
                 *position = index;
                 response.push(1);
-                write_standard_property_row(
-                    &mut response,
-                    &serialize_folder_row(mailbox, &columns),
-                );
+                write_standard_property_row(&mut response, &serialize_hierarchy_row(row, &columns));
             } else {
                 response.push(0);
             }
@@ -1093,6 +1121,35 @@ pub(in crate::mapi) fn find_row<'a, T>(
     }
 }
 
+fn find_hierarchy_row<'a>(
+    rows: &'a [HierarchyRow<'a>],
+    current_position: usize,
+    request: &RopRequest,
+    restriction: Option<&MapiRestriction>,
+) -> Option<(usize, HierarchyRow<'a>)> {
+    if rows.is_empty() {
+        return None;
+    }
+    let start = match request.find_origin().unwrap_or(1) {
+        0 => 0,
+        2 => rows.len().saturating_sub(1),
+        _ => current_position.min(rows.len()),
+    };
+    if request.find_backward() {
+        let end = start.min(rows.len().saturating_sub(1));
+        (0..=end).rev().find_map(|index| {
+            hierarchy_row_matches(&rows[index], restriction).then_some((index, rows[index]))
+        })
+    } else {
+        rows.iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(index, row)| {
+                hierarchy_row_matches(row, restriction).then_some((index, *row))
+            })
+    }
+}
+
 pub(in crate::mapi) fn table_position_and_count(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
@@ -1104,14 +1161,13 @@ pub(in crate::mapi) fn table_position_and_count(
             folder_id,
             position,
             restriction,
+            sort_orders,
             ..
-        }) if is_root_hierarchy_folder(*folder_id) => (
-            *position,
-            mailboxes
-                .iter()
-                .filter(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox))
-                .count(),
-        ),
+        }) if is_root_hierarchy_folder(*folder_id) => {
+            let total =
+                hierarchy_rows(mailboxes, snapshot, restriction.as_ref(), sort_orders).len();
+            (*position, total)
+        }
         Some(MapiObject::ContentsTable {
             folder_id,
             position,
@@ -1211,20 +1267,10 @@ pub(in crate::mapi) fn table_row_keys(
             restriction,
             ..
         } if is_root_hierarchy_folder(*folder_id) => {
-            let mut rows = mailboxes.iter().collect::<Vec<_>>();
-            rows.retain(|mailbox| restriction_matches_mailbox(restriction.as_ref(), mailbox));
-            sort_mailboxes(&mut rows, sort_orders);
-            let mut keys = rows.into_iter().map(mapi_folder_id).collect::<Vec<_>>();
-            let mut collaboration_rows = snapshot
-                .collaboration_folders()
-                .iter()
-                .filter(|folder| {
-                    restriction_matches_collaboration_folder(restriction.as_ref(), folder)
-                })
-                .collect::<Vec<_>>();
-            sort_collaboration_folders(&mut collaboration_rows, sort_orders);
-            keys.extend(collaboration_rows.into_iter().map(|folder| folder.id));
-            keys
+            hierarchy_rows(mailboxes, snapshot, restriction.as_ref(), sort_orders)
+                .into_iter()
+                .map(|row| hierarchy_row_id(&row))
+                .collect()
         }
         MapiObject::ContentsTable {
             folder_id,
