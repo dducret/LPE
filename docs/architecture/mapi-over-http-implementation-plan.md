@@ -65,6 +65,19 @@ The Microsoft protocol specifications were checked on 2026-05-14. The cited spec
 | Session handles | ROP handles and FastTransfer/ICS contexts are session-scoped resources and must be released or expired with the session. | [MS-OXCFXICS 2.2.3](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/50d462aa-67ed-48d3-bead-a3d8b110bcfb), [MS-OXCROPS 2.2.2](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/6c623489-576d-45ef-9288-5b62b73c6961) | `MAPI-SESSION-01` |
 | Request replay | `X-RequestId`, sequence cookies, and request bodies must prevent duplicate canonical mutations while allowing valid reconnect/profile retry behavior. | [MS-OXCMAPIHTTP 2.2.2.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/2e717239-a22b-4508-a2ee-af64ffc090a2), [MS-OXCMAPIHTTP 2.2.3.3.1](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/cb1f2c87-eb69-418f-9e59-c30c179615a0) | `MAPI-SESSION-01` |
 
+## Canonical Store Adapter Mapping
+
+The MAPI store adapter resolves protocol identifiers and source keys through `mapi_object_identities`, then reads or mutates canonical `LPE` rows. It must not add MAPI-local mailbox content tables. The Microsoft object protocols checked for this adapter on 2026-05-14 were [MS-OXCMSG](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmsg), [MS-OXCFOLD](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfold), and [MS-OXCSTOR](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcstor).
+
+| MAPI surface | Canonical `LPE` source of truth | Adapter rule |
+| --- | --- | --- |
+| Store object and special folders | `accounts`, `mailboxes`, `mapi_mailbox_replicas`, `mapi_object_identities` | Logon and special-folder identifiers are stable MAPI projections over canonical account/mailbox rows. |
+| Folder open and properties | `mailboxes` | Folder properties derive from canonical mailbox role, display name, counts, and modseq/change facts. |
+| Message open and properties | `messages`, `mailbox_messages`, `message_recipients`, `message_bodies` | Normal object access resolves `MID` or source key first, then fetches only the addressed canonical message instead of loading whole mailbox snapshots. |
+| Attachment open/write | `attachments`, `mime_parts`, `blobs` through canonical attachment APIs | Attachment streams read/write canonical attachment blobs and update the canonical message attachment state. |
+| Recipient table mutation | pending MAPI session state until save, then `message_recipients` / protected `Bcc` persistence through canonical save/import paths | Visible recipients remain visible canonical metadata; `Bcc` stays protected and out of user search/sync projections. |
+| Sync checkpoints | `mapi_sync_checkpoints` plus canonical change logs, tombstones, and modseqs | Checkpoints store protocol cursor position only; they are not mailbox content or Outlook-owned state. |
+
 ## Planned Implementation Tickets
 
 | Ticket | Scope | Spec sections that define acceptance | Verification target |

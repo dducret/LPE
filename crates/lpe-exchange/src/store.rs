@@ -1,3 +1,4 @@
+use anyhow::Result;
 use lpe_mail_auth::{AccountAuthStore, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
@@ -42,6 +43,42 @@ pub(crate) struct MapiIdentityRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiIdentityLookupRecord {
+    pub(crate) object_kind: MapiIdentityObjectKind,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) object_id: u64,
+    pub(crate) source_key: Vec<u8>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum MapiCheckpointKind {
+    Hierarchy,
+    Content,
+    ReadState,
+}
+
+impl MapiCheckpointKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Hierarchy => "hierarchy",
+            Self::Content => "content",
+            Self::ReadState => "read_state",
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiSyncCheckpoint {
+    pub(crate) mailbox_id: Option<Uuid>,
+    pub(crate) checkpoint_kind: MapiCheckpointKind,
+    pub(crate) last_change_sequence: u64,
+    pub(crate) last_modseq: u64,
+    pub(crate) cursor_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) id: Uuid,
     pub(crate) display_name: String,
@@ -69,6 +106,38 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         requests: &'a [MapiIdentityRequest],
     ) -> StoreFuture<'a, Vec<MapiIdentityRecord>>;
+
+    fn fetch_mapi_identities_by_object_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_ids: &'a [u64],
+    ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>>;
+
+    #[allow(dead_code)]
+    fn fetch_mapi_identities_by_source_keys<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_keys: &'a [Vec<u8>],
+    ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>>;
+
+    #[allow(dead_code)]
+    fn fetch_mapi_sync_checkpoint<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+    ) -> StoreFuture<'a, Option<MapiSyncCheckpoint>>;
+
+    #[allow(dead_code)]
+    fn store_mapi_sync_checkpoint<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+        last_change_sequence: u64,
+        last_modseq: u64,
+        cursor_json: serde_json::Value,
+    ) -> StoreFuture<'a, MapiSyncCheckpoint>;
 
     fn fetch_address_book_entries<'a>(
         &'a self,
@@ -455,6 +524,185 @@ impl ExchangeStore for Storage {
             }
             tx.commit().await?;
             Ok(records)
+        })
+    }
+
+    fn fetch_mapi_identities_by_object_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_ids: &'a [u64],
+    ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>> {
+        Box::pin(async move {
+            if object_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let object_ids = object_ids
+                .iter()
+                .map(|value| *value as i64)
+                .collect::<Vec<_>>();
+            let rows = sqlx::query(
+                r#"
+                SELECT object_kind, canonical_id, mapi_object_id, source_key
+                FROM mapi_object_identities
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND mapi_object_id = ANY($3)
+                  AND deleted_at IS NULL
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(&object_ids)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_identity_lookup_from_row)
+                .collect()
+        })
+    }
+
+    fn fetch_mapi_identities_by_source_keys<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_keys: &'a [Vec<u8>],
+    ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>> {
+        Box::pin(async move {
+            if source_keys.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT object_kind, canonical_id, mapi_object_id, source_key
+                FROM mapi_object_identities
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND source_key = ANY($3)
+                  AND deleted_at IS NULL
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(source_keys)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_identity_lookup_from_row)
+                .collect()
+        })
+    }
+
+    fn fetch_mapi_sync_checkpoint<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+    ) -> StoreFuture<'a, Option<MapiSyncCheckpoint>> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let row = sqlx::query(
+                r#"
+                SELECT mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json
+                FROM mapi_sync_checkpoints
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND checkpoint_kind = $3
+                  AND mapi_replica_guid = $4
+                  AND (
+                      ($5::uuid IS NULL AND mailbox_id IS NULL)
+                      OR mailbox_id = $5
+                  )
+                LIMIT 1
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(checkpoint_kind.as_str())
+            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(mailbox_id)
+            .fetch_optional(self.pool())
+            .await?;
+
+            row.map(mapi_sync_checkpoint_from_row).transpose()
+        })
+    }
+
+    fn store_mapi_sync_checkpoint<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+        last_change_sequence: u64,
+        last_modseq: u64,
+        cursor_json: serde_json::Value,
+    ) -> StoreFuture<'a, MapiSyncCheckpoint> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let existing_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM mapi_sync_checkpoints
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND checkpoint_kind = $3
+                  AND mapi_replica_guid = $4
+                  AND (
+                      ($5::uuid IS NULL AND mailbox_id IS NULL)
+                      OR mailbox_id = $5
+                  )
+                LIMIT 1
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(checkpoint_kind.as_str())
+            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(mailbox_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let row = sqlx::query(
+                if existing_id.is_some() {
+                    r#"
+                    UPDATE mapi_sync_checkpoints
+                    SET
+                        last_change_sequence = $7,
+                        last_modseq = $8,
+                        cursor_json = $9,
+                        updated_at = NOW(),
+                        expires_at = NOW() + INTERVAL '30 days'
+                    WHERE id = $1
+                    RETURNING mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json
+                    "#
+                } else {
+                    r#"
+                    INSERT INTO mapi_sync_checkpoints (
+                        id, tenant_id, account_id, mailbox_id, checkpoint_kind,
+                        mapi_replica_guid, last_change_sequence, last_modseq,
+                        cursor_json, expires_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW() + INTERVAL '30 days')
+                    RETURNING mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json
+                    "#
+                },
+            )
+            .bind(existing_id.unwrap_or_else(Uuid::new_v4))
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(checkpoint_kind.as_str())
+            .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(last_change_sequence as i64)
+            .bind(last_modseq as i64)
+            .bind(cursor_json)
+            .fetch_one(&mut *tx)
+            .await?;
+            tx.commit().await?;
+
+            mapi_sync_checkpoint_from_row(row)
         })
     }
 
@@ -1037,4 +1285,52 @@ fn address_book_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
         ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
     }
     .max(2)
+}
+
+async fn mapi_tenant_id_for_account(storage: &Storage, account_id: Uuid) -> Result<Uuid> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT tenant_id
+        FROM accounts
+        WHERE id = $1
+        LIMIT 1
+        "#,
+    )
+    .bind(account_id)
+    .fetch_optional(storage.pool())
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("account not found"))
+}
+
+fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdentityLookupRecord> {
+    let object_kind = match row.get::<String, _>("object_kind").as_str() {
+        "mailbox" => MapiIdentityObjectKind::Mailbox,
+        "message" => MapiIdentityObjectKind::Message,
+        "contact" => MapiIdentityObjectKind::Contact,
+        "calendar_event" => MapiIdentityObjectKind::CalendarEvent,
+        value => anyhow::bail!("unsupported MAPI object kind: {value}"),
+    };
+    Ok(MapiIdentityLookupRecord {
+        object_kind,
+        canonical_id: row.get("canonical_id"),
+        object_id: row.get::<i64, _>("mapi_object_id") as u64,
+        source_key: row.get("source_key"),
+    })
+}
+
+#[allow(dead_code)]
+fn mapi_sync_checkpoint_from_row(row: sqlx::postgres::PgRow) -> Result<MapiSyncCheckpoint> {
+    let checkpoint_kind = match row.get::<String, _>("checkpoint_kind").as_str() {
+        "hierarchy" => MapiCheckpointKind::Hierarchy,
+        "content" => MapiCheckpointKind::Content,
+        "read_state" => MapiCheckpointKind::ReadState,
+        value => anyhow::bail!("unsupported MAPI checkpoint kind: {value}"),
+    };
+    Ok(MapiSyncCheckpoint {
+        mailbox_id: row.get("mailbox_id"),
+        checkpoint_kind,
+        last_change_sequence: row.get::<i64, _>("last_change_sequence") as u64,
+        last_modseq: row.get::<i64, _>("last_modseq") as u64,
+        cursor_json: row.get("cursor_json"),
+    })
 }

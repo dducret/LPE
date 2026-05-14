@@ -97,6 +97,16 @@ pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     key
 }
 
+#[allow(dead_code)]
+pub(crate) fn object_id_from_source_key(source_key: &[u8]) -> Option<u64> {
+    if source_key.len() != 24 || source_key[..16] != STORE_REPLICA_GUID {
+        return None;
+    }
+    let bytes = source_key.get(16..24)?.try_into().ok()?;
+    let object_id = u64::from_le_bytes(bytes);
+    global_counter_from_store_id(object_id).map(|_| object_id)
+}
+
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
     key.extend_from_slice(&change_number.max(1).to_le_bytes());
@@ -107,6 +117,7 @@ pub(crate) fn instance_key_for_object_id(object_id: u64) -> Vec<u8> {
     source_key_for_object_id(object_id)
 }
 
+#[allow(dead_code)]
 pub(crate) fn legacy_migration_object_id(canonical_id: &Uuid) -> u64 {
     let bytes = canonical_id.as_bytes();
     let value = u64::from_le_bytes([

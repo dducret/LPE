@@ -1,6 +1,7 @@
 use super::dispatch::*;
 use super::properties::*;
 use super::rop::*;
+use super::store_adapter::*;
 use super::sync::*;
 use super::transport::*;
 use super::*;
@@ -274,9 +275,9 @@ where
         return Err(anyhow!("RPC/HTTP EMSMDB ROP payload is empty"));
     }
 
-    let snapshot = store
-        .load_mapi_mail_store(principal.account_id, 500)
-        .await?;
+    let access_plan = plan_mapi_store_access(&session, rop_buffer);
+    let snapshot =
+        load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await?;
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
     let Some(mut session) = remove_session(&session_id) else {

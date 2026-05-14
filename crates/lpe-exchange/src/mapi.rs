@@ -45,6 +45,7 @@ mod nspi;
 mod properties;
 mod rop;
 mod session;
+mod store_adapter;
 mod sync;
 mod tables;
 mod transport;

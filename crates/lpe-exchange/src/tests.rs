@@ -32,7 +32,8 @@ use crate::{
     },
     store::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, MapiIdentityRecord, MapiIdentityRequest,
+        ExchangeStore, MapiCheckpointKind, MapiIdentityLookupRecord, MapiIdentityObjectKind,
+        MapiIdentityRecord, MapiIdentityRequest, MapiSyncCheckpoint,
     },
 };
 
@@ -78,6 +79,62 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
     );
 }
 
+#[tokio::test]
+async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..FakeStore::default()
+    };
+    let mailbox = FakeStore::mailbox(
+        "44444444-4444-4444-4444-444444444444",
+        "custom",
+        "Source key",
+    );
+    store.mailboxes.lock().unwrap().push(mailbox.clone());
+    let allocated = store
+        .fetch_or_allocate_mapi_identities(
+            account.account_id,
+            &[MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::Mailbox,
+                canonical_id: mailbox.id,
+                reserved_global_counter: None,
+            }],
+        )
+        .await
+        .unwrap();
+    let source_key = crate::mapi::identity::source_key_for_object_id(allocated[0].object_id);
+    let looked_up = store
+        .fetch_mapi_identities_by_source_keys(account.account_id, &[source_key])
+        .await
+        .unwrap();
+
+    assert_eq!(looked_up[0].canonical_id, mailbox.id);
+
+    let checkpoint = store
+        .store_mapi_sync_checkpoint(
+            account.account_id,
+            Some(mailbox.id),
+            MapiCheckpointKind::Content,
+            42,
+            7,
+            serde_json::json!({"last": "message"}),
+        )
+        .await
+        .unwrap();
+    let fetched = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(mailbox.id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(fetched, checkpoint);
+}
+
 #[derive(Clone, Default)]
 struct FakeStore {
     session: Option<AuthenticatedAccount>,
@@ -105,10 +162,12 @@ struct FakeStore {
     moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     copied_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
+    queried_jmap_email_ids: Arc<AtomicU64>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
+    mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
@@ -275,6 +334,67 @@ impl FakeStore {
             .collect()
     }
 
+    fn fake_mapi_identity_lookup_for_object_id(
+        &self,
+        object_id: u64,
+    ) -> Option<MapiIdentityLookupRecord> {
+        let identities = self.mapi_identities.lock().unwrap().clone();
+        let mailbox_match = self
+            .mailboxes
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|mailbox| {
+                identities.get(&mailbox.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&mailbox.id) == object_id
+                    || crate::mapi_store::reserved_folder_counter_for_role(&mailbox.role)
+                        .map(crate::mapi::identity::mapi_store_id)
+                        == Some(object_id)
+            })
+            .map(|mailbox| (MapiIdentityObjectKind::Mailbox, mailbox.id));
+        let message_match = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|email| {
+                identities.get(&email.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&email.id) == object_id
+            })
+            .map(|email| (MapiIdentityObjectKind::Message, email.id));
+        let contact_match = self
+            .contacts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|contact| {
+                identities.get(&contact.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&contact.id) == object_id
+            })
+            .map(|contact| (MapiIdentityObjectKind::Contact, contact.id));
+        let event_match = self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|event| {
+                identities.get(&event.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&event.id) == object_id
+            })
+            .map(|event| (MapiIdentityObjectKind::CalendarEvent, event.id));
+
+        let (object_kind, canonical_id) = mailbox_match
+            .or(message_match)
+            .or(contact_match)
+            .or(event_match)?;
+        Some(MapiIdentityLookupRecord {
+            object_kind,
+            canonical_id,
+            object_id,
+            source_key: crate::mapi::identity::source_key_for_object_id(object_id),
+        })
+    }
+
     fn task(id: &str, task_list_id: &str, title: &str) -> ClientTask {
         let account = Self::account();
         ClientTask {
@@ -374,6 +494,71 @@ impl ExchangeStore for FakeStore {
             }
             Ok(records)
         })
+    }
+
+    fn fetch_mapi_identities_by_object_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        object_ids: &'a [u64],
+    ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>> {
+        let records = object_ids
+            .iter()
+            .filter_map(|object_id| self.fake_mapi_identity_lookup_for_object_id(*object_id))
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(records) })
+    }
+
+    fn fetch_mapi_identities_by_source_keys<'a>(
+        &'a self,
+        _account_id: Uuid,
+        source_keys: &'a [Vec<u8>],
+    ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>> {
+        let records = source_keys
+            .iter()
+            .filter_map(|source_key| {
+                crate::mapi::identity::object_id_from_source_key(source_key)
+                    .and_then(|object_id| self.fake_mapi_identity_lookup_for_object_id(object_id))
+            })
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(records) })
+    }
+
+    fn fetch_mapi_sync_checkpoint<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+    ) -> StoreFuture<'a, Option<MapiSyncCheckpoint>> {
+        let checkpoint = self
+            .mapi_checkpoints
+            .lock()
+            .unwrap()
+            .get(&(mailbox_id, checkpoint_kind))
+            .cloned();
+        Box::pin(async move { Ok(checkpoint) })
+    }
+
+    fn store_mapi_sync_checkpoint<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Option<Uuid>,
+        checkpoint_kind: MapiCheckpointKind,
+        last_change_sequence: u64,
+        last_modseq: u64,
+        cursor_json: serde_json::Value,
+    ) -> StoreFuture<'a, MapiSyncCheckpoint> {
+        let checkpoint = MapiSyncCheckpoint {
+            mailbox_id,
+            checkpoint_kind,
+            last_change_sequence,
+            last_modseq,
+            cursor_json,
+        };
+        self.mapi_checkpoints
+            .lock()
+            .unwrap()
+            .insert((mailbox_id, checkpoint_kind), checkpoint.clone());
+        Box::pin(async move { Ok(checkpoint) })
     }
 
     fn fetch_address_book_entries<'a>(
@@ -968,6 +1153,7 @@ impl ExchangeStore for FakeStore {
         _position: u64,
         _limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {
+        self.queried_jmap_email_ids.fetch_add(1, Ordering::SeqCst);
         let ids = self
             .emails
             .lock()
@@ -6903,6 +7089,73 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
     );
     assert!(contains_bytes(response_rops, &[0x1E, 0x01, 0, 0, 0, 0, 0]));
     assert!(contains_bytes(response_rops, &[0x91, 0x01, 0, 0, 0, 0, 0]));
+}
+
+#[tokio::test]
+async fn mapi_over_http_open_message_uses_targeted_store_lookup() {
+    let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    inbox.total_emails = 2;
+    let target = FakeStore::email(
+        "87878787-8787-8787-8787-878787878787",
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Targeted open",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            target.clone(),
+            FakeStore::email(
+                "88888888-8888-8888-8888-888888888888",
+                "55555555-5555-5555-5555-555555555555",
+                "inbox",
+                "Unopened message",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let queried_jmap_email_ids = store.queried_jmap_email_ids.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(5),
+        test_mapi_message_id(&target.id.to_string()),
+    );
+    append_rop_get_properties_specific(&mut rops, 2, &[0x0037_001F]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &utf16z("Targeted open")));
+    assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

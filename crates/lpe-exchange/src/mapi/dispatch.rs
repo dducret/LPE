@@ -1,6 +1,7 @@
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
+use super::store_adapter::*;
 use super::sync::*;
 use super::tables::*;
 use super::transport::*;
@@ -102,18 +103,21 @@ where
         );
     }
 
-    let snapshot = match store.load_mapi_mail_store(principal.account_id, 500).await {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            store_session(session_id.clone(), session);
-            return execute_failure_response(
-                request_id,
-                4,
-                &format!("failed to load MAPI mail store snapshot: {error}"),
-                Some(session_cookie(endpoint, &session_id, false)),
-            );
-        }
-    };
+    let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
+    let snapshot =
+        match load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await
+        {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                store_session(session_id.clone(), session);
+                return execute_failure_response(
+                    request_id,
+                    4,
+                    &format!("failed to load MAPI mail store view: {error}"),
+                    Some(session_cookie(endpoint, &session_id, false)),
+                );
+            }
+        };
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
     let rop_buffer = execute_rops(

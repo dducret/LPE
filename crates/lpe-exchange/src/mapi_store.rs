@@ -444,7 +444,7 @@ fn stable_text_counter(value: &str) -> u64 {
     }) & 0x0000_FFFF_FFFF_FFFF
 }
 
-fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
+pub(crate) fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
     match role {
         "inbox" => Some(crate::mapi::identity::INBOX_FOLDER_COUNTER),
         "drafts" => Some(crate::mapi::identity::DRAFTS_FOLDER_COUNTER),

@@ -1496,6 +1496,7 @@ dependencies = [
  "lpe-magika",
  "lpe-mail-auth",
  "lpe-storage",
+ "serde_json",
  "sqlx",
  "tokio",
  "tokio-stream",
