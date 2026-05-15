@@ -10719,6 +10719,16 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &test_mapi_folder_id(4).to_le_bytes()
     ));
+    for tag in [
+        0x3601_0003u32,
+        0x0E08_0003,
+        0x0FF4_0102,
+        0x3FE0_0102,
+        0x3FE1_0102,
+        0x0E27_0002,
+    ] {
+        assert!(contains_bytes(&response_rops, &tag.to_le_bytes()));
+    }
     assert!(contains_bytes(
         &response_rops,
         &0x65E1_0102u32.to_le_bytes()
