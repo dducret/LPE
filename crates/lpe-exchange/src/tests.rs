@@ -2468,9 +2468,7 @@ fn test_mapi_folder_id(global_counter: u64) -> u64 {
 }
 
 fn globcnt_bytes(value: u64) -> [u8; 6] {
-    let mut bytes = [0; 6];
-    bytes.copy_from_slice(&value.to_le_bytes()[..6]);
-    bytes
+    crate::mapi::identity::globcnt_bytes(value)
 }
 
 fn test_mapi_uuid_id(uuid: &Uuid) -> u64 {
@@ -12082,7 +12080,7 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     let object_id = test_mapi_folder_id(5);
     let mut long_term_id = [0; 24];
     long_term_id[..16].copy_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
-    long_term_id[16..22].copy_from_slice(&5u64.to_le_bytes()[..6]);
+    long_term_id[16..22].copy_from_slice(&globcnt_bytes(5));
     let mut invalid_long_term_id = long_term_id;
     invalid_long_term_id[0] ^= 0xFF;
 
@@ -12195,8 +12193,9 @@ async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
 
 #[tokio::test]
 async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -12237,6 +12236,9 @@ async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
         0
     );
     assert_eq!(&response_rops[6..22], &mapi_mailstore::STORE_REPLICA_GUID);
+    let (first_global_counter, _) =
+        mapi_mailstore::local_replica_id_range(account.account_id, 4, 1);
+    assert_eq!(&response_rops[22..28], &globcnt_bytes(first_global_counter));
     assert_eq!(response_rops.len(), 28);
     assert!(response_rops[22..28].iter().any(|byte| *byte != 0));
 }

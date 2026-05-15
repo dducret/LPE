@@ -123,7 +123,7 @@ pub(in crate::mapi) fn rop_get_local_replica_ids_response(
     let mut response = vec![0x7F, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
-    response.extend_from_slice(&first_global_counter.to_le_bytes()[..6]);
+    response.extend_from_slice(&crate::mapi::identity::globcnt_bytes(first_global_counter));
     response
 }
 

@@ -716,9 +716,7 @@ fn write_globset_ranges(buffer: &mut Vec<u8>, ranges: &[(u64, u64)]) {
 }
 
 fn globcnt_bytes(value: u64) -> [u8; 6] {
-    let mut bytes = [0; 6];
-    bytes.copy_from_slice(&value.to_le_bytes()[..6]);
-    bytes
+    crate::mapi::identity::globcnt_bytes(value)
 }
 
 #[cfg(test)]
@@ -755,8 +753,8 @@ mod tests {
         assert_eq!(STORE_REPLICA_GUID[8] & 0xc0, 0x80);
         assert_eq!(source_key.len(), 22);
         assert_eq!(change_key.len(), 22);
-        assert_eq!(&source_key[16..22], &42u64.to_le_bytes()[..6]);
-        assert_eq!(&change_key[16..22], &42u64.to_le_bytes()[..6]);
+        assert_eq!(&source_key[16..22], &[0, 0, 0, 0, 0, 42]);
+        assert_eq!(&change_key[16..22], &[0, 0, 0, 0, 0, 42]);
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));

@@ -53,6 +53,19 @@ pub(crate) fn global_counter_from_store_id(store_id: u64) -> Option<u64> {
     (counter != 0).then_some(counter)
 }
 
+pub(crate) fn globcnt_bytes(value: u64) -> [u8; 6] {
+    let bytes = (value & 0x0000_FFFF_FFFF_FFFF).to_be_bytes();
+    [bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]]
+}
+
+pub(crate) fn global_counter_from_globcnt(bytes: &[u8]) -> Option<u64> {
+    let bytes: [u8; 6] = bytes.try_into().ok()?;
+    let global_counter = u64::from_be_bytes([
+        0, 0, bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5],
+    ]);
+    (global_counter != 0).then_some(global_counter)
+}
+
 pub(crate) fn remember_mapi_identity(canonical_id: Uuid, object_id: u64) {
     let mut ids = MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -74,7 +87,7 @@ pub(crate) fn long_term_id_from_object_id(object_id: u64) -> Option<[u8; 24]> {
     let global_counter = global_counter_from_store_id(object_id)?;
     let mut long_term_id = [0; 24];
     long_term_id[..16].copy_from_slice(&STORE_REPLICA_GUID);
-    long_term_id[16..22].copy_from_slice(&global_counter.to_le_bytes()[..6]);
+    long_term_id[16..22].copy_from_slice(&globcnt_bytes(global_counter));
     Some(long_term_id)
 }
 
@@ -85,10 +98,7 @@ pub(crate) fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
     {
         return None;
     }
-    let mut counter_bytes = [0; 8];
-    counter_bytes[..6].copy_from_slice(&long_term_id[16..22]);
-    let global_counter = u64::from_le_bytes(counter_bytes);
-    (global_counter != 0).then(|| mapi_store_id(global_counter))
+    global_counter_from_globcnt(&long_term_id[16..22]).map(mapi_store_id)
 }
 
 pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
@@ -96,7 +106,7 @@ pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     let Some(global_counter) = global_counter_from_store_id(object_id) else {
         return key;
     };
-    key.extend_from_slice(&global_counter.to_le_bytes()[..6]);
+    key.extend_from_slice(&globcnt_bytes(global_counter));
     key
 }
 
@@ -105,15 +115,12 @@ pub(crate) fn object_id_from_source_key(source_key: &[u8]) -> Option<u64> {
     if source_key.len() != 22 || source_key[..16] != STORE_REPLICA_GUID {
         return None;
     }
-    let mut bytes = [0; 8];
-    bytes[..6].copy_from_slice(source_key.get(16..22)?);
-    let global_counter = u64::from_le_bytes(bytes);
-    (global_counter != 0).then(|| mapi_store_id(global_counter))
+    global_counter_from_globcnt(source_key.get(16..22)?).map(mapi_store_id)
 }
 
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
-    key.extend_from_slice(&change_number.max(1).to_le_bytes()[..6]);
+    key.extend_from_slice(&globcnt_bytes(change_number.max(1)));
     key
 }
 
@@ -140,6 +147,7 @@ mod tests {
         let long_term_id = long_term_id_from_object_id(object_id).unwrap();
 
         assert_eq!(long_term_id.len(), 24);
+        assert_eq!(&long_term_id[16..22], &[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
         assert_eq!(object_id_from_long_term_id(&long_term_id), Some(object_id));
     }
 
@@ -152,6 +160,14 @@ mod tests {
         );
         assert_eq!(source_key_for_object_id(object_id).len(), 22);
         assert_eq!(change_key_for_change_number(7).len(), 22);
+        assert_eq!(
+            &source_key_for_object_id(object_id)[16..22],
+            &[0, 0, 0, 0, 0, 42]
+        );
+        assert_eq!(
+            &change_key_for_change_number(7)[16..22],
+            &[0, 0, 0, 0, 0, 7]
+        );
         assert_eq!(
             object_id_from_source_key(&source_key_for_object_id(object_id)),
             Some(object_id)
