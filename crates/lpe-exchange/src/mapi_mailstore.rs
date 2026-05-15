@@ -160,10 +160,10 @@ pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
 }
 
 pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
-    let change_number = change_number.max(1);
-    let mut list = Vec::with_capacity(16);
-    list.extend_from_slice(&(change_number.saturating_sub(1)).to_le_bytes());
-    list.extend_from_slice(&change_number.to_le_bytes());
+    let change_key = change_key_for_change_number(change_number);
+    let mut list = Vec::with_capacity(1 + change_key.len());
+    list.push(change_key.len() as u8);
+    list.extend_from_slice(&change_key);
     list
 }
 
@@ -758,6 +758,16 @@ mod tests {
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));
+    }
+
+    #[test]
+    fn predecessor_change_list_uses_sized_change_xid() {
+        let change_key = change_key_for_change_number(42);
+        let predecessor_list = predecessor_change_list(42);
+
+        assert_eq!(predecessor_list.len(), 1 + change_key.len());
+        assert_eq!(predecessor_list[0], change_key.len() as u8);
+        assert_eq!(&predecessor_list[1..], change_key.as_slice());
     }
 
     #[test]
