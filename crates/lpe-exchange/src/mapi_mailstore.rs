@@ -155,6 +155,27 @@ pub(crate) fn source_key_for_store_id(store_id: u64) -> Vec<u8> {
     crate::mapi::identity::source_key_for_object_id(store_id)
 }
 
+pub(crate) fn source_key_for_mailbox_folder(mailbox: &JmapMailbox) -> Vec<u8> {
+    let fallback = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
+        .expect("MAPI folder identity mapping missing");
+    source_key_for_store_id(mapi_folder_id_for_mailbox(mailbox, fallback))
+}
+
+pub(crate) fn source_key_for_mailbox_role(mailbox_id: &Uuid, role: &str) -> Vec<u8> {
+    let folder_id = match role {
+        "inbox" => crate::mapi::identity::INBOX_FOLDER_ID,
+        "drafts" => crate::mapi::identity::DRAFTS_FOLDER_ID,
+        "outbox" => crate::mapi::identity::OUTBOX_FOLDER_ID,
+        "sent" => crate::mapi::identity::SENT_FOLDER_ID,
+        "trash" => crate::mapi::identity::TRASH_FOLDER_ID,
+        "contacts" => crate::mapi::identity::CONTACTS_FOLDER_ID,
+        "calendar" => crate::mapi::identity::CALENDAR_FOLDER_ID,
+        _ => crate::mapi::identity::mapped_mapi_object_id(mailbox_id)
+            .expect("MAPI folder identity mapping missing"),
+    };
+    source_key_for_store_id(folder_id)
+}
+
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
     crate::mapi::identity::change_key_for_change_number(change_number)
 }
@@ -294,9 +315,9 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     let mut folders = mailboxes.iter().collect::<Vec<_>>();
     folders.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
     for mailbox in folders {
-        let change_number = canonical_folder_change_number(mailbox);
-        let source_key = source_key_for_uuid(&mailbox.id);
         let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+        let change_number = canonical_folder_change_number(mailbox);
+        let source_key = source_key_for_store_id(folder_id);
         let parent_source_key = if sync_type == 0x02
             && sync_root_folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
         {
@@ -562,7 +583,7 @@ pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
     folders.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
     for mailbox in folders {
         let change_number = canonical_folder_change_number(mailbox);
-        write_prefixed_bytes(&mut buffer, &source_key_for_uuid(&mailbox.id));
+        write_prefixed_bytes(&mut buffer, &source_key_for_mailbox_folder(mailbox));
         buffer.extend_from_slice(&change_number.to_le_bytes());
         write_prefixed_bytes(&mut buffer, mailbox.role.as_bytes());
         write_prefixed_bytes(&mut buffer, mailbox.name.as_bytes());
@@ -834,7 +855,7 @@ mod tests {
 
     #[test]
     fn source_and_change_keys_are_stable_replica_scoped_values() {
-        let id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        let id = Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
         crate::mapi::identity::remember_mapi_identity(id, crate::mapi::identity::mapi_store_id(42));
         let source_key = source_key_for_uuid(&id);
         let change_key = change_key_for_change_number(42);
@@ -848,6 +869,30 @@ mod tests {
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));
+    }
+
+    #[test]
+    fn special_folder_source_key_matches_projected_folder_id() {
+        let mailbox_id = Uuid::parse_str("bbbbbbbb-cccc-4ddd-8eee-ffffffffffff").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(0x1234),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        assert_eq!(
+            source_key_for_mailbox_folder(&mailbox),
+            source_key_for_store_id(crate::mapi::identity::INBOX_FOLDER_ID)
+        );
     }
 
     #[test]

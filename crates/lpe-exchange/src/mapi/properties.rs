@@ -421,9 +421,9 @@ pub(in crate::mapi) fn mailbox_property_value(
         PID_TAG_HIERARCHY_CHANGE_NUMBER => Some(MapiValue::U32(
             mapi_mailstore::canonical_folder_change_number(mailbox).min(u64::from(u32::MAX)) as u32,
         )),
-        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
-            &mailbox.id,
-        ))),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_mailbox_folder(mailbox),
+        )),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
         )),
@@ -522,9 +522,9 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
             &email.id,
         ))),
-        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
-            &email.mailbox_id,
-        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_mailbox_role(&email.mailbox_id, &email.mailbox_role),
+        )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::change_key_for_change_number(
                 mapi_mailstore::canonical_message_change_number(email),
@@ -1681,10 +1681,10 @@ pub(in crate::mapi) fn imported_hierarchy_existing_mailbox<'a>(
             _ => None,
         });
     if let Some(source_key) = source_key {
-        if let Some(mailbox) = mailboxes
-            .iter()
-            .find(|mailbox| mapi_mailstore::source_key_for_uuid(&mailbox.id) == source_key)
-        {
+        if let Some(mailbox) = mailboxes.iter().find(|mailbox| {
+            mapi_mailstore::source_key_for_mailbox_folder(mailbox) == source_key
+                || mapi_mailstore::source_key_for_uuid(&mailbox.id) == source_key
+        }) {
             return Some(mailbox);
         }
     }
