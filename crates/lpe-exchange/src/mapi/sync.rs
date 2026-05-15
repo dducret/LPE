@@ -4,7 +4,7 @@ use super::tables::*;
 use super::*;
 
 pub(in crate::mapi) use super::identity::{
-    long_term_id_from_object_id, mapi_store_id, object_id_from_long_term_id, CALENDAR_FOLDER_ID,
+    long_term_id_from_object_id, object_id_from_long_term_id, CALENDAR_FOLDER_ID,
     COMMON_VIEWS_FOLDER_ID, CONTACTS_FOLDER_ID, DEFERRED_ACTION_FOLDER_ID, DRAFTS_FOLDER_ID,
     INBOX_FOLDER_ID, IPM_SUBTREE_FOLDER_ID, OUTBOX_FOLDER_ID, ROOT_FOLDER_ID, SCHEDULE_FOLDER_ID,
     SEARCH_FOLDER_ID, SENT_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
@@ -126,13 +126,11 @@ pub(in crate::mapi) fn rop_synchronization_import_message_move_response(
 pub(in crate::mapi) fn rop_get_local_replica_ids_response(
     request: &RopRequest,
     first_global_counter: u64,
-    count: u32,
 ) -> Vec<u8> {
     let mut response = vec![0x7F, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
-    write_u64(&mut response, mapi_store_id(first_global_counter));
-    write_u32(&mut response, count);
+    response.extend_from_slice(&first_global_counter.to_le_bytes()[..6]);
     response
 }
 

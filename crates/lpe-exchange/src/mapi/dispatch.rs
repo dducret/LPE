@@ -3111,7 +3111,7 @@ where
             },
             0x7F => {
                 echo_input_handle_table = true;
-                let (first_global_counter, count) = mapi_mailstore::local_replica_id_range(
+                let (first_global_counter, _) = mapi_mailstore::local_replica_id_range(
                     principal.account_id,
                     request.local_replica_id_count(),
                     session.next_local_replica_sequence,
@@ -3121,7 +3121,6 @@ where
                 responses.extend_from_slice(&rop_get_local_replica_ids_response(
                     &request,
                     first_global_counter,
-                    count,
                 ));
             }
             0x59 | 0x5A => responses.extend_from_slice(&rop_error_response(
@@ -3440,7 +3439,7 @@ mod tests {
             payload: 2u32.to_le_bytes().to_vec(),
         };
         let response_buffer =
-            rop_buffer_with_response(rop_get_local_replica_ids_response(&request, 42, 2), &[42]);
+            rop_buffer_with_response(rop_get_local_replica_ids_response(&request, 42), &[42]);
         let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x01, 0x7F]);
 
         assert_eq!(response_summary.ids_csv, "0x7f");

@@ -4225,6 +4225,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         0
     );
     assert_eq!(&response_rop[6..22], &mapi_mailstore::STORE_REPLICA_GUID);
+    assert_eq!(response_rop.len(), 28);
+    assert!(response_rop[22..28].iter().any(|byte| *byte != 0));
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
@@ -11921,11 +11923,15 @@ async fn mapi_over_http_get_local_replica_ids_returns_replica_guid() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_mailstore::STORE_REPLICA_GUID
-    ));
-    assert!(contains_bytes(&response_rops, &4u32.to_le_bytes()));
+    assert_eq!(response_rops[0], 0x7F);
+    assert_eq!(response_rops[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(&response_rops[6..22], &mapi_mailstore::STORE_REPLICA_GUID);
+    assert_eq!(response_rops.len(), 28);
+    assert!(response_rops[22..28].iter().any(|byte| *byte != 0));
 }
 
 #[tokio::test]
