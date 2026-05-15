@@ -1662,6 +1662,20 @@ impl RopRequest {
         self.payload.get(4..4 + size).unwrap_or_default()
     }
 
+    pub(in crate::mapi) fn upload_state_property_tag(&self) -> Option<u32> {
+        self.payload
+            .get(..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+    }
+
+    pub(in crate::mapi) fn upload_state_transfer_size(&self) -> Option<u32> {
+        self.payload
+            .get(4..8)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+    }
+
     pub(in crate::mapi) fn import_message_id(&self) -> Option<u64> {
         let bytes = self.payload.get(..8)?;
         Some(u64::from_le_bytes(bytes.try_into().ok()?))

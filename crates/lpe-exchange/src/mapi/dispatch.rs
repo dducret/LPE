@@ -2364,6 +2364,11 @@ where
                 let sync_flags = request.sync_flags();
                 let sync_extra_flags = request.sync_extra_flags();
                 let sync_property_tags = request.sync_property_tags();
+                let sync_property_tags_hex = sync_property_tags
+                    .iter()
+                    .map(|tag| format!("0x{tag:08x}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
@@ -2464,6 +2469,10 @@ where
                     request_rop_id = "0x70",
                     folder_id = format_args!("0x{folder_id:016x}"),
                     sync_type = format_args!("0x{sync_type:02x}"),
+                    sync_flags = format_args!("0x{sync_flags:04x}"),
+                    sync_extra_flags = format_args!("0x{sync_extra_flags:08x}"),
+                    sync_property_tag_count = sync_property_tags.len(),
+                    sync_property_tags = %sync_property_tags_hex,
                     checkpoint_loaded = checkpoint.is_some(),
                     snapshot_mailbox_count = mailboxes.len(),
                     snapshot_email_count = emails.len(),
@@ -2589,12 +2598,32 @@ where
                     transfer_position,
                     ..
                 }) => {
+                    let requested_buffer_bytes = request.fast_transfer_buffer_size();
+                    let previous_transfer_position = *transfer_position;
                     let response = rop_fast_transfer_source_get_buffer_response(
                         &request,
                         transfer_buffer,
                         transfer_position,
                     );
                     let completed = *transfer_position >= transfer_buffer.len();
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x4e",
+                        sync_type = format_args!("0x{:02x}", *sync_type),
+                        requested_buffer_bytes,
+                        transfer_position_before = previous_transfer_position,
+                        transfer_position_after = *transfer_position,
+                        transfer_buffer_bytes = transfer_buffer.len(),
+                        transfer_chunk_bytes =
+                            (*transfer_position).saturating_sub(previous_transfer_position),
+                        transfer_completed = completed,
+                        transfer_status = if completed { "0x0003" } else { "0x0001" },
+                        "rca debug mapi fast transfer get buffer"
+                    );
                     let checkpoint = (
                         *mailbox_id,
                         *checkpoint_kind,
@@ -2638,14 +2667,32 @@ where
             },
             0x75 => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource {
+                    folder_id,
                     state_upload_buffer,
                     ..
                 })
                 | Some(MapiObject::SynchronizationCollector {
+                    folder_id,
                     state_upload_buffer,
                     ..
                 }) => {
                     state_upload_buffer.clear();
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x75",
+                        folder_id = format_args!("0x{:016x}", *folder_id),
+                        upload_state_property_tag = format_args!(
+                            "0x{:08x}",
+                            request.upload_state_property_tag().unwrap_or_default()
+                        ),
+                        upload_state_declared_bytes =
+                            request.upload_state_transfer_size().unwrap_or_default(),
+                        "rca debug mapi sync upload state begin"
+                    );
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
@@ -2656,14 +2703,29 @@ where
             },
             0x76 => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource {
+                    folder_id,
                     state_upload_buffer,
                     ..
                 })
                 | Some(MapiObject::SynchronizationCollector {
+                    folder_id,
                     state_upload_buffer,
                     ..
                 }) => {
-                    state_upload_buffer.extend_from_slice(request.stream_data());
+                    let stream_data = request.stream_data();
+                    state_upload_buffer.extend_from_slice(stream_data);
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x76",
+                        folder_id = format_args!("0x{:016x}", *folder_id),
+                        upload_state_chunk_bytes = stream_data.len(),
+                        upload_state_buffer_bytes = state_upload_buffer.len(),
+                        "rca debug mapi sync upload state continue"
+                    );
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
@@ -2674,19 +2736,43 @@ where
             },
             0x77 => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource {
+                    folder_id,
                     state,
                     state_upload_buffer,
                     ..
                 }) => {
                     commit_uploaded_sync_state(state, state_upload_buffer);
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x77",
+                        folder_id = format_args!("0x{:016x}", *folder_id),
+                        upload_state_total_bytes = state.len(),
+                        "rca debug mapi sync upload state end"
+                    );
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 Some(MapiObject::SynchronizationCollector {
+                    folder_id,
                     state,
                     state_upload_buffer,
                     ..
                 }) => {
                     commit_uploaded_sync_state(state, state_upload_buffer);
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x77",
+                        folder_id = format_args!("0x{:016x}", *folder_id),
+                        upload_state_total_bytes = state.len(),
+                        "rca debug mapi sync upload state end"
+                    );
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
