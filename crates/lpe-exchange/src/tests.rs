@@ -2172,7 +2172,6 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 
 fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     let change_marker = 0x4012_0003u32.to_le_bytes();
-    let folder_id_tag = 0x6748_0014u32.to_le_bytes();
     let message_id_tag = 0x674A_0014u32.to_le_bytes();
     let mut folder_count = 0;
     let mut message_count = 0;
@@ -2180,11 +2179,12 @@ fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     while offset + 8 <= bytes.len() {
         if bytes[offset..offset + 4] == change_marker {
             let tag = &bytes[offset + 4..offset + 8];
-            if tag == folder_id_tag {
-                folder_count += 1;
-            } else if tag == message_id_tag {
+            if tag == message_id_tag {
                 message_count += 1;
+            } else {
+                folder_count += 1;
             }
+            offset += 4;
         }
         offset += 1;
     }
@@ -10730,6 +10730,21 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x3008_0040u32.to_le_bytes()
     ));
+    let tag_position = |tag: u32| {
+        let tag_bytes = tag.to_le_bytes();
+        response_rops
+            .windows(tag_bytes.len())
+            .position(|window| window == tag_bytes)
+            .unwrap()
+    };
+    assert!(
+        tag_position(0x65E1_0102) < tag_position(0x65E0_0102)
+            && tag_position(0x65E0_0102) < tag_position(0x3008_0040)
+            && tag_position(0x3008_0040) < tag_position(0x65E2_0102)
+            && tag_position(0x65E2_0102) < tag_position(0x65E3_0102)
+            && tag_position(0x65E3_0102) < tag_position(0x3001_001F)
+            && tag_position(0x3001_001F) < tag_position(0x6749_0014)
+    );
     for tag in [
         0x3601_0003u32,
         0x3602_0003,

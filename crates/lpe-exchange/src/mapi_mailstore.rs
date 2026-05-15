@@ -269,7 +269,32 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         let change_number = canonical_folder_change_number(mailbox);
         let source_key = source_key_for_uuid(&mailbox.id);
         let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+        let parent_source_key = if sync_type == 0x02
+            && sync_root_folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
+        {
+            Vec::new()
+        } else {
+            source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        };
         write_u32(&mut buffer, INCR_SYNC_CHG);
+        write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
+        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
+        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
+        write_i64(
+            &mut buffer,
+            filetime_from_change_number(change_number) as i64,
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_CHANGE_KEY,
+            &change_key_for_change_number(change_number),
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list(change_number),
+        );
+        write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
         if sync_type != 0x02 || sync_extra_flags & 0x0000_0001 != 0 {
             write_u32(&mut buffer, PID_TAG_FOLDER_ID);
             write_i64(&mut buffer, folder_id as i64);
@@ -281,32 +306,8 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
                 crate::mapi::identity::IPM_SUBTREE_FOLDER_ID as i64,
             );
         }
-        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
-        let parent_source_key = if sync_type == 0x02
-            && sync_root_folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
-        {
-            Vec::new()
-        } else {
-            source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
-        };
-        write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
-        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
-        write_i64(
-            &mut buffer,
-            filetime_from_change_number(change_number) as i64,
-        );
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_CHANGE_KEY,
-            &change_key_for_change_number(change_number),
-        );
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_PREDECESSOR_CHANGE_LIST,
-            &predecessor_change_list(change_number),
-        );
         if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
             write_i32_property(
                 &mut buffer,
@@ -340,7 +341,6 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
         }
         write_bool_property(&mut buffer, PID_TAG_SUBFOLDERS, false);
-        write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
         write_utf16_property(
             &mut buffer,
             PID_TAG_MESSAGE_CLASS_W,
@@ -883,13 +883,11 @@ mod tests {
         );
 
         let subfolders = PID_TAG_SUBFOLDERS.to_le_bytes();
-        let display_name = PID_TAG_DISPLAY_NAME_W.to_le_bytes();
         let offset = buffer
             .windows(subfolders.len())
             .position(|window| window == subfolders)
             .expect("subfolders property is present");
         assert_eq!(&buffer[offset + 4..offset + 6], &[0, 0]);
-        assert_eq!(&buffer[offset + 6..offset + 10], &display_name);
     }
 
     #[test]
