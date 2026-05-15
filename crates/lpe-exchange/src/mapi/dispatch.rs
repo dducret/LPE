@@ -297,6 +297,9 @@ fn summarize_response_rop_buffer(
     let mut ids = Vec::new();
     let mut results = Vec::new();
     for expected_rop_id in request_rop_ids.iter().copied().take(MAX_ROP_DEBUG_ENTRIES) {
+        if rop_has_no_response(expected_rop_id) {
+            continue;
+        }
         let Some(found) = responses.get(offset..).and_then(|remaining| {
             remaining
                 .iter()
@@ -319,6 +322,10 @@ fn summarize_response_rop_buffer(
     summary.ids_csv = rop_ids_csv(&ids);
     summary.results_csv = results.join(",");
     summary
+}
+
+fn rop_has_no_response(rop_id: u8) -> bool {
+    matches!(rop_id, 0x01)
 }
 
 fn summarize_logon_response_rop(
@@ -3419,6 +3426,25 @@ mod tests {
 
         assert_eq!(response_summary.ids_csv, "0x02");
         assert_eq!(response_summary.results_csv, "0x02:0x00000000");
+        assert_eq!(response_summary.count, 1);
+        assert_eq!(response_summary.handle_count, 1);
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_debug_summary_skips_release_rops_without_responses() {
+        let request = RopRequest {
+            rop_id: 0x7F,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: 2u32.to_le_bytes().to_vec(),
+        };
+        let response_buffer =
+            rop_buffer_with_response(rop_get_local_replica_ids_response(&request, 42, 2), &[42]);
+        let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x01, 0x7F]);
+
+        assert_eq!(response_summary.ids_csv, "0x7f");
+        assert_eq!(response_summary.results_csv, "0x7f:0x00000000");
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
         assert!(response_summary.parse_error.is_empty());
