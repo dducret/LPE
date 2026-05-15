@@ -21,6 +21,7 @@ const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
+const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS_BINARY: u32 = 0x0FF4_0102;
 const PID_TAG_MAPPING_SIGNATURE: u32 = 0x3FE0_0102;
 const PID_TAG_RECORD_KEY: u32 = 0x3FE1_0102;
@@ -245,6 +246,8 @@ pub(crate) fn sync_state_token_with_attachments(
 
 pub(crate) fn sync_manifest_buffer_with_attachments(
     sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -261,13 +264,17 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         let source_key = source_key_for_uuid(&mailbox.id);
         let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
-        write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-        write_i64(&mut buffer, folder_id as i64);
-        write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
-        write_i64(
-            &mut buffer,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID as i64,
-        );
+        if sync_type != 0x02 || sync_extra_flags & 0x0000_0001 != 0 {
+            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+            write_i64(&mut buffer, folder_id as i64);
+        }
+        if sync_type != 0x02 || sync_flags & 0x0100 != 0 || sync_extra_flags & 0x0000_0001 != 0 {
+            write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
+            write_i64(
+                &mut buffer,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID as i64,
+            );
+        }
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
         let parent_source_key = if sync_type == 0x02
             && sync_root_folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
@@ -277,6 +284,11 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         };
         write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
+        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
+        write_i64(
+            &mut buffer,
+            filetime_from_change_number(change_number) as i64,
+        );
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
         write_binary_property(
@@ -793,6 +805,8 @@ mod tests {
         let email = test_email();
         let buffer = sync_manifest_buffer_with_attachments(
             0x02,
+            0x0100,
+            0,
             crate::mapi::identity::ROOT_FOLDER_ID,
             &[mailbox],
             &[email],
@@ -830,6 +844,8 @@ mod tests {
         };
         let buffer = sync_manifest_buffer_with_attachments(
             0x02,
+            0x0100,
+            0,
             crate::mapi::identity::ROOT_FOLDER_ID,
             &[mailbox],
             &[],

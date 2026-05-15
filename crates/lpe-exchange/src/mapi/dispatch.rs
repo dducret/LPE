@@ -2361,6 +2361,8 @@ where
                     continue;
                 };
                 let sync_type = request.sync_type();
+                let sync_flags = request.sync_flags();
+                let sync_extra_flags = request.sync_extra_flags();
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
@@ -2442,6 +2444,8 @@ where
                 );
                 let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_attachments(
                     sync_type,
+                    sync_flags,
+                    sync_extra_flags,
                     folder_id,
                     &sync_mailboxes,
                     &sync_emails,

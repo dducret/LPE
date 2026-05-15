@@ -10203,7 +10203,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x02, 0x00, 0x00, 0x00, // hierarchy sync
         0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x01, 0x00, 0x00, 0x00, // SynchronizationExtraFlags, Eid
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
@@ -10655,7 +10655,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x02, 0x00, 0x00, 0x00, // hierarchy sync
         0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x01, 0x00, 0x00, 0x00, // SynchronizationExtraFlags, Eid
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
@@ -10709,7 +10709,10 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x4012_0003u32.to_le_bytes()
+    ));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert!(contains_bytes(
         &response_rops,
@@ -10718,6 +10721,14 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     assert!(contains_bytes(
         &response_rops,
         &test_mapi_folder_id(4).to_le_bytes()
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x6748_0014u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x3008_0040u32.to_le_bytes()
     ));
     for tag in [
         0x3601_0003u32,
@@ -10786,7 +10797,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x02, 0x00, 0x00, 0x00, // hierarchy sync
         0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x01, 0x00, 0x00, 0x00, // SynchronizationExtraFlags, Eid
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);

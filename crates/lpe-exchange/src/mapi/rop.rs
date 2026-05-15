@@ -1589,6 +1589,28 @@ impl RopRequest {
         self.payload.first().copied().unwrap_or(0)
     }
 
+    pub(in crate::mapi) fn sync_flags(&self) -> u16 {
+        self.payload
+            .get(2..4)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn sync_extra_flags(&self) -> u32 {
+        let restriction_size = self
+            .payload
+            .get(4..6)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0) as usize;
+        self.payload
+            .get(6 + restriction_size..10 + restriction_size)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0)
+    }
+
     pub(in crate::mapi) fn fast_transfer_buffer_size(&self) -> usize {
         let requested = self
             .payload
