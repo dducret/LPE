@@ -2467,6 +2467,12 @@ fn test_mapi_folder_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | 1
 }
 
+fn globcnt_bytes(value: u64) -> [u8; 6] {
+    let mut bytes = [0; 6];
+    bytes.copy_from_slice(&value.to_le_bytes()[..6]);
+    bytes
+}
+
 fn test_mapi_uuid_id(uuid: &Uuid) -> u64 {
     let bytes = uuid.as_bytes();
     let value = u64::from_le_bytes([
@@ -10291,10 +10297,16 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
         &response_rops,
         &0x4013_0003u32.to_le_bytes()
     ));
-    assert!(contains_bytes(
-        &response_rops,
-        &test_mapi_message_id(&deleted_id.to_string()).to_le_bytes()
-    ));
+    let deleted_counter = test_mapi_message_id(&deleted_id.to_string()) >> 16;
+    let mut deleted_idset = 1u16.to_le_bytes().to_vec();
+    deleted_idset.push(0x52);
+    deleted_idset.extend_from_slice(&globcnt_bytes(deleted_counter));
+    deleted_idset.extend_from_slice(&globcnt_bytes(deleted_counter));
+    deleted_idset.push(0);
+    let mut deleted_property = 0x4018_0102u32.to_le_bytes().to_vec();
+    deleted_property.extend_from_slice(&(deleted_idset.len() as u32).to_le_bytes());
+    deleted_property.extend_from_slice(&deleted_idset);
+    assert!(contains_bytes(&response_rops, &deleted_property));
 
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(

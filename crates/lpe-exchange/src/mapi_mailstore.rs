@@ -33,6 +33,8 @@ const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
 const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
+const GLOBSET_RANGE_COMMAND: u8 = 0x52;
+const GLOBSET_END_COMMAND: u8 = 0x00;
 const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
 const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
 const FILETIME_2026_01_01: u64 =
@@ -608,19 +610,57 @@ fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) 
 
 fn replguid_idset_from_change(change: u64) -> Vec<u8> {
     let mut idset = STORE_REPLICA_GUID.to_vec();
-    idset.extend_from_slice(&change.max(1).to_le_bytes());
-    idset.push(0);
+    write_globset_ranges(&mut idset, &[(1, change.max(1))]);
     idset
 }
 
 fn replid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
+    let mut counters = ids
+        .iter()
+        .filter_map(|id| crate::mapi::identity::global_counter_from_store_id(*id))
+        .collect::<Vec<_>>();
+    counters.sort_unstable();
+    counters.dedup();
+
     let mut idset = Vec::new();
-    idset.extend_from_slice(&1u16.to_le_bytes());
-    for id in ids {
-        idset.extend_from_slice(&id.to_le_bytes());
-    }
-    idset.push(0);
+    idset.extend_from_slice(&(crate::mapi::identity::STORE_REPLICA_ID as u16).to_le_bytes());
+    write_globset_ranges(&mut idset, &coalesced_ranges(&counters));
     idset
+}
+
+fn coalesced_ranges(counters: &[u64]) -> Vec<(u64, u64)> {
+    let mut ranges = Vec::new();
+    let Some((&first, rest)) = counters.split_first() else {
+        return ranges;
+    };
+    let mut low = first;
+    let mut high = first;
+    for &counter in rest {
+        if counter == high.saturating_add(1) {
+            high = counter;
+        } else {
+            ranges.push((low, high));
+            low = counter;
+            high = counter;
+        }
+    }
+    ranges.push((low, high));
+    ranges
+}
+
+fn write_globset_ranges(buffer: &mut Vec<u8>, ranges: &[(u64, u64)]) {
+    for &(low, high) in ranges {
+        buffer.push(GLOBSET_RANGE_COMMAND);
+        buffer.extend_from_slice(&globcnt_bytes(low.max(1)));
+        buffer.extend_from_slice(&globcnt_bytes(high.max(low).max(1)));
+    }
+    buffer.push(GLOBSET_END_COMMAND);
+}
+
+fn globcnt_bytes(value: u64) -> [u8; 6] {
+    let mut bytes = [0; 6];
+    bytes.copy_from_slice(&value.to_le_bytes()[..6]);
+    bytes
 }
 
 #[cfg(test)]
@@ -781,6 +821,41 @@ mod tests {
             .expect("subfolders property is present");
         assert_eq!(&buffer[offset + 4..offset + 6], &[0, 0]);
         assert_eq!(&buffer[offset + 6..offset + 10], &display_name);
+    }
+
+    #[test]
+    fn final_sync_state_uses_replguid_globset_ranges() {
+        let token = final_sync_state_stream(0x02, 32);
+        let mut expected = STORE_REPLICA_GUID.to_vec();
+        expected.push(GLOBSET_RANGE_COMMAND);
+        expected.extend_from_slice(&globcnt_bytes(1));
+        expected.extend_from_slice(&globcnt_bytes(32));
+        expected.push(GLOBSET_END_COMMAND);
+
+        assert_variable_property(&token, META_TAG_IDSET_GIVEN, &expected);
+        assert_variable_property(&token, META_TAG_CNSET_SEEN, &expected);
+    }
+
+    #[test]
+    fn deleted_idset_uses_replid_globset_ranges() {
+        let idset = replid_idset_from_object_ids(&[
+            crate::mapi::identity::mapi_store_id(3),
+            crate::mapi::identity::mapi_store_id(4),
+            crate::mapi::identity::mapi_store_id(8),
+        ]);
+
+        let mut expected = (crate::mapi::identity::STORE_REPLICA_ID as u16)
+            .to_le_bytes()
+            .to_vec();
+        expected.push(GLOBSET_RANGE_COMMAND);
+        expected.extend_from_slice(&globcnt_bytes(3));
+        expected.extend_from_slice(&globcnt_bytes(4));
+        expected.push(GLOBSET_RANGE_COMMAND);
+        expected.extend_from_slice(&globcnt_bytes(8));
+        expected.extend_from_slice(&globcnt_bytes(8));
+        expected.push(GLOBSET_END_COMMAND);
+
+        assert_eq!(idset, expected);
     }
 
     fn assert_variable_property(buffer: &[u8], property_tag: u32, value: &[u8]) {
