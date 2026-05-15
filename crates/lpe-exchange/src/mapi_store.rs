@@ -387,7 +387,7 @@ impl<T: ExchangeStore> MapiStore for T {
         message_limit: u64,
     ) -> StoreFuture<'a, MapiMailStoreSnapshot> {
         Box::pin(async move {
-            let mailboxes = self.fetch_jmap_mailboxes(account_id).await?;
+            let mailboxes = self.ensure_jmap_system_mailboxes(account_id).await?;
             let query = self
                 .query_jmap_email_ids(account_id, None, None, 0, message_limit)
                 .await?;

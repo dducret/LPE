@@ -112,7 +112,7 @@ The MAPI store adapter resolves protocol identifiers and source keys through `ma
 
 | MAPI surface | Canonical `LPE` source of truth | Adapter rule |
 | --- | --- | --- |
-| Store object and special folders | `accounts`, `mailboxes`, `mapi_mailbox_replicas`, `mapi_object_identities` | Logon and special-folder identifiers are stable MAPI projections over canonical account/mailbox rows. |
+| Store object and special folders | `accounts`, `mailboxes`, `mapi_mailbox_replicas`, `mapi_object_identities` | Logon and special-folder identifiers are stable MAPI projections over canonical account/mailbox rows; MAPI store snapshot bootstrap ensures the canonical system mailbox rows exist before projecting hierarchy sync. |
 | Folder open and properties | `mailboxes` | Folder properties derive from canonical mailbox role, display name, counts, and modseq/change facts. |
 | Message open and properties | `messages`, `mailbox_messages`, `message_recipients`, `message_bodies` | Normal object access resolves `MID` or source key first, then fetches only the addressed canonical message instead of loading whole mailbox snapshots. |
 | Attachment open/write | `attachments`, `mime_parts`, `blobs` through canonical attachment APIs | Attachment streams read/write canonical attachment blobs and update the canonical message attachment state. |

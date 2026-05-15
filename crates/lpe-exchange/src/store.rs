@@ -383,6 +383,11 @@ pub trait ExchangeStore: AccountAuthStore {
 
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
 
+    fn ensure_jmap_system_mailboxes<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<JmapMailbox>>;
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -1426,6 +1431,13 @@ impl ExchangeStore for Storage {
 
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
+    }
+
+    fn ensure_jmap_system_mailboxes<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        Box::pin(async move { self.ensure_imap_mailboxes(account_id).await })
     }
 
     fn create_jmap_mailbox<'a>(

@@ -1215,6 +1215,13 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn ensure_jmap_system_mailboxes<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        self.fetch_jmap_mailboxes(account_id)
+    }
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -10526,7 +10533,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
         .to_string();
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(1));
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x02, 0x00, 0x00, 0x00, // hierarchy sync
@@ -10591,7 +10598,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(1));
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
         0x02, 0x00, 0x00, 0x00, // hierarchy sync

@@ -132,7 +132,7 @@ where
             .await;
     }
 
-    let mailboxes = store.fetch_jmap_mailboxes(account_id).await?;
+    let mailboxes = store.ensure_jmap_system_mailboxes(account_id).await?;
     let mailbox_requests = mapi_identity_requests_for_mailboxes(&mailboxes);
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &mailbox_requests)
