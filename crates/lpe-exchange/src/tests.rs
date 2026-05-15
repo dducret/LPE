@@ -10732,13 +10732,15 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     ));
     for tag in [
         0x3601_0003u32,
+        0x3602_0003,
+        0x3603_0003,
         0x0E08_0003,
         0x0FF4_0102,
         0x3FE0_0102,
         0x3FE1_0102,
         0x0E27_0102,
     ] {
-        assert!(contains_bytes(&response_rops, &tag.to_le_bytes()));
+        assert!(!contains_bytes(&response_rops, &tag.to_le_bytes()));
     }
     assert!(contains_bytes(
         &response_rops,

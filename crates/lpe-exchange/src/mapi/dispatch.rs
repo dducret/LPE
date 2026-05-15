@@ -2363,6 +2363,7 @@ where
                 let sync_type = request.sync_type();
                 let sync_flags = request.sync_flags();
                 let sync_extra_flags = request.sync_extra_flags();
+                let sync_property_tags = request.sync_property_tags();
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
@@ -2446,6 +2447,7 @@ where
                     sync_type,
                     sync_flags,
                     sync_extra_flags,
+                    &sync_property_tags,
                     folder_id,
                     &sync_mailboxes,
                     &sync_emails,

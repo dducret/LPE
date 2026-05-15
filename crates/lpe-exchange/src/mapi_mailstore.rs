@@ -248,6 +248,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     sync_type: u8,
     sync_flags: u16,
     sync_extra_flags: u32,
+    sync_property_tags: &[u32],
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -257,6 +258,11 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     let sync_root_folder_id = folder_id;
+    let excluded_property_tags = if sync_flags & 0x0080 == 0 {
+        sync_property_tags
+    } else {
+        &[]
+    };
     let mut folders = mailboxes.iter().collect::<Vec<_>>();
     folders.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
     for mailbox in folders {
@@ -301,22 +307,38 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             PID_TAG_PREDECESSOR_CHANGE_LIST,
             &predecessor_change_list(change_number),
         );
-        write_i32_property(
-            &mut buffer,
-            PID_TAG_CONTENT_COUNT,
-            mailbox.total_emails.min(i32::MAX as u32) as i32,
-        );
-        write_i32_property(
-            &mut buffer,
-            PID_TAG_CONTENT_UNREAD_COUNT,
-            mailbox.unread_emails.min(i32::MAX as u32) as i32,
-        );
-        write_i32_property(&mut buffer, PID_TAG_FOLDER_CHILD_COUNT, 0);
-        write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
-        write_binary_property(&mut buffer, PID_TAG_ACCESS_BINARY, &source_key);
-        write_binary_property(&mut buffer, PID_TAG_MAPPING_SIGNATURE, &source_key);
-        write_binary_property(&mut buffer, PID_TAG_RECORD_KEY, &source_key);
-        write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_CONTENT_COUNT,
+                mailbox.total_emails.min(i32::MAX as u32) as i32,
+            );
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT) {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_CONTENT_UNREAD_COUNT,
+                mailbox.unread_emails.min(i32::MAX as u32) as i32,
+            );
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_CHILD_COUNT) {
+            write_i32_property(&mut buffer, PID_TAG_FOLDER_CHILD_COUNT, 0);
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
+            write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS_BINARY) {
+            write_binary_property(&mut buffer, PID_TAG_ACCESS_BINARY, &source_key);
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_MAPPING_SIGNATURE) {
+            write_binary_property(&mut buffer, PID_TAG_MAPPING_SIGNATURE, &source_key);
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_RECORD_KEY) {
+            write_binary_property(&mut buffer, PID_TAG_RECORD_KEY, &source_key);
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_ORDINAL_MOST) {
+            write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
+        }
         write_bool_property(&mut buffer, PID_TAG_SUBFOLDERS, false);
         write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
         write_utf16_property(
@@ -426,6 +448,10 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
         "calendar" => "IPF.Appointment",
         _ => "IPF.Note",
     }
+}
+
+fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> bool {
+    excluded_property_tags.contains(&property_tag)
 }
 
 pub(crate) fn final_sync_state_stream(sync_type: u8, max_change: u64) -> Vec<u8> {
@@ -807,6 +833,7 @@ mod tests {
             0x02,
             0x0100,
             0,
+            &[],
             crate::mapi::identity::ROOT_FOLDER_ID,
             &[mailbox],
             &[email],
@@ -846,6 +873,7 @@ mod tests {
             0x02,
             0x0100,
             0,
+            &[],
             crate::mapi::identity::ROOT_FOLDER_ID,
             &[mailbox],
             &[],

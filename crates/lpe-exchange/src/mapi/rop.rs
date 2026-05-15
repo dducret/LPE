@@ -1611,6 +1611,29 @@ impl RopRequest {
             .unwrap_or(0)
     }
 
+    pub(in crate::mapi) fn sync_property_tags(&self) -> Vec<u32> {
+        let restriction_size = self
+            .payload
+            .get(4..6)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0) as usize;
+        let count_offset = 10 + restriction_size;
+        let count = self
+            .payload
+            .get(count_offset..count_offset + 2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0) as usize;
+        self.payload
+            .get(count_offset + 2..)
+            .unwrap_or_default()
+            .chunks_exact(4)
+            .take(count)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap_or_default()))
+            .collect()
+    }
+
     pub(in crate::mapi) fn fast_transfer_buffer_size(&self) -> usize {
         let requested = self
             .payload
