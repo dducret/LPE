@@ -3155,7 +3155,10 @@ where
             0x43 => responses.extend_from_slice(&rop_long_term_id_from_id_response(&request)),
             0x44 => responses.extend_from_slice(&rop_id_from_long_term_id_response(&request)),
             0x45 => responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request)),
-            0x49 => responses.extend_from_slice(&rop_get_address_types_response(&request)),
+            0x49 => {
+                echo_input_handle_table = true;
+                responses.extend_from_slice(&rop_get_address_types_response(&request));
+            }
             0x55 => responses
                 .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
             0x56 => {

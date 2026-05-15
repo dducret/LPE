@@ -4454,6 +4454,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         b"EX\0SMTP\0".len()
     );
     assert_eq!(&response_rop[10..], b"EX\0SMTP\0");
+    assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
 }
 
 #[tokio::test]
