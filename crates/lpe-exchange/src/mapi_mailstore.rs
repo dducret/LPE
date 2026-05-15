@@ -283,8 +283,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             PID_TAG_CONTENT_UNREAD_COUNT,
             mailbox.unread_emails.min(i32::MAX as u32) as i32,
         );
-        write_u32(&mut buffer, PID_TAG_SUBFOLDERS);
-        buffer.push(0);
+        write_bool_property(&mut buffer, PID_TAG_SUBFOLDERS, false);
         write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
         write_utf16_property(
             &mut buffer,
@@ -577,6 +576,11 @@ fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
     write_i32(buffer, value);
 }
 
+fn write_bool_property(buffer: &mut Vec<u8>, property_tag: u32, value: bool) {
+    write_u32(buffer, property_tag);
+    buffer.extend_from_slice(&(value as u16).to_le_bytes());
+}
+
 fn write_binary_property(buffer: &mut Vec<u8>, property_tag: u32, value: &[u8]) {
     write_u32(buffer, property_tag);
     write_u32(buffer, value.len().min(u32::MAX as usize) as u32);
@@ -740,6 +744,43 @@ mod tests {
         assert_variable_property(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Inbox"));
         assert_variable_property(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
         assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A, b"Hello\0");
+    }
+
+    #[test]
+    fn sync_manifest_serializes_fast_transfer_boolean_values_as_u16() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x02,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            &[mailbox],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let subfolders = PID_TAG_SUBFOLDERS.to_le_bytes();
+        let display_name = PID_TAG_DISPLAY_NAME_W.to_le_bytes();
+        let offset = buffer
+            .windows(subfolders.len())
+            .position(|window| window == subfolders)
+            .expect("subfolders property is present");
+        assert_eq!(&buffer[offset + 4..offset + 6], &[0, 0]);
+        assert_eq!(&buffer[offset + 6..offset + 10], &display_name);
     }
 
     fn assert_variable_property(buffer: &[u8], property_tag: u32, value: &[u8]) {
