@@ -2374,7 +2374,7 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
         0x02, 0x01, 0xf4, 0x0f, // PidTagAccess
         0x02, 0x01, 0xe0, 0x3f, // PidTagMappingSignature
         0x02, 0x01, 0xe1, 0x3f, // PidTagRecordKey
-        0x02, 0x01, 0x27, 0x0e, // PidTagContentCount
+        0x02, 0x01, 0x27, 0x0e, // PidTagOrdinalMost
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
     ]);
     rops.extend_from_slice(&0x4017_0003u32.to_le_bytes());
@@ -4342,7 +4342,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         0x0FF4_0102,
         0x3FE0_0102,
         0x3FE1_0102,
-        0x0E27_0002,
+        0x0E27_0102,
     ];
     hierarchy_sync_rops.extend_from_slice(&(sync_property_tags.len() as u16).to_le_bytes());
     for tag in sync_property_tags {
@@ -10725,7 +10725,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         0x0FF4_0102,
         0x3FE0_0102,
         0x3FE1_0102,
-        0x0E27_0002,
+        0x0E27_0102,
     ] {
         assert!(contains_bytes(&response_rops, &tag.to_le_bytes()));
     }
@@ -10738,7 +10738,10 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     let mut root_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
     root_child_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
     root_child_parent_source_key.extend_from_slice(&parent_source_key);
-    assert!(contains_bytes(&response_rops, &root_child_parent_source_key));
+    assert!(contains_bytes(
+        &response_rops,
+        &root_child_parent_source_key
+    ));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
 }
 

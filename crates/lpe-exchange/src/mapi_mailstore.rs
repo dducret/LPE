@@ -24,7 +24,7 @@ const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_ACCESS_BINARY: u32 = 0x0FF4_0102;
 const PID_TAG_MAPPING_SIGNATURE: u32 = 0x3FE0_0102;
 const PID_TAG_RECORD_KEY: u32 = 0x3FE1_0102;
-const PID_TAG_ORDINAL_MOST: u32 = 0x0E27_0002;
+const PID_TAG_ORDINAL_MOST: u32 = 0x0E27_0102;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
@@ -300,7 +300,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         write_binary_property(&mut buffer, PID_TAG_ACCESS_BINARY, &[]);
         write_binary_property(&mut buffer, PID_TAG_MAPPING_SIGNATURE, &source_key);
         write_binary_property(&mut buffer, PID_TAG_RECORD_KEY, &source_key);
-        write_i16_property(&mut buffer, PID_TAG_ORDINAL_MOST, 0);
+        write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
         write_bool_property(&mut buffer, PID_TAG_SUBFOLDERS, false);
         write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
         write_utf16_property(
@@ -592,11 +592,6 @@ fn write_i64(buffer: &mut Vec<u8>, value: i64) {
 fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
     write_u32(buffer, property_tag);
     write_i32(buffer, value);
-}
-
-fn write_i16_property(buffer: &mut Vec<u8>, property_tag: u32, value: i16) {
-    write_u32(buffer, property_tag);
-    buffer.extend_from_slice(&value.to_le_bytes());
 }
 
 fn write_bool_property(buffer: &mut Vec<u8>, property_tag: u32, value: bool) {
