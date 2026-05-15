@@ -1508,10 +1508,13 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
     response.extend_from_slice(values);
 }
 
-pub(in crate::mapi) fn serialize_logon_row(columns: &[u32]) -> Vec<u8> {
+pub(in crate::mapi) fn serialize_logon_row(
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        match logon_property_value(*column) {
+        match logon_property_value(principal, *column) {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }

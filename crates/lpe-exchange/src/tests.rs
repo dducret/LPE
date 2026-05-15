@@ -4516,6 +4516,73 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
 }
 
 #[tokio::test]
+async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
+    let mut account = FakeStore::account();
+    account.account_id = Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap();
+    account.email = "bob@example.test".to_string();
+    account.display_name = "Bob Store".to_string();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_request = hex_bytes(
+        "0200000063000000000004005b005b005700fe0000010c0400210000000047002f6f3d4c50452f6f753d45786368616e67652041646d696e6973747261746976652047726f75702f636e3d526563697069656e74732f636e3d746573742d6c2d702d652d636800ffffffff0780000000000000",
+    );
+    let logon_response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &logon_request)
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    assert_eq!(logon_response.headers().get("x-responsecode").unwrap(), "0");
+
+    renew_mapi_request_id(&mut execute_headers);
+    let store_properties_request = hex_bytes(
+        "0200000037000000000004002f002f002b000700000000000008001f001c6602011b661f001d3402011e3402011f340b005c0e03006f3402010767010000000780000000000000",
+    );
+    let store_properties_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &store_properties_request,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(store_properties_response.status(), StatusCode::OK);
+    assert_eq!(
+        store_properties_response
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+    let body = response_bytes(store_properties_response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let payload_size = u16::from_le_bytes(rop_buffer[4..6].try_into().unwrap()) as usize;
+    let payload = &rop_buffer[8..8 + payload_size];
+    let response_rop_size = u16::from_le_bytes(payload[0..2].try_into().unwrap()) as usize;
+    let response_rops = &payload[2..response_rop_size];
+
+    assert!(contains_bytes(&response_rops, &utf16z("Bob Store")));
+    assert!(contains_bytes(&response_rops, b"acct-bob-example-test\0"));
+    assert!(contains_bytes(&response_rops, &utf16z("LPE")));
+    assert!(contains_bytes(
+        &response_rops,
+        account.account_id.as_bytes().as_slice()
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

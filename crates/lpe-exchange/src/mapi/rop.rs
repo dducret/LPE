@@ -568,7 +568,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
     write_u32(&mut response, 0);
     let columns = request.property_tags();
     let row = match object {
-        Some(MapiObject::Logon) => serialize_logon_row(&columns),
+        Some(MapiObject::Logon) => serialize_logon_row(principal, &columns),
         Some(MapiObject::Message {
             folder_id,
             message_id,
@@ -783,7 +783,7 @@ pub(in crate::mapi) fn serialize_object_property(
     tag: u32,
 ) -> Vec<u8> {
     match object {
-        Some(MapiObject::Logon) => serialize_logon_row(&[tag]),
+        Some(MapiObject::Logon) => serialize_logon_row(principal, &[tag]),
         Some(MapiObject::Message {
             folder_id,
             message_id,

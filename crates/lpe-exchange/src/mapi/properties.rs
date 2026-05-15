@@ -188,6 +188,13 @@ pub(in crate::mapi) const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME: u32 = 0x6709_0040;
 pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
 pub(in crate::mapi) const PID_TAG_SERIALIZED_REPLID_GUID_MAP: u32 = 0x6638_0102;
+pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_ENTRY_ID: u32 = 0x661B_0102;
+pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_NAME_W: u32 = 0x661C_001F;
+pub(in crate::mapi) const PID_TAG_SERVER_TYPE_DISPLAY_NAME_W: u32 = 0x341D_001F;
+pub(in crate::mapi) const PID_TAG_SERVER_CONNECTED_ICON: u32 = 0x341E_0102;
+pub(in crate::mapi) const PID_TAG_SERVER_ACCOUNT_ICON: u32 = 0x341F_0102;
+pub(in crate::mapi) const PID_TAG_PRIVATE: u32 = 0x0E5C_000B;
+pub(in crate::mapi) const PID_TAG_USER_GUID: u32 = 0x6707_0102;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 pub(in crate::mapi) const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
@@ -219,11 +226,41 @@ pub(in crate::mapi) const PS_INTERNET_HEADERS_GUID: [u8; 16] = [
     0x86, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
 
-pub(in crate::mapi) fn logon_property_value(property_tag: u32) -> Option<MapiValue> {
+const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [
+    0xDC, 0xA7, 0x40, 0xC8, 0xC0, 0x42, 0x10, 0x1A, 0xB4, 0xB9, 0x08, 0x00, 0x2B, 0x2F, 0xE1, 0x82,
+];
+
+pub(in crate::mapi) fn logon_property_value(
+    principal: &AccountPrincipal,
+    property_tag: u32,
+) -> Option<MapiValue> {
     match property_tag {
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
+        PID_TAG_MAILBOX_OWNER_ENTRY_ID => {
+            Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
+        }
+        PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
+        PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
+            Some(MapiValue::Binary(Vec::new()))
+        }
+        PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
+        PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
         _ => None,
     }
+}
+
+fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
+    let entry = super::nspi::principal_address_book_entry(principal);
+    let legacy_dn = super::nspi::nspi_entry_legacy_dn(&entry);
+    let mut value = Vec::with_capacity(28 + legacy_dn.len() + 1);
+    value.extend_from_slice(&[0, 0, 0, 0]);
+    value.extend_from_slice(&NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID);
+    value.extend_from_slice(&1u32.to_le_bytes());
+    value.extend_from_slice(&super::nspi::nspi_entry_display_type(&entry).to_le_bytes());
+    value.extend_from_slice(legacy_dn.as_bytes());
+    value.push(0);
+    value
 }
 
 pub(in crate::mapi) fn rop_read_recipients_response(
