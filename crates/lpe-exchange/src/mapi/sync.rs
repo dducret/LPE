@@ -44,20 +44,32 @@ pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_response(
     transfer_buffer: &[u8],
     transfer_position: &mut usize,
 ) -> Vec<u8> {
-    let requested = request.fast_transfer_buffer_size().min(u16::MAX as usize);
+    let requested = request
+        .fast_transfer_buffer_size()
+        .clamp(1, u16::MAX as usize);
     let end = transfer_position
         .saturating_add(requested)
         .min(transfer_buffer.len());
     let chunk = transfer_buffer[*transfer_position..end].to_vec();
     *transfer_position = end;
     let done = *transfer_position >= transfer_buffer.len();
+    let total_steps = transfer_buffer
+        .len()
+        .div_ceil(requested)
+        .min(u16::MAX as usize) as u16;
+    let completed_steps = if total_steps == 0 {
+        0
+    } else {
+        (*transfer_position)
+            .div_ceil(requested)
+            .min(u16::MAX as usize) as u16
+    };
 
     let mut response = vec![0x4E, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.extend_from_slice(&(if done { 0x0003u16 } else { 0x0001u16 }).to_le_bytes());
-    response.extend_from_slice(&((*transfer_position).min(u16::MAX as usize) as u16).to_le_bytes());
-    response
-        .extend_from_slice(&(transfer_buffer.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(&completed_steps.to_le_bytes());
+    response.extend_from_slice(&total_steps.to_le_bytes());
     response.push(0);
     response.extend_from_slice(&(chunk.len().min(u16::MAX as usize) as u16).to_le_bytes());
     response.extend_from_slice(&chunk);

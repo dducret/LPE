@@ -10766,6 +10766,42 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         .await
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
+    let get_buffer_response_offset = response_rops
+        .windows(6)
+        .position(|window| window == [0x4E, 0x02, 0x00, 0x00, 0x00, 0x00])
+        .unwrap();
+    assert_eq!(
+        u16::from_le_bytes(
+            response_rops[get_buffer_response_offset + 6..get_buffer_response_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        0x0003
+    );
+    assert_eq!(
+        u16::from_le_bytes(
+            response_rops[get_buffer_response_offset + 8..get_buffer_response_offset + 10]
+                .try_into()
+                .unwrap()
+        ),
+        1
+    );
+    assert_eq!(
+        u16::from_le_bytes(
+            response_rops[get_buffer_response_offset + 10..get_buffer_response_offset + 12]
+                .try_into()
+                .unwrap()
+        ),
+        1
+    );
+    assert_eq!(response_rops[get_buffer_response_offset + 12], 0);
+    let transfer_buffer_size = u16::from_le_bytes(
+        response_rops[get_buffer_response_offset + 13..get_buffer_response_offset + 15]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    assert!(transfer_buffer_size > 0);
+    assert!(response_rops.len() >= get_buffer_response_offset + 15 + transfer_buffer_size);
 
     assert!(contains_bytes(
         &response_rops,
