@@ -188,6 +188,20 @@ struct RopResponseDebugSummary {
     parse_error: String,
 }
 
+#[derive(Debug, Default)]
+struct LogonResponseDebugSummary {
+    present: bool,
+    output_handle_index: String,
+    error_code: String,
+    logon_flags: String,
+    special_folder_ids: String,
+    response_flags: String,
+    mailbox_guid: String,
+    replid: String,
+    replica_guid: String,
+    parse_error: String,
+}
+
 fn log_execute_rop_debug(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
@@ -197,6 +211,7 @@ fn log_execute_rop_debug(
 ) {
     let request = summarize_request_rop_buffer(request_rop_buffer);
     let response = summarize_response_rop_buffer(response_rop_buffer, &request.ids);
+    let logon = summarize_logon_response_rop(response_rop_buffer, &request.ids);
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
@@ -223,6 +238,16 @@ fn log_execute_rop_debug(
         response_handle_count = response.handle_count,
         response_extended_rop_buffer = response.extended,
         response_rop_parse_error = %response.parse_error,
+        logon_response_present = logon.present,
+        logon_output_handle_index = %logon.output_handle_index,
+        logon_error_code = %logon.error_code,
+        logon_flags = %logon.logon_flags,
+        logon_special_folder_ids = %logon.special_folder_ids,
+        logon_response_flags = %logon.response_flags,
+        logon_mailbox_guid = %logon.mailbox_guid,
+        logon_replid = %logon.replid,
+        logon_replica_guid = %logon.replica_guid,
+        logon_parse_error = %logon.parse_error,
         request_rop_buffer_bytes = request_rop_buffer.len(),
         response_rop_buffer_bytes = response_rop_buffer.len(),
         message = message,
@@ -294,6 +319,76 @@ fn summarize_response_rop_buffer(
     summary.ids_csv = rop_ids_csv(&ids);
     summary.results_csv = results.join(",");
     summary
+}
+
+fn summarize_logon_response_rop(
+    rop_buffer: &[u8],
+    request_rop_ids: &[u8],
+) -> LogonResponseDebugSummary {
+    if !request_rop_ids.contains(&0xFE) {
+        return LogonResponseDebugSummary::default();
+    }
+    let mut summary = LogonResponseDebugSummary {
+        present: true,
+        ..LogonResponseDebugSummary::default()
+    };
+    let Some((responses, _handle_table)) = split_rop_buffer(rop_buffer) else {
+        summary.parse_error = "invalid ROP buffer".to_string();
+        return summary;
+    };
+    let Some(offset) = responses.iter().position(|rop_id| *rop_id == 0xFE) else {
+        summary.parse_error = "missing RopLogon response".to_string();
+        return summary;
+    };
+    let result = (|| -> Result<()> {
+        let mut cursor = Cursor::new(&responses[offset..]);
+        let rop_id = cursor.read_u8()?;
+        if rop_id != 0xFE {
+            return Err(anyhow::anyhow!("unexpected ROP response"));
+        }
+        summary.output_handle_index = cursor.read_u8()?.to_string();
+        let error_code = cursor.read_u32()?;
+        summary.error_code = format!("{error_code:#010x}");
+        if error_code != 0 {
+            return Ok(());
+        }
+        summary.logon_flags = format!("{:#04x}", cursor.read_u8()?);
+        let mut folder_ids = Vec::with_capacity(PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len());
+        for _ in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
+            folder_ids.push(format!("{:#018x}", read_u64(&mut cursor)?));
+        }
+        summary.special_folder_ids = folder_ids.join(",");
+        summary.response_flags = format!("{:#04x}", cursor.read_u8()?);
+        summary.mailbox_guid = read_guid_le(&mut cursor)?;
+        summary.replid = cursor.read_u16()?.to_string();
+        summary.replica_guid = bytes_to_hex(cursor.read_bytes(16)?);
+        cursor.read_bytes(8)?;
+        read_u64(&mut cursor)?;
+        cursor.read_u32()?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        summary.parse_error = error.to_string();
+    }
+    summary
+}
+
+fn read_u64(cursor: &mut Cursor<'_>) -> Result<u64> {
+    let bytes = cursor.read_bytes(8)?;
+    Ok(u64::from_le_bytes(bytes.try_into()?))
+}
+
+fn read_guid_le(cursor: &mut Cursor<'_>) -> Result<String> {
+    let bytes = cursor.read_bytes(16)?;
+    Ok(Uuid::from_bytes_le(bytes.try_into()?).to_string())
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 fn handle_table_count(handle_table: &[u8], parse_error: &mut String) -> usize {
@@ -3327,5 +3422,38 @@ mod tests {
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
         assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn logon_response_debug_summary_decodes_private_mailbox_fields() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        };
+        let request = RopRequest {
+            rop_id: 0xFE,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0x01],
+        };
+        let response_buffer =
+            rop_buffer_with_response(rop_logon_response_body(&principal, &request), &[42]);
+
+        let summary = summarize_logon_response_rop(&response_buffer, &[0xFE]);
+
+        assert!(summary.present);
+        assert_eq!(summary.output_handle_index, "1");
+        assert_eq!(summary.error_code, "0x00000000");
+        assert_eq!(summary.logon_flags, "0x01");
+        assert!(summary
+            .special_folder_ids
+            .starts_with(&format!("{ROOT_FOLDER_ID:#018x}")));
+        assert_eq!(summary.response_flags, "0x07");
+        assert_eq!(summary.mailbox_guid, principal.account_id.to_string());
+        assert_eq!(summary.replid, "1");
+        assert_eq!(summary.replica_guid.len(), 32);
+        assert!(summary.parse_error.is_empty());
     }
 }

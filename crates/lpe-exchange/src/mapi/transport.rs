@@ -362,7 +362,78 @@ pub(in crate::mapi) fn connect_response(
     let auxiliary_buffer = connect_auxiliary_buffer();
     write_u32(&mut body, auxiliary_buffer.len() as u32);
     body.extend_from_slice(&auxiliary_buffer);
+    log_connect_body_debug(endpoint, principal, request_id, &body);
     mapi_response_with_cookies("Connect", request_id, 0, body, cookies)
+}
+
+#[derive(Debug, Default)]
+struct ConnectBodyDebugSummary {
+    status_code: u32,
+    error_code: u32,
+    polls_max: u32,
+    retry_count: u32,
+    retry_delay_ms: u32,
+    dn_prefix: String,
+    display_name: String,
+    auxiliary_buffer_bytes: u32,
+    parse_error: String,
+}
+
+fn log_connect_body_debug(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    body: &[u8],
+) {
+    let summary = summarize_connect_body(body);
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Connect",
+        mapi_request_id = request_id,
+        connect_status_code = summary.status_code,
+        connect_error_code = summary.error_code,
+        connect_polls_max = summary.polls_max,
+        connect_retry_count = summary.retry_count,
+        connect_retry_delay_ms = summary.retry_delay_ms,
+        connect_dn_prefix = %summary.dn_prefix,
+        connect_display_name = %summary.display_name,
+        connect_auxiliary_buffer_bytes = summary.auxiliary_buffer_bytes,
+        connect_body_bytes = body.len(),
+        connect_parse_error = %summary.parse_error,
+        message = "rca debug mapi connect body",
+    );
+}
+
+fn summarize_connect_body(body: &[u8]) -> ConnectBodyDebugSummary {
+    let mut cursor = Cursor::new(body);
+    let mut summary = ConnectBodyDebugSummary::default();
+    let result = (|| -> Result<()> {
+        summary.status_code = cursor.read_u32()?;
+        summary.error_code = cursor.read_u32()?;
+        summary.polls_max = cursor.read_u32()?;
+        summary.retry_count = cursor.read_u32()?;
+        summary.retry_delay_ms = cursor.read_u32()?;
+        summary.dn_prefix = cursor.read_ascii_z()?;
+        summary.display_name = cursor.read_utf16z()?;
+        summary.auxiliary_buffer_bytes = cursor.read_u32()?;
+        let auxiliary_buffer_bytes = summary.auxiliary_buffer_bytes as usize;
+        cursor.read_bytes(auxiliary_buffer_bytes)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        summary.parse_error = error.to_string();
+    }
+    summary
 }
 
 pub(in crate::mapi) fn connect_auxiliary_buffer() -> Vec<u8> {
@@ -1082,6 +1153,44 @@ pub(in crate::mapi) fn is_authentication_error(message: &str) -> bool {
         message,
         "missing account authentication" | "invalid credentials"
     ) || message.contains("oauth access token")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connect_body_debug_summary_decodes_fields() {
+        let mut body = Vec::new();
+        write_u32(&mut body, 0);
+        write_u32(&mut body, 0);
+        write_u32(&mut body, 60_000);
+        write_u32(&mut body, 6);
+        write_u32(&mut body, 10_000);
+        body.extend_from_slice(b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=\0");
+        write_utf16z(&mut body, "Alice");
+        let auxiliary_buffer = connect_auxiliary_buffer();
+        write_u32(&mut body, auxiliary_buffer.len() as u32);
+        body.extend_from_slice(&auxiliary_buffer);
+
+        let summary = summarize_connect_body(&body);
+
+        assert_eq!(summary.status_code, 0);
+        assert_eq!(summary.error_code, 0);
+        assert_eq!(summary.polls_max, 60_000);
+        assert_eq!(summary.retry_count, 6);
+        assert_eq!(summary.retry_delay_ms, 10_000);
+        assert_eq!(
+            summary.dn_prefix,
+            "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn="
+        );
+        assert_eq!(summary.display_name, "Alice");
+        assert_eq!(
+            summary.auxiliary_buffer_bytes,
+            auxiliary_buffer.len() as u32
+        );
+        assert!(summary.parse_error.is_empty());
+    }
 }
 
 impl MapiRequestType {

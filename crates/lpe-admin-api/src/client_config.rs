@@ -68,11 +68,20 @@ fn jmap_well_known_location(headers: &HeaderMap) -> String {
 }
 
 async fn outlook_autodiscover_get(uri: Uri, headers: HeaderMap) -> Response {
-    let response = xml_response(render_outlook_autodiscover(
-        &PublishedEndpoints::from_headers(&headers, None),
+    let response_body =
+        render_outlook_autodiscover(&PublishedEndpoints::from_headers(&headers, None), None);
+    let response = xml_response(response_body.clone());
+    log_autodiscover_connection(
+        "GET",
+        &uri,
+        &headers,
         None,
-    ));
-    log_autodiscover_connection("GET", &uri, &headers, None, "pox", 0, &response, None);
+        "pox",
+        0,
+        &response,
+        Some(&response_body),
+        None,
+    );
     response
 }
 
@@ -86,7 +95,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
     } else {
         "pox"
     };
-    let response = if response_kind == "soap_user_settings" {
+    let response_body = if response_kind == "soap_user_settings" {
         match render_soap_user_settings_response(&endpoints, email.as_deref()) {
             Some(response) => response,
             None => {
@@ -103,6 +112,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
                     response_kind,
                     body.len(),
                     &response,
+                    Some("SOAP Autodiscover is not published for the default Outlook IMAP profile.\n"),
                     Some("SOAP Exchange autodiscover is not published"),
                 );
                 return response;
@@ -113,7 +123,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
     } else {
         render_outlook_autodiscover(&endpoints, email.as_deref())
     };
-    let response = xml_response(response);
+    let response = xml_response(response_body.clone());
     log_autodiscover_connection(
         "POST",
         &uri,
@@ -122,6 +132,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
         response_kind,
         body.len(),
         &response,
+        Some(&response_body),
         None,
     );
     response
@@ -158,6 +169,7 @@ async fn outlook_autodiscover_json(
         query.protocol.as_deref().unwrap_or("AutoDiscoverV1"),
         0,
         &response,
+        None,
         None,
     );
     response
@@ -889,6 +901,7 @@ fn log_autodiscover_connection(
     response_kind: &str,
     request_body_bytes: usize,
     response: &Response,
+    response_body: Option<&str>,
     error: Option<&str>,
 ) {
     let status = response.status().as_u16();
@@ -914,6 +927,7 @@ fn log_autodiscover_connection(
             x_mapi_http_capability = %x_mapi_http_capability,
             http_status = status,
             request_body_bytes,
+            response_body = %response_body.unwrap_or_default(),
             user_agent = %user_agent,
             "{message}"
         );
@@ -932,6 +946,7 @@ fn log_autodiscover_connection(
             x_mapi_http_capability = %x_mapi_http_capability,
             http_status = status,
             request_body_bytes,
+            response_body = %response_body.unwrap_or_default(),
             user_agent = %user_agent,
             error = %error.unwrap_or_default(),
             "{message}"
