@@ -2353,6 +2353,33 @@ fn append_rop_sync_manifest_get_buffer(
     rops.extend_from_slice(&buffer_size.to_le_bytes());
 }
 
+fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    buffer_size: u16,
+) {
+    rops.extend_from_slice(&[
+        0x70, 0x00, input, output, // RopSynchronizationConfigure
+        0x02,   // hierarchy sync
+        0x09,   // SendOptions
+        0x01, 0x01, // SynchronizationFlags
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x08, 0x00, // PropertyTagCount
+        0x03, 0x00, 0x01, 0x36, // PidTagContainerContents
+        0x03, 0x00, 0x02, 0x36, // PidTagFolderAssociatedContents
+        0x03, 0x00, 0x03, 0x36, // PidTagContainerHierarchy
+        0x03, 0x00, 0x08, 0x0e, // PidTagMessageSize
+        0x02, 0x01, 0xf4, 0x0f, // PidTagAccess
+        0x02, 0x01, 0xe0, 0x3f, // PidTagMappingSignature
+        0x02, 0x01, 0xe1, 0x3f, // PidTagRecordKey
+        0x02, 0x01, 0x27, 0x0e, // PidTagContentCount
+        0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&buffer_size.to_le_bytes());
+}
+
 fn append_rop_set_read_flags(rops: &mut Vec<u8>, input: u8, read_flags: u8, message_ids: &[u64]) {
     rops.extend_from_slice(&[0x66, 0x00, input, 0x00, read_flags]);
     rops.extend_from_slice(&(message_ids.len() as u16).to_le_bytes());
@@ -10557,6 +10584,43 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
 }
 
 #[tokio::test]

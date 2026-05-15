@@ -2402,6 +2402,8 @@ where
                 };
                 let all_sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
+                let available_sync_mailbox_count = all_sync_mailboxes.len();
+                let available_sync_email_count = all_sync_emails.len();
                 let (sync_mailboxes, sync_emails) = if checkpoint.is_some() {
                     (
                         changed_sync_mailboxes(all_sync_mailboxes, &changes.changed_mailbox_ids),
@@ -2437,6 +2439,26 @@ where
                     &sync_attachment_facts,
                     &deleted_message_ids,
                     changes.current_change_sequence,
+                );
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x70",
+                    folder_id = format_args!("0x{folder_id:016x}"),
+                    sync_type = format_args!("0x{sync_type:02x}"),
+                    checkpoint_loaded = checkpoint.is_some(),
+                    snapshot_mailbox_count = mailboxes.len(),
+                    snapshot_email_count = emails.len(),
+                    available_sync_mailbox_count,
+                    available_sync_email_count,
+                    sync_mailbox_count = sync_mailboxes.len(),
+                    sync_email_count = sync_emails.len(),
+                    current_change_sequence = changes.current_change_sequence,
+                    transfer_buffer_bytes = transfer_buffer.len(),
+                    "rca debug mapi sync configure"
                 );
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
