@@ -4693,6 +4693,71 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_advertised_special_folder_reports_own_identity() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Outbox
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(6).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x01, // RopGetPropertiesSpecific
+    ]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    for tag in [0x3001_001F, 0x6748_0014, 0x6749_0014, 0x001A_001F] as [u32; 4] {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    let properties = &response_rops[8..];
+
+    assert_eq!(properties[0], 0x07);
+    assert_eq!(properties[1], 0x01);
+    assert_eq!(u32::from_le_bytes(properties[2..6].try_into().unwrap()), 0);
+    assert!(contains_bytes(properties, &utf16z("Outbox")));
+    assert!(contains_bytes(
+        properties,
+        &test_mapi_folder_id(6).to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        properties,
+        &test_mapi_folder_id(4).to_le_bytes()
+    ));
+    assert!(contains_bytes(properties, &utf16z("IPF.Note")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
@@ -10633,6 +10698,23 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x6749_0014u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &test_mapi_folder_id(4).to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x65E1_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4))
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
 }
 
 #[tokio::test]

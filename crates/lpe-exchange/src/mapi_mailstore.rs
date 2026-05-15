@@ -12,15 +12,21 @@ const INCR_SYNC_READ: u32 = 0x402F_0003;
 const INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
 const INCR_SYNC_STATE_END: u32 = 0x403B_0003;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
+const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
+const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
+const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
+const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
+const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
@@ -244,13 +250,21 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     for mailbox in folders {
         let change_number = canonical_folder_change_number(mailbox);
         let source_key = source_key_for_uuid(&mailbox.id);
+        let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+        write_i64(&mut buffer, folder_id as i64);
+        write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
         write_i64(
             &mut buffer,
-            crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(folder_id) as i64,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID as i64,
         );
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PARENT_SOURCE_KEY,
+            &source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID),
+        );
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
         write_binary_property(
@@ -263,7 +277,24 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             PID_TAG_PREDECESSOR_CHANGE_LIST,
             &predecessor_change_list(change_number),
         );
+        write_i32_property(
+            &mut buffer,
+            PID_TAG_CONTENT_COUNT,
+            mailbox.total_emails.min(i32::MAX as u32) as i32,
+        );
+        write_i32_property(
+            &mut buffer,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            mailbox.unread_emails.min(i32::MAX as u32) as i32,
+        );
+        write_u32(&mut buffer, PID_TAG_SUBFOLDERS);
+        buffer.push(0);
         write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
+        write_utf16_property(
+            &mut buffer,
+            PID_TAG_MESSAGE_CLASS_W,
+            mapi_folder_message_class(mailbox),
+        );
     }
 
     let mut messages = emails.iter().collect::<Vec<_>>();
@@ -345,6 +376,27 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     ));
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer
+}
+
+fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
+    match mailbox.role.as_str() {
+        "inbox" => crate::mapi::identity::INBOX_FOLDER_ID,
+        "drafts" => crate::mapi::identity::DRAFTS_FOLDER_ID,
+        "outbox" => crate::mapi::identity::OUTBOX_FOLDER_ID,
+        "sent" => crate::mapi::identity::SENT_FOLDER_ID,
+        "trash" => crate::mapi::identity::TRASH_FOLDER_ID,
+        "contacts" => crate::mapi::identity::CONTACTS_FOLDER_ID,
+        "calendar" => crate::mapi::identity::CALENDAR_FOLDER_ID,
+        _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(fallback),
+    }
+}
+
+fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
+    match mailbox.role.as_str() {
+        "contacts" => "IPF.Contact",
+        "calendar" => "IPF.Appointment",
+        _ => "IPF.Note",
+    }
 }
 
 pub(crate) fn final_sync_state_stream(sync_type: u8, max_change: u64) -> Vec<u8> {
@@ -522,6 +574,11 @@ fn write_i32(buffer: &mut Vec<u8>, value: i32) {
 
 fn write_i64(buffer: &mut Vec<u8>, value: i64) {
     buffer.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
+    write_u32(buffer, property_tag);
+    write_i32(buffer, value);
 }
 
 fn write_binary_property(buffer: &mut Vec<u8>, property_tag: u32, value: &[u8]) {

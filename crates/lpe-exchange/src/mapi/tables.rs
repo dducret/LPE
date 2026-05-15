@@ -1339,7 +1339,73 @@ pub(in crate::mapi) fn serialize_special_folder_row(
 ) -> Vec<u8> {
     match folder_id {
         IPM_SUBTREE_FOLDER_ID => serialize_ipm_subtree_folder_row(mailboxes, columns),
-        _ => serialize_root_folder_row(mailboxes, columns),
+        ROOT_FOLDER_ID => serialize_root_folder_row(mailboxes, columns),
+        _ => serialize_advertised_special_folder_row(folder_id, columns),
+    }
+}
+
+fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> Vec<u8> {
+    let mut row = Vec::new();
+    let (display_name, parent_folder_id, message_class, has_subfolders) =
+        special_folder_metadata(folder_id);
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, display_name),
+            PID_TAG_FOLDER_ID => write_u64(&mut row, folder_id),
+            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, parent_folder_id),
+            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
+            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, message_class),
+            PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME_MAX
+            | PID_TAG_HIER_REV => write_u64(
+                &mut row,
+                mapi_mailstore::filetime_from_change_number(folder_id),
+            ),
+            PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+                write_u32(&mut row, folder_id.min(u64::from(u32::MAX)) as u32)
+            }
+            PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(folder_id),
+            ),
+            PID_TAG_PARENT_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(parent_folder_id),
+            ),
+            PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::change_key_for_change_number(folder_id),
+            ),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::predecessor_change_list(folder_id),
+            ),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, folder_id),
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, bool) {
+    match folder_id {
+        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "IPF.Root", false),
+        SPOOLER_QUEUE_FOLDER_ID => ("Spooler Queue", ROOT_FOLDER_ID, "IPF.Root", false),
+        INBOX_FOLDER_ID => ("Inbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
+        OUTBOX_FOLDER_ID => ("Outbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
+        SENT_FOLDER_ID => ("Sent", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
+        TRASH_FOLDER_ID => ("Deleted Items", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
+        COMMON_VIEWS_FOLDER_ID => ("Common Views", ROOT_FOLDER_ID, "IPF.Root", false),
+        SCHEDULE_FOLDER_ID => ("Schedule", ROOT_FOLDER_ID, "IPF.Root", false),
+        SEARCH_FOLDER_ID => ("Search", ROOT_FOLDER_ID, "IPF.Root", false),
+        VIEWS_FOLDER_ID => ("Views", ROOT_FOLDER_ID, "IPF.Root", false),
+        SHORTCUTS_FOLDER_ID => ("Shortcuts", ROOT_FOLDER_ID, "IPF.Root", false),
+        DRAFTS_FOLDER_ID => ("Drafts", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
+        CONTACTS_FOLDER_ID => ("Contacts", IPM_SUBTREE_FOLDER_ID, "IPF.Contact", false),
+        CALENDAR_FOLDER_ID => ("Calendar", IPM_SUBTREE_FOLDER_ID, "IPF.Appointment", false),
+        _ => ("Root", 0, "IPF.Root", true),
     }
 }
 
