@@ -1850,7 +1850,11 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             }
             Ok(())
         }
-        Some(MapiObject::Folder { .. }) | Some(MapiObject::Logon) => Ok(()),
+        Some(MapiObject::Folder { properties, .. }) => {
+            properties.extend(values);
+            Ok(())
+        }
+        Some(MapiObject::Logon) => Ok(()),
         _ => Err(anyhow!("MAPI object does not support property mutation")),
     }
 }

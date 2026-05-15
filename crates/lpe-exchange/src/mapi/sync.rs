@@ -256,7 +256,7 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(u64, Vec<u8>)> {
     match object {
-        MapiObject::Folder { folder_id } => {
+        MapiObject::Folder { folder_id, .. } => {
             let folder = folder_row_for_id(*folder_id, mailboxes)
                 .cloned()
                 .into_iter()

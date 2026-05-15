@@ -478,7 +478,10 @@ where
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
-                    MapiObject::Folder { folder_id },
+                    MapiObject::Folder {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_open_folder_response(&request));
@@ -1290,7 +1293,10 @@ where
                         let folder_id = mapi_folder_id(existing);
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
-                            MapiObject::Folder { folder_id },
+                            MapiObject::Folder {
+                                folder_id,
+                                properties: HashMap::new(),
+                            },
                         );
                         set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                         responses.extend_from_slice(&rop_create_folder_response(
@@ -1340,7 +1346,10 @@ where
                         };
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
-                            MapiObject::Folder { folder_id },
+                            MapiObject::Folder {
+                                folder_id,
+                                properties: HashMap::new(),
+                            },
                         );
                         set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                         responses.extend_from_slice(&rop_create_folder_response(
@@ -1421,7 +1430,7 @@ where
             }
             0x1E | 0x91 => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id }) => *folder_id,
+                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
                             request.rop_id,
@@ -2186,7 +2195,7 @@ where
             }
             0x33 => {
                 let source_folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id }) => *folder_id,
+                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
                             0x33,
@@ -2299,7 +2308,7 @@ where
             }
             0x66 => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::Folder { folder_id }) => *folder_id,
+                    Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
                             0x66,

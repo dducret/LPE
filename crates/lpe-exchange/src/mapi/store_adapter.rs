@@ -287,7 +287,10 @@ fn simulate_table_access(
                 handles,
                 next_handle,
                 request.output_handle_index,
-                MapiObject::Folder { folder_id },
+                MapiObject::Folder {
+                    folder_id,
+                    properties: HashMap::new(),
+                },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
         }
@@ -524,7 +527,7 @@ fn mapi_content_table_sort_orders(
 
 fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
     match object {
-        MapiObject::Folder { folder_id }
+        MapiObject::Folder { folder_id, .. }
         | MapiObject::HierarchyTable { folder_id, .. }
         | MapiObject::ContentsTable { folder_id, .. }
         | MapiObject::PendingMessage { folder_id, .. }

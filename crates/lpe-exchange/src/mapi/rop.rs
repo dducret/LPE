@@ -617,6 +617,10 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &columns)
         }
+        Some(MapiObject::Folder {
+            folder_id,
+            properties,
+        }) => serialize_session_folder_row(*folder_id, properties, mailboxes, snapshot, &columns),
         Some(MapiObject::Attachment {
             folder_id,
             message_id,
@@ -823,6 +827,10 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &[tag])
         }
+        Some(MapiObject::Folder {
+            folder_id,
+            properties,
+        }) => serialize_session_folder_row(*folder_id, properties, mailboxes, snapshot, &[tag]),
         Some(MapiObject::Attachment {
             folder_id,
             message_id,
@@ -870,6 +878,37 @@ pub(in crate::mapi) fn serialize_object_property(
                 .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &[tag]))
         }
     }
+}
+
+fn serialize_session_folder_row(
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        let storage_tag = canonical_property_storage_tag(*column);
+        if let Some(value) = properties
+            .get(&storage_tag)
+            .or_else(|| properties.get(column))
+        {
+            write_mapi_value(&mut row, *column, value);
+            continue;
+        }
+
+        let value = folder_row_for_id(folder_id, mailboxes)
+            .map(|mailbox| serialize_folder_row(mailbox, &[*column]))
+            .or_else(|| {
+                snapshot
+                    .collaboration_folder_for_id(folder_id)
+                    .map(|folder| serialize_collaboration_folder_row(folder, &[*column]))
+            })
+            .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &[*column]));
+        row.extend_from_slice(&value);
+    }
+    row
 }
 
 pub(in crate::mapi) fn rop_get_receive_folder_response(

@@ -70,6 +70,7 @@ pub(in crate::mapi) enum MapiObject {
     Logon,
     Folder {
         folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
     },
     Message {
         folder_id: u64,
@@ -602,7 +603,7 @@ impl MapiObject {
                 None
             }
             MapiObject::Logon => Some(ROOT_FOLDER_ID),
-            MapiObject::Folder { folder_id }
+            MapiObject::Folder { folder_id, .. }
             | MapiObject::Message { folder_id, .. }
             | MapiObject::Contact { folder_id, .. }
             | MapiObject::Event { folder_id, .. }
