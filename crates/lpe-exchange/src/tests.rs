@@ -13783,6 +13783,22 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     assert_eq!(body[12], 1);
     assert!(contains_bytes(&body, &utf16z("alice@example.test")));
     assert!(contains_bytes(&body, &utf16z("Alice")));
+
+    let outlook_stat_props_request = hex_bytes(
+        "00000000ff000000000000000000000000000000000000000000000000b00400000904000009080000ff0100000002016d8c00000000",
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &props_headers,
+            &outlook_stat_props_request,
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Alice")));
 }
 
 #[tokio::test]

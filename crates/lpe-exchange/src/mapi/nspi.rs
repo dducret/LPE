@@ -1082,12 +1082,37 @@ pub(in crate::mapi) fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {
             request[offset + 2],
             request[offset + 3],
         ]);
-        if value >= 2 && !nspi_property_tag_is_supported(value) && !ids.contains(&value) {
+        if nspi_word_looks_like_entry_id(value) && !ids.contains(&value) {
             ids.push(value);
         }
         offset += 4;
     }
     ids
+}
+
+fn nspi_word_looks_like_entry_id(value: u32) -> bool {
+    matches!(value & 0xc000_0000, 0x4000_0000 | 0x8000_0000)
+        && !nspi_word_looks_like_property_tag(value)
+}
+
+fn nspi_word_looks_like_property_tag(value: u32) -> bool {
+    nspi_property_tag_is_supported(value)
+        || matches!(
+            value & 0xffff,
+            0x0002
+                | 0x0003
+                | 0x000b
+                | 0x000d
+                | 0x001e
+                | 0x001f
+                | 0x0040
+                | 0x0048
+                | 0x0102
+                | 0x1003
+                | 0x101e
+                | 0x101f
+                | 0x1102
+        )
 }
 
 pub(in crate::mapi) fn scan_address_book_lookup_values(request: &[u8]) -> Vec<String> {
