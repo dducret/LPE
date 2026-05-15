@@ -1,4 +1,4 @@
-use super::properties::write_ascii_z;
+use super::properties::{write_ascii_z, write_rop_binary};
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
@@ -137,6 +137,7 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x3005_001E, // PidTagAddressBookDisplayNamePrintable / legacy DN string8
     0x3005_001F, // PidTagAddressBookDisplayNamePrintable / legacy DN
     0x3900_0003, // PidTagDisplayType
+    0x8C6D_0102, // PidTagAddressBookObjectGuid
 ];
 
 pub(in crate::mapi) async fn resolve_names_response<S>(
@@ -406,6 +407,32 @@ pub(in crate::mapi) fn nspi_requested_property_tags(request: &[u8]) -> Vec<u32> 
     }
 }
 
+fn nspi_get_props_property_tags(request: &[u8]) -> Vec<u32> {
+    let tags = nspi_requested_property_tags(request);
+    if tags != NSPI_BOOTSTRAP_PROPERTY_TAGS {
+        return tags;
+    }
+    let mut tags = Vec::new();
+    let mut offset = 0usize;
+    while offset + 4 <= request.len() {
+        let tag = u32::from_le_bytes([
+            request[offset],
+            request[offset + 1],
+            request[offset + 2],
+            request[offset + 3],
+        ]);
+        if nspi_property_tag_is_supported(tag) && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+        offset += 1;
+    }
+    if tags.is_empty() {
+        NSPI_BOOTSTRAP_PROPERTY_TAGS.to_vec()
+    } else {
+        tags
+    }
+}
+
 pub(in crate::mapi) fn nspi_property_tag_is_supported(tag: u32) -> bool {
     NSPI_BOOTSTRAP_PROPERTY_TAGS.contains(&tag)
         || NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS.contains(&tag)
@@ -448,7 +475,7 @@ where
             &format!("failed to project authenticated address book identifier: {error}"),
         );
     }
-    let tags = nspi_requested_property_tags(request);
+    let tags = nspi_get_props_property_tags(request);
     let principal_entry = principal_address_book_entry(principal);
     let principal_id = nspi_entry_id(&principal_entry);
     let entry = nspi_stat_current_rec(request)
@@ -724,6 +751,7 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
 pub(in crate::mapi) enum NspiValue<'a> {
     String(&'a str),
     OwnedString(String),
+    Binary(&'a [u8]),
     U32(u32),
 }
 
@@ -742,6 +770,7 @@ pub(in crate::mapi) fn nspi_entry_value(
         0x3004_001F | 0x3004_001E => NspiValue::String(&entry.email),
         0x3002_001F | 0x3002_001E => NspiValue::String("SMTP"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
+        0x8C6D_0102 => NspiValue::Binary(entry.id.as_bytes()),
         _ => match property_tag & 0xFFFF {
             0x001F | 0x001E => NspiValue::String(""),
             0x0003 => NspiValue::U32(0),
@@ -900,9 +929,11 @@ pub(in crate::mapi) fn write_address_book_property_value(
             body.push(0xFF);
             write_utf16z(body, value);
         }
+        (0x0102, NspiValue::Binary(value)) => write_rop_binary(body, value),
         (0x0003, NspiValue::U32(value)) => write_u32(body, *value),
         (0x0003, _) => write_u32(body, 0),
         (_, NspiValue::U32(value)) => write_u32(body, *value),
+        (_, NspiValue::Binary(value)) => write_rop_binary(body, value),
         (_, NspiValue::String(value)) => {
             body.push(0xFF);
             write_utf16z(body, value);

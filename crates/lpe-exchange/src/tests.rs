@@ -14108,8 +14108,17 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
-    assert!(contains_bytes(&body, &utf16z("Alice")));
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x8C6D_0102
+    );
+    assert_eq!(u16::from_le_bytes(body[21..23].try_into().unwrap()), 16);
+    assert_eq!(
+        &body[23..39],
+        FakeStore::account().account_id.as_bytes().as_slice()
+    );
+    assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
 }
 
 #[tokio::test]
