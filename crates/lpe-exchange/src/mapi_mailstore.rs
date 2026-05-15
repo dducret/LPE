@@ -537,13 +537,16 @@ fn write_utf16_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) {
         .flat_map(u16::to_le_bytes)
         .collect::<Vec<_>>();
     bytes.extend_from_slice(&0u16.to_le_bytes());
+    write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
     buffer.extend_from_slice(&bytes);
 }
 
 fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) {
     write_u32(buffer, property_tag);
-    buffer.extend_from_slice(value.as_bytes());
-    buffer.push(0);
+    let mut bytes = value.as_bytes().to_vec();
+    bytes.push(0);
+    write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
+    buffer.extend_from_slice(&bytes);
 }
 
 fn replguid_idset_from_change(change: u64) -> Vec<u8> {
@@ -646,6 +649,63 @@ mod tests {
             ),
             baseline
         );
+    }
+
+    #[test]
+    fn sync_manifest_serializes_variable_strings_with_fast_transfer_lengths() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        let email_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(50),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let email = test_email();
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x02,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            &[mailbox],
+            &[email],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_variable_property(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Inbox"));
+        assert_variable_property(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
+        assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A, b"Hello\0");
+    }
+
+    fn assert_variable_property(buffer: &[u8], property_tag: u32, value: &[u8]) {
+        let tag = property_tag.to_le_bytes();
+        let offset = buffer
+            .windows(tag.len())
+            .position(|window| window == tag)
+            .expect("property tag is present");
+        let length = u32::from_le_bytes(buffer[offset + 4..offset + 8].try_into().unwrap());
+        assert_eq!(length as usize, value.len());
+        assert_eq!(&buffer[offset + 8..offset + 8 + value.len()], value);
+    }
+
+    fn utf16z(value: &str) -> Vec<u8> {
+        value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .chain([0, 0])
+            .collect()
     }
 
     fn test_email() -> JmapEmail {
