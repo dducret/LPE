@@ -10775,6 +10775,24 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &root_child_parent_source_key
     ));
+    let source_key_offset = tag_position(0x65E0_0102);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[source_key_offset + 4..source_key_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        22
+    );
+    let change_key_offset = tag_position(0x65E2_0102);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[change_key_offset + 4..change_key_offset + 8]
+                .try_into()
+                .unwrap()
+        ),
+        22
+    );
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
 }
 

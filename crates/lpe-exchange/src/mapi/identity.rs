@@ -93,23 +93,27 @@ pub(crate) fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
 
 pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
-    key.extend_from_slice(&object_id.to_le_bytes());
+    let Some(global_counter) = global_counter_from_store_id(object_id) else {
+        return key;
+    };
+    key.extend_from_slice(&global_counter.to_le_bytes()[..6]);
     key
 }
 
 #[allow(dead_code)]
 pub(crate) fn object_id_from_source_key(source_key: &[u8]) -> Option<u64> {
-    if source_key.len() != 24 || source_key[..16] != STORE_REPLICA_GUID {
+    if source_key.len() != 22 || source_key[..16] != STORE_REPLICA_GUID {
         return None;
     }
-    let bytes = source_key.get(16..24)?.try_into().ok()?;
-    let object_id = u64::from_le_bytes(bytes);
-    global_counter_from_store_id(object_id).map(|_| object_id)
+    let mut bytes = [0; 8];
+    bytes[..6].copy_from_slice(source_key.get(16..22)?);
+    let global_counter = u64::from_le_bytes(bytes);
+    (global_counter != 0).then(|| mapi_store_id(global_counter))
 }
 
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
-    key.extend_from_slice(&change_number.max(1).to_le_bytes());
+    key.extend_from_slice(&change_number.max(1).to_le_bytes()[..6]);
     key
 }
 
@@ -145,6 +149,12 @@ mod tests {
         assert_eq!(
             source_key_for_object_id(object_id),
             instance_key_for_object_id(object_id)
+        );
+        assert_eq!(source_key_for_object_id(object_id).len(), 22);
+        assert_eq!(change_key_for_change_number(7).len(), 22);
+        assert_eq!(
+            object_id_from_source_key(&source_key_for_object_id(object_id)),
+            Some(object_id)
         );
         assert!(source_key_for_object_id(object_id).starts_with(&STORE_REPLICA_GUID));
         assert!(change_key_for_change_number(7).starts_with(&STORE_REPLICA_GUID));

@@ -753,6 +753,10 @@ mod tests {
 
         assert_eq!(STORE_REPLICA_GUID[7] & 0xf0, 0x40);
         assert_eq!(STORE_REPLICA_GUID[8] & 0xc0, 0x80);
+        assert_eq!(source_key.len(), 22);
+        assert_eq!(change_key.len(), 22);
+        assert_eq!(&source_key[16..22], &42u64.to_le_bytes()[..6]);
+        assert_eq!(&change_key[16..22], &42u64.to_le_bytes()[..6]);
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));
