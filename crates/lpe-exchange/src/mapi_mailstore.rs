@@ -297,7 +297,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         );
         write_i32_property(&mut buffer, PID_TAG_FOLDER_CHILD_COUNT, 0);
         write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
-        write_binary_property(&mut buffer, PID_TAG_ACCESS_BINARY, &[]);
+        write_binary_property(&mut buffer, PID_TAG_ACCESS_BINARY, &source_key);
         write_binary_property(&mut buffer, PID_TAG_MAPPING_SIGNATURE, &source_key);
         write_binary_property(&mut buffer, PID_TAG_RECORD_KEY, &source_key);
         write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
@@ -800,6 +800,11 @@ mod tests {
         assert_variable_property(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Inbox"));
         assert_variable_property(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
         assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A, b"Hello\0");
+        let mailbox_source_key = source_key_for_uuid(&mailbox_id);
+        assert_variable_property(&buffer, PID_TAG_ACCESS_BINARY, &mailbox_source_key);
+        assert_variable_property(&buffer, PID_TAG_MAPPING_SIGNATURE, &mailbox_source_key);
+        assert_variable_property(&buffer, PID_TAG_RECORD_KEY, &mailbox_source_key);
+        assert_variable_property(&buffer, PID_TAG_ORDINAL_MOST, &mailbox_source_key);
     }
 
     #[test]
