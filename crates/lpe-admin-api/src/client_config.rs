@@ -462,7 +462,7 @@ fn render_outlook_autodiscover(config: &PublishedEndpoints, email: Option<&str>)
         ));
     }
 
-    if config.ews_enabled && !config.mapi_http_autodiscover_selected() {
+    if config.ews_enabled {
         xml.push_str(&render_ews_web_autodiscover_protocol(config, email));
     }
     if (config.exch_autodiscover_enabled() || config.expr_autodiscover_enabled())
@@ -1347,6 +1347,30 @@ mod tests {
         assert!(xml.contains("<AddressBook>"));
         assert!(xml.contains("<InternalUrl>https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test</InternalUrl>"));
         assert!(xml.contains("<ExternalUrl>https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test</ExternalUrl>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+        assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+    }
+
+    #[test]
+    fn outlook_autodiscover_mapi_probe_keeps_opt_in_ews_web_endpoint() {
+        let config = PublishedEndpoints {
+            ews_enabled: true,
+            mapi_enabled: true,
+            outlook_interop_gate_passed: true,
+            mapi_http_requested: true,
+            mapi_emsmdb_url: "https://mail.example.test/mapi/emsmdb/?MailboxId=alice@example.test"
+                .to_string(),
+            mapi_nspi_url: "https://mail.example.test/mapi/nspi/?MailboxId=alice@example.test"
+                .to_string(),
+            ..sample_config()
+        };
+
+        let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+        assert!(xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+        assert!(xml.contains("<Type>WEB</Type>"));
+        assert!(xml.contains("<OWAUrl AuthenticationMethod=\"Basic\">https://mail.example.test/EWS/Exchange.asmx</OWAUrl>"));
+        assert!(xml.contains("<ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
         assert!(!xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
     }

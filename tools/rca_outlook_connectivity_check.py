@@ -459,6 +459,13 @@ def check_pox_autodiscover(
         require("mapiHttp" in text, "POX MAPI probe did not publish mapiHttp")
         require("/mapi/emsmdb/" in text, "POX MAPI probe missing EMSMDB URL")
         require("/mapi/nspi/" in text, "POX MAPI probe missing NSPI URL")
+        if expect_ews:
+            require("<Type>WEB</Type>" in text, "POX MAPI probe suppressed opt-in EWS WEB block")
+            require("<ASUrl>" in text, "POX MAPI probe missing EWS ASUrl")
+            require(
+                not expected_service_host or f"https://{expected_service_host}/EWS/Exchange.asmx" in text,
+                f"POX MAPI probe does not publish EWS on expected service host {expected_service_host}",
+            )
     else:
         require("mapiHttp" not in text, "POX MAPI probe unexpectedly published mapiHttp")
     print("ok autodiscover_pox")
