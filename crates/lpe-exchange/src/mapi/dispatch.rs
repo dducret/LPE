@@ -133,6 +133,13 @@ where
         &execute.rop_buffer,
     )
     .await;
+    log_execute_rop_debug(
+        endpoint,
+        principal,
+        request_id,
+        &execute.rop_buffer,
+        &rop_buffer,
+    );
     let response_body = execute_success_body(rop_buffer, Vec::new());
     cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
     store_session(session_id.clone(), session);
@@ -158,6 +165,162 @@ pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteReque
     let auxiliary_buffer_size = cursor.read_u32()? as usize;
     let _auxiliary_buffer = cursor.read_bytes(auxiliary_buffer_size)?;
     Ok(ExecuteRequest { rop_buffer })
+}
+
+const MAX_ROP_DEBUG_ENTRIES: usize = 32;
+
+#[derive(Debug, Default)]
+struct RopRequestDebugSummary {
+    ids: Vec<u8>,
+    ids_csv: String,
+    handle_count: usize,
+    extended: bool,
+    parse_error: String,
+}
+
+#[derive(Debug, Default)]
+struct RopResponseDebugSummary {
+    ids_csv: String,
+    results_csv: String,
+    count: usize,
+    handle_count: usize,
+    extended: bool,
+    parse_error: String,
+}
+
+fn log_execute_rop_debug(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request_rop_buffer: &[u8],
+    response_rop_buffer: &[u8],
+) {
+    let request = summarize_request_rop_buffer(request_rop_buffer);
+    let response = summarize_response_rop_buffer(response_rop_buffer, &request.ids);
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let message = "rca debug mapi execute rops";
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        request_rop_ids = %request.ids_csv,
+        request_rop_count = request.ids.len(),
+        request_handle_count = request.handle_count,
+        request_extended_rop_buffer = request.extended,
+        request_rop_parse_error = %request.parse_error,
+        response_rop_ids = %response.ids_csv,
+        response_rop_results_best_effort = %response.results_csv,
+        response_rop_count = response.count,
+        response_handle_count = response.handle_count,
+        response_extended_rop_buffer = response.extended,
+        response_rop_parse_error = %response.parse_error,
+        request_rop_buffer_bytes = request_rop_buffer.len(),
+        response_rop_buffer_bytes = response_rop_buffer.len(),
+        message = message,
+    );
+}
+
+fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
+    let mut summary = RopRequestDebugSummary {
+        extended: is_rpc_header_ext_rop_buffer(rop_buffer),
+        ..RopRequestDebugSummary::default()
+    };
+    let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
+        summary.parse_error = "invalid ROP buffer".to_string();
+        return summary;
+    };
+    summary.handle_count = handle_table_count(handle_table, &mut summary.parse_error);
+
+    let mut cursor = Cursor::new(requests);
+    while cursor.remaining() > 0 && summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
+        match read_rop_request(&mut cursor) {
+            Ok(request) => summary.ids.push(request.typed().rop_id()),
+            Err(error) => {
+                summary.parse_error = error.to_string();
+                break;
+            }
+        }
+    }
+    summary.ids_csv = rop_ids_csv(&summary.ids);
+    summary
+}
+
+fn summarize_response_rop_buffer(
+    rop_buffer: &[u8],
+    request_rop_ids: &[u8],
+) -> RopResponseDebugSummary {
+    let mut summary = RopResponseDebugSummary {
+        extended: is_rpc_header_ext_rop_buffer(rop_buffer),
+        ..RopResponseDebugSummary::default()
+    };
+    let Some((responses, handle_table)) = split_rop_buffer(rop_buffer) else {
+        summary.parse_error = "invalid ROP buffer".to_string();
+        return summary;
+    };
+    summary.handle_count = handle_table_count(handle_table, &mut summary.parse_error);
+
+    let mut offset = 0usize;
+    let mut ids = Vec::new();
+    let mut results = Vec::new();
+    for expected_rop_id in request_rop_ids.iter().copied().take(MAX_ROP_DEBUG_ENTRIES) {
+        let Some(found) = responses.get(offset..).and_then(|remaining| {
+            remaining
+                .iter()
+                .position(|rop_id| *rop_id == expected_rop_id)
+        }) else {
+            break;
+        };
+        offset += found;
+        let rop_id = responses[offset];
+        ids.push(rop_id);
+        if let Some(error_code) = read_response_error_code(responses, offset) {
+            results.push(format!("{}:{error_code:#010x}", rop_id_hex(rop_id)));
+        } else {
+            results.push(format!("{}:truncated", rop_id_hex(rop_id)));
+        }
+        offset = offset.saturating_add(6);
+    }
+
+    summary.count = ids.len();
+    summary.ids_csv = rop_ids_csv(&ids);
+    summary.results_csv = results.join(",");
+    summary
+}
+
+fn handle_table_count(handle_table: &[u8], parse_error: &mut String) -> usize {
+    match read_handle_table(handle_table) {
+        Ok(handles) => handles.len(),
+        Err(error) => {
+            *parse_error = error.to_string();
+            handle_table.len() / 4
+        }
+    }
+}
+
+fn read_response_error_code(responses: &[u8], offset: usize) -> Option<u32> {
+    let bytes = responses.get(offset + 2..offset + 6)?;
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn rop_ids_csv(rop_ids: &[u8]) -> String {
+    rop_ids
+        .iter()
+        .map(|rop_id| rop_id_hex(*rop_id))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn rop_id_hex(rop_id: u8) -> String {
+    format!("0x{rop_id:02x}")
 }
 
 pub(in crate::mapi) async fn execute_rops<S, V>(
@@ -3130,4 +3293,39 @@ where
         .ok_or_else(|| anyhow::anyhow!("MAPI identity allocator returned no record"))?;
     crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
     Ok(object_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execute_rop_debug_summary_decodes_ids_and_return_codes() {
+        let mut request_bytes = vec![0x02, 0, 0, 1];
+        request_bytes.extend_from_slice(&ROOT_FOLDER_ID.to_le_bytes());
+        request_bytes.push(0);
+        let request_buffer = rop_buffer_with_response(request_bytes, &[0]);
+        let request_summary = summarize_request_rop_buffer(&request_buffer);
+
+        assert_eq!(request_summary.ids, vec![0x02]);
+        assert_eq!(request_summary.ids_csv, "0x02");
+        assert_eq!(request_summary.handle_count, 1);
+        assert!(request_summary.parse_error.is_empty());
+
+        let request = RopRequest {
+            rop_id: 0x02,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        let response_buffer = rop_buffer_with_response(rop_open_folder_response(&request), &[42]);
+        let response_summary =
+            summarize_response_rop_buffer(&response_buffer, &request_summary.ids);
+
+        assert_eq!(response_summary.ids_csv, "0x02");
+        assert_eq!(response_summary.results_csv, "0x02:0x00000000");
+        assert_eq!(response_summary.count, 1);
+        assert_eq!(response_summary.handle_count, 1);
+        assert!(response_summary.parse_error.is_empty());
+    }
 }
