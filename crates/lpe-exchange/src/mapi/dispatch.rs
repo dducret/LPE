@@ -2355,22 +2355,26 @@ where
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
-                let checkpoint = match store
-                    .fetch_mapi_sync_checkpoint(
-                        principal.account_id,
-                        checkpoint_mailbox_id,
-                        checkpoint_kind,
-                    )
-                    .await
-                {
-                    Ok(checkpoint) => checkpoint,
-                    Err(_) => {
-                        responses.extend_from_slice(&rop_error_response(
-                            0x70,
-                            request.response_handle_index(),
-                            0x8004_0102,
-                        ));
-                        continue;
+                let checkpoint = if checkpoint_kind == MapiCheckpointKind::Hierarchy {
+                    None
+                } else {
+                    match store
+                        .fetch_mapi_sync_checkpoint(
+                            principal.account_id,
+                            checkpoint_mailbox_id,
+                            checkpoint_kind,
+                        )
+                        .await
+                    {
+                        Ok(checkpoint) => checkpoint,
+                        Err(_) => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x70,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            continue;
+                        }
                     }
                 };
                 let since = checkpoint
@@ -2562,7 +2566,7 @@ where
                         *sync_type,
                     );
                     responses.extend_from_slice(&response);
-                    if completed && (checkpoint.4 == 0x01 || checkpoint.4 == 0x02) {
+                    if completed && checkpoint.4 == 0x01 {
                         let _ = store
                             .store_mapi_sync_checkpoint(
                                 principal.account_id,

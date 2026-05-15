@@ -10553,6 +10553,69 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
 }
 
 #[tokio::test]
+async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 3;
+    inbox.unread_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+            99,
+            9,
+            serde_json::json!({"source": "failed-profile-bootstrap"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 99,
+        current_modseq: 9,
+        ..Default::default()
+    };
+
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(1));
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x02, 0x00, 0x00, 0x00, // hierarchy sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest_without_bcc() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "43434343-4343-4343-4343-434343434343";
