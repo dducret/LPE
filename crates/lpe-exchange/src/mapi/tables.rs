@@ -85,6 +85,7 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
         PID_TAG_SUBFOLDERS,
+        PID_TAG_CONTAINER_CLASS_W,
         PID_TAG_MESSAGE_CLASS_W,
         PID_TAG_LAST_MODIFICATION_TIME,
         PID_TAG_LOCAL_COMMIT_TIME,
@@ -1355,6 +1356,7 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, parent_folder_id),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
+            PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, message_class),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, message_class),
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
@@ -1421,6 +1423,7 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, 0),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
+            PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
@@ -1464,6 +1467,7 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
+            PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
@@ -1591,6 +1595,7 @@ pub(in crate::mapi) fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u3
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             _ => match mailbox_property_value(mailbox, *column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
@@ -1614,6 +1619,9 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row(
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_CONTAINER_CLASS_W => {
+                write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
+            }
             PID_TAG_MESSAGE_CLASS_W => {
                 write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
             }

@@ -4703,15 +4703,16 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
     ]);
     rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(&6u16.to_le_bytes());
+    rops.extend_from_slice(&7u16.to_le_bytes());
     for tag in [
         0x3001_001F,
         0x6748_0014,
         0x6749_0014,
+        0x3613_001F,
         0x001A_001F,
         0x65E0_0102,
         0x65E1_0102,
-    ] as [u32; 6]
+    ] as [u32; 7]
     {
         rops.extend_from_slice(&tag.to_le_bytes());
     }
@@ -4783,8 +4784,15 @@ async fn mapi_over_http_advertised_special_folder_reports_own_identity() {
     ]);
     rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(&4u16.to_le_bytes());
-    for tag in [0x3001_001F, 0x6748_0014, 0x6749_0014, 0x001A_001F] as [u32; 4] {
+    rops.extend_from_slice(&5u16.to_le_bytes());
+    for tag in [
+        0x3001_001F,
+        0x6748_0014,
+        0x6749_0014,
+        0x3613_001F,
+        0x001A_001F,
+    ] as [u32; 5]
+    {
         rops.extend_from_slice(&tag.to_le_bytes());
     }
 
@@ -10824,6 +10832,14 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x3008_0040u32.to_le_bytes()
     ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x3613_001Fu32.to_le_bytes()
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x001A_001Fu32.to_le_bytes()
+    ));
     let tag_position = |tag: u32| {
         let tag_bytes = tag.to_le_bytes();
         response_rops
@@ -13350,7 +13366,7 @@ async fn mapi_over_http_execute_handles_mailbox_store_bootstrap_rops() {
 
     let props_list_offset = 8;
     assert_eq!(response_rops[props_list_offset], 0x09);
-    let folder_property_count = 17usize;
+    let folder_property_count = 18usize;
     assert_eq!(
         u16::from_le_bytes(
             response_rops[props_list_offset + 6..props_list_offset + 8]
@@ -13360,6 +13376,7 @@ async fn mapi_over_http_execute_handles_mailbox_store_bootstrap_rops() {
         folder_property_count as u16
     );
     assert!(contains_bytes(response_rops, &0x6748_0014u32.to_le_bytes()));
+    assert!(contains_bytes(response_rops, &0x3613_001Fu32.to_le_bytes()));
 
     let contents_offset = props_list_offset + 8 + folder_property_count * 4;
     assert_eq!(response_rops[contents_offset], 0x05);

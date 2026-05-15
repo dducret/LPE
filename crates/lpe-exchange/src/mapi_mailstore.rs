@@ -18,7 +18,7 @@ const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_FOLDER_CHILD_COUNT: u32 = 0x3601_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
-const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
+const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
@@ -392,7 +392,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         write_bool_property(&mut buffer, PID_TAG_SUBFOLDERS, false);
         write_utf16_property(
             &mut buffer,
-            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_CONTAINER_CLASS_W,
             mapi_folder_message_class(mailbox),
         );
     }

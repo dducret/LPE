@@ -156,6 +156,7 @@ pub(in crate::mapi) const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 pub(in crate::mapi) const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
+pub(in crate::mapi) const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
@@ -411,6 +412,7 @@ pub(in crate::mapi) fn mailbox_property_value(
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
@@ -454,6 +456,9 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(folder.item_count)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(
+            collaboration_folder_message_class(folder.kind).to_string(),
+        )),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
