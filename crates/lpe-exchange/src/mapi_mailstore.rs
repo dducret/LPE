@@ -260,11 +260,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID as i64,
         );
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_PARENT_SOURCE_KEY,
-            &source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID),
-        );
+        write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &[]);
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
         write_binary_property(
