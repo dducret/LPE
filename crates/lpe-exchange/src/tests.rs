@@ -4390,6 +4390,14 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     ));
     assert!(contains_bytes(
         &response_rops,
+        &[0x70, 0x02, 0x00, 0x00, 0x00, 0x00, 0x75, 0x02, 0x00, 0x00, 0x00, 0x00,]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x70, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x75,]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &[0x75, 0x02, 0x00, 0x00, 0x00, 0x00]
     ));
     assert!(contains_bytes(
