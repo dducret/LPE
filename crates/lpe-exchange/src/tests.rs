@@ -2375,6 +2375,18 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
         0x02, 0x01, 0xe0, 0x3f, // PidTagMappingSignature
         0x02, 0x01, 0xe1, 0x3f, // PidTagRecordKey
         0x02, 0x01, 0x27, 0x0e, // PidTagContentCount
+        0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x4017_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
+        0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
         0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&buffer_size.to_le_bytes());

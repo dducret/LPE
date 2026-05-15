@@ -2661,14 +2661,9 @@ where
                 Some(MapiObject::SynchronizationSource {
                     state,
                     state_upload_buffer,
-                    sync_type,
-                    transfer_buffer,
-                    transfer_position,
                     ..
                 }) => {
                     commit_uploaded_sync_state(state, state_upload_buffer);
-                    *transfer_buffer = final_incremental_sync_stream(*sync_type);
-                    *transfer_position = 0;
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 Some(MapiObject::SynchronizationCollector {

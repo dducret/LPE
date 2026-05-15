@@ -40,12 +40,6 @@ pub(in crate::mapi) fn rop_fast_transfer_source_copy_response(request: &RopReque
     response
 }
 
-pub(in crate::mapi) fn final_incremental_sync_stream(sync_type: u8) -> Vec<u8> {
-    let mut stream = mapi_mailstore::final_sync_state_stream(sync_type, 1);
-    write_u32(&mut stream, 0x4014_0003); // IncrSyncEnd
-    stream
-}
-
 pub(in crate::mapi) fn rop_fast_transfer_source_get_buffer_response(
     request: &RopRequest,
     transfer_buffer: &[u8],
