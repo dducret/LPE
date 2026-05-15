@@ -10858,6 +10858,107 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
 }
 
 #[tokio::test]
+async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_download() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 3;
+    inbox.unread_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 42,
+        current_modseq: 7,
+        ..Default::default()
+    };
+
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 42);
+    assert_eq!(checkpoint.last_modseq, 7);
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("source")
+            .and_then(serde_json::Value::as_str),
+        Some("emsmdb-ics-download")
+    );
+
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 42,
+        current_modseq: 7,
+        ..Default::default()
+    };
+    let restarted = ExchangeService::new(store);
+    let connect = restarted
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut restarted_headers = mapi_headers("Execute");
+    restarted_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut restart_rops = Vec::new();
+    append_rop_open_folder(&mut restart_rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut restart_rops, 1, 2, 4096);
+    let response = restarted
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &restarted_headers,
+            &execute_body(&rop_buffer(&restart_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
+    assert!(!contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x403A_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x4014_0003u32.to_le_bytes()
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest_without_bcc() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let message_id = "43434343-4343-4343-4343-434343434343";

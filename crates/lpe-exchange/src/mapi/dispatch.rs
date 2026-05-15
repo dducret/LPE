@@ -8,6 +8,7 @@ use super::sync::*;
 use super::tables::*;
 use super::transport::*;
 use super::*;
+use crate::store::MapiSyncCheckpoint;
 
 pub(in crate::mapi) async fn execute_response<S, V>(
     store: &S,
@@ -2372,26 +2373,24 @@ where
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
-                let checkpoint = if checkpoint_kind == MapiCheckpointKind::Hierarchy {
-                    None
-                } else {
-                    match store
-                        .fetch_mapi_sync_checkpoint(
-                            principal.account_id,
-                            checkpoint_mailbox_id,
-                            checkpoint_kind,
-                        )
-                        .await
-                    {
-                        Ok(checkpoint) => checkpoint,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x70,
-                                request.response_handle_index(),
-                                0x8004_0102,
-                            ));
-                            continue;
-                        }
+                let checkpoint = match store
+                    .fetch_mapi_sync_checkpoint(
+                        principal.account_id,
+                        checkpoint_mailbox_id,
+                        checkpoint_kind,
+                    )
+                    .await
+                {
+                    Ok(checkpoint) => checkpoint.filter(|checkpoint| {
+                        hierarchy_checkpoint_is_usable(checkpoint_kind, checkpoint)
+                    }),
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x70,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
                     }
                 };
                 let since = checkpoint
@@ -2632,7 +2631,7 @@ where
                         *sync_type,
                     );
                     responses.extend_from_slice(&response);
-                    if completed && checkpoint.4 == 0x01 {
+                    if completed && matches!(checkpoint.4, 0x01 | 0x02) {
                         let _ = store
                             .store_mapi_sync_checkpoint(
                                 principal.account_id,
@@ -2807,7 +2806,7 @@ where
                 output_handles.push(handle);
             }
             0x82 => {
-                let Some((folder_id, state)) =
+                let Some((folder_id, mailbox_id, checkpoint_kind, sync_type, state)) =
                     synchronization_context_state(input_object(session, &handle_slots, &request))
                 else {
                     responses.extend_from_slice(&rop_error_response(
@@ -2818,12 +2817,12 @@ where
                     continue;
                 };
                 let transfer_buffer = if state.is_empty() {
-                    let sync_mailboxes = sync_mailboxes_for(folder_id, 0x01, mailboxes);
-                    let sync_emails = sync_emails_for(folder_id, 0x01, mailboxes, emails);
+                    let sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
+                    let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                     let sync_attachment_facts =
                         sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
                     mapi_mailstore::sync_state_token_with_attachments(
-                        0x01,
+                        sync_type,
                         &sync_mailboxes,
                         &sync_emails,
                         &sync_attachment_facts,
@@ -2835,11 +2834,11 @@ where
                     request.output_handle_index,
                     MapiObject::SynchronizationSource {
                         folder_id,
-                        mailbox_id: sync_checkpoint_mailbox_id(folder_id, 0x01, mailboxes),
-                        checkpoint_kind: MapiCheckpointKind::Content,
+                        mailbox_id,
+                        checkpoint_kind,
                         checkpoint_change_sequence: 0,
                         checkpoint_modseq: 1,
-                        sync_type: 0,
+                        sync_type,
                         state: transfer_buffer.clone(),
                         state_upload_buffer: Vec::new(),
                         transfer_buffer,
@@ -3519,6 +3518,18 @@ where
         .ok_or_else(|| anyhow::anyhow!("MAPI identity allocator returned no record"))?;
     crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
     Ok(object_id)
+}
+
+fn hierarchy_checkpoint_is_usable(
+    checkpoint_kind: MapiCheckpointKind,
+    checkpoint: &MapiSyncCheckpoint,
+) -> bool {
+    checkpoint_kind != MapiCheckpointKind::Hierarchy
+        || checkpoint
+            .cursor_json
+            .get("source")
+            .and_then(serde_json::Value::as_str)
+            == Some("emsmdb-ics-download")
 }
 
 #[cfg(test)]

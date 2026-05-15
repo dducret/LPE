@@ -643,14 +643,38 @@ pub(in crate::mapi) fn input_object_mut<'a>(
 
 pub(in crate::mapi) fn synchronization_context_state(
     object: Option<&MapiObject>,
-) -> Option<(u64, Vec<u8>)> {
+) -> Option<(u64, Option<Uuid>, MapiCheckpointKind, u8, Vec<u8>)> {
     match object {
         Some(MapiObject::SynchronizationSource {
-            folder_id, state, ..
-        })
-        | Some(MapiObject::SynchronizationCollector {
-            folder_id, state, ..
-        }) => Some((*folder_id, state.clone())),
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            sync_type,
+            state,
+            ..
+        }) => Some((
+            *folder_id,
+            *mailbox_id,
+            *checkpoint_kind,
+            *sync_type,
+            state.clone(),
+        )),
+        Some(MapiObject::SynchronizationCollector {
+            folder_id,
+            mailbox_id,
+            checkpoint_kind,
+            state,
+            ..
+        }) => Some((
+            *folder_id,
+            *mailbox_id,
+            *checkpoint_kind,
+            match checkpoint_kind {
+                MapiCheckpointKind::Hierarchy => 0x02,
+                _ => 0x01,
+            },
+            state.clone(),
+        )),
         _ => None,
     }
 }
