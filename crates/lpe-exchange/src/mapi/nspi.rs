@@ -1,4 +1,4 @@
-use super::properties::{write_ascii_z, write_rop_binary};
+use super::properties::{write_ascii_z, write_multi_string, write_multi_string8, write_rop_binary};
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
@@ -137,6 +137,8 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x3005_001E, // PidTagAddressBookDisplayNamePrintable / legacy DN string8
     0x3005_001F, // PidTagAddressBookDisplayNamePrintable / legacy DN
     0x3900_0003, // PidTagDisplayType
+    0x800F_101E, // PidTagAddressBookProxyAddresses string8
+    0x800F_101F, // PidTagAddressBookProxyAddresses
     0x8C6D_0102, // PidTagAddressBookObjectGuid
 ];
 
@@ -751,6 +753,7 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
 pub(in crate::mapi) enum NspiValue<'a> {
     String(&'a str),
     OwnedString(String),
+    MultiString(Vec<String>),
     Binary(&'a [u8]),
     U32(u32),
 }
@@ -770,6 +773,7 @@ pub(in crate::mapi) fn nspi_entry_value(
         0x3004_001F | 0x3004_001E => NspiValue::String(&entry.email),
         0x3002_001F | 0x3002_001E => NspiValue::String("SMTP"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
+        0x800F_101F | 0x800F_101E => NspiValue::MultiString(vec![format!("SMTP:{}", entry.email)]),
         0x8C6D_0102 => NspiValue::Binary(entry.id.as_bytes()),
         _ => match property_tag & 0xFFFF {
             0x001F | 0x001E => NspiValue::String(""),
@@ -929,11 +933,15 @@ pub(in crate::mapi) fn write_address_book_property_value(
             body.push(0xFF);
             write_utf16z(body, value);
         }
+        (0x101E, NspiValue::MultiString(values)) => write_multi_string8(body, values),
+        (0x101F, NspiValue::MultiString(values)) => write_multi_string(body, values),
         (0x0102, NspiValue::Binary(value)) => write_rop_binary(body, value),
         (0x0003, NspiValue::U32(value)) => write_u32(body, *value),
         (0x0003, _) => write_u32(body, 0),
+        (0x101E | 0x101F, _) => write_u32(body, 0),
         (_, NspiValue::U32(value)) => write_u32(body, *value),
         (_, NspiValue::Binary(value)) => write_rop_binary(body, value),
+        (_, NspiValue::MultiString(values)) => write_multi_string(body, values),
         (_, NspiValue::String(value)) => {
             body.push(0xFF);
             write_utf16z(body, value);

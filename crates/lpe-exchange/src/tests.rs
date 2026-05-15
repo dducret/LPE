@@ -14122,6 +14122,23 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         FakeStore::account().account_id.as_bytes().as_slice()
     );
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
+
+    let proxy_addresses_request = hex_bytes(
+        "00000000ff000000000000000012000080000000000000000000000000b00400000904000009080000ff010000001f100f8000000000",
+    );
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &props_headers, &proxy_addresses_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 1);
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 1);
+    assert_eq!(
+        u32::from_le_bytes(body[17..21].try_into().unwrap()),
+        0x800F_101F
+    );
+    assert_eq!(u32::from_le_bytes(body[21..25].try_into().unwrap()), 1);
+    assert!(contains_bytes(&body, &utf16z("SMTP:alice@example.test")));
 }
 
 #[tokio::test]
