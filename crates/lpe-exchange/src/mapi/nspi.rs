@@ -440,21 +440,44 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
+    if let Err(error) = allocate_principal_nspi_identity(store, principal).await {
+        return mapi_diagnostic_response(
+            request_type,
+            request_id,
+            4,
+            &format!("failed to project authenticated address book identifier: {error}"),
+        );
+    }
     let tags = nspi_requested_property_tags(request);
-    let entry = nspi_requested_entry(request, &entries).or_else(|| {
-        (!nspi_request_has_entry_selector(request))
-            .then(|| {
+    let principal_entry = principal_address_book_entry(principal);
+    let principal_id = nspi_entry_id(&principal_entry);
+    let entry = nspi_requested_entry(request, &entries)
+        .cloned()
+        .or_else(|| {
+            nspi_requested_entry_ids(request)
+                .contains(&principal_id)
+                .then_some(principal_entry.clone())
+        })
+        .or_else(|| {
+            scan_address_book_lookup_values(request)
+                .iter()
+                .any(|value| nspi_lookup_matches_principal(value, principal))
+                .then_some(principal_entry.clone())
+        })
+        .or_else(|| {
+            (!nspi_request_has_entry_selector(request)).then(|| {
                 entries
                     .iter()
                     .find(|entry| nspi_entry_is_principal(entry, principal))
+                    .cloned()
+                    .unwrap_or_else(|| principal_entry.clone())
             })
-            .flatten()
-    });
+        });
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
-    if let Some(entry) = entry {
+    if let Some(entry) = entry.as_ref() {
         body.push(1);
         body.extend_from_slice(&nspi_entry_property_value_list(entry, &tags));
     } else {

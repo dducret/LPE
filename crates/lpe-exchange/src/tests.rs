@@ -13759,6 +13759,30 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
     assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+
+    let dn_to_mid_request = b"\0\0\0\0\xff\x01\0\0\0/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test\0\0\0\0\0";
+    let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, dn_to_mid_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    let self_mid = u32::from_le_bytes(body[13..17].try_into().unwrap());
+    assert_ne!(self_mid, 0);
+
+    let mut props_request = Vec::new();
+    props_request.extend_from_slice(&self_mid.to_le_bytes());
+    props_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
+    props_request.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    let props_headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &props_headers, &props_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Alice")));
 }
 
 #[tokio::test]
