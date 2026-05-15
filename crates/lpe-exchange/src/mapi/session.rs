@@ -168,6 +168,8 @@ pub(in crate::mapi) enum MapiObject {
         sync_type: u8,
         state: Vec<u8>,
         state_upload_buffer: Vec<u8>,
+        client_state_uploaded_bytes: usize,
+        incremental_transfer_buffer: Option<Vec<u8>>,
         transfer_buffer: Vec<u8>,
         transfer_position: usize,
     },

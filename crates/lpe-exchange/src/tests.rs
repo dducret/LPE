@@ -2343,11 +2343,34 @@ fn append_rop_sync_manifest_get_buffer(
     output: u8,
     buffer_size: u16,
 ) {
+    append_rop_sync_manifest_get_buffer_with_state(rops, input, output, buffer_size, &[]);
+}
+
+fn append_rop_sync_manifest_get_buffer_with_state(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    buffer_size: u16,
+    state: &[u8],
+) {
     rops.extend_from_slice(&[
         0x70, 0x00, input, output, 0x01, 0x00, 0x00, 0x00, // RopSynchronizationConfigure
         0x00, 0x00, // RestrictionDataSize
         0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
         0x00, 0x00, // PropertyTagCount
+        0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x4017_0102u32.to_le_bytes());
+    rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+    if !state.is_empty() {
+        rops.extend_from_slice(&[
+            0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
+        ]);
+        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+        rops.extend_from_slice(state);
+    }
+    rops.extend_from_slice(&[
+        0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
         0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&buffer_size.to_le_bytes());
@@ -2358,6 +2381,22 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
     input: u8,
     output: u8,
     buffer_size: u16,
+) {
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        rops,
+        input,
+        output,
+        buffer_size,
+        &[],
+    );
+}
+
+fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+    rops: &mut Vec<u8>,
+    input: u8,
+    output: u8,
+    buffer_size: u16,
+    state: &[u8],
 ) {
     rops.extend_from_slice(&[
         0x70, 0x00, input, output, // RopSynchronizationConfigure
@@ -2378,7 +2417,14 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
     ]);
     rops.extend_from_slice(&0x4017_0003u32.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+    if !state.is_empty() {
+        rops.extend_from_slice(&[
+            0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
+        ]);
+        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+        rops.extend_from_slice(state);
+    }
     rops.extend_from_slice(&[
         0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
@@ -10285,7 +10331,7 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
     );
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
-    append_rop_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    append_rop_sync_manifest_get_buffer_with_state(&mut rops, 1, 2, 4096, b"client-content-state");
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -10343,7 +10389,13 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
     );
     let mut restart_rops = Vec::new();
     append_rop_open_folder(&mut restart_rops, 0, 1, test_mapi_folder_id(5));
-    append_rop_sync_manifest_get_buffer(&mut restart_rops, 1, 2, 4096);
+    append_rop_sync_manifest_get_buffer_with_state(
+        &mut restart_rops,
+        1,
+        2,
+        4096,
+        b"client-content-state",
+    );
     let response = restarted
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -10812,7 +10864,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
             MapiCheckpointKind::Hierarchy,
             99,
             9,
-            serde_json::json!({"source": "failed-profile-bootstrap"}),
+            serde_json::json!({"source": "emsmdb-ics-download"}),
         )
         .await
         .unwrap();
@@ -10935,7 +10987,13 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
     );
     let mut restart_rops = Vec::new();
     append_rop_open_folder(&mut restart_rops, 0, 1, test_mapi_folder_id(4));
-    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut restart_rops, 1, 2, 4096);
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut restart_rops,
+        1,
+        2,
+        4096,
+        b"client-hierarchy-state",
+    );
     let response = restarted
         .handle_mapi(
             MapiEndpoint::Emsmdb,

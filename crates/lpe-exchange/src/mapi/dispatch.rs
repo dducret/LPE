@@ -2420,7 +2420,7 @@ where
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                 let available_sync_mailbox_count = all_sync_mailboxes.len();
                 let available_sync_email_count = all_sync_emails.len();
-                let (sync_mailboxes, sync_emails) = if checkpoint.is_some() {
+                let (delta_sync_mailboxes, delta_sync_emails) = if checkpoint.is_some() {
                     (
                         changed_sync_mailboxes(
                             all_sync_mailboxes.clone(),
@@ -2432,7 +2432,9 @@ where
                     (all_sync_mailboxes.clone(), all_sync_emails.clone())
                 };
                 let sync_attachment_facts =
-                    sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+                    sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
+                let delta_attachment_facts =
+                    sync_attachment_facts_for(folder_id, &delta_sync_emails, snapshot);
                 let state_attachment_facts =
                     sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
                 let deleted_message_ids = if checkpoint.is_some() {
@@ -2459,15 +2461,35 @@ where
                     sync_extra_flags,
                     &sync_property_tags,
                     folder_id,
-                    &sync_mailboxes,
-                    &sync_emails,
+                    &all_sync_mailboxes,
+                    &all_sync_emails,
                     &sync_attachment_facts,
-                    &deleted_message_ids,
+                    &[],
                     &all_sync_mailboxes,
                     &all_sync_emails,
                     &state_attachment_facts,
                     changes.current_change_sequence,
                 );
+                let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
+                    mapi_mailstore::sync_manifest_buffer_with_final_state(
+                        sync_type,
+                        sync_flags,
+                        sync_extra_flags,
+                        &sync_property_tags,
+                        folder_id,
+                        &delta_sync_mailboxes,
+                        &delta_sync_emails,
+                        &delta_attachment_facts,
+                        &deleted_message_ids,
+                        &all_sync_mailboxes,
+                        &all_sync_emails,
+                        &state_attachment_facts,
+                        changes.current_change_sequence,
+                    )
+                });
+                let checkpoint_delta_mailbox_count = delta_sync_mailboxes.len();
+                let checkpoint_delta_email_count = delta_sync_emails.len();
+                let checkpoint_deleted_message_count = deleted_message_ids.len();
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -2486,8 +2508,11 @@ where
                     snapshot_email_count = emails.len(),
                     available_sync_mailbox_count,
                     available_sync_email_count,
-                    sync_mailbox_count = sync_mailboxes.len(),
-                    sync_email_count = sync_emails.len(),
+                    sync_mailbox_count = all_sync_mailboxes.len(),
+                    sync_email_count = all_sync_emails.len(),
+                    checkpoint_delta_mailbox_count,
+                    checkpoint_delta_email_count,
+                    checkpoint_deleted_message_count,
                     current_change_sequence = changes.current_change_sequence,
                     transfer_buffer_bytes = transfer_buffer.len(),
                     "rca debug mapi sync configure"
@@ -2503,6 +2528,8 @@ where
                         sync_type,
                         state,
                         state_upload_buffer: Vec::new(),
+                        client_state_uploaded_bytes: 0,
+                        incremental_transfer_buffer,
                         transfer_buffer,
                         transfer_position: 0,
                     },
@@ -2549,6 +2576,8 @@ where
                         sync_type: 0,
                         state: Vec::new(),
                         state_upload_buffer: Vec::new(),
+                        client_state_uploaded_bytes: 0,
+                        incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,
                     },
@@ -2587,6 +2616,8 @@ where
                         sync_type: 0,
                         state: Vec::new(),
                         state_upload_buffer: Vec::new(),
+                        client_state_uploaded_bytes: 0,
+                        incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,
                     },
@@ -2747,9 +2778,26 @@ where
                     folder_id,
                     state,
                     state_upload_buffer,
+                    client_state_uploaded_bytes,
+                    incremental_transfer_buffer,
+                    transfer_buffer,
+                    transfer_position,
                     ..
                 }) => {
+                    let uploaded_bytes = state_upload_buffer.len();
+                    let may_use_incremental =
+                        uploaded_bytes > 0 && *client_state_uploaded_bytes == 0;
                     commit_uploaded_sync_state(state, state_upload_buffer);
+                    *client_state_uploaded_bytes =
+                        (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
+                    let mut selected_checkpoint_delta = false;
+                    if may_use_incremental {
+                        if let Some(buffer) = incremental_transfer_buffer.take() {
+                            *transfer_buffer = buffer;
+                            *transfer_position = 0;
+                            selected_checkpoint_delta = true;
+                        }
+                    }
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -2759,6 +2807,8 @@ where
                         request_rop_id = "0x77",
                         folder_id = format_args!("0x{:016x}", *folder_id),
                         upload_state_total_bytes = state.len(),
+                        upload_state_client_bytes = *client_state_uploaded_bytes,
+                        upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
                         "rca debug mapi sync upload state end"
                     );
                     responses.extend_from_slice(&rop_simple_success_response(&request));
@@ -2851,6 +2901,8 @@ where
                         sync_type,
                         state: transfer_buffer.clone(),
                         state_upload_buffer: Vec::new(),
+                        client_state_uploaded_bytes: 0,
+                        incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,
                     },
