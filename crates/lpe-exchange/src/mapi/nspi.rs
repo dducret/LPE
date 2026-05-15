@@ -451,8 +451,15 @@ where
     let tags = nspi_requested_property_tags(request);
     let principal_entry = principal_address_book_entry(principal);
     let principal_id = nspi_entry_id(&principal_entry);
-    let entry = nspi_requested_entry(request, &entries)
-        .cloned()
+    let entry = nspi_stat_current_rec(request)
+        .and_then(|current_rec| {
+            entries
+                .iter()
+                .find(|entry| nspi_entry_id(entry) == current_rec)
+                .cloned()
+                .or_else(|| (current_rec == principal_id).then_some(principal_entry.clone()))
+        })
+        .or_else(|| nspi_requested_entry(request, &entries).cloned())
         .or_else(|| {
             nspi_requested_entry_ids(request)
                 .contains(&principal_id)
@@ -982,7 +989,8 @@ pub(in crate::mapi) fn nspi_requested_entry<'a>(
 }
 
 pub(in crate::mapi) fn nspi_request_has_entry_selector(request: &[u8]) -> bool {
-    !nspi_requested_entry_ids(request).is_empty()
+    nspi_stat_current_rec(request).is_some()
+        || nspi_direct_entry_id(request).is_some()
         || !scan_address_book_lookup_values(request).is_empty()
 }
 
@@ -1088,6 +1096,29 @@ pub(in crate::mapi) fn nspi_requested_entry_ids(request: &[u8]) -> Vec<u32> {
         offset += 4;
     }
     ids
+}
+
+fn nspi_stat_current_rec(request: &[u8]) -> Option<u32> {
+    const FLAGS_BYTES: usize = 4;
+    const STAT_CURRENT_REC_OFFSET: usize = FLAGS_BYTES + 8;
+    if request.len() < STAT_CURRENT_REC_OFFSET + 4 {
+        return None;
+    }
+    let value = u32::from_le_bytes([
+        request[STAT_CURRENT_REC_OFFSET],
+        request[STAT_CURRENT_REC_OFFSET + 1],
+        request[STAT_CURRENT_REC_OFFSET + 2],
+        request[STAT_CURRENT_REC_OFFSET + 3],
+    ]);
+    nspi_word_looks_like_entry_id(value).then_some(value)
+}
+
+fn nspi_direct_entry_id(request: &[u8]) -> Option<u32> {
+    if request.len() < 4 {
+        return None;
+    }
+    let value = u32::from_le_bytes([request[0], request[1], request[2], request[3]]);
+    nspi_word_looks_like_entry_id(value).then_some(value)
 }
 
 fn nspi_word_looks_like_entry_id(value: u32) -> bool {
@@ -1218,4 +1249,54 @@ pub(in crate::mapi) fn public_endpoint_url(headers: &HeaderMap, path: &str) -> S
         .filter(|value| !value.is_empty())
         .unwrap_or("localhost");
     format!("{scheme}://{host}{path}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_props_stat_current_rec_is_parsed_from_documented_stat_field() {
+        let request = hex_bytes(
+            "00000000ff0000000000000012000080000000000000000000000000b00400000904000009080000ff0100000002016d8c00000000",
+        );
+
+        assert_eq!(nspi_stat_current_rec(&request), Some(0x8000_0012));
+    }
+
+    #[test]
+    fn get_props_stat_words_are_not_entry_ids_when_current_rec_is_empty() {
+        let request = hex_bytes(
+            "00000000ff0000000000000000000000000000000000000000000000b00400000904000009080000ff0100000002016d8c00000000",
+        );
+
+        assert_eq!(nspi_stat_current_rec(&request), None);
+        assert!(!nspi_request_has_entry_selector(&request));
+    }
+
+    fn hex_bytes(hex: &str) -> Vec<u8> {
+        let compact = hex
+            .as_bytes()
+            .iter()
+            .copied()
+            .filter(|byte| !byte.is_ascii_whitespace())
+            .collect::<Vec<_>>();
+        compact
+            .chunks_exact(2)
+            .map(|chunk| {
+                let high = hex_value(chunk[0]);
+                let low = hex_value(chunk[1]);
+                (high << 4) | low
+            })
+            .collect()
+    }
+
+    fn hex_value(byte: u8) -> u8 {
+        match byte {
+            b'0'..=b'9' => byte - b'0',
+            b'a'..=b'f' => byte - b'a' + 10,
+            b'A'..=b'F' => byte - b'A' + 10,
+            _ => panic!("invalid hex byte"),
+        }
+    }
 }
