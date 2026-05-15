@@ -121,7 +121,7 @@ The MAPI store adapter resolves protocol identifiers and source keys through `ma
 
 ## MAPI Sync State Format
 
-`EMSMDB` ICS download state is serialized as a bounded MS-OXCFXICS FastTransfer stream, not as an `LPE`-private payload. The stream uses the documented synchronization markers `IncrSyncChg`, `IncrSyncDel`, `IncrSyncRead`, `IncrSyncStateBegin`, `IncrSyncStateEnd`, and `IncrSyncEnd`, with message and folder identity projected through `PidTagSourceKey`, `PidTagMid`, `PidTagFolderId`, `PidTagChangeNumber`, `PidTagChangeKey`, and `PidTagPredecessorChangeList`.
+`EMSMDB` ICS download state is serialized as a bounded MS-OXCFXICS FastTransfer stream, not as an `LPE`-private payload. The stream uses the documented synchronization markers `IncrSyncChg`, `IncrSyncDel`, `IncrSyncRead`, `IncrSyncStateBegin`, `IncrSyncStateEnd`, and `IncrSyncEnd`, with message and folder identity projected through `PidTagSourceKey`, `PidTagParentSourceKey`, `PidTagMid`, `PidTagFolderId`, `PidTagChangeNumber`, `PidTagChangeKey`, and `PidTagPredecessorChangeList`.
 
 Final and checkpoint state is represented with the ICS state meta-properties `MetaTagIdsetGiven`, `MetaTagCnsetSeen`, `MetaTagCnsetSeenFAI`, and `MetaTagCnsetRead` as REPLGUID-scoped serialized IDSET/GLOBSET payloads over the canonical `LPE` replica GUID. Deleted or moved-out messages are exported as `IncrSyncDel` with `MetaTagIdsetDeleted` as a REPLID-scoped serialized IDSET/GLOBSET over the MAPI message IDs derived from canonical identity mappings.
 
