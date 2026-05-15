@@ -2422,14 +2422,19 @@ where
                 let available_sync_email_count = all_sync_emails.len();
                 let (sync_mailboxes, sync_emails) = if checkpoint.is_some() {
                     (
-                        changed_sync_mailboxes(all_sync_mailboxes, &changes.changed_mailbox_ids),
-                        changed_sync_emails(all_sync_emails, &changes.changed_message_ids),
+                        changed_sync_mailboxes(
+                            all_sync_mailboxes.clone(),
+                            &changes.changed_mailbox_ids,
+                        ),
+                        changed_sync_emails(all_sync_emails.clone(), &changes.changed_message_ids),
                     )
                 } else {
-                    (all_sync_mailboxes, all_sync_emails)
+                    (all_sync_mailboxes.clone(), all_sync_emails.clone())
                 };
                 let sync_attachment_facts =
                     sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
+                let state_attachment_facts =
+                    sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
                 let deleted_message_ids = if checkpoint.is_some() {
                     mapi_message_ids_for_deleted_changes(
                         store,
@@ -2443,11 +2448,12 @@ where
                 };
                 let state = mapi_mailstore::sync_state_token_with_attachments(
                     sync_type,
-                    &sync_mailboxes,
-                    &sync_emails,
-                    &sync_attachment_facts,
+                    folder_id,
+                    &all_sync_mailboxes,
+                    &all_sync_emails,
+                    &state_attachment_facts,
                 );
-                let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_attachments(
+                let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
                     sync_type,
                     sync_flags,
                     sync_extra_flags,
@@ -2457,6 +2463,9 @@ where
                     &sync_emails,
                     &sync_attachment_facts,
                     &deleted_message_ids,
+                    &all_sync_mailboxes,
+                    &all_sync_emails,
+                    &state_attachment_facts,
                     changes.current_change_sequence,
                 );
                 tracing::info!(
@@ -2823,6 +2832,7 @@ where
                         sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
                     mapi_mailstore::sync_state_token_with_attachments(
                         sync_type,
+                        folder_id,
                         &sync_mailboxes,
                         &sync_emails,
                         &sync_attachment_facts,

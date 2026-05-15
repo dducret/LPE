@@ -226,24 +226,19 @@ fn days_from_civil(mut year: i32, month: i32, day: i32) -> i64 {
 
 pub(crate) fn sync_state_token_with_attachments(
     sync_type: u8,
+    folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> Vec<u8> {
-    let max_change = mailboxes
-        .iter()
-        .map(canonical_folder_change_number)
-        .chain(emails.iter().map(|email| {
-            canonical_message_change_number_with_attachments(
-                email,
-                attachments_for_message(email.id, attachment_facts),
-            )
-        }))
-        .max()
-        .unwrap_or(1);
-    final_sync_state_stream(sync_type, max_change)
+    final_sync_state_stream(
+        sync_type,
+        &sync_state_object_ids(sync_type, folder_id, mailboxes, emails),
+        &sync_state_change_numbers(sync_type, mailboxes, emails, attachment_facts),
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn sync_manifest_buffer_with_attachments(
     sync_type: u8,
     sync_flags: u16,
@@ -255,6 +250,39 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     attachment_facts: &[MessageAttachmentSyncFacts],
     deleted_message_ids: &[u64],
     final_change_sequence: u64,
+) -> Vec<u8> {
+    sync_manifest_buffer_with_final_state(
+        sync_type,
+        sync_flags,
+        sync_extra_flags,
+        sync_property_tags,
+        folder_id,
+        mailboxes,
+        emails,
+        attachment_facts,
+        deleted_message_ids,
+        mailboxes,
+        emails,
+        attachment_facts,
+        final_change_sequence,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sync_manifest_buffer_with_final_state(
+    sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    sync_property_tags: &[u32],
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    deleted_message_ids: &[u64],
+    state_mailboxes: &[JmapMailbox],
+    state_emails: &[JmapEmail],
+    state_attachment_facts: &[MessageAttachmentSyncFacts],
+    _final_change_sequence: u64,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     let sync_root_folder_id = folder_id;
@@ -421,9 +449,12 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         }
     }
 
-    buffer.extend_from_slice(&final_sync_state_stream(
+    buffer.extend_from_slice(&sync_state_token_with_attachments(
         sync_type,
-        final_change_sequence.max(1),
+        folder_id,
+        state_mailboxes,
+        state_emails,
+        state_attachment_facts,
     ));
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer
@@ -454,15 +485,63 @@ fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> b
     excluded_property_tags.contains(&property_tag)
 }
 
-pub(crate) fn final_sync_state_stream(sync_type: u8, max_change: u64) -> Vec<u8> {
-    let idset = replguid_idset_from_change(max_change);
+fn sync_state_object_ids(
+    sync_type: u8,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Vec<u64> {
+    if sync_type == 0x02 {
+        mailboxes
+            .iter()
+            .map(|mailbox| mapi_folder_id_for_mailbox(mailbox, folder_id))
+            .collect()
+    } else {
+        emails
+            .iter()
+            .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
+            .collect()
+    }
+}
+
+fn sync_state_change_numbers(
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> Vec<u64> {
+    if sync_type == 0x02 {
+        mailboxes
+            .iter()
+            .map(canonical_folder_change_number)
+            .collect()
+    } else {
+        emails
+            .iter()
+            .map(|email| {
+                canonical_message_change_number_with_attachments(
+                    email,
+                    attachments_for_message(email.id, attachment_facts),
+                )
+            })
+            .collect()
+    }
+}
+
+pub(crate) fn final_sync_state_stream(
+    sync_type: u8,
+    object_ids: &[u64],
+    change_numbers: &[u64],
+) -> Vec<u8> {
+    let idset_given = replguid_idset_from_object_ids(object_ids);
+    let cnset_seen = replguid_idset_from_counters(change_numbers);
     let mut token = Vec::new();
     write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
-    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset);
-    write_binary_property(&mut token, META_TAG_CNSET_SEEN, &idset);
+    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset_given);
+    write_binary_property(&mut token, META_TAG_CNSET_SEEN, &cnset_seen);
     if sync_type == 0x01 {
-        write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, &idset);
-        write_binary_property(&mut token, META_TAG_CNSET_READ, &idset);
+        write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, &cnset_seen);
+        write_binary_property(&mut token, META_TAG_CNSET_READ, &cnset_seen);
     }
     write_u32(&mut token, INCR_SYNC_STATE_END);
     token
@@ -666,9 +745,20 @@ fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) 
     buffer.extend_from_slice(&bytes);
 }
 
-fn replguid_idset_from_change(change: u64) -> Vec<u8> {
+fn replguid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
+    let counters = ids
+        .iter()
+        .filter_map(|id| crate::mapi::identity::global_counter_from_store_id(*id))
+        .collect::<Vec<_>>();
+    replguid_idset_from_counters(&counters)
+}
+
+fn replguid_idset_from_counters(counters: &[u64]) -> Vec<u8> {
     let mut idset = STORE_REPLICA_GUID.to_vec();
-    write_globset_ranges(&mut idset, &[(1, change.max(1))]);
+    let mut counters = counters.to_vec();
+    counters.sort_unstable();
+    counters.dedup();
+    write_globset_ranges(&mut idset, &coalesced_ranges(&counters));
     idset
 }
 
@@ -903,16 +993,35 @@ mod tests {
     }
 
     #[test]
-    fn final_sync_state_uses_replguid_globset_ranges() {
-        let token = final_sync_state_stream(0x02, 32);
-        let mut expected = STORE_REPLICA_GUID.to_vec();
-        expected.push(GLOBSET_RANGE_COMMAND);
-        expected.extend_from_slice(&globcnt_bytes(1));
-        expected.extend_from_slice(&globcnt_bytes(32));
-        expected.push(GLOBSET_END_COMMAND);
+    fn final_sync_state_separates_object_idset_from_change_cnset() {
+        let token = final_sync_state_stream(
+            0x02,
+            &[
+                crate::mapi::identity::mapi_store_id(5),
+                crate::mapi::identity::mapi_store_id(7),
+                crate::mapi::identity::mapi_store_id(8),
+            ],
+            &[10, 12],
+        );
+        let mut expected_idset = STORE_REPLICA_GUID.to_vec();
+        expected_idset.push(GLOBSET_RANGE_COMMAND);
+        expected_idset.extend_from_slice(&globcnt_bytes(5));
+        expected_idset.extend_from_slice(&globcnt_bytes(5));
+        expected_idset.push(GLOBSET_RANGE_COMMAND);
+        expected_idset.extend_from_slice(&globcnt_bytes(7));
+        expected_idset.extend_from_slice(&globcnt_bytes(8));
+        expected_idset.push(GLOBSET_END_COMMAND);
+        let mut expected_cnset = STORE_REPLICA_GUID.to_vec();
+        expected_cnset.push(GLOBSET_RANGE_COMMAND);
+        expected_cnset.extend_from_slice(&globcnt_bytes(10));
+        expected_cnset.extend_from_slice(&globcnt_bytes(10));
+        expected_cnset.push(GLOBSET_RANGE_COMMAND);
+        expected_cnset.extend_from_slice(&globcnt_bytes(12));
+        expected_cnset.extend_from_slice(&globcnt_bytes(12));
+        expected_cnset.push(GLOBSET_END_COMMAND);
 
-        assert_variable_property(&token, META_TAG_IDSET_GIVEN, &expected);
-        assert_variable_property(&token, META_TAG_CNSET_SEEN, &expected);
+        assert_variable_property(&token, META_TAG_IDSET_GIVEN, &expected_idset);
+        assert_variable_property(&token, META_TAG_CNSET_SEEN, &expected_cnset);
     }
 
     #[test]
