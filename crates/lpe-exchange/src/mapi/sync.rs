@@ -156,13 +156,36 @@ pub(in crate::mapi) fn sync_mailboxes_for(
     mailboxes: &[JmapMailbox],
 ) -> Vec<JmapMailbox> {
     if sync_type == 0x02 && is_root_hierarchy_folder(folder_id) {
-        return mailboxes.to_vec();
+        let mut rows = mailboxes.to_vec();
+        let mut folder_ids = rows.iter().map(mapi_folder_id).collect::<HashSet<_>>();
+        for special_folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
+            if !special_folder_is_in_sync_scope(special_folder_id, folder_id) {
+                continue;
+            }
+            if folder_ids.insert(special_folder_id) {
+                if let Some(mailbox) = mapi_mailstore::virtual_special_mailbox(special_folder_id) {
+                    rows.push(mailbox);
+                }
+            }
+        }
+        return rows;
     }
 
     folder_row_for_id(folder_id, mailboxes)
         .cloned()
         .into_iter()
         .collect()
+}
+
+fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: u64) -> bool {
+    match sync_root_folder_id {
+        ROOT_FOLDER_ID => special_folder_id != ROOT_FOLDER_ID,
+        IPM_SUBTREE_FOLDER_ID => matches!(
+            special_folder_id,
+            INBOX_FOLDER_ID | OUTBOX_FOLDER_ID | SENT_FOLDER_ID | TRASH_FOLDER_ID
+        ),
+        _ => false,
+    }
 }
 
 pub(in crate::mapi) fn sync_emails_for(

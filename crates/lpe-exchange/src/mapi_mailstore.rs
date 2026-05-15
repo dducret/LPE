@@ -46,6 +46,8 @@ const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
 const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
 const FILETIME_2026_01_01: u64 =
     (WINDOWS_UNIX_EPOCH_OFFSET_SECONDS as u64 + 1_767_225_600) * FILETIME_TICKS_PER_SECOND;
+const VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX: u128 = 0x4c50455f_4d415049_0000_0000_0000_0000;
+const VIRTUAL_SPECIAL_MAILBOX_UUID_MASK: u128 = 0xffff_ffff_ffff_ffff_0000_0000_0000_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
@@ -176,6 +178,20 @@ pub(crate) fn source_key_for_mailbox_role(mailbox_id: &Uuid, role: &str) -> Vec<
     source_key_for_store_id(folder_id)
 }
 
+pub(crate) fn virtual_special_mailbox(folder_id: u64) -> Option<JmapMailbox> {
+    let (role, name, sort_order, _, _) = virtual_special_folder_metadata(folder_id)?;
+    Some(JmapMailbox {
+        id: virtual_special_mailbox_id(folder_id),
+        parent_id: None,
+        role: role.to_string(),
+        name: name.to_string(),
+        sort_order,
+        total_emails: 0,
+        unread_emails: 0,
+        is_subscribed: true,
+    })
+}
+
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
     crate::mapi::identity::change_key_for_change_number(change_number)
 }
@@ -255,7 +271,7 @@ pub(crate) fn sync_state_token_with_attachments(
     final_sync_state_stream(
         sync_type,
         &sync_state_object_ids(sync_type, folder_id, mailboxes, emails),
-        &sync_state_change_numbers(sync_type, mailboxes, emails, attachment_facts),
+        &sync_state_change_numbers(sync_type, folder_id, mailboxes, emails, attachment_facts),
     )
 }
 
@@ -313,17 +329,21 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         &[]
     };
     let mut folders = mailboxes.iter().collect::<Vec<_>>();
-    folders.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+    folders.sort_by(|left, right| {
+        hierarchy_sort_depth(sync_type, sync_root_folder_id, left)
+            .cmp(&hierarchy_sort_depth(sync_type, sync_root_folder_id, right))
+            .then(left.name.cmp(&right.name))
+            .then(left.id.cmp(&right.id))
+    });
     for mailbox in folders {
         let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-        let change_number = canonical_folder_change_number(mailbox);
+        let parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox);
+        let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
         let source_key = source_key_for_store_id(folder_id);
-        let parent_source_key = if sync_type == 0x02
-            && sync_root_folder_id == crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
-        {
+        let parent_source_key = if sync_type == 0x02 && parent_folder_id == sync_root_folder_id {
             Vec::new()
         } else {
-            source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            source_key_for_store_id(parent_folder_id)
         };
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
@@ -350,10 +370,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         }
         if sync_type != 0x02 || sync_flags & 0x0100 != 0 || sync_extra_flags & 0x0000_0001 != 0 {
             write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
-            write_i64(
-                &mut buffer,
-                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID as i64,
-            );
+            write_i64(&mut buffer, parent_folder_id as i64);
         }
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
@@ -389,7 +406,11 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         if !property_tag_excluded(excluded_property_tags, PID_TAG_ORDINAL_MOST) {
             write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
         }
-        write_bool_property(&mut buffer, PID_TAG_SUBFOLDERS, false);
+        write_bool_property(
+            &mut buffer,
+            PID_TAG_SUBFOLDERS,
+            mapi_folder_has_subfolders(mailbox, mailboxes),
+        );
         write_utf16_property(
             &mut buffer,
             PID_TAG_CONTAINER_CLASS_W,
@@ -483,22 +504,161 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
 
 fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
     match mailbox.role.as_str() {
+        "__mapi_ipm_subtree" => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        "__mapi_deferred_action" => crate::mapi::identity::DEFERRED_ACTION_FOLDER_ID,
+        "__mapi_spooler_queue" => crate::mapi::identity::SPOOLER_QUEUE_FOLDER_ID,
         "inbox" => crate::mapi::identity::INBOX_FOLDER_ID,
         "drafts" => crate::mapi::identity::DRAFTS_FOLDER_ID,
         "outbox" => crate::mapi::identity::OUTBOX_FOLDER_ID,
         "sent" => crate::mapi::identity::SENT_FOLDER_ID,
         "trash" => crate::mapi::identity::TRASH_FOLDER_ID,
+        "__mapi_common_views" => crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        "__mapi_schedule" => crate::mapi::identity::SCHEDULE_FOLDER_ID,
+        "__mapi_search" => crate::mapi::identity::SEARCH_FOLDER_ID,
+        "__mapi_views" => crate::mapi::identity::VIEWS_FOLDER_ID,
+        "__mapi_shortcuts" => crate::mapi::identity::SHORTCUTS_FOLDER_ID,
         "contacts" => crate::mapi::identity::CONTACTS_FOLDER_ID,
         "calendar" => crate::mapi::identity::CALENDAR_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(fallback),
     }
 }
 
-fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
+fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox) -> u64 {
     match mailbox.role.as_str() {
-        "contacts" => "IPF.Contact",
-        "calendar" => "IPF.Appointment",
-        _ => "IPF.Note",
+        "__mapi_ipm_subtree"
+        | "__mapi_deferred_action"
+        | "__mapi_spooler_queue"
+        | "__mapi_common_views"
+        | "__mapi_schedule"
+        | "__mapi_search"
+        | "__mapi_views"
+        | "__mapi_shortcuts" => crate::mapi::identity::ROOT_FOLDER_ID,
+        _ => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    }
+}
+
+fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
+    virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
+        .map(|(_, _, _, _, message_class)| message_class)
+        .unwrap_or(match mailbox.role.as_str() {
+            "contacts" => "IPF.Contact",
+            "calendar" => "IPF.Appointment",
+            _ => "IPF.Note",
+        })
+}
+
+fn mapi_folder_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
+    let folder_id = mapi_folder_id_for_mailbox(mailbox, 0);
+    mailboxes
+        .iter()
+        .any(|candidate| mapi_folder_parent_id_for_mailbox(candidate) == folder_id)
+}
+
+fn hierarchy_sort_depth(sync_type: u8, sync_root_folder_id: u64, mailbox: &JmapMailbox) -> u8 {
+    if sync_type != 0x02 || mapi_folder_parent_id_for_mailbox(mailbox) == sync_root_folder_id {
+        0
+    } else {
+        1
+    }
+}
+
+fn virtual_special_mailbox_id(folder_id: u64) -> Uuid {
+    Uuid::from_u128(VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX | u128::from(folder_id))
+}
+
+fn is_virtual_special_mailbox(mailbox: &JmapMailbox) -> bool {
+    mailbox.id.as_u128() & VIRTUAL_SPECIAL_MAILBOX_UUID_MASK == VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX
+}
+
+fn virtual_special_folder_metadata(
+    folder_id: u64,
+) -> Option<(&'static str, &'static str, i32, u64, &'static str)> {
+    match folder_id {
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID => Some((
+            "__mapi_ipm_subtree",
+            "Top of Information Store",
+            0,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::DEFERRED_ACTION_FOLDER_ID => Some((
+            "__mapi_deferred_action",
+            "Deferred Action",
+            1,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::SPOOLER_QUEUE_FOLDER_ID => Some((
+            "__mapi_spooler_queue",
+            "Spooler Queue",
+            2,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::INBOX_FOLDER_ID => Some((
+            "inbox",
+            "Inbox",
+            20,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::OUTBOX_FOLDER_ID => Some((
+            "outbox",
+            "Outbox",
+            30,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::SENT_FOLDER_ID => Some((
+            "sent",
+            "Sent Items",
+            40,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::TRASH_FOLDER_ID => Some((
+            "trash",
+            "Deleted Items",
+            50,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => Some((
+            "__mapi_common_views",
+            "Common Views",
+            60,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::SCHEDULE_FOLDER_ID => Some((
+            "__mapi_schedule",
+            "Schedule",
+            70,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::SEARCH_FOLDER_ID => Some((
+            "__mapi_search",
+            "Search",
+            80,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::VIEWS_FOLDER_ID => Some((
+            "__mapi_views",
+            "Views",
+            90,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::SHORTCUTS_FOLDER_ID => Some((
+            "__mapi_shortcuts",
+            "Shortcuts",
+            100,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        _ => None,
     }
 }
 
@@ -527,6 +687,7 @@ fn sync_state_object_ids(
 
 fn sync_state_change_numbers(
     sync_type: u8,
+    folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
@@ -534,7 +695,7 @@ fn sync_state_change_numbers(
     if sync_type == 0x02 {
         mailboxes
             .iter()
-            .map(canonical_folder_change_number)
+            .map(|mailbox| canonical_hierarchy_change_number(folder_id, mailbox))
             .collect()
     } else {
         emails
@@ -546,6 +707,15 @@ fn sync_state_change_numbers(
                 )
             })
             .collect()
+    }
+}
+
+fn canonical_hierarchy_change_number(sync_root_folder_id: u64, mailbox: &JmapMailbox) -> u64 {
+    let folder_id = mapi_folder_id_for_mailbox(mailbox, sync_root_folder_id);
+    if is_virtual_special_mailbox(mailbox) {
+        folder_id
+    } else {
+        canonical_folder_change_number(mailbox)
     }
 }
 

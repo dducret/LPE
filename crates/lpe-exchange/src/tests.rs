@@ -10334,7 +10334,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
-    hierarchy_rops.extend_from_slice(&4096u16.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&16384u16.to_le_bytes());
     renew_mapi_request_id(&mut execute_headers);
     let hierarchy_request = execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX, u32::MAX]));
     let hierarchy_response = service
@@ -10343,7 +10343,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((2, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((12, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
@@ -10804,7 +10804,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
 }
@@ -10966,6 +10966,58 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_hierarchy_sync_includes_advertised_ipm_special_folders() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert!(contains_bytes(&response_rops, &utf16z("Outbox")));
+    assert!(contains_bytes(&response_rops, &utf16z("Sent Items")));
+    assert!(contains_bytes(&response_rops, &utf16z("Deleted Items")));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("Top of Information Store")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::OUTBOX_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TRASH_FOLDER_ID)
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
@@ -11024,7 +11076,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
 }
 
@@ -11068,7 +11120,7 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
