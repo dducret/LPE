@@ -2435,8 +2435,13 @@ where
                     sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
                 let delta_attachment_facts =
                     sync_attachment_facts_for(folder_id, &delta_sync_emails, snapshot);
+                let aggregate_sync_emails = if sync_type == 0x02 {
+                    emails.to_vec()
+                } else {
+                    all_sync_emails.clone()
+                };
                 let state_attachment_facts =
-                    sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
+                    sync_attachment_facts_for(folder_id, &aggregate_sync_emails, snapshot);
                 let deleted_message_ids = if checkpoint.is_some() {
                     mapi_message_ids_for_deleted_changes(
                         store,
@@ -2452,7 +2457,7 @@ where
                     sync_type,
                     folder_id,
                     &all_sync_mailboxes,
-                    &all_sync_emails,
+                    &aggregate_sync_emails,
                     &state_attachment_facts,
                 );
                 let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
@@ -2466,7 +2471,7 @@ where
                     &sync_attachment_facts,
                     &[],
                     &all_sync_mailboxes,
-                    &all_sync_emails,
+                    &aggregate_sync_emails,
                     &state_attachment_facts,
                     changes.current_change_sequence,
                 );
@@ -2482,7 +2487,7 @@ where
                         &delta_attachment_facts,
                         &deleted_message_ids,
                         &all_sync_mailboxes,
-                        &all_sync_emails,
+                        &aggregate_sync_emails,
                         &state_attachment_facts,
                         changes.current_change_sequence,
                     )

@@ -31,6 +31,8 @@ const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
+const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
@@ -391,6 +393,16 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_CHILD_COUNT) {
             write_i32_property(&mut buffer, PID_TAG_FOLDER_CHILD_COUNT, 0);
         }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX) {
+            write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
+            write_i64(
+                &mut buffer,
+                local_commit_time_max(mailbox, state_emails, state_attachment_facts) as i64,
+            );
+        }
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL) {
+            write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
+        }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
             write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
         }
@@ -664,6 +676,25 @@ fn virtual_special_folder_metadata(
 
 fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> bool {
     excluded_property_tags.contains(&property_tag)
+}
+
+fn local_commit_time_max(
+    mailbox: &JmapMailbox,
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+) -> u64 {
+    emails
+        .iter()
+        .filter(|email| email.mailbox_id == mailbox.id)
+        .map(|email| {
+            let attachments = attachments_for_message(email.id, attachment_facts);
+            filetime_from_change_number(canonical_message_change_number_with_attachments(
+                email,
+                attachments,
+            ))
+        })
+        .max()
+        .unwrap_or_else(|| filetime_from_change_number(canonical_folder_change_number(mailbox)))
 }
 
 fn sync_state_object_ids(

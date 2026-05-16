@@ -10761,9 +10761,19 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     let change_number = mapi_mailstore::canonical_folder_change_number(&inbox);
     let change_key = mapi_mailstore::change_key_for_change_number(change_number);
     let predecessor_change_list = mapi_mailstore::predecessor_change_list(change_number);
+    let email = FakeStore::email(
+        "57575757-5757-5757-5757-575757575757",
+        inbox_id,
+        "inbox",
+        "Hierarchy aggregate message",
+    );
+    let local_commit_time_max = mapi_mailstore::filetime_from_change_number(
+        mapi_mailstore::canonical_message_change_number(&email),
+    );
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -10807,6 +10817,12 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
+    let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
+    local_commit_time_property.extend_from_slice(&(local_commit_time_max as i64).to_le_bytes());
+    assert!(contains_bytes(&response_rops, &local_commit_time_property));
+    let mut deleted_count_property = 0x670B_0003u32.to_le_bytes().to_vec();
+    deleted_count_property.extend_from_slice(&0i32.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &deleted_count_property));
 }
 
 #[tokio::test]
