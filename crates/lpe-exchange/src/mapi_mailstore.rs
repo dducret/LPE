@@ -25,9 +25,6 @@ const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
-const PID_TAG_MAPPING_SIGNATURE: u32 = 0x3FE0_0102;
-const PID_TAG_RECORD_KEY: u32 = 0x3FE1_0102;
-const PID_TAG_ORDINAL_MOST: u32 = 0x0E27_0102;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
@@ -447,15 +444,6 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) {
             write_i32_property(&mut buffer, PID_TAG_ACCESS, 0x0000_0002);
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_MAPPING_SIGNATURE) {
-            write_binary_property(&mut buffer, PID_TAG_MAPPING_SIGNATURE, &source_key);
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_RECORD_KEY) {
-            write_binary_property(&mut buffer, PID_TAG_RECORD_KEY, &source_key);
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_ORDINAL_MOST) {
-            write_binary_property(&mut buffer, PID_TAG_ORDINAL_MOST, &source_key);
         }
         write_bool_property(
             &mut buffer,
@@ -1558,11 +1546,10 @@ mod tests {
         assert_variable_property(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Inbox"));
         assert_variable_property(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
         assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A, b"Hello\0");
-        let mailbox_source_key = source_key_for_uuid(&mailbox_id);
         assert_i32_property(&buffer, PID_TAG_ACCESS, 0x0000_0002);
-        assert_variable_property(&buffer, PID_TAG_MAPPING_SIGNATURE, &mailbox_source_key);
-        assert_variable_property(&buffer, PID_TAG_RECORD_KEY, &mailbox_source_key);
-        assert_variable_property(&buffer, PID_TAG_ORDINAL_MOST, &mailbox_source_key);
+        assert_absent_property(&buffer, 0x3FE0_0102);
+        assert_absent_property(&buffer, 0x3FE1_0102);
+        assert_absent_property(&buffer, 0x0E27_0102);
     }
 
     #[test]
@@ -1727,6 +1714,11 @@ mod tests {
             i32::from_le_bytes(buffer[offset + 4..offset + 8].try_into().unwrap()),
             value
         );
+    }
+
+    fn assert_absent_property(buffer: &[u8], property_tag: u32) {
+        let tag = property_tag.to_le_bytes();
+        assert!(!buffer.windows(tag.len()).any(|window| window == tag));
     }
 
     fn utf16z(value: &str) -> Vec<u8> {
