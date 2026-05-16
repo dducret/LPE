@@ -501,6 +501,14 @@ pub(in crate::mapi) fn disconnect_response(
         );
     }
 
+    log_mapi_session_disconnect(
+        endpoint,
+        principal,
+        &session,
+        request_id,
+        response_request_type,
+    );
+
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -512,6 +520,85 @@ pub(in crate::mapi) fn disconnect_response(
         body,
         session_context_cookies(endpoint, "", true),
     )
+}
+
+fn log_mapi_session_disconnect(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    request_id: &str,
+    request_type: &str,
+) {
+    let endpoint_label = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let sync_source_summaries = session
+        .handles
+        .iter()
+        .filter_map(|(handle, object)| match object {
+            MapiObject::SynchronizationSource {
+                folder_id,
+                mailbox_id,
+                checkpoint_kind,
+                checkpoint_change_sequence,
+                checkpoint_modseq,
+                sync_type,
+                state,
+                state_upload_buffer,
+                client_state_uploaded_bytes,
+                incremental_transfer_buffer,
+                transfer_buffer,
+                transfer_position,
+            } => Some(format!(
+                "handle={handle};folder=0x{folder_id:016x};sync=0x{sync_type:02x};kind={};mailbox={};seq={checkpoint_change_sequence};modseq={checkpoint_modseq};state={};client_state={};upload_buffer={};transfer={}/{};incremental={}",
+                checkpoint_kind.as_str(),
+                mailbox_id.map(|id| id.to_string()).unwrap_or_default(),
+                state.len(),
+                client_state_uploaded_bytes,
+                state_upload_buffer.len(),
+                transfer_position,
+                transfer_buffer.len(),
+                incremental_transfer_buffer.is_some(),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let sync_source_count = session
+        .handles
+        .values()
+        .filter(|object| matches!(object, MapiObject::SynchronizationSource { .. }))
+        .count();
+    let sync_collector_count = session
+        .handles
+        .values()
+        .filter(|object| matches!(object, MapiObject::SynchronizationCollector { .. }))
+        .count();
+    let notification_subscription_count = session
+        .handles
+        .values()
+        .filter(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
+        .count();
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint_label,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = %request_type,
+        mapi_request_id = %request_id,
+        handle_count = session.handles.len(),
+        sync_source_count,
+        sync_collector_count,
+        notification_subscription_count,
+        pending_notification_count = session.pending_notifications.len(),
+        completed_execute_request_count = session.completed_execute_requests.len(),
+        sync_source_summaries = %sync_source_summaries,
+        "rca debug mapi session disconnect"
+    );
 }
 
 pub(in crate::mapi) async fn notification_wait_response<S>(

@@ -2647,11 +2647,16 @@ where
             }
             0x4E => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource {
+                    folder_id,
                     mailbox_id,
                     checkpoint_kind,
                     checkpoint_change_sequence,
                     checkpoint_modseq,
                     sync_type,
+                    state,
+                    state_upload_buffer,
+                    client_state_uploaded_bytes,
+                    incremental_transfer_buffer,
                     transfer_buffer,
                     transfer_position,
                     ..
@@ -2691,7 +2696,7 @@ where
                     );
                     responses.extend_from_slice(&response);
                     if completed && matches!(checkpoint.4, 0x01 | 0x02) {
-                        let _ = store
+                        let checkpoint_result = store
                             .store_mapi_sync_checkpoint(
                                 principal.account_id,
                                 checkpoint.0,
@@ -2704,6 +2709,61 @@ where
                                 }),
                             )
                             .await;
+                        match checkpoint_result {
+                            Ok(stored_checkpoint) => tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x4e",
+                                folder_id = format_args!("0x{:016x}", *folder_id),
+                                sync_type = format_args!("0x{:02x}", checkpoint.4),
+                                checkpoint_kind = checkpoint.1.as_str(),
+                                checkpoint_mailbox_id = checkpoint
+                                    .0
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_default(),
+                                checkpoint_change_sequence = checkpoint.2,
+                                checkpoint_modseq = checkpoint.3,
+                                stored_change_sequence = stored_checkpoint.last_change_sequence,
+                                stored_modseq = stored_checkpoint.last_modseq,
+                                sync_state_bytes = state.len(),
+                                upload_state_buffer_bytes = state_upload_buffer.len(),
+                                upload_state_client_bytes = *client_state_uploaded_bytes,
+                                incremental_transfer_available = incremental_transfer_buffer.is_some(),
+                                transfer_buffer_bytes = transfer_buffer.len(),
+                                transfer_position = *transfer_position,
+                                checkpoint_store_status = "ok",
+                                "rca debug mapi sync checkpoint store"
+                            ),
+                            Err(error) => tracing::warn!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x4e",
+                                folder_id = format_args!("0x{:016x}", *folder_id),
+                                sync_type = format_args!("0x{:02x}", checkpoint.4),
+                                checkpoint_kind = checkpoint.1.as_str(),
+                                checkpoint_mailbox_id = checkpoint
+                                    .0
+                                    .map(|id| id.to_string())
+                                    .unwrap_or_default(),
+                                checkpoint_change_sequence = checkpoint.2,
+                                checkpoint_modseq = checkpoint.3,
+                                sync_state_bytes = state.len(),
+                                upload_state_buffer_bytes = state_upload_buffer.len(),
+                                upload_state_client_bytes = *client_state_uploaded_bytes,
+                                incremental_transfer_available = incremental_transfer_buffer.is_some(),
+                                transfer_buffer_bytes = transfer_buffer.len(),
+                                transfer_position = *transfer_position,
+                                checkpoint_store_status = "error",
+                                error = %error,
+                                "rca debug mapi sync checkpoint store"
+                            ),
+                        }
                     }
                 }
                 _ => responses.extend_from_slice(&rop_error_response(

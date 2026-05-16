@@ -46,6 +46,7 @@ Current investigation focus:
 - Outlook accepts enough of the session to reach a successful hierarchy sync download, then closes the EMSMDB session without issuing a content sync request in the supplied server traces.
 - Outlook safe mode reproduced the same stop point, so add-ins are unlikely to explain the current disconnect after hierarchy sync.
 - The converted Outlook ETL files did not expose a decoded MAPI exception through `tracerpt`; the next lab run should preserve both server RCA logs and any Outlook UI/profile status so this stop point can be tied to a user-visible state.
+- RCA logs now include `rca debug mapi sync checkpoint store` when `RopFastTransferSourceGetBuffer` completes an ICS download and attempts to persist the hierarchy/content checkpoint, plus `rca debug mapi session disconnect` when a MAPI session is removed. Use these fields to distinguish a clean completed hierarchy sync from a checkpoint persistence failure, incomplete transfer state, pending notification state, or unexpected live synchronization handles at disconnect.
 
 ## Source Set
 
