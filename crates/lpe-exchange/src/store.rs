@@ -602,7 +602,8 @@ impl ExchangeStore for Storage {
                     };
                     let object_id = crate::mapi::identity::mapi_store_id(global_counter);
                     let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
-                    let change_key = crate::mapi::identity::change_key_for_change_number(object_id);
+                    let change_key =
+                        crate::mapi::identity::change_key_for_change_number(global_counter);
                     let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
                     let row = sqlx::query(
                         r#"

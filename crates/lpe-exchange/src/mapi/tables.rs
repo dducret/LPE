@@ -1355,6 +1355,7 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
     let mut row = Vec::new();
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
+    let change_number = mapi_mailstore::change_number_for_store_id(folder_id);
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, display_name),
@@ -1369,10 +1370,10 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
             | PID_TAG_LOCAL_COMMIT_TIME_MAX
             | PID_TAG_HIER_REV => write_u64(
                 &mut row,
-                mapi_mailstore::filetime_from_change_number(folder_id),
+                mapi_mailstore::filetime_from_change_number(change_number),
             ),
             PID_TAG_HIERARCHY_CHANGE_NUMBER => {
-                write_u32(&mut row, folder_id.min(u64::from(u32::MAX)) as u32)
+                write_u32(&mut row, change_number.min(u64::from(u32::MAX)) as u32)
             }
             PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
@@ -1384,13 +1385,13 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
             ),
             PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
                 &mut row,
-                &mapi_mailstore::change_key_for_change_number(folder_id),
+                &mapi_mailstore::change_key_for_change_number(change_number),
             ),
             PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
                 &mut row,
-                &mapi_mailstore::predecessor_change_list(folder_id),
+                &mapi_mailstore::predecessor_change_list(change_number),
             ),
-            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, folder_id),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
             _ if folder_id == INBOX_FOLDER_ID => {
                 match special_folder_identification_property_value(*column) {
                     Some(value) => write_mapi_value(&mut row, *column, &value),
@@ -1432,6 +1433,7 @@ pub(in crate::mapi) fn serialize_root_folder_row(
     columns: &[u32],
 ) -> Vec<u8> {
     let mut row = Vec::new();
+    let change_number = mapi_mailstore::change_number_for_store_id(ROOT_FOLDER_ID);
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Root"),
@@ -1446,10 +1448,10 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             | PID_TAG_LOCAL_COMMIT_TIME_MAX
             | PID_TAG_HIER_REV => write_u64(
                 &mut row,
-                mapi_mailstore::filetime_from_change_number(ROOT_FOLDER_ID),
+                mapi_mailstore::filetime_from_change_number(change_number),
             ),
             PID_TAG_HIERARCHY_CHANGE_NUMBER => {
-                write_u32(&mut row, ROOT_FOLDER_ID.min(u64::from(u32::MAX)) as u32)
+                write_u32(&mut row, change_number.min(u64::from(u32::MAX)) as u32)
             }
             PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
@@ -1458,13 +1460,13 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             PID_TAG_PARENT_SOURCE_KEY => write_u16_prefixed_bytes(&mut row, &[]),
             PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
                 &mut row,
-                &mapi_mailstore::change_key_for_change_number(ROOT_FOLDER_ID),
+                &mapi_mailstore::change_key_for_change_number(change_number),
             ),
             PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
                 &mut row,
-                &mapi_mailstore::predecessor_change_list(ROOT_FOLDER_ID),
+                &mapi_mailstore::predecessor_change_list(change_number),
             ),
-            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
             _ => match special_folder_identification_property_value(*column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
@@ -1479,6 +1481,7 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
     columns: &[u32],
 ) -> Vec<u8> {
     let mut row = Vec::new();
+    let change_number = mapi_mailstore::change_number_for_store_id(IPM_SUBTREE_FOLDER_ID);
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Top of Information Store"),
@@ -1493,12 +1496,11 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             | PID_TAG_LOCAL_COMMIT_TIME_MAX
             | PID_TAG_HIER_REV => write_u64(
                 &mut row,
-                mapi_mailstore::filetime_from_change_number(IPM_SUBTREE_FOLDER_ID),
+                mapi_mailstore::filetime_from_change_number(change_number),
             ),
-            PID_TAG_HIERARCHY_CHANGE_NUMBER => write_u32(
-                &mut row,
-                IPM_SUBTREE_FOLDER_ID.min(u64::from(u32::MAX)) as u32,
-            ),
+            PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+                write_u32(&mut row, change_number.min(u64::from(u32::MAX)) as u32)
+            }
             PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
                 &mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
@@ -1509,13 +1511,13 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             ),
             PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
                 &mut row,
-                &mapi_mailstore::change_key_for_change_number(IPM_SUBTREE_FOLDER_ID),
+                &mapi_mailstore::change_key_for_change_number(change_number),
             ),
             PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
                 &mut row,
-                &mapi_mailstore::predecessor_change_list(IPM_SUBTREE_FOLDER_ID),
+                &mapi_mailstore::predecessor_change_list(change_number),
             ),
-            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
             PID_TAG_OST_OSTID => write_u16_prefixed_bytes(&mut row, &[]),
             _ => write_property_default(&mut row, *column),
         }
@@ -1526,6 +1528,30 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
 pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, values: &[u8]) {
     response.push(0);
     response.extend_from_slice(values);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn special_folder_rows_use_global_counters_for_change_xids() {
+        let row = serialize_special_folder_row(
+            INBOX_FOLDER_ID,
+            &[],
+            &[PID_TAG_CHANGE_NUMBER, PID_TAG_CHANGE_KEY],
+        );
+        let change_number = u64::from_le_bytes(row[0..8].try_into().unwrap());
+        let change_key_len = u16::from_le_bytes(row[8..10].try_into().unwrap()) as usize;
+        let change_key = &row[10..10 + change_key_len];
+
+        assert_eq!(change_number, crate::mapi::identity::INBOX_FOLDER_COUNTER);
+        assert_eq!(change_key_len, 22);
+        assert_eq!(
+            &change_key[16..22],
+            &crate::mapi::identity::globcnt_bytes(change_number)
+        );
+    }
 }
 
 pub(in crate::mapi) fn write_logon_property_row(

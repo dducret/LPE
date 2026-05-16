@@ -68,7 +68,7 @@ pub(crate) struct MessageAttachmentSyncFacts {
 }
 
 pub(crate) fn canonical_folder_change_number(mailbox: &JmapMailbox) -> u64 {
-    stable_hash64([
+    stable_change_counter([
         mailbox.id.as_bytes().as_slice(),
         mailbox.role.as_bytes(),
         mailbox.name.as_bytes(),
@@ -147,7 +147,7 @@ pub(crate) fn canonical_message_change_number_with_attachments(
         hash = hash_bytes(hash, attachment.media_type.as_bytes());
         hash = hash_bytes(hash, &attachment.size_octets.to_le_bytes());
     }
-    hash.max(1)
+    change_counter_from_hash(hash)
 }
 
 pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
@@ -201,6 +201,12 @@ pub(crate) fn virtual_special_mailbox(folder_id: u64) -> Option<JmapMailbox> {
 
 pub(crate) fn change_key_for_change_number(change_number: u64) -> Vec<u8> {
     crate::mapi::identity::change_key_for_change_number(change_number)
+}
+
+pub(crate) fn change_number_for_store_id(store_id: u64) -> u64 {
+    crate::mapi::identity::global_counter_from_store_id(store_id).unwrap_or_else(|| {
+        crate::mapi::identity::global_counter_from_globcnt(&globcnt_bytes(store_id)).unwrap_or(1)
+    })
 }
 
 pub(crate) fn predecessor_change_list(change_number: u64) -> Vec<u8> {
@@ -1349,7 +1355,7 @@ fn sync_state_change_numbers(
 fn canonical_hierarchy_change_number(sync_root_folder_id: u64, mailbox: &JmapMailbox) -> u64 {
     let folder_id = mapi_folder_id_for_mailbox(mailbox, sync_root_folder_id);
     if is_virtual_special_mailbox(mailbox) {
-        folder_id
+        change_number_for_store_id(folder_id)
     } else {
         canonical_folder_change_number(mailbox)
     }
@@ -1512,6 +1518,14 @@ fn stable_hash64<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> u64 {
     hash.max(1)
 }
 
+fn stable_change_counter<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> u64 {
+    change_counter_from_hash(stable_hash64(parts))
+}
+
+fn change_counter_from_hash(hash: u64) -> u64 {
+    (hash & 0x0000_FFFF_FFFF_FFFF).max(1)
+}
+
 fn hash_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {
         hash ^= u64::from(*byte);
@@ -1660,6 +1674,33 @@ mod tests {
     }
 
     #[test]
+    fn canonical_change_numbers_fit_mapi_globcnt() {
+        let mailbox = JmapMailbox {
+            id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let email = test_email();
+
+        for change_number in [
+            canonical_folder_change_number(&mailbox),
+            canonical_message_change_number(&email),
+        ] {
+            assert!(change_number > 0);
+            assert!(change_number <= 0x0000_FFFF_FFFF_FFFF);
+            assert_eq!(
+                crate::mapi::identity::global_counter_from_globcnt(&globcnt_bytes(change_number)),
+                Some(change_number)
+            );
+        }
+    }
+
+    #[test]
     fn source_and_change_keys_are_stable_replica_scoped_values() {
         let id = Uuid::parse_str("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee").unwrap();
         crate::mapi::identity::remember_mapi_identity(id, crate::mapi::identity::mapi_store_id(42));
@@ -1675,6 +1716,19 @@ mod tests {
         assert!(source_key.starts_with(&STORE_REPLICA_GUID));
         assert!(change_key.starts_with(&STORE_REPLICA_GUID));
         assert_eq!(source_key, source_key_for_uuid(&id));
+    }
+
+    #[test]
+    fn store_id_change_numbers_use_global_counter() {
+        let store_id = crate::mapi::identity::mapi_store_id(42);
+        let change_number = change_number_for_store_id(store_id);
+        let change_key = change_key_for_change_number(change_number);
+
+        assert_eq!(change_number, 42);
+        assert_eq!(
+            &source_key_for_store_id(store_id)[16..22],
+            &change_key[16..22]
+        );
     }
 
     #[test]

@@ -543,6 +543,7 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(folder.id);
     match property_tag {
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(folder.collection.display_name.clone())),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(folder.item_count)),
@@ -556,10 +557,10 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         | PID_TAG_LOCAL_COMMIT_TIME
         | PID_TAG_LOCAL_COMMIT_TIME_MAX
         | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
-            folder.id,
+            change_number,
         ))),
         PID_TAG_HIERARCHY_CHANGE_NUMBER => {
-            Some(MapiValue::U32(folder.id.min(u64::from(u32::MAX)) as u32))
+            Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
         }
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
@@ -571,12 +572,12 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
         )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(folder.id),
+            mapi_mailstore::change_key_for_change_number(change_number),
         )),
         PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-            mapi_mailstore::predecessor_change_list(folder.id),
+            mapi_mailstore::predecessor_change_list(change_number),
         )),
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(folder.id)),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
 }
@@ -647,6 +648,7 @@ pub(in crate::mapi) fn contact_property_value(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
         PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
@@ -686,12 +688,12 @@ pub(in crate::mapi) fn contact_property_value(
             mapi_mailstore::source_key_for_store_id(folder_id),
         )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(item_id),
+            mapi_mailstore::change_key_for_change_number(change_number),
         )),
         PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-            mapi_mailstore::predecessor_change_list(item_id),
+            mapi_mailstore::predecessor_change_list(change_number),
         )),
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(item_id)),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
 }
@@ -703,6 +705,7 @@ pub(in crate::mapi) fn event_property_value(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(item_id)),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
@@ -728,12 +731,12 @@ pub(in crate::mapi) fn event_property_value(
             mapi_mailstore::source_key_for_store_id(folder_id),
         )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(item_id),
+            mapi_mailstore::change_key_for_change_number(change_number),
         )),
         PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-            mapi_mailstore::predecessor_change_list(item_id),
+            mapi_mailstore::predecessor_change_list(change_number),
         )),
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(item_id)),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
 }
