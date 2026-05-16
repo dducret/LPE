@@ -111,9 +111,8 @@ pub(crate) fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
 
 pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
-    let Some(global_counter) = global_counter_from_store_id(object_id) else {
-        return key;
-    };
+    let global_counter = global_counter_from_store_id(object_id)
+        .expect("source keys require a MAPI object id with the store replica id");
     key.extend_from_slice(&globcnt_bytes(global_counter));
     key
 }
@@ -182,5 +181,11 @@ mod tests {
         );
         assert!(source_key_for_object_id(object_id).starts_with(&STORE_REPLICA_GUID));
         assert!(change_key_for_change_number(7).starts_with(&STORE_REPLICA_GUID));
+    }
+
+    #[test]
+    #[should_panic(expected = "source keys require a MAPI object id with the store replica id")]
+    fn source_key_rejects_non_mapi_object_id_instead_of_emitting_guid_only_xid() {
+        let _ = source_key_for_object_id(42);
     }
 }

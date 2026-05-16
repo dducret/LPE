@@ -10770,6 +10770,7 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let folder_change = mapi_mailstore::canonical_folder_change_number(&inbox);
     let mut email = FakeStore::email(message_id, mailbox_id, "inbox", "Cached mode message");
     email.flagged = true;
+    let message_change_number = mapi_mailstore::canonical_message_change_number(&email);
     let message_commit_time = mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at);
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -10841,6 +10842,15 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         &response_rops,
         &mapi_mailstore::STORE_REPLICA_GUID
     ));
+    let message_uuid = Uuid::parse_str(message_id).unwrap();
+    let message_source_key = mapi_mailstore::source_key_for_uuid(&message_uuid);
+    let message_change_key = mapi_mailstore::change_key_for_change_number(message_change_number);
+    let mut source_key_wire_value = 22u16.to_le_bytes().to_vec();
+    source_key_wire_value.extend_from_slice(&message_source_key);
+    let mut change_key_wire_value = 22u16.to_le_bytes().to_vec();
+    change_key_wire_value.extend_from_slice(&message_change_key);
+    assert!(contains_bytes(&response_rops, &source_key_wire_value));
+    assert!(contains_bytes(&response_rops, &change_key_wire_value));
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::filetime_from_change_number(folder_change).to_le_bytes()
