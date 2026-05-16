@@ -292,7 +292,11 @@ fn valid_folder_mask() -> u32 {
 }
 
 fn folder_entry_id(folder_id: u64) -> MapiValue {
-    MapiValue::Binary(crate::mapi::identity::instance_key_for_object_id(folder_id))
+    MapiValue::Binary(
+        crate::mapi::identity::long_term_id_from_object_id(folder_id)
+            .unwrap()
+            .to_vec(),
+    )
 }
 
 fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
@@ -2280,11 +2284,14 @@ mod tests {
             (PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
             (PID_TAG_REM_ONLINE_ENTRY_ID, REMINDERS_FOLDER_ID),
         ] {
+            let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id).unwrap();
             assert_eq!(
                 special_folder_identification_property_value(property_tag),
-                Some(MapiValue::Binary(
-                    crate::mapi::identity::instance_key_for_object_id(folder_id)
-                ))
+                Some(MapiValue::Binary(entry_id.to_vec()))
+            );
+            assert_eq!(
+                crate::mapi::identity::object_id_from_long_term_id(&entry_id),
+                Some(folder_id)
             );
         }
     }
