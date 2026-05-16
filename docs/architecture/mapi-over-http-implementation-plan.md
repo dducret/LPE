@@ -33,18 +33,19 @@ This list is updated after each Outlook/RCA lab run. Use it to keep new Outlook 
 | 5. EMSMDB session bootstrap | `Connect` returned HTTP `200`, MAPI response code `0`, connect status code `0`, and connect error code `0`. | Passed | Continue with the authenticated mailbox session path. |
 | 6. Private mailbox logon | `RopLogon` returned success with mailbox GUID, REPLID, replica GUID, and private mailbox special folder IDs. | Passed | Preserve private mailbox-only support until public folders are deliberately added. |
 | 7. Store bootstrap ROPs | Outlook store bootstrap ROPs, including folder/property/name-id probes, returned MAPI success in the May 16 traces. | Passed | Use this as the baseline before sync debugging. |
-| 8. Hierarchy sync setup | On 2026-05-16 at 13:11, the hierarchy sync batch `0x02,0x70,0x75,0x77,0x75,0x77,0x4e` returned HTTP `200`, MAPI response code `0`, response handle count `3`, and ROP results `0x00000000` for all seven ROPs. `RopFastTransferSourceGetBuffer` completed with transfer status `0x0003` and a 2946-byte transfer stream. | Passed server-side | Keep watching for Outlook-side parse failures, but do not reopen the previous handle-table or `PtypBoolean` fix unless ETL or server logs show a new concrete failure. |
-| 9. Content sync and profile completion | Not yet proven from supplied logs. The 13:11 trace disconnects after successful hierarchy sync and does not show a subsequent content sync request. | Pending | Record the first `sync_type` `0x01` content sync request, close/reopen behavior, and canonical `Sent` visibility. |
+| 8. Hierarchy sync setup | On 2026-05-16 at 13:11, the hierarchy sync batch `0x02,0x70,0x75,0x77,0x75,0x77,0x4e` returned HTTP `200`, MAPI response code `0`, response handle count `3`, and ROP results `0x00000000` for all seven ROPs. `RopFastTransferSourceGetBuffer` completed with transfer status `0x0003` and a 2946-byte transfer stream. The 13:20 Outlook safe-mode run repeated the same server-side success pattern. | Passed server-side | Keep watching for Outlook-side parse failures, but do not reopen the previous handle-table or `PtypBoolean` fix unless ETL or server logs show a new concrete failure. |
+| 9. Content sync and profile completion | Not yet proven from supplied logs. The 13:11 and 13:20 safe-mode traces disconnect after successful hierarchy sync and do not show a subsequent content sync request. | Pending | Record the first `sync_type` `0x01` content sync request, close/reopen behavior, and canonical `Sent` visibility. |
 
-Current 2026-05-16 corrections validated by the 13:11 server trace:
+Current 2026-05-16 corrections validated by the 13:11 and 13:20 server traces:
 
 - FastTransfer `PtypBoolean` values are serialized as two bytes per the MS-OXCFXICS fixed-size property lexical structure.
 - EMSMDB `Execute` response handle tables preserve request slot order and remain large enough for sparse output handle indexes.
 
 Current investigation focus:
 
-- Outlook accepts enough of the session to reach a successful hierarchy sync download, then closes the EMSMDB session without issuing a content sync request in the supplied server trace.
-- The converted Outlook ETL did not expose a decoded MAPI exception through `tracerpt`; the next lab run should preserve both server RCA logs and any Outlook UI/profile status so this stop point can be tied to a user-visible state.
+- Outlook accepts enough of the session to reach a successful hierarchy sync download, then closes the EMSMDB session without issuing a content sync request in the supplied server traces.
+- Outlook safe mode reproduced the same stop point, so add-ins are unlikely to explain the current disconnect after hierarchy sync.
+- The converted Outlook ETL files did not expose a decoded MAPI exception through `tracerpt`; the next lab run should preserve both server RCA logs and any Outlook UI/profile status so this stop point can be tied to a user-visible state.
 
 ## Source Set
 
