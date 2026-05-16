@@ -604,6 +604,7 @@ struct HierarchyTransferDebugSummary {
     source_key_lengths: Vec<usize>,
     change_key_lengths: Vec<usize>,
     emitted_property_tags: Vec<u32>,
+    rows: Vec<HierarchyTransferRowDebug>,
 }
 
 #[derive(Default)]
@@ -611,7 +612,50 @@ struct HierarchyTransferFolderDebug {
     source_key: Option<Vec<u8>>,
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
+    predecessor_change_list: Option<Vec<u8>>,
+    display_name: Option<String>,
+    container_class: Option<String>,
+    folder_id: Option<u64>,
+    parent_folder_id: Option<u64>,
+    last_modification_time: Option<u64>,
+    change_number: Option<u64>,
+    content_count: Option<i32>,
+    content_unread_count: Option<i32>,
+    folder_type: Option<i32>,
+    local_commit_time_max: Option<u64>,
+    deleted_count_total: Option<i32>,
+    message_size: Option<i32>,
+    access: Option<i32>,
+    subfolders: Option<bool>,
     property_tags: Vec<u32>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct HierarchyTransferRowDebug {
+    row_index: usize,
+    display_name: String,
+    container_class: String,
+    folder_id: Option<u64>,
+    parent_folder_id: Option<u64>,
+    source_key_len: usize,
+    parent_source_key_len: usize,
+    change_key_len: usize,
+    predecessor_change_list_len: usize,
+    last_modification_time: Option<u64>,
+    change_number: Option<u64>,
+    content_count: Option<i32>,
+    content_unread_count: Option<i32>,
+    folder_type: Option<i32>,
+    local_commit_time_max: Option<u64>,
+    deleted_count_total: Option<i32>,
+    message_size: Option<i32>,
+    access: Option<i32>,
+    subfolders: Option<bool>,
+    source_key_hex: String,
+    parent_source_key_hex: String,
+    change_key_hex: String,
+    property_tags: Vec<u32>,
+    missing_core_property_tags: Vec<u32>,
 }
 
 struct FastTransferDebugProperty {
@@ -676,6 +720,37 @@ fn decode_hierarchy_transfer_debug_summary(
                 PID_TAG_PARENT_SOURCE_KEY => folder.parent_source_key = Some(property.value),
                 PID_TAG_SOURCE_KEY => folder.source_key = Some(property.value),
                 PID_TAG_CHANGE_KEY => folder.change_key = Some(property.value),
+                PID_TAG_PREDECESSOR_CHANGE_LIST => {
+                    folder.predecessor_change_list = Some(property.value)
+                }
+                PID_TAG_DISPLAY_NAME_W => {
+                    folder.display_name = decode_debug_utf16z(&property.value)
+                }
+                PID_TAG_CONTAINER_CLASS_W => {
+                    folder.container_class = decode_debug_utf16z(&property.value)
+                }
+                PID_TAG_FOLDER_ID => folder.folder_id = decode_debug_u64(&property.value),
+                PID_TAG_PARENT_FOLDER_ID => {
+                    folder.parent_folder_id = decode_debug_u64(&property.value)
+                }
+                PID_TAG_LAST_MODIFICATION_TIME => {
+                    folder.last_modification_time = decode_debug_u64(&property.value)
+                }
+                PID_TAG_CHANGE_NUMBER => folder.change_number = decode_debug_u64(&property.value),
+                PID_TAG_CONTENT_COUNT => folder.content_count = decode_debug_i32(&property.value),
+                PID_TAG_CONTENT_UNREAD_COUNT => {
+                    folder.content_unread_count = decode_debug_i32(&property.value)
+                }
+                PID_TAG_FOLDER_TYPE => folder.folder_type = decode_debug_i32(&property.value),
+                PID_TAG_LOCAL_COMMIT_TIME_MAX => {
+                    folder.local_commit_time_max = decode_debug_u64(&property.value)
+                }
+                PID_TAG_DELETED_COUNT_TOTAL => {
+                    folder.deleted_count_total = decode_debug_i32(&property.value)
+                }
+                PID_TAG_MESSAGE_SIZE => folder.message_size = decode_debug_i32(&property.value),
+                PID_TAG_ACCESS => folder.access = decode_debug_i32(&property.value),
+                PID_TAG_SUBFOLDERS => folder.subfolders = decode_debug_bool(&property.value),
                 _ => {}
             }
         } else if !in_final_state {
@@ -699,23 +774,177 @@ fn finish_hierarchy_debug_folder(
     summary: &mut HierarchyTransferDebugSummary,
 ) {
     summary.folder_change_count += 1;
-    if let Some(parent_source_key) = folder.parent_source_key {
-        if parent_source_key.is_empty() {
-            summary.zero_length_parent_source_key_count += 1;
-        } else if !hierarchy_debug_known_parent_source_key(&parent_source_key)
+    let parent_source_key_present = folder.parent_source_key.is_some();
+    let parent_source_key = folder.parent_source_key.unwrap_or_default();
+    if !parent_source_key.is_empty() {
+        if !hierarchy_debug_known_parent_source_key(&parent_source_key)
             && !seen_source_keys
                 .iter()
                 .any(|source_key| source_key.as_slice() == parent_source_key.as_slice())
         {
             summary.parent_before_child_violations += 1;
         }
+    } else if parent_source_key_present {
+        summary.zero_length_parent_source_key_count += 1;
     }
-    if let Some(source_key) = folder.source_key {
+    let source_key = folder.source_key.unwrap_or_default();
+    if !source_key.is_empty() {
         summary.source_key_lengths.push(source_key.len());
-        seen_source_keys.push(source_key);
+        seen_source_keys.push(source_key.clone());
     }
-    if let Some(change_key) = folder.change_key {
+    let change_key = folder.change_key.unwrap_or_default();
+    if !change_key.is_empty() {
         summary.change_key_lengths.push(change_key.len());
+    }
+    let predecessor_change_list = folder.predecessor_change_list.unwrap_or_default();
+    let missing_core_property_tags = missing_hierarchy_core_property_tags(&folder.property_tags);
+    let row = HierarchyTransferRowDebug {
+        row_index: summary.folder_change_count,
+        display_name: folder.display_name.unwrap_or_default(),
+        container_class: folder.container_class.unwrap_or_default(),
+        folder_id: folder.folder_id,
+        parent_folder_id: folder.parent_folder_id,
+        source_key_len: source_key.len(),
+        parent_source_key_len: parent_source_key.len(),
+        change_key_len: change_key.len(),
+        predecessor_change_list_len: predecessor_change_list.len(),
+        last_modification_time: folder.last_modification_time,
+        change_number: folder.change_number,
+        content_count: folder.content_count,
+        content_unread_count: folder.content_unread_count,
+        folder_type: folder.folder_type,
+        local_commit_time_max: folder.local_commit_time_max,
+        deleted_count_total: folder.deleted_count_total,
+        message_size: folder.message_size,
+        access: folder.access,
+        subfolders: folder.subfolders,
+        source_key_hex: format_debug_hex(&source_key),
+        parent_source_key_hex: format_debug_hex(&parent_source_key),
+        change_key_hex: format_debug_hex(&change_key),
+        property_tags: folder.property_tags,
+        missing_core_property_tags,
+    };
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_rop_id = "0x70",
+        row_index = row.row_index,
+        display_name = %row.display_name,
+        container_class = %row.container_class,
+        folder_id = row.folder_id.map(format_u64_hex).unwrap_or_default(),
+        parent_folder_id = row.parent_folder_id.map(format_u64_hex).unwrap_or_default(),
+        source_key_len = row.source_key_len,
+        parent_source_key_len = row.parent_source_key_len,
+        change_key_len = row.change_key_len,
+        predecessor_change_list_len = row.predecessor_change_list_len,
+        last_modification_time = row.last_modification_time.unwrap_or_default(),
+        change_number = row.change_number.unwrap_or_default(),
+        content_count = row.content_count.unwrap_or_default(),
+        content_unread_count = row.content_unread_count.unwrap_or_default(),
+        folder_type = row.folder_type.unwrap_or_default(),
+        local_commit_time_max = row.local_commit_time_max.unwrap_or_default(),
+        deleted_count_total = row.deleted_count_total.unwrap_or_default(),
+        message_size = row.message_size.unwrap_or_default(),
+        access = row.access.unwrap_or_default(),
+        subfolders = row.subfolders.unwrap_or_default(),
+        source_key_hex = %row.source_key_hex,
+        parent_source_key_hex = %row.parent_source_key_hex,
+        change_key_hex = %row.change_key_hex,
+        emitted_property_tags = %format_property_tags(&row.property_tags),
+        emitted_property_names = %format_property_tag_names(&row.property_tags),
+        missing_core_property_tags = %format_property_tags(&row.missing_core_property_tags),
+        missing_core_property_names = %format_property_tag_names(&row.missing_core_property_tags),
+        "rca debug mapi hierarchy transfer row semantics"
+    );
+    summary.rows.push(row);
+}
+
+fn missing_hierarchy_core_property_tags(property_tags: &[u32]) -> Vec<u32> {
+    [
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_CONTAINER_CLASS_W,
+    ]
+    .into_iter()
+    .filter(|tag| !property_tags.contains(tag))
+    .collect()
+}
+
+fn decode_debug_i32(bytes: &[u8]) -> Option<i32> {
+    (bytes.len() == 4).then(|| i32::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+fn decode_debug_u64(bytes: &[u8]) -> Option<u64> {
+    (bytes.len() == 8).then(|| u64::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+fn decode_debug_bool(bytes: &[u8]) -> Option<bool> {
+    (bytes.len() == 2).then(|| u16::from_le_bytes(bytes.try_into().unwrap()) != 0)
+}
+
+fn decode_debug_utf16z(bytes: &[u8]) -> Option<String> {
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let mut units = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    if units.last() == Some(&0) {
+        units.pop();
+    }
+    String::from_utf16(&units).ok()
+}
+
+fn format_debug_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn format_u64_hex(value: u64) -> String {
+    format!("0x{value:016x}")
+}
+
+fn format_property_tag_names(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| property_tag_debug_name(*tag))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn property_tag_debug_name(tag: u32) -> &'static str {
+    match tag {
+        PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
+        PID_TAG_CONTENT_COUNT => "PidTagContentCount",
+        PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
+        PID_TAG_SUBFOLDERS => "PidTagSubfolders",
+        PID_TAG_FOLDER_TYPE => "PidTagFolderType",
+        PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
+        PID_TAG_MESSAGE_SIZE => "PidTagMessageSize",
+        PID_TAG_LAST_MODIFICATION_TIME => "PidTagLastModificationTime",
+        PID_TAG_ACCESS => "PidTagAccess",
+        PID_TAG_SOURCE_KEY => "PidTagSourceKey",
+        PID_TAG_PARENT_SOURCE_KEY => "PidTagParentSourceKey",
+        PID_TAG_CHANGE_KEY => "PidTagChangeKey",
+        PID_TAG_PREDECESSOR_CHANGE_LIST => "PidTagPredecessorChangeList",
+        PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
+        PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
+        PID_TAG_FOLDER_ID => "PidTagFolderId",
+        PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
+        PID_TAG_CHANGE_NUMBER => "PidTagChangeNumber",
+        META_TAG_IDSET_GIVEN => "MetaTagIdsetGiven",
+        META_TAG_CNSET_SEEN => "MetaTagCnsetSeen",
+        _ => "unknown",
     }
 }
 
@@ -1696,6 +1925,12 @@ mod tests {
             .emitted_property_tags
             .contains(&PID_TAG_PARENT_SOURCE_KEY));
         assert!(summary.emitted_property_tags.contains(&PID_TAG_CHANGE_KEY));
+        assert_eq!(summary.rows.len(), 1);
+        assert_eq!(summary.rows[0].display_name, "Inbox");
+        assert_eq!(summary.rows[0].container_class, "IPF.Note");
+        assert_eq!(summary.rows[0].source_key_len, 22);
+        assert_eq!(summary.rows[0].parent_source_key_len, 22);
+        assert!(summary.rows[0].missing_core_property_tags.is_empty());
     }
 
     #[test]
