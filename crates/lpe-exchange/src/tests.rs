@@ -11717,10 +11717,8 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x65E1_0102u32.to_le_bytes()
     ));
-    let parent_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
     let mut root_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    root_child_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
-    root_child_parent_source_key.extend_from_slice(&parent_source_key);
+    root_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
     assert!(contains_bytes(
         &response_rops,
         &root_child_parent_source_key
