@@ -92,6 +92,7 @@ pub(crate) fn canonical_message_change_number_with_attachments(
     hash = hash_bytes(hash, email.mailbox_id.as_bytes());
     hash = hash_bytes(hash, email.mailbox_role.as_bytes());
     hash = hash_bytes(hash, email.mailbox_name.as_bytes());
+    hash = hash_message_mailbox_membership(hash, email);
     hash = hash_bytes(hash, email.received_at.as_bytes());
     hash = hash_bytes(
         hash,
@@ -148,6 +149,32 @@ pub(crate) fn canonical_message_change_number_with_attachments(
         hash = hash_bytes(hash, &attachment.size_octets.to_le_bytes());
     }
     change_counter_from_hash(hash)
+}
+
+fn hash_message_mailbox_membership(mut hash: u64, email: &JmapEmail) -> u64 {
+    let mut mailbox_ids = email.mailbox_ids.iter().collect::<Vec<_>>();
+    mailbox_ids.sort();
+    for mailbox_id in mailbox_ids {
+        hash = hash_bytes(hash, mailbox_id.as_bytes());
+    }
+
+    let mut mailbox_states = email.mailbox_states.iter().collect::<Vec<_>>();
+    mailbox_states.sort_by(|left, right| {
+        left.mailbox_id
+            .cmp(&right.mailbox_id)
+            .then(left.role.cmp(&right.role))
+            .then(left.name.cmp(&right.name))
+    });
+    for state in mailbox_states {
+        hash = hash_bytes(hash, state.mailbox_id.as_bytes());
+        hash = hash_bytes(hash, state.role.as_bytes());
+        hash = hash_bytes(hash, state.name.as_bytes());
+        hash = hash_bytes(
+            hash,
+            &[state.unread as u8, state.flagged as u8, state.draft as u8],
+        );
+    }
+    hash
 }
 
 pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
@@ -376,6 +403,8 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             source_key_for_store_id(parent_folder_id)
         };
         let container_class = mapi_folder_message_class(mailbox);
+        let (content_count, content_unread_count, content_count_source) =
+            folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -389,6 +418,12 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             display_name = %mailbox.name,
             container_class,
             change_number,
+            mailbox_content_count = mailbox.total_emails,
+            mailbox_unread_count = mailbox.unread_emails,
+            computed_content_count = content_count,
+            computed_unread_count = content_unread_count,
+            content_count_source,
+            aggregate_email_count = aggregate_emails.len(),
             "rca debug mapi hierarchy row"
         );
         write_u32(&mut buffer, INCR_SYNC_CHG);
@@ -421,17 +456,13 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
         if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
-            write_i32_property(
-                &mut buffer,
-                PID_TAG_CONTENT_COUNT,
-                mailbox.total_emails.min(i32::MAX as u32) as i32,
-            );
+            write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
         }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT) {
             write_i32_property(
                 &mut buffer,
                 PID_TAG_CONTENT_UNREAD_COUNT,
-                mailbox.unread_emails.min(i32::MAX as u32) as i32,
+                content_unread_count,
             );
         }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE) {
@@ -441,7 +472,12 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
             write_i64(
                 &mut buffer,
-                local_commit_time_max(mailbox, aggregate_emails, aggregate_attachment_facts) as i64,
+                local_commit_time_max(
+                    folder_id,
+                    mailboxes,
+                    aggregate_emails,
+                    aggregate_attachment_facts,
+                ) as i64,
             );
         }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL) {
@@ -1096,6 +1132,75 @@ fn mapi_folder_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) 
         .any(|candidate| mapi_folder_parent_id_for_mailbox(candidate, mailboxes) == folder_id)
 }
 
+fn folder_content_counts(
+    folder_id: u64,
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    aggregate_emails: &[JmapEmail],
+) -> (i32, i32, &'static str) {
+    if aggregate_emails.is_empty() {
+        return (
+            mailbox.total_emails.min(i32::MAX as u32) as i32,
+            mailbox.unread_emails.min(i32::MAX as u32) as i32,
+            "mailbox",
+        );
+    }
+
+    let mut total = 0u32;
+    let mut unread = 0u32;
+    for unread_in_folder in aggregate_emails
+        .iter()
+        .filter_map(|email| email_unread_in_manifest_folder(email, folder_id, mailboxes))
+    {
+        total = total.saturating_add(1);
+        if unread_in_folder {
+            unread = unread.saturating_add(1);
+        }
+    }
+
+    (
+        total.min(i32::MAX as u32) as i32,
+        unread.min(i32::MAX as u32) as i32,
+        "snapshot",
+    )
+}
+
+fn email_unread_in_manifest_folder(
+    email: &JmapEmail,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> Option<bool> {
+    if let Some((role, _, _, _, _)) = virtual_special_folder_metadata(folder_id) {
+        if role.starts_with("__mapi_") {
+            return None;
+        }
+        return email
+            .mailbox_states
+            .iter()
+            .find(|state| state.role == role)
+            .map(|state| state.unread)
+            .or_else(|| (email.mailbox_role == role).then_some(email.unread));
+    }
+
+    mailboxes
+        .iter()
+        .find(|mailbox| {
+            let Some(mapped_folder_id) = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
+            else {
+                return false;
+            };
+            mapi_folder_id_for_mailbox(mailbox, mapped_folder_id) == folder_id
+        })
+        .and_then(|mailbox| {
+            email
+                .mailbox_states
+                .iter()
+                .find(|state| state.mailbox_id == mailbox.id)
+                .map(|state| state.unread)
+                .or_else(|| (email.mailbox_id == mailbox.id).then_some(email.unread))
+        })
+}
+
 fn hierarchy_sort_depth(
     sync_type: u8,
     sync_root_folder_id: u64,
@@ -1290,13 +1395,14 @@ fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
 }
 
 fn local_commit_time_max(
-    mailbox: &JmapMailbox,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> u64 {
     emails
         .iter()
-        .filter(|email| email.mailbox_id == mailbox.id)
+        .filter(|email| email_unread_in_manifest_folder(email, folder_id, mailboxes).is_some())
         .map(|email| {
             let attachments = attachments_for_message(email.id, attachment_facts);
             filetime_from_change_number(canonical_message_change_number_with_attachments(
@@ -1671,6 +1777,33 @@ mod tests {
             display_name: None,
         });
         assert_ne!(canonical_message_change_number(&email), baseline);
+    }
+
+    #[test]
+    fn message_change_number_tracks_per_folder_membership_state() {
+        let mut email = test_email();
+        let baseline = canonical_message_change_number(&email);
+        let archive_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+
+        email.mailbox_ids.push(archive_id);
+        email.mailbox_states.push(JmapEmailMailboxState {
+            mailbox_id: archive_id,
+            role: String::new(),
+            name: "Archive".to_string(),
+            unread: false,
+            flagged: false,
+            draft: false,
+        });
+        let with_archive = canonical_message_change_number(&email);
+        assert_ne!(with_archive, baseline);
+
+        email
+            .mailbox_states
+            .iter_mut()
+            .find(|state| state.mailbox_id == archive_id)
+            .unwrap()
+            .unread = true;
+        assert_ne!(canonical_message_change_number(&email), with_archive);
     }
 
     #[test]

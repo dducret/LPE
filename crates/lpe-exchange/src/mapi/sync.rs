@@ -485,11 +485,18 @@ pub(in crate::mapi) fn email_matches_folder(
     mailboxes: &[JmapMailbox],
 ) -> bool {
     if let Some(role) = role_for_folder_id(folder_id) {
-        return email.mailbox_role == role;
+        return email.mailbox_states.iter().any(|state| state.role == role)
+            || email.mailbox_role == role;
     }
 
     mailboxes
         .iter()
         .find(|mailbox| mapi_folder_id(mailbox) == folder_id)
-        .is_some_and(|mailbox| email.mailbox_id == mailbox.id)
+        .is_some_and(|mailbox| {
+            email
+                .mailbox_states
+                .iter()
+                .any(|state| state.mailbox_id == mailbox.id)
+                || email.mailbox_id == mailbox.id
+        })
 }

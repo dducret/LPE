@@ -2212,9 +2212,12 @@ const FX_INCR_SYNC_END: u32 = 0x4014_0003;
 const FX_INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
 const FX_INCR_SYNC_STATE_END: u32 = 0x403B_0003;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
+const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
+const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
@@ -2236,6 +2239,9 @@ struct StrictHierarchyFolderChange {
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
     display_name: String,
+    content_count: Option<u32>,
+    content_unread_count: Option<u32>,
+    local_commit_time_max: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -2245,6 +2251,9 @@ struct StrictHierarchyFolderBuilder {
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
     display_name: Option<String>,
+    content_count: Option<u32>,
+    content_unread_count: Option<u32>,
+    local_commit_time_max: Option<u64>,
 }
 
 struct StrictFastTransferProperty {
@@ -2491,6 +2500,15 @@ fn strict_record_folder_property(
         PID_TAG_DISPLAY_NAME_W => {
             folder.display_name = Some(strict_decode_utf16z(&property.value)?)
         }
+        PID_TAG_CONTENT_COUNT => {
+            folder.content_count = Some(strict_decode_u32_property(&property)?);
+        }
+        PID_TAG_CONTENT_UNREAD_COUNT => {
+            folder.content_unread_count = Some(strict_decode_u32_property(&property)?);
+        }
+        PID_TAG_LOCAL_COMMIT_TIME_MAX => {
+            folder.local_commit_time_max = Some(strict_decode_u64_property(&property)?);
+        }
         PID_TAG_SUBFOLDERS => {
             if property.value.len() != 2 {
                 return Err("PidTagSubfolders was not encoded as a two-byte PtypBoolean".into());
@@ -2502,6 +2520,30 @@ fn strict_record_folder_property(
         _ => {}
     }
     Ok(())
+}
+
+fn strict_decode_u32_property(property: &StrictFastTransferProperty) -> Result<u32, String> {
+    if property.value.len() != 4 {
+        return Err(format!(
+            "property 0x{:08x} was not encoded as a four-byte integer",
+            property.tag
+        ));
+    }
+    Ok(u32::from_le_bytes(
+        property.value.as_slice().try_into().unwrap(),
+    ))
+}
+
+fn strict_decode_u64_property(property: &StrictFastTransferProperty) -> Result<u64, String> {
+    if property.value.len() != 8 {
+        return Err(format!(
+            "property 0x{:08x} was not encoded as an eight-byte integer",
+            property.tag
+        ));
+    }
+    Ok(u64::from_le_bytes(
+        property.value.as_slice().try_into().unwrap(),
+    ))
 }
 
 fn strict_finish_folder_change(
@@ -2556,6 +2598,9 @@ fn strict_finish_folder_change(
         parent_source_key,
         change_key,
         display_name,
+        content_count: folder.content_count,
+        content_unread_count: folder.content_unread_count,
+        local_commit_time_max: folder.local_commit_time_max,
     });
     Ok(())
 }
@@ -10934,6 +10979,78 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_content_sync_uses_mailbox_state_membership() {
+    let inbox_id = Uuid::parse_str("97979797-9797-4797-9797-979797979797").unwrap();
+    let sent_id = Uuid::parse_str("98989898-9898-4898-9898-989898989898").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let sent = FakeStore::mailbox(&sent_id.to_string(), "sent", "Sent");
+    let mut email = FakeStore::email(
+        "99999999-9999-4999-9999-999999999999",
+        &sent_id.to_string(),
+        "sent",
+        "Inbox membership sync",
+    );
+    email.mailbox_ids.push(inbox_id);
+    email.mailbox_states.push(JmapEmailMailboxState {
+        mailbox_id: inbox_id,
+        role: "inbox".to_string(),
+        name: "Inbox".to_string(),
+        unread: false,
+        flagged: false,
+        draft: false,
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox, sent])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x00, 0x00, // content sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, b"Inbox membership sync"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_tell_version_accepts_fast_transfer_sync_context() {
     let message_id = "40404040-4040-4040-4040-404040404041";
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
@@ -11986,6 +12103,82 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
     assert!(decoded
         .cnset_seen
         .starts_with(&mapi_mailstore::STORE_REPLICA_GUID));
+}
+
+#[tokio::test]
+async fn mapi_over_http_hierarchy_sync_advertises_counts_from_snapshot_messages() {
+    let inbox_id = Uuid::parse_str("94949494-9494-4494-9494-949494949494").unwrap();
+    let sent_id = Uuid::parse_str("96969696-9696-4696-9696-969696969696").unwrap();
+    let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    let sent = FakeStore::mailbox(&sent_id.to_string(), "sent", "Sent");
+    let mut email = FakeStore::email(
+        "95959595-9595-4595-9595-959595959595",
+        &sent_id.to_string(),
+        "sent",
+        "Unread hierarchy count",
+    );
+    email.mailbox_ids.push(inbox_id);
+    email.mailbox_states.push(JmapEmailMailboxState {
+        mailbox_id: inbox_id,
+        role: "inbox".to_string(),
+        name: "Inbox".to_string(),
+        unread: true,
+        flagged: false,
+        draft: false,
+    });
+    let inbox_local_commit_time_max = mapi_mailstore::filetime_from_change_number(
+        mapi_mailstore::canonical_message_change_number(&email),
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox, sent])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x02, 0x00, 0x00, 0x00, // hierarchy sync
+        0x00, 0x00, // RestrictionDataSize
+        0x01, 0x00, 0x00, 0x00, // SynchronizationExtraFlags, Eid
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    let inbox = decoded
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
+        .expect("Inbox folderChange");
+    assert_eq!(inbox.content_count, Some(1));
+    assert_eq!(inbox.content_unread_count, Some(1));
+    assert_eq!(
+        inbox.local_commit_time_max,
+        Some(inbox_local_commit_time_max)
+    );
 }
 
 #[tokio::test]
