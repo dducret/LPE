@@ -2195,6 +2195,579 @@ fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     }
 }
 
+const FX_INCR_SYNC_CHG: u32 = 0x4012_0003;
+const FX_INCR_SYNC_END: u32 = 0x4014_0003;
+const FX_INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
+const FX_INCR_SYNC_STATE_END: u32 = 0x403B_0003;
+const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
+const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
+const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
+const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
+const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
+const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
+const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+const PID_TAG_MID: u32 = 0x674A_0014;
+const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
+const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
+
+#[derive(Debug)]
+struct StrictHierarchySyncStream {
+    folder_changes: Vec<StrictHierarchyFolderChange>,
+    idset_given: Vec<u8>,
+    cnset_seen: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct StrictHierarchyFolderChange {
+    source_key: Vec<u8>,
+    parent_source_key: Vec<u8>,
+    change_key: Vec<u8>,
+    display_name: String,
+}
+
+#[derive(Debug, Default)]
+struct StrictHierarchyFolderBuilder {
+    tags: Vec<u32>,
+    source_key: Option<Vec<u8>>,
+    parent_source_key: Option<Vec<u8>>,
+    change_key: Option<Vec<u8>>,
+    display_name: Option<String>,
+}
+
+struct StrictFastTransferProperty {
+    tag: u32,
+    value: Vec<u8>,
+    next_offset: usize,
+}
+
+fn strict_hierarchy_sync_transfer_from_response(
+    response_rops: &[u8],
+) -> Result<StrictHierarchySyncStream, String> {
+    let chunks = mapi_fast_transfer_chunks(response_rops);
+    if chunks.len() != 1 {
+        return Err(format!(
+            "expected one completed FastTransfer chunk, got {}",
+            chunks.len()
+        ));
+    }
+    if chunks[0].0 != 0x0003 {
+        return Err(format!(
+            "expected completed FastTransfer status 0x0003, got 0x{:04x}",
+            chunks[0].0
+        ));
+    }
+    strict_decode_hierarchy_sync_stream(&chunks[0].1)
+}
+
+fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySyncStream, String> {
+    let mut offset = 0;
+    let mut current_folder: Option<StrictHierarchyFolderBuilder> = None;
+    let mut folder_changes = Vec::new();
+    let mut seen_source_keys: Vec<Vec<u8>> = Vec::new();
+    let mut in_state = false;
+    let mut state_closed = false;
+    let mut idset_given = None;
+    let mut cnset_seen = None;
+
+    while offset < bytes.len() {
+        let tag = read_strict_u32(bytes, offset)?;
+        if strict_hierarchy_marker(tag) {
+            match tag {
+                FX_INCR_SYNC_CHG => {
+                    if in_state || state_closed {
+                        return Err(
+                            "folderChange marker appears after final ICS state starts".into()
+                        );
+                    }
+                    if let Some(folder) = current_folder.take() {
+                        strict_finish_folder_change(
+                            folder,
+                            &mut seen_source_keys,
+                            &mut folder_changes,
+                        )?;
+                    }
+                    current_folder = Some(StrictHierarchyFolderBuilder::default());
+                }
+                FX_INCR_SYNC_STATE_BEGIN => {
+                    if let Some(folder) = current_folder.take() {
+                        strict_finish_folder_change(
+                            folder,
+                            &mut seen_source_keys,
+                            &mut folder_changes,
+                        )?;
+                    }
+                    if in_state || state_closed {
+                        return Err("duplicate final ICS state boundary".into());
+                    }
+                    in_state = true;
+                }
+                FX_INCR_SYNC_STATE_END => {
+                    if !in_state {
+                        return Err("IncrSyncStateEnd without IncrSyncStateBegin".into());
+                    }
+                    if idset_given.is_none() || cnset_seen.is_none() {
+                        return Err("final ICS state is missing hierarchy IDSET or CNSET".into());
+                    }
+                    in_state = false;
+                    state_closed = true;
+                }
+                FX_INCR_SYNC_END => {
+                    if current_folder.is_some() {
+                        return Err("IncrSyncEnd appears inside an open folderChange".into());
+                    }
+                    if !state_closed {
+                        return Err("IncrSyncEnd appears before final ICS state is complete".into());
+                    }
+                    offset += 4;
+                    if offset != bytes.len() {
+                        return Err("trailing bytes after IncrSyncEnd".into());
+                    }
+                    break;
+                }
+                _ => unreachable!(),
+            }
+            offset += 4;
+            continue;
+        }
+
+        let property = strict_parse_fast_transfer_property(bytes, offset)?;
+        offset = property.next_offset;
+        if let Some(folder) = current_folder.as_mut() {
+            strict_record_folder_property(folder, property)?;
+        } else if in_state {
+            match property.tag {
+                META_TAG_IDSET_GIVEN => {
+                    if idset_given.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagIdsetGiven in final ICS state".into());
+                    }
+                }
+                META_TAG_CNSET_SEEN => {
+                    if cnset_seen.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagCnsetSeen in final ICS state".into());
+                    }
+                }
+                tag => {
+                    return Err(format!(
+                        "unexpected property 0x{tag:08x} in hierarchy final ICS state"
+                    ));
+                }
+            }
+        } else {
+            return Err(format!(
+                "property 0x{:08x} appears outside folderChange or final state",
+                property.tag
+            ));
+        }
+    }
+
+    if offset != bytes.len() {
+        return Err("FastTransfer stream ended on a partial atom".into());
+    }
+    if folder_changes.is_empty() {
+        return Err("hierarchy sync stream contained no folderChange rows".into());
+    }
+    let idset_given = idset_given.ok_or("missing MetaTagIdsetGiven")?;
+    let cnset_seen = cnset_seen.ok_or("missing MetaTagCnsetSeen")?;
+    strict_validate_replguid_globset(&idset_given)?;
+    strict_validate_replguid_globset(&cnset_seen)?;
+    for folder in &folder_changes {
+        strict_validate_source_or_change_key(&folder.source_key)?;
+        strict_validate_source_or_change_key(&folder.change_key)?;
+        if !strict_replguid_globset_contains_counter(&idset_given, &folder.source_key[16..22])? {
+            return Err(format!(
+                "final MetaTagIdsetGiven does not include folder {}",
+                folder.display_name
+            ));
+        }
+        if !strict_replguid_globset_contains_counter(&cnset_seen, &folder.change_key[16..22])? {
+            return Err(format!(
+                "final MetaTagCnsetSeen does not include folder {} change key",
+                folder.display_name
+            ));
+        }
+    }
+
+    Ok(StrictHierarchySyncStream {
+        folder_changes,
+        idset_given,
+        cnset_seen,
+    })
+}
+
+fn strict_hierarchy_marker(tag: u32) -> bool {
+    matches!(
+        tag,
+        FX_INCR_SYNC_CHG | FX_INCR_SYNC_STATE_BEGIN | FX_INCR_SYNC_STATE_END | FX_INCR_SYNC_END
+    )
+}
+
+fn strict_parse_fast_transfer_property(
+    bytes: &[u8],
+    offset: usize,
+) -> Result<StrictFastTransferProperty, String> {
+    let tag = read_strict_u32(bytes, offset)?;
+    let property_type = tag & 0x0000_FFFF;
+    let value_start = offset + 4;
+    let (value_start, value_len) = match property_type {
+        0x0002 => (value_start, 2),
+        0x0003 => (value_start, 4),
+        0x000B => {
+            let value = read_strict_slice(bytes, value_start, 2)?;
+            if value != [0, 0] && value != [1, 0] {
+                return Err(format!(
+                    "PtypBoolean property 0x{tag:08x} has invalid FastTransfer value"
+                ));
+            }
+            (value_start, 2)
+        }
+        0x0014 | 0x0040 => (value_start, 8),
+        0x001E | 0x001F | 0x0102 => {
+            let len = read_strict_u32(bytes, value_start)? as usize;
+            let value_start = value_start + 4;
+            if property_type == 0x001E {
+                let value = read_strict_slice(bytes, value_start, len)?;
+                if value.is_empty() || value.last() != Some(&0) {
+                    return Err(format!(
+                        "PtypString8 property 0x{tag:08x} is not null-terminated"
+                    ));
+                }
+            }
+            if property_type == 0x001F {
+                let value = read_strict_slice(bytes, value_start, len)?;
+                if value.len() < 2 || value.len() % 2 != 0 || value[value.len() - 2..] != [0, 0] {
+                    return Err(format!("PtypString property 0x{tag:08x} is not UTF-16Z"));
+                }
+            }
+            (value_start, len)
+        }
+        _ => {
+            return Err(format!(
+                "unsupported FastTransfer property type in 0x{tag:08x}"
+            ))
+        }
+    };
+    let value = read_strict_slice(bytes, value_start, value_len)?.to_vec();
+    Ok(StrictFastTransferProperty {
+        tag,
+        value,
+        next_offset: value_start + value_len,
+    })
+}
+
+fn strict_record_folder_property(
+    folder: &mut StrictHierarchyFolderBuilder,
+    property: StrictFastTransferProperty,
+) -> Result<(), String> {
+    if property.tag == PID_TAG_MID {
+        return Err("message change property appears inside hierarchy folderChange".into());
+    }
+    if folder.tags.contains(&property.tag) {
+        return Err(format!(
+            "duplicate property 0x{:08x} inside folderChange",
+            property.tag
+        ));
+    }
+    folder.tags.push(property.tag);
+    match property.tag {
+        PID_TAG_PARENT_SOURCE_KEY => folder.parent_source_key = Some(property.value),
+        PID_TAG_SOURCE_KEY => folder.source_key = Some(property.value),
+        PID_TAG_CHANGE_KEY => folder.change_key = Some(property.value),
+        PID_TAG_DISPLAY_NAME_W => {
+            folder.display_name = Some(strict_decode_utf16z(&property.value)?)
+        }
+        PID_TAG_SUBFOLDERS => {
+            if property.value.len() != 2 {
+                return Err("PidTagSubfolders was not encoded as a two-byte PtypBoolean".into());
+            }
+        }
+        PID_TAG_CONTAINER_CLASS_W => {
+            let _ = strict_decode_utf16z(&property.value)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn strict_finish_folder_change(
+    folder: StrictHierarchyFolderBuilder,
+    seen_source_keys: &mut Vec<Vec<u8>>,
+    folder_changes: &mut Vec<StrictHierarchyFolderChange>,
+) -> Result<(), String> {
+    let required_prefix = [
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_DISPLAY_NAME_W,
+    ];
+    if folder.tags.len() < required_prefix.len()
+        || folder.tags[..required_prefix.len()] != required_prefix
+    {
+        return Err(format!(
+            "folderChange required property prefix was not in documented order: {:x?}",
+            folder.tags
+        ));
+    }
+    let source_key = folder
+        .source_key
+        .ok_or("folderChange missing PidTagSourceKey")?;
+    let parent_source_key = folder
+        .parent_source_key
+        .ok_or("folderChange missing PidTagParentSourceKey")?;
+    let change_key = folder
+        .change_key
+        .ok_or("folderChange missing PidTagChangeKey")?;
+    let display_name = folder
+        .display_name
+        .ok_or("folderChange missing PidTagDisplayName")?;
+    strict_validate_source_or_change_key(&source_key)?;
+    strict_validate_source_or_change_key(&change_key)?;
+    if !parent_source_key.is_empty() {
+        strict_validate_source_or_change_key(&parent_source_key)?;
+        if !seen_source_keys
+            .iter()
+            .any(|source_key| source_key.as_slice() == parent_source_key.as_slice())
+        {
+            return Err(format!(
+                "folderChange for {display_name} appeared before its parent folder"
+            ));
+        }
+    }
+    seen_source_keys.push(source_key.clone());
+    folder_changes.push(StrictHierarchyFolderChange {
+        source_key,
+        parent_source_key,
+        change_key,
+        display_name,
+    });
+    Ok(())
+}
+
+fn strict_decode_utf16z(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() < 2 || bytes.len() % 2 != 0 || bytes[bytes.len() - 2..] != [0, 0] {
+        return Err("UTF-16 property is not null-terminated".into());
+    }
+    let units = bytes[..bytes.len() - 2]
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    String::from_utf16(&units).map_err(|_| "UTF-16 property contains invalid data".into())
+}
+
+fn strict_validate_source_or_change_key(value: &[u8]) -> Result<(), String> {
+    if value.len() != 22 || !value.starts_with(&mapi_mailstore::STORE_REPLICA_GUID) {
+        return Err("source/change key is not a 22-byte REPLGUID-scoped XID".into());
+    }
+    if value[16..22] == [0; 6] {
+        return Err("source/change key contains a zero GLOBCNT".into());
+    }
+    Ok(())
+}
+
+fn strict_validate_replguid_globset(value: &[u8]) -> Result<(), String> {
+    let _ = strict_replguid_globset_ranges(value)?;
+    Ok(())
+}
+
+fn strict_replguid_globset_contains_counter(value: &[u8], counter: &[u8]) -> Result<bool, String> {
+    let counter = strict_globcnt_to_u64(counter)?;
+    Ok(strict_replguid_globset_ranges(value)?
+        .into_iter()
+        .any(|(low, high)| low <= counter && counter <= high))
+}
+
+fn strict_replguid_globset_ranges(value: &[u8]) -> Result<Vec<(u64, u64)>, String> {
+    if value.len() < 17 || !value.starts_with(&mapi_mailstore::STORE_REPLICA_GUID) {
+        return Err("REPLGUID-based IDSET/CNSET is missing the store replica GUID".into());
+    }
+    let mut ranges = Vec::new();
+    let mut offset = 16;
+    loop {
+        let command = *value
+            .get(offset)
+            .ok_or("REPLGUID-based IDSET/CNSET missing end command")?;
+        offset += 1;
+        match command {
+            0x00 => {
+                if offset != value.len() {
+                    return Err("trailing bytes after GLOBSET end command".into());
+                }
+                return Ok(ranges);
+            }
+            0x52 => {
+                let low = strict_globcnt_to_u64(read_strict_slice(value, offset, 6)?)?;
+                offset += 6;
+                let high = strict_globcnt_to_u64(read_strict_slice(value, offset, 6)?)?;
+                offset += 6;
+                if low == 0 || high < low {
+                    return Err("invalid GLOBSET range".into());
+                }
+                ranges.push((low, high));
+            }
+            _ => return Err(format!("unsupported GLOBSET command 0x{command:02x}")),
+        }
+    }
+}
+
+fn strict_globcnt_to_u64(bytes: &[u8]) -> Result<u64, String> {
+    if bytes.len() != 6 {
+        return Err("GLOBCNT must be six bytes".into());
+    }
+    Ok(bytes
+        .iter()
+        .fold(0u64, |value, byte| (value << 8) | u64::from(*byte)))
+}
+
+fn read_strict_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
+    let slice = read_strict_slice(bytes, offset, 4)?;
+    Ok(u32::from_le_bytes(slice.try_into().unwrap()))
+}
+
+fn read_strict_slice(bytes: &[u8], offset: usize, len: usize) -> Result<&[u8], String> {
+    bytes
+        .get(offset..offset.saturating_add(len))
+        .ok_or_else(|| format!("FastTransfer atom at offset {offset} overruns stream"))
+}
+
+fn strict_test_xid(counter: u64) -> Vec<u8> {
+    let mut value = mapi_mailstore::STORE_REPLICA_GUID.to_vec();
+    value.extend_from_slice(&globcnt_bytes(counter));
+    value
+}
+
+fn strict_test_replguid_globset(counters: &[u64]) -> Vec<u8> {
+    let mut value = mapi_mailstore::STORE_REPLICA_GUID.to_vec();
+    for counter in counters {
+        value.push(0x52);
+        value.extend_from_slice(&globcnt_bytes(*counter));
+        value.extend_from_slice(&globcnt_bytes(*counter));
+    }
+    value.push(0);
+    value
+}
+
+fn strict_push_binary_property(bytes: &mut Vec<u8>, tag: u32, value: &[u8]) {
+    bytes.extend_from_slice(&tag.to_le_bytes());
+    bytes.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(value);
+}
+
+fn strict_push_i32_property(bytes: &mut Vec<u8>, tag: u32, value: i32) {
+    bytes.extend_from_slice(&tag.to_le_bytes());
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn strict_push_i64_property(bytes: &mut Vec<u8>, tag: u32, value: i64) {
+    bytes.extend_from_slice(&tag.to_le_bytes());
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn strict_push_utf16_property(bytes: &mut Vec<u8>, tag: u32, value: &str) {
+    bytes.extend_from_slice(&tag.to_le_bytes());
+    let value = utf16z(value);
+    bytes.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(&value);
+}
+
+fn strict_push_folder_change(
+    bytes: &mut Vec<u8>,
+    parent_source_key: &[u8],
+    source_counter: u64,
+    change_counter: u64,
+    name: &str,
+    boolean_width: usize,
+) {
+    bytes.extend_from_slice(&FX_INCR_SYNC_CHG.to_le_bytes());
+    strict_push_binary_property(bytes, PID_TAG_PARENT_SOURCE_KEY, parent_source_key);
+    strict_push_binary_property(bytes, PID_TAG_SOURCE_KEY, &strict_test_xid(source_counter));
+    strict_push_i64_property(bytes, PID_TAG_LAST_MODIFICATION_TIME, 1);
+    strict_push_binary_property(bytes, PID_TAG_CHANGE_KEY, &strict_test_xid(change_counter));
+    strict_push_binary_property(
+        bytes,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        &strict_test_xid(change_counter),
+    );
+    strict_push_utf16_property(bytes, PID_TAG_DISPLAY_NAME_W, name);
+    strict_push_i32_property(bytes, 0x3602_0003, 0);
+    bytes.extend_from_slice(&PID_TAG_SUBFOLDERS.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    if boolean_width > 2 {
+        bytes.extend(std::iter::repeat_n(0, boolean_width - 2));
+    }
+    strict_push_utf16_property(bytes, PID_TAG_CONTAINER_CLASS_W, "IPF.Note");
+}
+
+fn strict_push_final_hierarchy_state(bytes: &mut Vec<u8>, source_ids: &[u64], changes: &[u64]) {
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_BEGIN.to_le_bytes());
+    strict_push_binary_property(bytes, META_TAG_IDSET_GIVEN, &strict_test_replguid_globset(source_ids));
+    strict_push_binary_property(bytes, META_TAG_CNSET_SEEN, &strict_test_replguid_globset(changes));
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
+    bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_child_before_parent() {
+    let parent_source_key = strict_test_xid(5);
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &parent_source_key, 6, 200, "Archive", 2);
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    strict_push_final_hierarchy_state(&mut bytes, &[5, 6], &[100, 200]);
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("before its parent"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_misaligned_boolean_lexical_size() {
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 4);
+    strict_push_final_hierarchy_state(&mut bytes, &[5], &[100]);
+
+    assert!(strict_decode_hierarchy_sync_stream(&bytes).is_err());
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_missing_final_cnset() {
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_BEGIN.to_le_bytes());
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_IDSET_GIVEN,
+        &strict_test_replguid_globset(&[5]),
+    );
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
+    bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("missing hierarchy IDSET or CNSET"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_folder_change_after_final_state() {
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_BEGIN.to_le_bytes());
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_IDSET_GIVEN,
+        &strict_test_replguid_globset(&[5]),
+    );
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_CNSET_SEEN,
+        &strict_test_replguid_globset(&[100]),
+    );
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
+    strict_push_folder_change(&mut bytes, &[], 6, 200, "Late", 2);
+    bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("after final ICS state"));
+}
+
 fn mapi_last_binary_property(bytes: &[u8], property_tag: u32) -> Option<&[u8]> {
     let tag = property_tag.to_le_bytes();
     let offset = bytes.windows(tag.len()).rposition(|window| window == tag)?;
@@ -11280,6 +11853,69 @@ async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Archive")));
     assert!(!contains_bytes(&response_rops, &utf16z("Projects")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
+    let parent_id = Uuid::parse_str("92929292-9292-4292-9292-929292929292").unwrap();
+    let child_id = Uuid::parse_str("93939393-9393-4393-9393-939393939393").unwrap();
+    let parent = FakeStore::mailbox(&parent_id.to_string(), "custom", "Projects");
+    let mut child = FakeStore::mailbox(&child_id.to_string(), "custom", "Archive");
+    child.parent_id = Some(parent_id);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![parent, child])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    assert_eq!(decoded.folder_changes.len(), 13);
+    let names = decoded
+        .folder_changes
+        .iter()
+        .map(|folder| folder.display_name.as_str())
+        .collect::<Vec<_>>();
+    let projects = names
+        .iter()
+        .position(|name| *name == "Projects")
+        .expect("Projects folderChange");
+    let archive = names
+        .iter()
+        .position(|name| *name == "Archive")
+        .expect("Archive folderChange");
+    assert!(projects < archive);
+    assert!(decoded.folder_changes[archive]
+        .parent_source_key
+        .eq(&decoded.folder_changes[projects].source_key));
+    assert!(decoded
+        .idset_given
+        .starts_with(&mapi_mailstore::STORE_REPLICA_GUID));
+    assert!(decoded
+        .cnset_seen
+        .starts_with(&mapi_mailstore::STORE_REPLICA_GUID));
 }
 
 #[tokio::test]
