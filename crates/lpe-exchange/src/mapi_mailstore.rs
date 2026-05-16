@@ -368,6 +368,22 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         } else {
             source_key_for_store_id(parent_folder_id)
         };
+        let container_class = mapi_folder_message_class(mailbox);
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            request_rop_id = "0x70",
+            sync_type = format_args!("0x{sync_type:02x}"),
+            folder_id = format_args!("0x{folder_id:016x}"),
+            parent_folder_id = format_args!("0x{parent_folder_id:016x}"),
+            source_key_len = source_key.len(),
+            parent_source_key_len = parent_source_key.len(),
+            display_name = %mailbox.name,
+            container_class,
+            change_number,
+            "rca debug mapi hierarchy row"
+        );
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
@@ -444,11 +460,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             PID_TAG_SUBFOLDERS,
             mapi_folder_has_subfolders(mailbox, parent_context_mailboxes),
         );
-        write_utf16_property(
-            &mut buffer,
-            PID_TAG_CONTAINER_CLASS_W,
-            mapi_folder_message_class(mailbox),
-        );
+        write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
     }
 
     let mut messages = emails.iter().collect::<Vec<_>>();

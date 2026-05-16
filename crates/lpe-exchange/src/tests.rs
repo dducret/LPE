@@ -2701,8 +2701,16 @@ fn strict_push_folder_change(
 
 fn strict_push_final_hierarchy_state(bytes: &mut Vec<u8>, source_ids: &[u64], changes: &[u64]) {
     bytes.extend_from_slice(&FX_INCR_SYNC_STATE_BEGIN.to_le_bytes());
-    strict_push_binary_property(bytes, META_TAG_IDSET_GIVEN, &strict_test_replguid_globset(source_ids));
-    strict_push_binary_property(bytes, META_TAG_CNSET_SEEN, &strict_test_replguid_globset(changes));
+    strict_push_binary_property(
+        bytes,
+        META_TAG_IDSET_GIVEN,
+        &strict_test_replguid_globset(source_ids),
+    );
+    strict_push_binary_property(
+        bytes,
+        META_TAG_CNSET_SEEN,
+        &strict_test_replguid_globset(changes),
+    );
     bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
     bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
 }
@@ -2766,6 +2774,58 @@ fn strict_hierarchy_decoder_rejects_folder_change_after_final_state() {
 
     let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
     assert!(error.contains("after final ICS state"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_duplicate_folder_property() {
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    strict_push_utf16_property(&mut bytes, PID_TAG_DISPLAY_NAME_W, "Duplicate");
+    strict_push_final_hierarchy_state(&mut bytes, &[5], &[100]);
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("duplicate property"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_message_change_in_hierarchy_stream() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&FX_INCR_SYNC_CHG.to_le_bytes());
+    strict_push_i64_property(&mut bytes, PID_TAG_MID, 123);
+    strict_push_final_hierarchy_state(&mut bytes, &[], &[]);
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("message change property"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_final_state_missing_folder_id() {
+    let mut bytes = Vec::new();
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    strict_push_final_hierarchy_state(&mut bytes, &[], &[100]);
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("does not include folder"));
+}
+
+#[test]
+fn strict_hierarchy_decoder_rejects_non_replguid_final_state() {
+    let mut bytes = Vec::new();
+    let mut wrong_idset = vec![0xAA; 16];
+    wrong_idset.push(0);
+    strict_push_folder_change(&mut bytes, &[], 5, 100, "Projects", 2);
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_BEGIN.to_le_bytes());
+    strict_push_binary_property(&mut bytes, META_TAG_IDSET_GIVEN, &wrong_idset);
+    strict_push_binary_property(
+        &mut bytes,
+        META_TAG_CNSET_SEEN,
+        &strict_test_replguid_globset(&[100]),
+    );
+    bytes.extend_from_slice(&FX_INCR_SYNC_STATE_END.to_le_bytes());
+    bytes.extend_from_slice(&FX_INCR_SYNC_END.to_le_bytes());
+
+    let error = strict_decode_hierarchy_sync_stream(&bytes).unwrap_err();
+    assert!(error.contains("missing the store replica GUID"));
 }
 
 fn mapi_last_binary_property(bytes: &[u8], property_tag: u32) -> Option<&[u8]> {
