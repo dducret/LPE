@@ -568,7 +568,10 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
     write_u32(&mut response, 0);
     let columns = request.property_tags();
     let row = match object {
-        Some(MapiObject::Logon) => serialize_logon_row(principal, &columns),
+        Some(MapiObject::Logon) => {
+            write_logon_property_row(&mut response, principal, &columns);
+            return response;
+        }
         Some(MapiObject::Message {
             folder_id,
             message_id,

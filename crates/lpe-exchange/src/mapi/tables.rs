@@ -1527,6 +1527,34 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
     response.extend_from_slice(values);
 }
 
+pub(in crate::mapi) fn write_logon_property_row(
+    response: &mut Vec<u8>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) {
+    if columns
+        .iter()
+        .all(|column| logon_property_value(principal, *column).is_some())
+    {
+        write_standard_property_row(response, &serialize_logon_row(principal, columns));
+        return;
+    }
+
+    response.push(1);
+    for column in columns {
+        match logon_property_value(principal, *column) {
+            Some(value) => {
+                response.push(0);
+                write_mapi_value(response, *column, &value);
+            }
+            None => {
+                response.push(0x0A);
+                write_u32(response, ROP_ERROR_NOT_SUPPORTED);
+            }
+        }
+    }
+}
+
 pub(in crate::mapi) fn serialize_logon_row(
     principal: &AccountPrincipal,
     columns: &[u32],
