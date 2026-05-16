@@ -350,6 +350,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             right,
             parent_context_mailboxes,
         ))
+        .then(hierarchy_folder_sort_order(left).cmp(&hierarchy_folder_sort_order(right)))
         .then(left.name.cmp(&right.name))
         .then(left.id.cmp(&right.id))
     });
@@ -614,6 +615,12 @@ fn hierarchy_sort_depth(
         depth = depth.saturating_add(1);
     }
     depth
+}
+
+fn hierarchy_folder_sort_order(mailbox: &JmapMailbox) -> i32 {
+    virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
+        .map(|(_, _, sort_order, _, _)| sort_order)
+        .unwrap_or(i32::MAX)
 }
 
 fn virtual_special_mailbox_id(folder_id: u64) -> Uuid {

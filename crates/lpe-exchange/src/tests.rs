@@ -11047,6 +11047,25 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("Deleted Items")));
     assert!(contains_bytes(&response_rops, &utf16z("Contacts")));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    let mut folder_offsets = Vec::new();
+    for name in [
+        "Inbox",
+        "Drafts",
+        "Outbox",
+        "Sent Items",
+        "Deleted Items",
+        "Contacts",
+        "Calendar",
+    ] {
+        let name_bytes = utf16z(name);
+        folder_offsets.push(
+            response_rops
+                .windows(name_bytes.len())
+                .position(|window| window == name_bytes.as_slice())
+                .unwrap(),
+        );
+    }
+    assert!(folder_offsets.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Contact")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
     assert!(!contains_bytes(
