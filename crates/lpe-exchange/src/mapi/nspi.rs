@@ -1,4 +1,4 @@
-use super::properties::{write_ascii_z, write_multi_string, write_multi_string8, write_rop_binary};
+use super::properties::{write_ascii_z, write_multi_string, write_multi_string8};
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
@@ -739,6 +739,7 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
     tags: &[u32],
 ) -> Vec<u8> {
     let mut values = Vec::new();
+    write_u32(&mut values, 0);
     write_u32(&mut values, tags.len() as u32);
     for property_tag in tags {
         write_address_book_tagged_property_value(
@@ -908,6 +909,7 @@ pub(in crate::mapi) fn write_address_book_tagged_property_value(
     value: &NspiValue<'_>,
 ) {
     write_u32(body, property_tag);
+    write_u32(body, 0);
     write_address_book_property_value(body, property_tag, value);
 }
 
@@ -935,12 +937,12 @@ pub(in crate::mapi) fn write_address_book_property_value(
         }
         (0x101E, NspiValue::MultiString(values)) => write_multi_string8(body, values),
         (0x101F, NspiValue::MultiString(values)) => write_multi_string(body, values),
-        (0x0102, NspiValue::Binary(value)) => write_rop_binary(body, value),
+        (0x0102, NspiValue::Binary(value)) => write_nspi_binary(body, value),
         (0x0003, NspiValue::U32(value)) => write_u32(body, *value),
         (0x0003, _) => write_u32(body, 0),
         (0x101E | 0x101F, _) => write_u32(body, 0),
         (_, NspiValue::U32(value)) => write_u32(body, *value),
-        (_, NspiValue::Binary(value)) => write_rop_binary(body, value),
+        (_, NspiValue::Binary(value)) => write_nspi_binary(body, value),
         (_, NspiValue::MultiString(values)) => write_multi_string(body, values),
         (_, NspiValue::String(value)) => {
             body.push(0xFF);
@@ -951,6 +953,12 @@ pub(in crate::mapi) fn write_address_book_property_value(
             write_utf16z(body, value);
         }
     }
+}
+
+fn write_nspi_binary(body: &mut Vec<u8>, value: &[u8]) {
+    let len = value.len().min(u32::MAX as usize);
+    write_u32(body, len as u32);
+    body.extend_from_slice(&value[..len]);
 }
 
 pub(in crate::mapi) fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {

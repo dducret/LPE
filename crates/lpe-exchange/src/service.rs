@@ -49,6 +49,7 @@ const MAPI_EMSMDB_TRAILING_PATH: &str = "/mapi/emsmdb/";
 const MAPI_NSPI_PATH: &str = "/mapi/nspi";
 const MAPI_NSPI_TRAILING_PATH: &str = "/mapi/nspi/";
 const RPC_PROXY_PATH: &str = "/rpc/rpcproxy.dll";
+const RPC_PROXY_OUTLOOK_CANONICAL_PATH: &str = "/RPC/RpcProxy.dll";
 const RPC_PROXY_COMPAT_STATUS: &str = "x-lpe-rpc-proxy-status";
 const RPC_PROXY_ECHO_STATUS: &str = "echo";
 const RPC_PROXY_IN_CHANNEL_STATUS: &str = "in-channel-open";
@@ -128,7 +129,7 @@ fn ews_pull_event_journal() -> &'static Mutex<HashMap<String, EwsPullEventJourna
 }
 
 pub fn router() -> Router<Storage> {
-    Router::new()
+    let router = Router::new()
         .route(
             EWS_PATH,
             on(MethodFilter::OPTIONS, options_handler).post(post_handler),
@@ -152,8 +153,14 @@ pub fn router() -> Router<Storage> {
         .route(
             MAPI_NSPI_TRAILING_PATH,
             on(MethodFilter::OPTIONS, mapi_options_handler).post(mapi_nspi_post_handler),
-        )
-        .route(RPC_PROXY_PATH, any(rpc_proxy_handler))
+        );
+    rpc_proxy_paths().into_iter().fold(router, |router, path| {
+        router.route(path, any(rpc_proxy_handler))
+    })
+}
+
+fn rpc_proxy_paths() -> [&'static str; 2] {
+    [RPC_PROXY_PATH, RPC_PROXY_OUTLOOK_CANONICAL_PATH]
 }
 
 #[derive(Clone)]
@@ -9184,6 +9191,20 @@ fn rpc_proxy_auth_challenge_response(message: &str) -> Response {
         HeaderValue::from_static("Basic realm=\"LPE RPC\""),
     );
     response
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::{rpc_proxy_paths, RPC_PROXY_OUTLOOK_CANONICAL_PATH, RPC_PROXY_PATH};
+
+    #[test]
+    fn rpc_proxy_routes_include_outlook_canonical_case() {
+        let paths = rpc_proxy_paths();
+
+        assert!(paths.contains(&RPC_PROXY_PATH));
+        assert!(paths.contains(&RPC_PROXY_OUTLOOK_CANONICAL_PATH));
+        assert_eq!(RPC_PROXY_OUTLOOK_CANONICAL_PATH, "/RPC/RpcProxy.dll");
+    }
 }
 
 pub(crate) fn error_response(error: &anyhow::Error) -> Response {

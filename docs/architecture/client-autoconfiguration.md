@@ -13,7 +13,7 @@
 - Publish `ActiveSync` only for clients that support `Exchange ActiveSync`.
 - Do not advertise `ActiveSync` as the Outlook for Windows desktop Exchange route.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
-- Publish `mapiHttp` only when the MAPI profile, sync, reconnect, request-id replay, Outlook 2016 / 2019 cached-mode lab, live RCA, and real Outlook desktop profile-creation gates pass and both `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true. A client `X-MapiHttpCapability` probe never publishes MAPI by itself; it suppresses legacy `EXCH` / `EXPR` metadata only when the gated `mapiHttp` response is actually being published.
+- Publish `mapiHttp` only when the MAPI profile, sync, reconnect, request-id replay, Outlook 2016 / 2019 cached-mode lab, live RCA, and real Outlook desktop profile-creation gates pass and both `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true. A client `X-MapiHttpCapability` probe must be a positive integer supported by `LPE`; it never publishes MAPI by itself and suppresses legacy `EXCH` / `EXPR` metadata only when the gated `mapiHttp` response is actually being published.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.
 - Publish top-level `EXPR` only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true and `/rpc/rpcproxy.dll` is implemented and exposed.
 - Publish SOAP `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is true and an `EWS` or `MAPI` surface is enabled.

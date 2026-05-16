@@ -12,6 +12,8 @@ use serde_json::json;
 use std::env;
 use tracing::{info, warn};
 
+const MAPI_HTTP_AUTODISCOVER_VERSION: u32 = 1;
+
 pub fn router() -> Router<Storage> {
     Router::new()
         .route(
@@ -239,7 +241,7 @@ impl PublishedEndpoints {
         let mapi_http_requested = headers
             .get("x-mapihttpcapability")
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| !value.trim().is_empty());
+            .and_then(valid_mapi_http_capability);
         let legacy_exch_autodiscover_enabled = env_flag("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
         let legacy_expr_autodiscover_enabled = env_flag("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
         let rpc_proxy_enabled = env_flag("LPE_AUTOCONFIG_RPC_PROXY_ENABLED");
@@ -267,7 +269,7 @@ impl PublishedEndpoints {
             ews_url,
             mapi_enabled,
             outlook_interop_gate_passed,
-            mapi_http_requested,
+            mapi_http_requested: mapi_http_requested.is_some(),
             legacy_exch_autodiscover_enabled,
             legacy_expr_autodiscover_enabled,
             rpc_proxy_enabled,
@@ -336,6 +338,11 @@ fn render_autodiscover_json(
         }))
         .into_response(),
     )
+}
+
+fn valid_mapi_http_capability(value: &str) -> Option<u32> {
+    let capability = value.trim().parse::<u32>().ok()?;
+    (capability >= MAPI_HTTP_AUTODISCOVER_VERSION).then_some(capability)
 }
 
 fn render_thunderbird_autoconfig(config: &PublishedEndpoints) -> String {
@@ -1564,6 +1571,39 @@ mod tests {
 
         std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
         std::env::remove_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED");
+    }
+
+    #[test]
+    fn invalid_mapi_http_capability_header_is_ignored() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LPE_AUTOCONFIG_MAPI_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED", "true");
+        std::env::set_var("LPE_AUTOCONFIG_RPC_PROXY_ENABLED", "true");
+        std::env::remove_var("LPE_PUBLIC_HOSTNAME");
+        std::env::remove_var("LPE_PUBLIC_SCHEME");
+
+        for value in ["", "0", "not-a-version"] {
+            let mut headers = HeaderMap::new();
+            headers.insert("host", "mail.example.test".parse().unwrap());
+            if !value.is_empty() {
+                headers.insert("x-mapihttpcapability", value.parse().unwrap());
+            }
+            let config = PublishedEndpoints::from_headers(&headers, Some("alice@example.test"));
+            let xml = render_outlook_autodiscover(&config, Some("alice@example.test"));
+
+            assert!(!config.mapi_http_requested);
+            assert!(!xml.contains("<Protocol Type=\"mapiHttp\" Version=\"1\">"));
+            assert!(xml.contains("      <Protocol>\n        <Type>EXCH</Type>"));
+            assert!(xml.contains("      <Protocol>\n        <Type>EXPR</Type>"));
+        }
+
+        std::env::remove_var("LPE_AUTOCONFIG_MAPI_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED");
+        std::env::remove_var("LPE_AUTOCONFIG_RPC_PROXY_ENABLED");
     }
 
     #[test]
