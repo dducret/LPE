@@ -1594,7 +1594,7 @@ pub(in crate::mapi) fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u3
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &mailbox.name),
             PID_TAG_FOLDER_ID => write_u64(&mut row, mapi_folder_id(mailbox)),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, mapi_parent_folder_id(mailbox)),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(0),
@@ -2047,6 +2047,13 @@ pub(in crate::mapi) fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
             .expect("MAPI folder identity mapping missing"),
     }
+}
+
+fn mapi_parent_folder_id(mailbox: &JmapMailbox) -> u64 {
+    mailbox
+        .parent_id
+        .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
+        .unwrap_or(IPM_SUBTREE_FOLDER_ID)
 }
 
 pub(in crate::mapi) fn mapi_message_id(email: &JmapEmail) -> u64 {

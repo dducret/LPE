@@ -155,8 +155,12 @@ pub(in crate::mapi) fn sync_mailboxes_for(
     sync_type: u8,
     mailboxes: &[JmapMailbox],
 ) -> Vec<JmapMailbox> {
-    if sync_type == 0x02 && is_root_hierarchy_folder(folder_id) {
-        let mut rows = mailboxes.to_vec();
+    if sync_type == 0x02 {
+        let mut rows = mailboxes
+            .iter()
+            .filter(|mailbox| mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes))
+            .cloned()
+            .collect::<Vec<_>>();
         let mut folder_ids = rows.iter().map(mapi_folder_id).collect::<HashSet<_>>();
         for special_folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
             if !special_folder_is_in_sync_scope(special_folder_id, folder_id) {
@@ -175,6 +179,60 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         .cloned()
         .into_iter()
         .collect()
+}
+
+fn mailbox_is_hierarchy_descendant(
+    mailbox: &JmapMailbox,
+    sync_root_folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> bool {
+    let mut parent_folder_id = mailbox_parent_folder_id(mailbox, mailboxes);
+    let mut visited = HashSet::new();
+    while parent_folder_id != 0 && visited.insert(parent_folder_id) {
+        if parent_folder_id == sync_root_folder_id {
+            return true;
+        }
+        parent_folder_id = parent_folder_id_for_folder_id(parent_folder_id, mailboxes).unwrap_or(0);
+    }
+    false
+}
+
+fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
+    match mailbox.role.as_str() {
+        "__mapi_ipm_subtree"
+        | "__mapi_deferred_action"
+        | "__mapi_spooler_queue"
+        | "__mapi_common_views"
+        | "__mapi_schedule"
+        | "__mapi_search"
+        | "__mapi_views"
+        | "__mapi_shortcuts" => ROOT_FOLDER_ID,
+        _ => mailbox
+            .parent_id
+            .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
+            .map(mapi_folder_id)
+            .unwrap_or(IPM_SUBTREE_FOLDER_ID),
+    }
+}
+
+fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> Option<u64> {
+    match folder_id {
+        IPM_SUBTREE_FOLDER_ID
+        | DEFERRED_ACTION_FOLDER_ID
+        | SPOOLER_QUEUE_FOLDER_ID
+        | COMMON_VIEWS_FOLDER_ID
+        | SCHEDULE_FOLDER_ID
+        | SEARCH_FOLDER_ID
+        | VIEWS_FOLDER_ID
+        | SHORTCUTS_FOLDER_ID => Some(ROOT_FOLDER_ID),
+        INBOX_FOLDER_ID | DRAFTS_FOLDER_ID | OUTBOX_FOLDER_ID | SENT_FOLDER_ID
+        | TRASH_FOLDER_ID | CONTACTS_FOLDER_ID | CALENDAR_FOLDER_ID => Some(IPM_SUBTREE_FOLDER_ID),
+        ROOT_FOLDER_ID => None,
+        _ => mailboxes
+            .iter()
+            .find(|mailbox| mapi_folder_id(mailbox) == folder_id)
+            .map(|mailbox| mailbox_parent_folder_id(mailbox, mailboxes)),
+    }
 }
 
 fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: u64) -> bool {

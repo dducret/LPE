@@ -11059,6 +11059,87 @@ async fn mapi_over_http_hierarchy_sync_includes_advertised_ipm_special_folders()
 }
 
 #[tokio::test]
+async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
+    let parent_id = Uuid::parse_str("90909090-9090-4090-9090-909090909090").unwrap();
+    let child_id = Uuid::parse_str("91919191-9191-4191-9191-919191919191").unwrap();
+    let parent = FakeStore::mailbox(&parent_id.to_string(), "custom", "Projects");
+    let mut child = FakeStore::mailbox(&child_id.to_string(), "custom", "Archive");
+    child.parent_id = Some(parent_id);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![parent.clone(), child.clone()])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((6, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Projects")));
+    assert!(contains_bytes(&response_rops, &utf16z("Archive")));
+    let projects_offset = response_rops
+        .windows(utf16z("Projects").len())
+        .position(|window| window == utf16z("Projects"))
+        .unwrap();
+    let archive_offset = response_rops
+        .windows(utf16z("Archive").len())
+        .position(|window| window == utf16z("Archive"))
+        .unwrap();
+    assert!(projects_offset < archive_offset);
+    let mut child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
+    let parent_source_key = mapi_mailstore::source_key_for_mailbox_folder(&parent);
+    child_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
+    child_parent_source_key.extend_from_slice(&parent_source_key);
+    assert!(contains_bytes(&response_rops, &child_parent_source_key));
+
+    let parent_folder_id = crate::mapi::identity::mapped_mapi_object_id(&parent_id).unwrap();
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut child_scope_headers = mapi_headers("Execute");
+    child_scope_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut child_scope_rops = Vec::new();
+    append_rop_open_folder(&mut child_scope_rops, 0, 1, parent_folder_id);
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut child_scope_rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &child_scope_headers,
+            &execute_body(&rop_buffer(&child_scope_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Archive")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Projects")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");

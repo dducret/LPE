@@ -301,6 +301,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         attachment_facts,
         deleted_message_ids,
         mailboxes,
+        mailboxes,
         emails,
         attachment_facts,
         emails,
@@ -320,6 +321,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
     deleted_message_ids: &[u64],
+    parent_context_mailboxes: &[JmapMailbox],
     state_mailboxes: &[JmapMailbox],
     state_emails: &[JmapEmail],
     state_attachment_facts: &[MessageAttachmentSyncFacts],
@@ -336,14 +338,24 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     };
     let mut folders = mailboxes.iter().collect::<Vec<_>>();
     folders.sort_by(|left, right| {
-        hierarchy_sort_depth(sync_type, sync_root_folder_id, left)
-            .cmp(&hierarchy_sort_depth(sync_type, sync_root_folder_id, right))
-            .then(left.name.cmp(&right.name))
-            .then(left.id.cmp(&right.id))
+        hierarchy_sort_depth(
+            sync_type,
+            sync_root_folder_id,
+            left,
+            parent_context_mailboxes,
+        )
+        .cmp(&hierarchy_sort_depth(
+            sync_type,
+            sync_root_folder_id,
+            right,
+            parent_context_mailboxes,
+        ))
+        .then(left.name.cmp(&right.name))
+        .then(left.id.cmp(&right.id))
     });
     for mailbox in folders {
         let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-        let parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox);
+        let parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
         let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
         let source_key = source_key_for_store_id(folder_id);
         let parent_source_key = if sync_type == 0x02 && parent_folder_id == sync_root_folder_id {
@@ -425,7 +437,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         write_bool_property(
             &mut buffer,
             PID_TAG_SUBFOLDERS,
-            mapi_folder_has_subfolders(mailbox, mailboxes),
+            mapi_folder_has_subfolders(mailbox, parent_context_mailboxes),
         );
         write_utf16_property(
             &mut buffer,
@@ -539,7 +551,7 @@ fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
     }
 }
 
-fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox) -> u64 {
+fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
     match mailbox.role.as_str() {
         "__mapi_ipm_subtree"
         | "__mapi_deferred_action"
@@ -549,7 +561,15 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox) -> u64 {
         | "__mapi_search"
         | "__mapi_views"
         | "__mapi_shortcuts" => crate::mapi::identity::ROOT_FOLDER_ID,
-        _ => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        _ => mailbox
+            .parent_id
+            .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
+            .map(|parent| {
+                let fallback = crate::mapi::identity::mapped_mapi_object_id(&parent.id)
+                    .unwrap_or(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+                mapi_folder_id_for_mailbox(parent, fallback)
+            })
+            .unwrap_or(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID),
     }
 }
 
@@ -567,15 +587,33 @@ fn mapi_folder_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) 
     let folder_id = mapi_folder_id_for_mailbox(mailbox, 0);
     mailboxes
         .iter()
-        .any(|candidate| mapi_folder_parent_id_for_mailbox(candidate) == folder_id)
+        .any(|candidate| mapi_folder_parent_id_for_mailbox(candidate, mailboxes) == folder_id)
 }
 
-fn hierarchy_sort_depth(sync_type: u8, sync_root_folder_id: u64, mailbox: &JmapMailbox) -> u8 {
-    if sync_type != 0x02 || mapi_folder_parent_id_for_mailbox(mailbox) == sync_root_folder_id {
-        0
-    } else {
-        1
+fn hierarchy_sort_depth(
+    sync_type: u8,
+    sync_root_folder_id: u64,
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+) -> u8 {
+    if sync_type != 0x02 {
+        return 0;
     }
+    let Some(mut parent_id) = mailbox.parent_id else {
+        return 0;
+    };
+    let mut depth = 1u8;
+    while let Some(parent) = mailboxes.iter().find(|candidate| candidate.id == parent_id) {
+        if mapi_folder_id_for_mailbox(parent, sync_root_folder_id) == sync_root_folder_id {
+            break;
+        }
+        let Some(next_parent_id) = parent.parent_id else {
+            break;
+        };
+        parent_id = next_parent_id;
+        depth = depth.saturating_add(1);
+    }
+    depth
 }
 
 fn virtual_special_mailbox_id(folder_id: u64) -> Uuid {
