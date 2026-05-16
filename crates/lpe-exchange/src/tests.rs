@@ -2172,19 +2172,31 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 
 fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     let change_marker = 0x4012_0003u32.to_le_bytes();
-    let message_id_tag = 0x674A_0014u32.to_le_bytes();
+    let message_marker = 0x4015_0003u32.to_le_bytes();
+    let state_marker = 0x403A_0003u32.to_le_bytes();
+    let end_marker = 0x4014_0003u32.to_le_bytes();
     let mut folder_count = 0;
     let mut message_count = 0;
     let mut offset = 0;
-    while offset + 8 <= bytes.len() {
+    while offset + 4 <= bytes.len() {
         if bytes[offset..offset + 4] == change_marker {
-            let tag = &bytes[offset + 4..offset + 8];
-            if tag == message_id_tag {
+            let next_change = bytes[offset + 4..]
+                .windows(4)
+                .position(|window| {
+                    window == change_marker || window == state_marker || window == end_marker
+                })
+                .map(|position| offset + 4 + position)
+                .unwrap_or(bytes.len());
+            if bytes[offset + 4..next_change]
+                .windows(4)
+                .any(|window| window == message_marker)
+            {
                 message_count += 1;
             } else {
                 folder_count += 1;
             }
-            offset += 4;
+            offset = next_change;
+            continue;
         }
         offset += 1;
     }

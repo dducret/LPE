@@ -10,6 +10,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const INCR_SYNC_CHG: u32 = 0x4012_0003;
 const INCR_SYNC_DEL: u32 = 0x4013_0003;
 const INCR_SYNC_END: u32 = 0x4014_0003;
+const INCR_SYNC_MESSAGE: u32 = 0x4015_0003;
 const INCR_SYNC_READ: u32 = 0x402F_0003;
 const INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
 const INCR_SYNC_STATE_END: u32 = 0x403B_0003;
@@ -25,6 +26,7 @@ const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
+const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
@@ -465,20 +467,12 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
         let source_key = source_key_for_uuid(&email.id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
-        write_u32(&mut buffer, PID_TAG_MID);
+        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
+        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
         write_i64(
             &mut buffer,
-            crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0) as i64,
+            filetime_from_change_number(change_number) as i64,
         );
-        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
-        write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
-        write_i64(&mut buffer, change_number as i64);
-        write_u32(&mut buffer, PID_TAG_MESSAGE_FLAGS);
-        write_i32(&mut buffer, canonical_message_flags(email) as i32);
-        write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
-        write_i32(&mut buffer, canonical_flag_status(email) as i32);
-        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
-        write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
         write_binary_property(
             &mut buffer,
             PID_TAG_CHANGE_KEY,
@@ -489,6 +483,28 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             PID_TAG_PREDECESSOR_CHANGE_LIST,
             &predecessor_change_list(change_number),
         );
+        write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, false);
+        if sync_extra_flags & 0x0000_0001 != 0 {
+            write_u32(&mut buffer, PID_TAG_MID);
+            write_i64(
+                &mut buffer,
+                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0) as i64,
+            );
+        }
+        if sync_extra_flags & 0x0000_0002 != 0 {
+            write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
+        }
+        if sync_extra_flags & 0x0000_0004 != 0 {
+            write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
+            write_i64(&mut buffer, change_number as i64);
+        }
+        write_u32(&mut buffer, INCR_SYNC_MESSAGE);
+        write_u32(&mut buffer, PID_TAG_MESSAGE_FLAGS);
+        write_i32(&mut buffer, canonical_message_flags(email) as i32);
+        write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
+        write_i32(&mut buffer, canonical_flag_status(email) as i32);
+        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
+        write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
         write_visible_recipient_facts(&mut buffer, email);
         buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
         let mut attachments = attachments.iter().collect::<Vec<_>>();
@@ -1553,6 +1569,46 @@ mod tests {
     }
 
     #[test]
+    fn sync_manifest_serializes_content_message_header_in_fixed_order() {
+        let email_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            email_id,
+            crate::mapi::identity::mapi_store_id(50),
+        );
+        let email = test_email();
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x01,
+            0,
+            0x0000_0007,
+            &[],
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            &[],
+            &[email],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_tag_order(
+            &buffer,
+            &[
+                INCR_SYNC_CHG,
+                PID_TAG_SOURCE_KEY,
+                PID_TAG_LAST_MODIFICATION_TIME,
+                PID_TAG_CHANGE_KEY,
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                PID_TAG_ASSOCIATED,
+                PID_TAG_MID,
+                PID_TAG_MESSAGE_SIZE,
+                PID_TAG_CHANGE_NUMBER,
+                INCR_SYNC_MESSAGE,
+                PID_TAG_MESSAGE_FLAGS,
+            ],
+        );
+        assert_bool_property(&buffer, PID_TAG_ASSOCIATED, false);
+    }
+
+    #[test]
     fn sync_manifest_serializes_fast_transfer_boolean_values_as_two_bytes() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
@@ -1719,6 +1775,31 @@ mod tests {
     fn assert_absent_property(buffer: &[u8], property_tag: u32) {
         let tag = property_tag.to_le_bytes();
         assert!(!buffer.windows(tag.len()).any(|window| window == tag));
+    }
+
+    fn assert_bool_property(buffer: &[u8], property_tag: u32, value: bool) {
+        let tag = property_tag.to_le_bytes();
+        let offset = buffer
+            .windows(tag.len())
+            .position(|window| window == tag)
+            .expect("property tag is present");
+        let expected = if value { [1, 0] } else { [0, 0] };
+        assert_eq!(&buffer[offset + 4..offset + 6], &expected);
+    }
+
+    fn assert_tag_order(buffer: &[u8], tags: &[u32]) {
+        let mut previous = None;
+        for tag in tags {
+            let tag_bytes = tag.to_le_bytes();
+            let offset = buffer
+                .windows(tag_bytes.len())
+                .position(|window| window == tag_bytes)
+                .expect("tag is present");
+            if let Some(previous) = previous {
+                assert!(previous < offset);
+            }
+            previous = Some(offset);
+        }
     }
 
     fn utf16z(value: &str) -> Vec<u8> {
