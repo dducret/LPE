@@ -3050,7 +3050,7 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
         0x03, 0x00, 0x02, 0x36, // PidTagContentCount
         0x03, 0x00, 0x03, 0x36, // PidTagContentUnreadCount
         0x03, 0x00, 0x08, 0x0e, // PidTagMessageSize
-        0x02, 0x01, 0xf4, 0x0f, // PidTagAccess
+        0x03, 0x00, 0xf4, 0x0f, // PidTagAccess
         0x02, 0x01, 0xe0, 0x3f, // PidTagMappingSignature
         0x02, 0x01, 0xe1, 0x3f, // PidTagRecordKey
         0x02, 0x01, 0x27, 0x0e, // PidTagOrdinalMost
@@ -5023,7 +5023,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         0x3602_0003,
         0x3603_0003,
         0x0E08_0003,
-        0x0FF4_0102,
+        0x0FF4_0003,
         0x3FE0_0102,
         0x3FE1_0102,
         0x0E27_0102,
@@ -11691,7 +11691,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         0x3602_0003,
         0x3603_0003,
         0x0E08_0003,
-        0x0FF4_0102,
+        0x0FF4_0003,
         0x3FE0_0102,
         0x3FE1_0102,
         0x0E27_0102,
