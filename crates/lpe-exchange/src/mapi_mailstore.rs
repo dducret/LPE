@@ -303,6 +303,8 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         mailboxes,
         emails,
         attachment_facts,
+        emails,
+        attachment_facts,
         final_change_sequence,
     )
 }
@@ -321,6 +323,8 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     state_mailboxes: &[JmapMailbox],
     state_emails: &[JmapEmail],
     state_attachment_facts: &[MessageAttachmentSyncFacts],
+    aggregate_emails: &[JmapEmail],
+    aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
     _final_change_sequence: u64,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
@@ -397,7 +401,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
             write_i64(
                 &mut buffer,
-                local_commit_time_max(mailbox, state_emails, state_attachment_facts) as i64,
+                local_commit_time_max(mailbox, aggregate_emails, aggregate_attachment_facts) as i64,
             );
         }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL) {

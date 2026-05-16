@@ -2195,6 +2195,13 @@ fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     }
 }
 
+fn mapi_last_binary_property(bytes: &[u8], property_tag: u32) -> Option<&[u8]> {
+    let tag = property_tag.to_le_bytes();
+    let offset = bytes.windows(tag.len()).rposition(|window| window == tag)?;
+    let length = u32::from_le_bytes(bytes.get(offset + 4..offset + 8)?.try_into().ok()?);
+    bytes.get(offset + 8..offset + 8 + length as usize)
+}
+
 fn mapi_sync_manifest_message_state(bytes: &[u8], subject: &str) -> Option<(u32, u32)> {
     let subject = subject.as_bytes();
     let subject_start = bytes
@@ -10767,9 +10774,9 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
         "inbox",
         "Hierarchy aggregate message",
     );
-    let local_commit_time_max = mapi_mailstore::filetime_from_change_number(
-        mapi_mailstore::canonical_message_change_number(&email),
-    );
+    let message_change_number = mapi_mailstore::canonical_message_change_number(&email);
+    assert_ne!(change_number, message_change_number);
+    let local_commit_time_max = mapi_mailstore::filetime_from_change_number(message_change_number);
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
@@ -10823,6 +10830,15 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     let mut deleted_count_property = 0x670B_0003u32.to_le_bytes().to_vec();
     deleted_count_property.extend_from_slice(&0i32.to_le_bytes());
     assert!(contains_bytes(&response_rops, &deleted_count_property));
+    let final_cnset_seen = mapi_last_binary_property(&response_rops, 0x6796_0102).unwrap();
+    assert!(contains_bytes(
+        final_cnset_seen,
+        &globcnt_bytes(change_number)
+    ));
+    assert!(!contains_bytes(
+        final_cnset_seen,
+        &globcnt_bytes(message_change_number)
+    ));
 }
 
 #[tokio::test]
