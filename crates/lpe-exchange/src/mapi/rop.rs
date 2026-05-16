@@ -695,9 +695,11 @@ fn log_get_properties_specific_debug(
     snapshot: &MapiMailStoreSnapshot,
 ) {
     let mut defaulted_tags = Vec::new();
+    let mut intentional_default_tags = Vec::new();
+    let mut fallback_default_tags = Vec::new();
     let mut unsupported_tags = Vec::new();
     for tag in columns {
-        if MapiPropertyTag::new(*tag).property_type().is_none() {
+        if property_is_unsupported_for_object(object, principal, *tag) {
             unsupported_tags.push(*tag);
             continue;
         }
@@ -706,6 +708,11 @@ fn log_get_properties_specific_debug(
         write_property_default(&mut default_value, *tag);
         if value == default_value {
             defaulted_tags.push(*tag);
+            if modeled_zero_or_default_property(object, *tag) {
+                intentional_default_tags.push(*tag);
+            } else {
+                fallback_default_tags.push(*tag);
+            }
         }
     }
     let (object_kind, folder_id, item_id) = mapi_object_debug_fields(object);
@@ -724,14 +731,43 @@ fn log_get_properties_specific_debug(
         item_id = %item_id,
         requested_property_tag_count = columns.len(),
         requested_property_tags = %format_property_tags_for_debug(columns),
+        requested_property_names = %format_property_names_for_debug(columns),
         returned_property_tag_count = columns.len().saturating_sub(unsupported_tags.len()),
         returned_property_tags = %format_returned_property_tags_for_debug(columns, &unsupported_tags),
         zero_or_default_property_tag_count = defaulted_tags.len(),
         zero_or_default_property_tags = %format_property_tags_for_debug(&defaulted_tags),
+        intentional_zero_or_default_property_tag_count = intentional_default_tags.len(),
+        intentional_zero_or_default_property_tags = %format_property_tags_for_debug(&intentional_default_tags),
+        fallback_default_property_tag_count = fallback_default_tags.len(),
+        fallback_default_property_tags = %format_property_tags_for_debug(&fallback_default_tags),
         unsupported_property_tag_count = unsupported_tags.len(),
         unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
         message = message,
     );
+}
+
+fn property_is_unsupported_for_object(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    tag: u32,
+) -> bool {
+    if MapiPropertyTag::new(tag).property_type().is_none() {
+        return true;
+    }
+    matches!(object, Some(MapiObject::Logon)) && logon_property_value(principal, tag).is_none()
+}
+
+fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bool {
+    match object {
+        Some(MapiObject::Logon) => matches!(
+            tag,
+            PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON | PID_TAG_PRIVATE
+        ),
+        Some(MapiObject::Folder { folder_id, .. }) => {
+            *folder_id == IPM_SUBTREE_FOLDER_ID && tag == PID_TAG_OST_OSTID
+        }
+        _ => false,
+    }
 }
 
 fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, String, String) {
@@ -872,6 +908,31 @@ fn format_property_tags_for_debug(tags: &[u32]) -> String {
         .map(|tag| format!("{tag:#010x}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn format_property_names_for_debug(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| property_tag_debug_name(*tag))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn property_tag_debug_name(tag: u32) -> &'static str {
+    match tag {
+        PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
+        PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
+        PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
+        PID_TAG_MAILBOX_OWNER_ENTRY_ID => "PidTagMailboxOwnerEntryId",
+        PID_TAG_MAILBOX_OWNER_NAME_W => "PidTagMailboxOwnerName",
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => "PidTagServerTypeDisplayName",
+        PID_TAG_SERVER_CONNECTED_ICON => "PidTagServerConnectedIcon",
+        PID_TAG_SERVER_ACCOUNT_ICON => "PidTagServerAccountIcon",
+        PID_TAG_PRIVATE => "PidTagPrivate",
+        PID_TAG_USER_GUID => "PidTagUserGuid",
+        PID_TAG_OST_OSTID => "PR_OST_OSTID",
+        _ => "unknown",
+    }
 }
 
 pub(in crate::mapi) fn rop_get_properties_all_response(

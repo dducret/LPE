@@ -1516,6 +1516,7 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
                 &mapi_mailstore::predecessor_change_list(IPM_SUBTREE_FOLDER_ID),
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_OST_OSTID => write_u16_prefixed_bytes(&mut row, &[]),
             _ => write_property_default(&mut row, *column),
         }
     }
