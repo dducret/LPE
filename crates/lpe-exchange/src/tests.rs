@@ -2276,7 +2276,10 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
     let mut offset = 0;
     let mut current_folder: Option<StrictHierarchyFolderBuilder> = None;
     let mut folder_changes = Vec::new();
-    let mut seen_source_keys: Vec<Vec<u8>> = Vec::new();
+    let mut seen_source_keys: Vec<Vec<u8>> = vec![
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::ROOT_FOLDER_ID),
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID),
+    ];
     let mut in_state = false;
     let mut state_closed = false;
     let mut idset_given = None;
@@ -11714,8 +11717,10 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x65E1_0102u32.to_le_bytes()
     ));
+    let parent_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
     let mut root_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    root_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
+    root_child_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
+    root_child_parent_source_key.extend_from_slice(&parent_source_key);
     assert!(contains_bytes(
         &response_rops,
         &root_child_parent_source_key
