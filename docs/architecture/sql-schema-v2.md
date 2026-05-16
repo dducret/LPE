@@ -217,6 +217,9 @@ Protocol adapters store only cursor rows:
   keys. These rows map canonical UUIDs to protocol identifiers; they do not
   store mailbox content, folder replicas, message bodies, attachments, `Sent`,
   drafts, outbox, or search state.
+  The source, change, and instance key columns persist 22-byte REPLGUID-scoped
+  XID/GID-compatible values. The 24-byte `LongTermID` form remains a protocol
+  conversion value with the two-byte pad and is not stored in these columns.
 
 None of these tables stores canonical messages, folders, contacts, calendars,
 tasks, attachments, `Sent`, drafts, or outbox state.
