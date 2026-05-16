@@ -4730,11 +4730,19 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
                 .try_into()
                 .unwrap()
         ),
-        2
+        1
     );
     assert_eq!(
         u32::from_le_bytes(
             rop_buffer[6 + response_rop_size..10 + response_rop_size]
+                .try_into()
+                .unwrap()
+        ),
+        2
+    );
+    assert_eq!(
+        u32::from_le_bytes(
+            rop_buffer[10 + response_rop_size..14 + response_rop_size]
                 .try_into()
                 .unwrap()
         ),

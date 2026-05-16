@@ -1058,7 +1058,7 @@ fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
 
 fn write_bool_property(buffer: &mut Vec<u8>, property_tag: u32, value: bool) {
     write_u32(buffer, property_tag);
-    buffer.push(u8::from(value));
+    buffer.extend_from_slice(&(value as u16).to_le_bytes());
 }
 
 fn write_binary_property(buffer: &mut Vec<u8>, property_tag: u32, value: &[u8]) {
@@ -1320,7 +1320,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_manifest_serializes_fast_transfer_boolean_values_as_one_byte() {
+    fn sync_manifest_serializes_fast_transfer_boolean_values_as_two_bytes() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -1354,9 +1354,9 @@ mod tests {
             .windows(subfolders.len())
             .position(|window| window == subfolders)
             .expect("subfolders property is present");
-        assert_eq!(buffer[offset + 4], 0);
+        assert_eq!(&buffer[offset + 4..offset + 6], &0u16.to_le_bytes());
         assert_eq!(
-            &buffer[offset + 5..offset + 9],
+            &buffer[offset + 6..offset + 10],
             &PID_TAG_CONTAINER_CLASS_W.to_le_bytes()
         );
     }

@@ -722,12 +722,8 @@ pub(in crate::mapi) fn release_handle_slot(
 pub(in crate::mapi) fn response_handle_table(
     handle_slots: &[u32],
     output_handles: &[u32],
-    echo_input_handles: bool,
+    _echo_input_handles: bool,
 ) -> Vec<u32> {
-    if !echo_input_handles {
-        return output_handles.to_vec();
-    }
-
     let mut handles = handle_slots.to_vec();
     while handles.last().is_some_and(|handle| *handle == u32::MAX) {
         handles.pop();
@@ -852,5 +848,12 @@ mod tests {
             session.completed_execute_requests.len(),
             MAX_CACHED_EXECUTE_REQUESTS
         );
+    }
+
+    #[test]
+    fn response_handle_table_preserves_sparse_output_handle_indexes() {
+        let handles = response_handle_table(&[10, 20, 30], &[20, 30], false);
+
+        assert_eq!(handles, vec![10, 20, 30]);
     }
 }
