@@ -1329,6 +1329,12 @@ pub(in crate::mapi) fn role_for_folder_id(folder_id: u64) -> Option<&'static str
         SENT_FOLDER_ID => Some("sent"),
         TRASH_FOLDER_ID => Some("trash"),
         OUTBOX_FOLDER_ID => Some("outbox"),
+        CONTACTS_FOLDER_ID => Some("contacts"),
+        CALENDAR_FOLDER_ID => Some("calendar"),
+        JOURNAL_FOLDER_ID => Some("journal"),
+        NOTES_FOLDER_ID => Some("notes"),
+        TASKS_FOLDER_ID => Some("tasks"),
+        REMINDERS_FOLDER_ID => Some("reminders"),
         _ => None,
     }
 }
@@ -1385,6 +1391,12 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
                 &mapi_mailstore::predecessor_change_list(folder_id),
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, folder_id),
+            _ if folder_id == INBOX_FOLDER_ID => {
+                match special_folder_identification_property_value(*column) {
+                    Some(value) => write_mapi_value(&mut row, *column, &value),
+                    None => write_property_default(&mut row, *column),
+                }
+            }
             _ => write_property_default(&mut row, *column),
         }
     }
@@ -1407,6 +1419,10 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         DRAFTS_FOLDER_ID => ("Drafts", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         CONTACTS_FOLDER_ID => ("Contacts", IPM_SUBTREE_FOLDER_ID, "IPF.Contact", false),
         CALENDAR_FOLDER_ID => ("Calendar", IPM_SUBTREE_FOLDER_ID, "IPF.Appointment", false),
+        JOURNAL_FOLDER_ID => ("Journal", IPM_SUBTREE_FOLDER_ID, "IPF.Journal", false),
+        NOTES_FOLDER_ID => ("Notes", IPM_SUBTREE_FOLDER_ID, "IPF.StickyNote", false),
+        TASKS_FOLDER_ID => ("Tasks", IPM_SUBTREE_FOLDER_ID, "IPF.Task", false),
+        REMINDERS_FOLDER_ID => ("Reminders", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         _ => ("Root", 0, "IPF.Root", true),
     }
 }
@@ -1449,7 +1465,10 @@ pub(in crate::mapi) fn serialize_root_folder_row(
                 &mapi_mailstore::predecessor_change_list(ROOT_FOLDER_ID),
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, ROOT_FOLDER_ID),
-            _ => write_property_default(&mut row, *column),
+            _ => match special_folder_identification_property_value(*column) {
+                Some(value) => write_mapi_value(&mut row, *column, &value),
+                None => write_property_default(&mut row, *column),
+            },
         }
     }
     row
@@ -1999,6 +2018,9 @@ pub(in crate::mapi) fn folder_message_class(mailbox: &JmapMailbox) -> &'static s
     match mailbox.role.as_str() {
         "contacts" => "IPF.Contact",
         "calendar" => "IPF.Appointment",
+        "journal" => "IPF.Journal",
+        "notes" => "IPF.StickyNote",
+        "tasks" => "IPF.Task",
         _ => "IPF.Note",
     }
 }
@@ -2044,6 +2066,10 @@ pub(in crate::mapi) fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
         "trash" => TRASH_FOLDER_ID,
         "contacts" => CONTACTS_FOLDER_ID,
         "calendar" => CALENDAR_FOLDER_ID,
+        "journal" => JOURNAL_FOLDER_ID,
+        "notes" => NOTES_FOLDER_ID,
+        "tasks" => TASKS_FOLDER_ID,
+        "reminders" => REMINDERS_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
             .expect("MAPI folder identity mapping missing"),
     }

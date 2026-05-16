@@ -524,8 +524,8 @@ fn mapi_collaboration_folder_id(
             .and_then(|id| crate::mapi::identity::mapped_mapi_object_id(&id))
             .unwrap_or_else(|| {
                 let seed = match kind {
-                    MapiCollaborationFolderKind::Contacts => 17,
-                    MapiCollaborationFolderKind::Calendar => 18,
+                    MapiCollaborationFolderKind::Contacts => 1_000,
+                    MapiCollaborationFolderKind::Calendar => 2_000,
                 };
                 crate::mapi::identity::mapi_store_id(seed + stable_text_counter(&collection.id))
             }),
@@ -547,6 +547,10 @@ pub(crate) fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
         "trash" => Some(crate::mapi::identity::TRASH_FOLDER_COUNTER),
         "contacts" => Some(crate::mapi::identity::CONTACTS_FOLDER_COUNTER),
         "calendar" => Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
+        "journal" => Some(crate::mapi::identity::JOURNAL_FOLDER_COUNTER),
+        "notes" => Some(crate::mapi::identity::NOTES_FOLDER_COUNTER),
+        "tasks" => Some(crate::mapi::identity::TASKS_FOLDER_COUNTER),
+        "reminders" => Some(crate::mapi::identity::REMINDERS_FOLDER_COUNTER),
         _ => None,
     }
 }

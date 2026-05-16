@@ -6,9 +6,10 @@ use super::*;
 pub(in crate::mapi) use super::identity::{
     long_term_id_from_object_id, object_id_from_long_term_id, CALENDAR_FOLDER_ID,
     COMMON_VIEWS_FOLDER_ID, CONTACTS_FOLDER_ID, DEFERRED_ACTION_FOLDER_ID, DRAFTS_FOLDER_ID,
-    INBOX_FOLDER_ID, IPM_SUBTREE_FOLDER_ID, OUTBOX_FOLDER_ID, ROOT_FOLDER_ID, SCHEDULE_FOLDER_ID,
-    SEARCH_FOLDER_ID, SENT_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
-    STORE_REPLICA_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    INBOX_FOLDER_ID, IPM_SUBTREE_FOLDER_ID, JOURNAL_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
+    REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID, SENT_FOLDER_ID,
+    SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID, STORE_REPLICA_ID, TASKS_FOLDER_ID,
+    TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 
 pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
@@ -27,7 +28,7 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SHORTCUTS_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 7] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 11] = [
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
     OUTBOX_FOLDER_ID,
@@ -35,6 +36,10 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 7] = [
     TRASH_FOLDER_ID,
     CONTACTS_FOLDER_ID,
     CALENDAR_FOLDER_ID,
+    JOURNAL_FOLDER_ID,
+    NOTES_FOLDER_ID,
+    TASKS_FOLDER_ID,
+    REMINDERS_FOLDER_ID,
 ];
 
 pub(in crate::mapi) fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
@@ -244,7 +249,8 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | VIEWS_FOLDER_ID
         | SHORTCUTS_FOLDER_ID => Some(ROOT_FOLDER_ID),
         INBOX_FOLDER_ID | DRAFTS_FOLDER_ID | OUTBOX_FOLDER_ID | SENT_FOLDER_ID
-        | TRASH_FOLDER_ID | CONTACTS_FOLDER_ID | CALENDAR_FOLDER_ID => Some(IPM_SUBTREE_FOLDER_ID),
+        | TRASH_FOLDER_ID | CONTACTS_FOLDER_ID | CALENDAR_FOLDER_ID | JOURNAL_FOLDER_ID
+        | NOTES_FOLDER_ID | TASKS_FOLDER_ID | REMINDERS_FOLDER_ID => Some(IPM_SUBTREE_FOLDER_ID),
         ROOT_FOLDER_ID => None,
         _ => mailboxes
             .iter()
@@ -265,6 +271,10 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | TRASH_FOLDER_ID
                 | CONTACTS_FOLDER_ID
                 | CALENDAR_FOLDER_ID
+                | JOURNAL_FOLDER_ID
+                | NOTES_FOLDER_ID
+                | TASKS_FOLDER_ID
+                | REMINDERS_FOLDER_ID
         ),
         _ => false,
     }

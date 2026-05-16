@@ -10809,7 +10809,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&8192u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -10821,7 +10821,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
     let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
@@ -11039,7 +11039,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert!(contains_bytes(&response_rops, &utf16z("Drafts")));
     assert!(contains_bytes(&response_rops, &utf16z("Outbox")));
@@ -11047,6 +11047,10 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("Deleted Items")));
     assert!(contains_bytes(&response_rops, &utf16z("Contacts")));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(&response_rops, &utf16z("Journal")));
+    assert!(contains_bytes(&response_rops, &utf16z("Notes")));
+    assert!(contains_bytes(&response_rops, &utf16z("Tasks")));
+    assert!(contains_bytes(&response_rops, &utf16z("Reminders")));
     let mut folder_offsets = Vec::new();
     for name in [
         "Inbox",
@@ -11056,6 +11060,10 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         "Deleted Items",
         "Contacts",
         "Calendar",
+        "Journal",
+        "Notes",
+        "Tasks",
+        "Reminders",
     ] {
         let name_bytes = utf16z(name);
         folder_offsets.push(
@@ -11068,6 +11076,9 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(folder_offsets.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Contact")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")
@@ -11091,6 +11102,22 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::JOURNAL_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::NOTES_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TASKS_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
     ));
 }
 
@@ -11129,7 +11156,7 @@ async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((9, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((13, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Projects")));
     assert!(contains_bytes(&response_rops, &utf16z("Archive")));
     let projects_offset = response_rops
@@ -11234,7 +11261,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
 }
 
@@ -11278,7 +11305,7 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(

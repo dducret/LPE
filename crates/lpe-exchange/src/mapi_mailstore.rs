@@ -174,6 +174,10 @@ pub(crate) fn source_key_for_mailbox_role(mailbox_id: &Uuid, role: &str) -> Vec<
         "trash" => crate::mapi::identity::TRASH_FOLDER_ID,
         "contacts" => crate::mapi::identity::CONTACTS_FOLDER_ID,
         "calendar" => crate::mapi::identity::CALENDAR_FOLDER_ID,
+        "journal" => crate::mapi::identity::JOURNAL_FOLDER_ID,
+        "notes" => crate::mapi::identity::NOTES_FOLDER_ID,
+        "tasks" => crate::mapi::identity::TASKS_FOLDER_ID,
+        "reminders" => crate::mapi::identity::REMINDERS_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(mailbox_id)
             .expect("MAPI folder identity mapping missing"),
     };
@@ -548,6 +552,10 @@ fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
         "__mapi_shortcuts" => crate::mapi::identity::SHORTCUTS_FOLDER_ID,
         "contacts" => crate::mapi::identity::CONTACTS_FOLDER_ID,
         "calendar" => crate::mapi::identity::CALENDAR_FOLDER_ID,
+        "journal" => crate::mapi::identity::JOURNAL_FOLDER_ID,
+        "notes" => crate::mapi::identity::NOTES_FOLDER_ID,
+        "tasks" => crate::mapi::identity::TASKS_FOLDER_ID,
+        "reminders" => crate::mapi::identity::REMINDERS_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(fallback),
     }
 }
@@ -562,6 +570,7 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
         | "__mapi_search"
         | "__mapi_views"
         | "__mapi_shortcuts" => crate::mapi::identity::ROOT_FOLDER_ID,
+        "journal" | "notes" | "tasks" | "reminders" => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
         _ => mailbox
             .parent_id
             .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
@@ -580,6 +589,10 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
         .unwrap_or(match mailbox.role.as_str() {
             "contacts" => "IPF.Contact",
             "calendar" => "IPF.Appointment",
+            "journal" => "IPF.Journal",
+            "notes" => "IPF.StickyNote",
+            "tasks" => "IPF.Task",
+            "reminders" => "IPF.Note",
             _ => "IPF.Note",
         })
 }
@@ -705,38 +718,66 @@ fn virtual_special_folder_metadata(
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             "IPF.Appointment",
         )),
+        crate::mapi::identity::JOURNAL_FOLDER_ID => Some((
+            "journal",
+            "Journal",
+            58,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Journal",
+        )),
+        crate::mapi::identity::NOTES_FOLDER_ID => Some((
+            "notes",
+            "Notes",
+            59,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.StickyNote",
+        )),
+        crate::mapi::identity::TASKS_FOLDER_ID => Some((
+            "tasks",
+            "Tasks",
+            60,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Task",
+        )),
+        crate::mapi::identity::REMINDERS_FOLDER_ID => Some((
+            "reminders",
+            "Reminders",
+            61,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => Some((
             "__mapi_common_views",
             "Common Views",
-            60,
+            70,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::SCHEDULE_FOLDER_ID => Some((
             "__mapi_schedule",
             "Schedule",
-            70,
+            80,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::SEARCH_FOLDER_ID => Some((
             "__mapi_search",
             "Search",
-            80,
+            90,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::VIEWS_FOLDER_ID => Some((
             "__mapi_views",
             "Views",
-            90,
+            100,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::SHORTCUTS_FOLDER_ID => Some((
             "__mapi_shortcuts",
             "Shortcuts",
-            100,
+            110,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),

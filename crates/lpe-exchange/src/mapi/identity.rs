@@ -23,6 +23,10 @@ pub(crate) const SHORTCUTS_FOLDER_COUNTER: u64 = 13;
 pub(crate) const DRAFTS_FOLDER_COUNTER: u64 = 14;
 pub(crate) const CONTACTS_FOLDER_COUNTER: u64 = 15;
 pub(crate) const CALENDAR_FOLDER_COUNTER: u64 = 16;
+pub(crate) const JOURNAL_FOLDER_COUNTER: u64 = 17;
+pub(crate) const NOTES_FOLDER_COUNTER: u64 = 18;
+pub(crate) const TASKS_FOLDER_COUNTER: u64 = 19;
+pub(crate) const REMINDERS_FOLDER_COUNTER: u64 = 20;
 
 pub(crate) const ROOT_FOLDER_ID: u64 = mapi_store_id(ROOT_FOLDER_COUNTER);
 pub(crate) const DEFERRED_ACTION_FOLDER_ID: u64 = mapi_store_id(DEFERRED_ACTION_FOLDER_COUNTER);
@@ -40,6 +44,10 @@ pub(crate) const SHORTCUTS_FOLDER_ID: u64 = mapi_store_id(SHORTCUTS_FOLDER_COUNT
 pub(crate) const DRAFTS_FOLDER_ID: u64 = mapi_store_id(DRAFTS_FOLDER_COUNTER);
 pub(crate) const CONTACTS_FOLDER_ID: u64 = mapi_store_id(CONTACTS_FOLDER_COUNTER);
 pub(crate) const CALENDAR_FOLDER_ID: u64 = mapi_store_id(CALENDAR_FOLDER_COUNTER);
+pub(crate) const JOURNAL_FOLDER_ID: u64 = mapi_store_id(JOURNAL_FOLDER_COUNTER);
+pub(crate) const NOTES_FOLDER_ID: u64 = mapi_store_id(NOTES_FOLDER_COUNTER);
+pub(crate) const TASKS_FOLDER_ID: u64 = mapi_store_id(TASKS_FOLDER_COUNTER);
+pub(crate) const REMINDERS_FOLDER_ID: u64 = mapi_store_id(REMINDERS_FOLDER_COUNTER);
 
 pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID

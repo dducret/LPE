@@ -157,6 +157,13 @@ pub(in crate::mapi) const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 pub(in crate::mapi) const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
+pub(in crate::mapi) const PID_TAG_VALID_FOLDER_MASK: u32 = 0x35DF_0003;
+pub(in crate::mapi) const PID_TAG_IPM_APPOINTMENT_ENTRY_ID: u32 = 0x36D0_0102;
+pub(in crate::mapi) const PID_TAG_IPM_CONTACT_ENTRY_ID: u32 = 0x36D1_0102;
+pub(in crate::mapi) const PID_TAG_IPM_JOURNAL_ENTRY_ID: u32 = 0x36D2_0102;
+pub(in crate::mapi) const PID_TAG_IPM_NOTE_ENTRY_ID: u32 = 0x36D3_0102;
+pub(in crate::mapi) const PID_TAG_IPM_TASK_ENTRY_ID: u32 = 0x36D4_0102;
+pub(in crate::mapi) const PID_TAG_REM_ONLINE_ENTRY_ID: u32 = 0x36D5_0102;
 pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
@@ -230,12 +237,21 @@ const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [
     0xDC, 0xA7, 0x40, 0xC8, 0xC0, 0x42, 0x10, 0x1A, 0xB4, 0xB9, 0x08, 0x00, 0x2B, 0x2F, 0xE1, 0x82,
 ];
 
+const FOLDER_IPM_SUBTREE_VALID: u32 = 0x0000_0001;
+const FOLDER_IPM_INBOX_VALID: u32 = 0x0000_0002;
+const FOLDER_IPM_OUTBOX_VALID: u32 = 0x0000_0004;
+const FOLDER_IPM_WASTEBASKET_VALID: u32 = 0x0000_0008;
+const FOLDER_IPM_SENTMAIL_VALID: u32 = 0x0000_0010;
+const FOLDER_VIEWS_VALID: u32 = 0x0000_0020;
+const FOLDER_COMMON_VIEWS_VALID: u32 = 0x0000_0040;
+
 pub(in crate::mapi) fn logon_property_value(
     principal: &AccountPrincipal,
     property_tag: u32,
 ) -> Option<MapiValue> {
     match property_tag {
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
+        PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
         PID_TAG_MAILBOX_OWNER_ENTRY_ID => {
             Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
         }
@@ -246,8 +262,37 @@ pub(in crate::mapi) fn logon_property_value(
         }
         PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
+        _ => special_folder_identification_property_value(property_tag),
+    }
+}
+
+pub(in crate::mapi) fn special_folder_identification_property_value(
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(folder_entry_id(CALENDAR_FOLDER_ID)),
+        PID_TAG_IPM_CONTACT_ENTRY_ID => Some(folder_entry_id(CONTACTS_FOLDER_ID)),
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(folder_entry_id(JOURNAL_FOLDER_ID)),
+        PID_TAG_IPM_NOTE_ENTRY_ID => Some(folder_entry_id(NOTES_FOLDER_ID)),
+        PID_TAG_IPM_TASK_ENTRY_ID => Some(folder_entry_id(TASKS_FOLDER_ID)),
+        PID_TAG_REM_ONLINE_ENTRY_ID => Some(folder_entry_id(REMINDERS_FOLDER_ID)),
         _ => None,
     }
+}
+
+fn valid_folder_mask() -> u32 {
+    FOLDER_IPM_SUBTREE_VALID
+        | FOLDER_IPM_INBOX_VALID
+        | FOLDER_IPM_OUTBOX_VALID
+        | FOLDER_IPM_WASTEBASKET_VALID
+        | FOLDER_IPM_SENTMAIL_VALID
+        | FOLDER_VIEWS_VALID
+        | FOLDER_COMMON_VIEWS_VALID
+}
+
+fn folder_entry_id(folder_id: u64) -> MapiValue {
+    MapiValue::Binary(crate::mapi::identity::instance_key_for_object_id(folder_id))
 }
 
 fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
@@ -444,6 +489,11 @@ pub(in crate::mapi) fn mailbox_property_value(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
+    if mailbox.role == "inbox" {
+        if let Some(value) = special_folder_identification_property_value(property_tag) {
+            return Some(value);
+        }
+    }
     match property_tag {
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mailbox.name.clone())),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
@@ -2205,6 +2255,38 @@ mod tests {
         assert_eq!(tag.property_type_code(), 0x001F);
         assert_eq!(tag.property_type(), Some(MapiPropertyType::String));
         assert!(MapiPropertyTag::new(0x8001_001F).property_id() >= FIRST_NAMED_PROPERTY_ID);
+    }
+
+    #[test]
+    fn special_folder_identification_properties_project_store_folder_ids() {
+        assert_eq!(PID_TAG_VALID_FOLDER_MASK, 0x35DF_0003);
+        assert_eq!(PID_TAG_IPM_APPOINTMENT_ENTRY_ID, 0x36D0_0102);
+        assert_eq!(PID_TAG_IPM_CONTACT_ENTRY_ID, 0x36D1_0102);
+        assert_eq!(PID_TAG_IPM_JOURNAL_ENTRY_ID, 0x36D2_0102);
+        assert_eq!(PID_TAG_IPM_NOTE_ENTRY_ID, 0x36D3_0102);
+        assert_eq!(PID_TAG_IPM_TASK_ENTRY_ID, 0x36D4_0102);
+        assert_eq!(PID_TAG_REM_ONLINE_ENTRY_ID, 0x36D5_0102);
+
+        assert_eq!(
+            special_folder_identification_property_value(PID_TAG_VALID_FOLDER_MASK),
+            Some(MapiValue::U32(0x7F))
+        );
+
+        for (property_tag, folder_id) in [
+            (PID_TAG_IPM_APPOINTMENT_ENTRY_ID, CALENDAR_FOLDER_ID),
+            (PID_TAG_IPM_CONTACT_ENTRY_ID, CONTACTS_FOLDER_ID),
+            (PID_TAG_IPM_JOURNAL_ENTRY_ID, JOURNAL_FOLDER_ID),
+            (PID_TAG_IPM_NOTE_ENTRY_ID, NOTES_FOLDER_ID),
+            (PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
+            (PID_TAG_REM_ONLINE_ENTRY_ID, REMINDERS_FOLDER_ID),
+        ] {
+            assert_eq!(
+                special_folder_identification_property_value(property_tag),
+                Some(MapiValue::Binary(
+                    crate::mapi::identity::instance_key_for_object_id(folder_id)
+                ))
+            );
+        }
     }
 
     #[test]
