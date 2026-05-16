@@ -2413,9 +2413,9 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
         0x00, 0x00, // RestrictionDataSize
         0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
         0x08, 0x00, // PropertyTagCount
-        0x03, 0x00, 0x01, 0x36, // PidTagContainerContents
-        0x03, 0x00, 0x02, 0x36, // PidTagFolderAssociatedContents
-        0x03, 0x00, 0x03, 0x36, // PidTagContainerHierarchy
+        0x03, 0x00, 0x01, 0x36, // PidTagFolderType
+        0x03, 0x00, 0x02, 0x36, // PidTagContentCount
+        0x03, 0x00, 0x03, 0x36, // PidTagContentUnreadCount
         0x03, 0x00, 0x08, 0x0e, // PidTagMessageSize
         0x02, 0x01, 0xf4, 0x0f, // PidTagAccess
         0x02, 0x01, 0xe0, 0x3f, // PidTagMappingSignature
@@ -10830,6 +10830,9 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     let mut deleted_count_property = 0x670B_0003u32.to_le_bytes().to_vec();
     deleted_count_property.extend_from_slice(&0i32.to_le_bytes());
     assert!(contains_bytes(&response_rops, &deleted_count_property));
+    let mut folder_type_property = 0x3601_0003u32.to_le_bytes().to_vec();
+    folder_type_property.extend_from_slice(&1i32.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &folder_type_property));
     let final_cnset_seen = mapi_last_binary_property(&response_rops, 0x6796_0102).unwrap();
     assert!(contains_bytes(
         final_cnset_seen,
@@ -10930,6 +10933,12 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     assert!(contains_bytes(
         &response_rops,
         &0x3008_0040u32.to_le_bytes()
+    ));
+    let mut empty_local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
+    empty_local_commit_time_property.extend_from_slice(&0i64.to_le_bytes());
+    assert!(contains_bytes(
+        &response_rops,
+        &empty_local_commit_time_property
     ));
     assert!(contains_bytes(
         &response_rops,

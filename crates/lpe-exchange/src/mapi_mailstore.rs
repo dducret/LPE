@@ -15,7 +15,7 @@ const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
-const PID_TAG_FOLDER_CHILD_COUNT: u32 = 0x3601_0003;
+const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
@@ -394,8 +394,8 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 mailbox.unread_emails.min(i32::MAX as u32) as i32,
             );
         }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_CHILD_COUNT) {
-            write_i32_property(&mut buffer, PID_TAG_FOLDER_CHILD_COUNT, 0);
+        if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE) {
+            write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
         }
         if !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX) {
             write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
@@ -682,6 +682,14 @@ fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> b
     excluded_property_tags.contains(&property_tag)
 }
 
+fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
+    if mailbox.role == "__mapi_search" {
+        2
+    } else {
+        1
+    }
+}
+
 fn local_commit_time_max(
     mailbox: &JmapMailbox,
     emails: &[JmapEmail],
@@ -698,7 +706,7 @@ fn local_commit_time_max(
             ))
         })
         .max()
-        .unwrap_or_else(|| filetime_from_change_number(canonical_folder_change_number(mailbox)))
+        .unwrap_or(0)
 }
 
 fn sync_state_object_ids(
