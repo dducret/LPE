@@ -27,6 +27,16 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SHORTCUTS_FOLDER_ID,
 ];
 
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 7] = [
+    INBOX_FOLDER_ID,
+    DRAFTS_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    SENT_FOLDER_ID,
+    TRASH_FOLDER_ID,
+    CONTACTS_FOLDER_ID,
+    CALENDAR_FOLDER_ID,
+];
+
 pub(in crate::mapi) fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x70, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -162,7 +172,7 @@ pub(in crate::mapi) fn sync_mailboxes_for(
             .cloned()
             .collect::<Vec<_>>();
         let mut folder_ids = rows.iter().map(mapi_folder_id).collect::<HashSet<_>>();
-        for special_folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
+        for &special_folder_id in hierarchy_virtual_folder_ids(folder_id) {
             if !special_folder_is_in_sync_scope(special_folder_id, folder_id) {
                 continue;
             }
@@ -179,6 +189,14 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         .cloned()
         .into_iter()
         .collect()
+}
+
+fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> &'static [u64] {
+    if sync_root_folder_id == IPM_SUBTREE_FOLDER_ID {
+        &IPM_SUBTREE_VIRTUAL_FOLDER_IDS
+    } else {
+        &PRIVATE_LOGON_SPECIAL_FOLDER_IDS
+    }
 }
 
 fn mailbox_is_hierarchy_descendant(
@@ -240,7 +258,13 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
         ROOT_FOLDER_ID => special_folder_id != ROOT_FOLDER_ID,
         IPM_SUBTREE_FOLDER_ID => matches!(
             special_folder_id,
-            INBOX_FOLDER_ID | OUTBOX_FOLDER_ID | SENT_FOLDER_ID | TRASH_FOLDER_ID
+            INBOX_FOLDER_ID
+                | DRAFTS_FOLDER_ID
+                | OUTBOX_FOLDER_ID
+                | SENT_FOLDER_ID
+                | TRASH_FOLDER_ID
+                | CONTACTS_FOLDER_ID
+                | CALENDAR_FOLDER_ID
         ),
         _ => false,
     }

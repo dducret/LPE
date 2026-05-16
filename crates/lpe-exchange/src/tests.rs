@@ -10821,7 +10821,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
     let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
@@ -11007,7 +11007,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_includes_advertised_ipm_special_folders() {
+async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -11039,11 +11039,16 @@ async fn mapi_over_http_hierarchy_sync_includes_advertised_ipm_special_folders()
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert!(contains_bytes(&response_rops, &utf16z("Drafts")));
     assert!(contains_bytes(&response_rops, &utf16z("Outbox")));
     assert!(contains_bytes(&response_rops, &utf16z("Sent Items")));
     assert!(contains_bytes(&response_rops, &utf16z("Deleted Items")));
+    assert!(contains_bytes(&response_rops, &utf16z("Contacts")));
+    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Contact")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")
@@ -11054,7 +11059,19 @@ async fn mapi_over_http_hierarchy_sync_includes_advertised_ipm_special_folders()
     ));
     assert!(contains_bytes(
         &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::DRAFTS_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TRASH_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
     ));
 }
 
@@ -11093,7 +11110,7 @@ async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((6, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((9, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Projects")));
     assert!(contains_bytes(&response_rops, &utf16z("Archive")));
     let projects_offset = response_rops
@@ -11198,7 +11215,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
 }
 
@@ -11242,7 +11259,7 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((4, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((7, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(

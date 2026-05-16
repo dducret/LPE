@@ -656,6 +656,13 @@ fn virtual_special_folder_metadata(
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             "IPF.Note",
         )),
+        crate::mapi::identity::DRAFTS_FOLDER_ID => Some((
+            "drafts",
+            "Drafts",
+            25,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
         crate::mapi::identity::OUTBOX_FOLDER_ID => Some((
             "outbox",
             "Outbox",
@@ -676,6 +683,20 @@ fn virtual_special_folder_metadata(
             50,
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             "IPF.Note",
+        )),
+        crate::mapi::identity::CONTACTS_FOLDER_ID => Some((
+            "contacts",
+            "Contacts",
+            55,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact",
+        )),
+        crate::mapi::identity::CALENDAR_FOLDER_ID => Some((
+            "calendar",
+            "Calendar",
+            57,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Appointment",
         )),
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => Some((
             "__mapi_common_views",
