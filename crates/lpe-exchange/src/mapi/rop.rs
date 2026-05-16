@@ -761,7 +761,10 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
     match object {
         Some(MapiObject::Logon) => matches!(
             tag,
-            PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON | PID_TAG_PRIVATE
+            PID_TAG_SERVER_CONNECTED_ICON
+                | PID_TAG_SERVER_ACCOUNT_ICON
+                | PID_TAG_PRIVATE
+                | PID_TAG_OUTLOOK_STORE_STATE
         ),
         Some(MapiObject::Folder { folder_id, .. }) => {
             *folder_id == IPM_SUBTREE_FOLDER_ID && tag == PID_TAG_OST_OSTID
@@ -928,6 +931,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => "PidTagServerTypeDisplayName",
         PID_TAG_SERVER_CONNECTED_ICON => "PidTagServerConnectedIcon",
         PID_TAG_SERVER_ACCOUNT_ICON => "PidTagServerAccountIcon",
+        PID_TAG_OUTLOOK_STORE_STATE => "OutlookStoreState",
         PID_TAG_PRIVATE => "PidTagPrivate",
         PID_TAG_USER_GUID => "PidTagUserGuid",
         PID_TAG_OST_OSTID => "PR_OST_OSTID",

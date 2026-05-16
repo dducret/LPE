@@ -200,6 +200,7 @@ pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_NAME_W: u32 = 0x661C_001F;
 pub(in crate::mapi) const PID_TAG_SERVER_TYPE_DISPLAY_NAME_W: u32 = 0x341D_001F;
 pub(in crate::mapi) const PID_TAG_SERVER_CONNECTED_ICON: u32 = 0x341E_0102;
 pub(in crate::mapi) const PID_TAG_SERVER_ACCOUNT_ICON: u32 = 0x341F_0102;
+pub(in crate::mapi) const PID_TAG_OUTLOOK_STORE_STATE: u32 = 0x346F_0003;
 pub(in crate::mapi) const PID_TAG_PRIVATE: u32 = 0x0E5C_000B;
 pub(in crate::mapi) const PID_TAG_USER_GUID: u32 = 0x6707_0102;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
@@ -261,6 +262,7 @@ pub(in crate::mapi) fn logon_property_value(
         PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
             Some(MapiValue::Binary(Vec::new()))
         }
+        PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
         _ => special_folder_identification_property_value(property_tag),
