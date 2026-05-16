@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
@@ -545,6 +547,238 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     ));
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer
+}
+
+pub(crate) fn log_hierarchy_transfer_debug(
+    sync_type: u8,
+    folder_id: u64,
+    requested_property_tags: &[u32],
+    transfer_buffer: &[u8],
+) {
+    if sync_type != 0x02 || !tracing::enabled!(tracing::Level::INFO) {
+        return;
+    }
+
+    match decode_hierarchy_transfer_debug_summary(transfer_buffer) {
+        Ok(summary) => tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            request_rop_id = "0x70",
+            sync_type = format_args!("0x{sync_type:02x}"),
+            folder_id = format_args!("0x{folder_id:016x}"),
+            transfer_buffer_bytes = transfer_buffer.len(),
+            hierarchy_decode_status = "ok",
+            folder_change_count = summary.folder_change_count,
+            final_state_present = summary.final_state_present,
+            parent_before_child_violations = summary.parent_before_child_violations,
+            zero_length_parent_source_key_count = summary.zero_length_parent_source_key_count,
+            source_key_lengths = %format_usize_list(&summary.source_key_lengths),
+            change_key_lengths = %format_usize_list(&summary.change_key_lengths),
+            emitted_property_tags = %format_property_tags(&summary.emitted_property_tags),
+            requested_property_tags = %format_property_tags(requested_property_tags),
+            "rca debug mapi hierarchy transfer stream"
+        ),
+        Err(error) => tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            request_rop_id = "0x70",
+            sync_type = format_args!("0x{sync_type:02x}"),
+            folder_id = format_args!("0x{folder_id:016x}"),
+            transfer_buffer_bytes = transfer_buffer.len(),
+            hierarchy_decode_status = "error",
+            hierarchy_decode_error = %error,
+            requested_property_tags = %format_property_tags(requested_property_tags),
+            "rca debug mapi hierarchy transfer stream"
+        ),
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct HierarchyTransferDebugSummary {
+    folder_change_count: usize,
+    final_state_present: bool,
+    parent_before_child_violations: usize,
+    zero_length_parent_source_key_count: usize,
+    source_key_lengths: Vec<usize>,
+    change_key_lengths: Vec<usize>,
+    emitted_property_tags: Vec<u32>,
+}
+
+#[derive(Default)]
+struct HierarchyTransferFolderDebug {
+    source_key: Option<Vec<u8>>,
+    parent_source_key: Option<Vec<u8>>,
+    change_key: Option<Vec<u8>>,
+    property_tags: Vec<u32>,
+}
+
+struct FastTransferDebugProperty {
+    tag: u32,
+    value: Vec<u8>,
+    next_offset: usize,
+}
+
+fn decode_hierarchy_transfer_debug_summary(
+    bytes: &[u8],
+) -> Result<HierarchyTransferDebugSummary, String> {
+    let mut offset = 0;
+    let mut current_folder: Option<HierarchyTransferFolderDebug> = None;
+    let mut seen_source_keys = Vec::<Vec<u8>>::new();
+    let mut emitted_property_tags = BTreeSet::new();
+    let mut summary = HierarchyTransferDebugSummary::default();
+    let mut in_final_state = false;
+
+    while offset < bytes.len() {
+        let tag = read_debug_u32(bytes, offset)?;
+        if hierarchy_debug_marker(tag) {
+            match tag {
+                INCR_SYNC_CHG => {
+                    if let Some(folder) = current_folder.take() {
+                        finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
+                    }
+                    current_folder = Some(HierarchyTransferFolderDebug::default());
+                }
+                INCR_SYNC_STATE_BEGIN => {
+                    if let Some(folder) = current_folder.take() {
+                        finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
+                    }
+                    summary.final_state_present = true;
+                    in_final_state = true;
+                }
+                INCR_SYNC_STATE_END => {
+                    in_final_state = false;
+                }
+                INCR_SYNC_END => {
+                    if let Some(folder) = current_folder.take() {
+                        finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
+                    }
+                    offset += 4;
+                    if offset != bytes.len() {
+                        return Err("trailing bytes after IncrSyncEnd".into());
+                    }
+                    break;
+                }
+                _ => unreachable!(),
+            }
+            offset += 4;
+            continue;
+        }
+
+        let property = parse_debug_fast_transfer_property(bytes, offset)?;
+        offset = property.next_offset;
+        emitted_property_tags.insert(property.tag);
+
+        if let Some(folder) = current_folder.as_mut() {
+            folder.property_tags.push(property.tag);
+            match property.tag {
+                PID_TAG_PARENT_SOURCE_KEY => folder.parent_source_key = Some(property.value),
+                PID_TAG_SOURCE_KEY => folder.source_key = Some(property.value),
+                PID_TAG_CHANGE_KEY => folder.change_key = Some(property.value),
+                _ => {}
+            }
+        } else if !in_final_state {
+            return Err(format!(
+                "property 0x{:08x} appears outside folderChange or final state",
+                property.tag
+            ));
+        }
+    }
+
+    if let Some(folder) = current_folder.take() {
+        finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
+    }
+    summary.emitted_property_tags = emitted_property_tags.into_iter().collect();
+    Ok(summary)
+}
+
+fn finish_hierarchy_debug_folder(
+    folder: HierarchyTransferFolderDebug,
+    seen_source_keys: &mut Vec<Vec<u8>>,
+    summary: &mut HierarchyTransferDebugSummary,
+) {
+    summary.folder_change_count += 1;
+    if let Some(parent_source_key) = folder.parent_source_key {
+        if parent_source_key.is_empty() {
+            summary.zero_length_parent_source_key_count += 1;
+        } else if !seen_source_keys
+            .iter()
+            .any(|source_key| source_key.as_slice() == parent_source_key.as_slice())
+        {
+            summary.parent_before_child_violations += 1;
+        }
+    }
+    if let Some(source_key) = folder.source_key {
+        summary.source_key_lengths.push(source_key.len());
+        seen_source_keys.push(source_key);
+    }
+    if let Some(change_key) = folder.change_key {
+        summary.change_key_lengths.push(change_key.len());
+    }
+}
+
+fn hierarchy_debug_marker(tag: u32) -> bool {
+    matches!(
+        tag,
+        INCR_SYNC_CHG | INCR_SYNC_STATE_BEGIN | INCR_SYNC_STATE_END | INCR_SYNC_END
+    )
+}
+
+fn parse_debug_fast_transfer_property(
+    bytes: &[u8],
+    offset: usize,
+) -> Result<FastTransferDebugProperty, String> {
+    let tag = read_debug_u32(bytes, offset)?;
+    let property_type = tag & 0x0000_FFFF;
+    let value_start = offset + 4;
+    let (value_start, value_len) = match property_type {
+        0x0002 => (value_start, 2),
+        0x0003 => (value_start, 4),
+        0x000B => (value_start, 2),
+        0x0014 | 0x0040 => (value_start, 8),
+        0x001E | 0x001F | 0x0102 => {
+            let len = read_debug_u32(bytes, value_start)? as usize;
+            (value_start + 4, len)
+        }
+        _ => {
+            return Err(format!(
+                "unsupported FastTransfer property type in 0x{tag:08x}"
+            ))
+        }
+    };
+    let value = read_debug_slice(bytes, value_start, value_len)?.to_vec();
+    Ok(FastTransferDebugProperty {
+        tag,
+        value,
+        next_offset: value_start + value_len,
+    })
+}
+
+fn read_debug_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
+    let slice = read_debug_slice(bytes, offset, 4)?;
+    Ok(u32::from_le_bytes(slice.try_into().unwrap()))
+}
+
+fn read_debug_slice(bytes: &[u8], offset: usize, len: usize) -> Result<&[u8], String> {
+    bytes
+        .get(offset..offset.saturating_add(len))
+        .ok_or_else(|| format!("FastTransfer atom at offset {offset} overruns stream"))
+}
+
+fn format_usize_list(values: &[usize]) -> String {
+    values
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_property_tags(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
@@ -1371,6 +1605,51 @@ mod tests {
             &buffer[offset + 6..offset + 10],
             &PID_TAG_CONTAINER_CLASS_W.to_le_bytes()
         );
+    }
+
+    #[test]
+    fn hierarchy_transfer_debug_decoder_summarizes_serialized_stream() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x02,
+            0x0100,
+            0,
+            &[PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &[mailbox],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+        assert_eq!(summary.folder_change_count, 1);
+        assert!(summary.final_state_present);
+        assert_eq!(summary.parent_before_child_violations, 0);
+        assert_eq!(summary.zero_length_parent_source_key_count, 1);
+        assert_eq!(summary.source_key_lengths, vec![22]);
+        assert_eq!(summary.change_key_lengths, vec![22]);
+        assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
+        assert!(summary
+            .emitted_property_tags
+            .contains(&PID_TAG_PARENT_SOURCE_KEY));
+        assert!(summary.emitted_property_tags.contains(&PID_TAG_CHANGE_KEY));
     }
 
     #[test]

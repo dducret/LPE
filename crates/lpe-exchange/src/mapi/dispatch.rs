@@ -2480,6 +2480,12 @@ where
                     &aggregate_attachment_facts,
                     changes.current_change_sequence,
                 );
+                mapi_mailstore::log_hierarchy_transfer_debug(
+                    sync_type,
+                    folder_id,
+                    &sync_property_tags,
+                    &transfer_buffer,
+                );
                 let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
                     mapi_mailstore::sync_manifest_buffer_with_final_state(
                         sync_type,
