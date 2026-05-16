@@ -478,6 +478,12 @@ where
         );
     }
     let tags = nspi_get_props_property_tags(request);
+    let raw_tag_candidates = nspi_raw_property_tag_candidates(request);
+    let dropped_tags = raw_tag_candidates
+        .iter()
+        .copied()
+        .filter(|tag| !tags.contains(tag))
+        .collect::<Vec<_>>();
     let principal_entry = principal_address_book_entry(principal);
     let principal_id = nspi_entry_id(&principal_entry);
     let entry = nspi_stat_current_rec(request)
@@ -519,8 +525,134 @@ where
     } else {
         body.push(0);
     }
+    log_nspi_get_props_debug(
+        principal,
+        request,
+        request_type,
+        &raw_tag_candidates,
+        &tags,
+        &dropped_tags,
+        entry.as_ref(),
+    );
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
+}
+
+fn log_nspi_get_props_debug(
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_type: &str,
+    raw_tag_candidates: &[u32],
+    tags: &[u32],
+    dropped_tags: &[u32],
+    entry: Option<&ExchangeAddressBookEntry>,
+) {
+    let entry_id = entry
+        .map(nspi_entry_id)
+        .map(|id| format!("{id:#010x}"))
+        .unwrap_or_default();
+    let entry_kind = entry
+        .map(|entry| match entry.entry_kind {
+            ExchangeAddressBookEntryKind::Account => "account",
+            ExchangeAddressBookEntryKind::Contact => "contact",
+        })
+        .unwrap_or("");
+    let entry_email = entry.map(|entry| entry.email.as_str()).unwrap_or("");
+    let entry_display_name = entry.map(|entry| entry.display_name.as_str()).unwrap_or("");
+    let requested_entry_ids = nspi_requested_entry_ids(request);
+    let current_rec = nspi_stat_current_rec(request)
+        .map(|value| format!("{value:#010x}"))
+        .unwrap_or_default();
+    let returned_property_tags = if entry.is_some() {
+        format_nspi_property_tags_for_debug(tags)
+    } else {
+        String::new()
+    };
+    let message = "rca debug mapi nspi get props";
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "nspi",
+        mailbox = %principal.email,
+        request_type = request_type,
+        request_body_bytes = request.len(),
+        current_rec = %current_rec,
+        requested_entry_ids = %format_nspi_u32_values_for_debug(&requested_entry_ids),
+        entry_present = entry.is_some(),
+        entry_id = %entry_id,
+        entry_kind = entry_kind,
+        entry_email = entry_email,
+        entry_display_name = entry_display_name,
+        requested_property_tag_candidate_count = raw_tag_candidates.len(),
+        requested_property_tag_candidates = %format_nspi_property_tags_for_debug(raw_tag_candidates),
+        effective_property_tag_count = tags.len(),
+        effective_property_tags = %format_nspi_property_tags_for_debug(tags),
+        returned_property_tag_count = if entry.is_some() { tags.len() } else { 0 },
+        returned_property_tags = %returned_property_tags,
+        dropped_property_tag_count = dropped_tags.len(),
+        dropped_property_tags = %format_nspi_property_tags_for_debug(dropped_tags),
+        message = message,
+    );
+}
+
+fn nspi_raw_property_tag_candidates(request: &[u8]) -> Vec<u32> {
+    let mut tags = Vec::new();
+    let mut offset = 0usize;
+    while offset + 4 <= request.len() {
+        let tag = u32::from_le_bytes([
+            request[offset],
+            request[offset + 1],
+            request[offset + 2],
+            request[offset + 3],
+        ]);
+        if nspi_word_looks_like_requested_property_tag(tag) && !tags.contains(&tag) {
+            tags.push(tag);
+        }
+        offset += 1;
+    }
+    tags
+}
+
+fn nspi_word_looks_like_requested_property_tag(tag: u32) -> bool {
+    let property_id = tag >> 16;
+    let property_type = tag & 0xffff;
+    property_id != 0
+        && matches!(
+            property_type,
+            0x0002
+                | 0x0003
+                | 0x0005
+                | 0x000A
+                | 0x000B
+                | 0x0014
+                | 0x001E
+                | 0x001F
+                | 0x0040
+                | 0x0048
+                | 0x0102
+                | 0x1002
+                | 0x1003
+                | 0x1014
+                | 0x101E
+                | 0x101F
+                | 0x1048
+                | 0x1102
+        )
+}
+
+fn format_nspi_u32_values_for_debug(values: &[u32]) -> String {
+    values
+        .iter()
+        .map(|value| format!("{value:#010x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_nspi_property_tags_for_debug(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("{tag:#010x}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 pub(in crate::mapi) async fn nspi_rowset_response<S>(

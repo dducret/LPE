@@ -569,6 +569,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
     let columns = request.property_tags();
     let row = match object {
         Some(MapiObject::Logon) => {
+            log_get_properties_specific_debug(
+                request, object, principal, &columns, mailboxes, emails, snapshot,
+            );
             write_logon_property_row(&mut response, principal, &columns);
             return response;
         }
@@ -675,8 +678,200 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
                 .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &columns))
         }
     };
+    log_get_properties_specific_debug(
+        request, object, principal, &columns, mailboxes, emails, snapshot,
+    );
     write_standard_property_row(&mut response, &row);
     response
+}
+
+fn log_get_properties_specific_debug(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let mut defaulted_tags = Vec::new();
+    let mut unsupported_tags = Vec::new();
+    for tag in columns {
+        if MapiPropertyTag::new(*tag).property_type().is_none() {
+            unsupported_tags.push(*tag);
+            continue;
+        }
+        let value = serialize_object_property(object, principal, mailboxes, emails, snapshot, *tag);
+        let mut default_value = Vec::new();
+        write_property_default(&mut default_value, *tag);
+        if value == default_value {
+            defaulted_tags.push(*tag);
+        }
+    }
+    let (object_kind, folder_id, item_id) = mapi_object_debug_fields(object);
+    let message = "rca debug mapi get properties specific";
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x07",
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = object_kind,
+        folder_id = %folder_id,
+        item_id = %item_id,
+        requested_property_tag_count = columns.len(),
+        requested_property_tags = %format_property_tags_for_debug(columns),
+        returned_property_tag_count = columns.len().saturating_sub(unsupported_tags.len()),
+        returned_property_tags = %format_returned_property_tags_for_debug(columns, &unsupported_tags),
+        zero_or_default_property_tag_count = defaulted_tags.len(),
+        zero_or_default_property_tags = %format_property_tags_for_debug(&defaulted_tags),
+        unsupported_property_tag_count = unsupported_tags.len(),
+        unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
+        message = message,
+    );
+}
+
+fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, String, String) {
+    match object {
+        Some(MapiObject::Logon) => ("logon", String::new(), String::new()),
+        Some(MapiObject::Folder { folder_id, .. }) => {
+            ("folder", format!("{folder_id:#018x}"), String::new())
+        }
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+        }) => (
+            "message",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}"),
+        ),
+        Some(MapiObject::Contact {
+            folder_id,
+            contact_id,
+        }) => (
+            "contact",
+            format!("{folder_id:#018x}"),
+            format!("{contact_id:#018x}"),
+        ),
+        Some(MapiObject::Event {
+            folder_id,
+            event_id,
+        }) => (
+            "event",
+            format!("{folder_id:#018x}"),
+            format!("{event_id:#018x}"),
+        ),
+        Some(MapiObject::PendingMessage { folder_id, .. }) => (
+            "pending_message",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::PendingContact { folder_id, .. }) => (
+            "pending_contact",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::PendingEvent { folder_id, .. }) => {
+            ("pending_event", format!("{folder_id:#018x}"), String::new())
+        }
+        Some(MapiObject::HierarchyTable { folder_id, .. }) => (
+            "hierarchy_table",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::ContentsTable { folder_id, .. }) => (
+            "contents_table",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::AttachmentTable {
+            folder_id,
+            message_id,
+            ..
+        }) => (
+            "attachment_table",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}"),
+        ),
+        Some(MapiObject::PermissionTable { folder_id, .. }) => (
+            "permission_table",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::Attachment {
+            folder_id,
+            message_id,
+            attach_num,
+        }) => (
+            "attachment",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}/{}", attach_num),
+        ),
+        Some(MapiObject::PendingAttachment {
+            folder_id,
+            message_id,
+            attach_num,
+            ..
+        }) => (
+            "pending_attachment",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}/{}", attach_num),
+        ),
+        Some(MapiObject::SavedAttachment {
+            folder_id,
+            message_id,
+            attach_num,
+            ..
+        }) => (
+            "saved_attachment",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}/{}", attach_num),
+        ),
+        Some(MapiObject::AttachmentStream { .. }) => {
+            ("attachment_stream", String::new(), String::new())
+        }
+        Some(MapiObject::NotificationSubscription { .. }) => {
+            ("notification_subscription", String::new(), String::new())
+        }
+        Some(MapiObject::SynchronizationSource {
+            folder_id,
+            sync_type,
+            ..
+        }) => (
+            "synchronization_source",
+            format!("{folder_id:#018x}"),
+            format!("{sync_type:#04x}"),
+        ),
+        Some(MapiObject::SynchronizationCollector {
+            folder_id,
+            checkpoint_kind,
+            ..
+        }) => (
+            "synchronization_collector",
+            format!("{folder_id:#018x}"),
+            format!("{checkpoint_kind:?}"),
+        ),
+        None => ("unknown", String::new(), String::new()),
+    }
+}
+
+fn format_returned_property_tags_for_debug(columns: &[u32], unsupported_tags: &[u32]) -> String {
+    let returned = columns
+        .iter()
+        .copied()
+        .filter(|tag| !unsupported_tags.contains(tag))
+        .collect::<Vec<_>>();
+    format_property_tags_for_debug(&returned)
+}
+
+fn format_property_tags_for_debug(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("{tag:#010x}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 pub(in crate::mapi) fn rop_get_properties_all_response(
