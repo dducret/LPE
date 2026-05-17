@@ -2482,6 +2482,7 @@ where
                 );
                 mapi_mailstore::log_hierarchy_transfer_debug(
                     sync_type,
+                    sync_flags,
                     folder_id,
                     &sync_property_tags,
                     &transfer_buffer,
@@ -2509,6 +2510,10 @@ where
                 let checkpoint_delta_mailbox_count = delta_sync_mailboxes.len();
                 let checkpoint_delta_email_count = delta_sync_emails.len();
                 let checkpoint_deleted_message_count = deleted_message_ids.len();
+                let incremental_transfer_buffer_bytes = incremental_transfer_buffer
+                    .as_ref()
+                    .map(|buffer| buffer.len())
+                    .unwrap_or_default();
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -2534,6 +2539,7 @@ where
                     checkpoint_deleted_message_count,
                     current_change_sequence = changes.current_change_sequence,
                     transfer_buffer_bytes = transfer_buffer.len(),
+                    incremental_transfer_buffer_bytes,
                     "rca debug mapi sync configure"
                 );
                 let handle = session.allocate_output_handle(
@@ -2888,6 +2894,8 @@ where
                         upload_state_total_bytes = state.len(),
                         upload_state_client_bytes = *client_state_uploaded_bytes,
                         upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
+                        transfer_buffer_bytes = transfer_buffer.len(),
+                        transfer_position = *transfer_position,
                         "rca debug mapi sync upload state end"
                     );
                     responses.extend_from_slice(&rop_simple_success_response(&request));

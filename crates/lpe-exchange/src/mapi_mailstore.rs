@@ -597,6 +597,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
 
 pub(crate) fn log_hierarchy_transfer_debug(
     sync_type: u8,
+    sync_flags: u16,
     folder_id: u64,
     requested_property_tags: &[u32],
     transfer_buffer: &[u8],
@@ -623,6 +624,7 @@ pub(crate) fn log_hierarchy_transfer_debug(
             change_key_lengths = %format_usize_list(&summary.change_key_lengths),
             emitted_property_tags = %format_property_tags(&summary.emitted_property_tags),
             requested_property_tags = %format_property_tags(requested_property_tags),
+            property_tags_filter_mode = hierarchy_property_filter_mode(sync_flags, requested_property_tags),
             "rca debug mapi hierarchy transfer stream"
         ),
         Err(error) => tracing::warn!(
@@ -636,8 +638,22 @@ pub(crate) fn log_hierarchy_transfer_debug(
             hierarchy_decode_status = "error",
             hierarchy_decode_error = %error,
             requested_property_tags = %format_property_tags(requested_property_tags),
+            property_tags_filter_mode = hierarchy_property_filter_mode(sync_flags, requested_property_tags),
             "rca debug mapi hierarchy transfer stream"
         ),
+    }
+}
+
+fn hierarchy_property_filter_mode(
+    sync_flags: u16,
+    requested_property_tags: &[u32],
+) -> &'static str {
+    if requested_property_tags.is_empty() {
+        "none"
+    } else if sync_flags & 0x0080 == 0 {
+        "exclude"
+    } else {
+        "only-specified"
     }
 }
 
@@ -887,13 +903,21 @@ fn finish_hierarchy_debug_folder(
         last_modification_time = row.last_modification_time.unwrap_or_default(),
         change_number = row.change_number.unwrap_or_default(),
         content_count = row.content_count.unwrap_or_default(),
+        content_count_present = row.content_count.is_some(),
         content_unread_count = row.content_unread_count.unwrap_or_default(),
+        content_unread_count_present = row.content_unread_count.is_some(),
         folder_type = row.folder_type.unwrap_or_default(),
+        folder_type_present = row.folder_type.is_some(),
         local_commit_time_max = row.local_commit_time_max.unwrap_or_default(),
+        local_commit_time_max_present = row.local_commit_time_max.is_some(),
         deleted_count_total = row.deleted_count_total.unwrap_or_default(),
+        deleted_count_total_present = row.deleted_count_total.is_some(),
         message_size = row.message_size.unwrap_or_default(),
+        message_size_present = row.message_size.is_some(),
         access = row.access.unwrap_or_default(),
+        access_present = row.access.is_some(),
         subfolders = row.subfolders.unwrap_or_default(),
+        subfolders_present = row.subfolders.is_some(),
         source_key_hex = %row.source_key_hex,
         parent_source_key_hex = %row.parent_source_key_hex,
         change_key_hex = %row.change_key_hex,
