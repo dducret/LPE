@@ -1148,21 +1148,43 @@ fn hierarchy_sort_depth(
     if sync_type != 0x02 {
         return 0;
     }
-    let Some(mut parent_id) = mailbox.parent_id else {
+    let mut parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, mailboxes);
+    if parent_folder_id == sync_root_folder_id {
         return 0;
-    };
+    }
+
     let mut depth = 1u8;
-    while let Some(parent) = mailboxes.iter().find(|candidate| candidate.id == parent_id) {
-        if mapi_folder_id_for_mailbox(parent, sync_root_folder_id) == sync_root_folder_id {
-            break;
-        }
-        let Some(next_parent_id) = parent.parent_id else {
+    let mut visited = BTreeSet::new();
+    while parent_folder_id != 0 && visited.insert(parent_folder_id) {
+        let Some(next_parent_folder_id) =
+            mapi_parent_folder_id_for_folder_id(parent_folder_id, mailboxes)
+        else {
             break;
         };
-        parent_id = next_parent_id;
+        if next_parent_folder_id == sync_root_folder_id {
+            break;
+        }
+        parent_folder_id = next_parent_folder_id;
         depth = depth.saturating_add(1);
     }
     depth
+}
+
+fn mapi_parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> Option<u64> {
+    if folder_id == crate::mapi::identity::ROOT_FOLDER_ID {
+        return None;
+    }
+    if let Some((_, _, _, parent_folder_id, _)) = virtual_special_folder_metadata(folder_id) {
+        return Some(parent_folder_id);
+    }
+    mailboxes
+        .iter()
+        .find(|mailbox| {
+            let fallback = crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
+                .unwrap_or(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+            mapi_folder_id_for_mailbox(mailbox, fallback) == folder_id
+        })
+        .map(|mailbox| mapi_folder_parent_id_for_mailbox(mailbox, mailboxes))
 }
 
 fn hierarchy_folder_sort_order(mailbox: &JmapMailbox) -> i32 {

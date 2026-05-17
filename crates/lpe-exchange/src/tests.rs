@@ -12144,6 +12144,74 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(1));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut rops, 1, 2, 4096);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    let top = decoded
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name == "Top of Information Store")
+        .expect("IPM subtree folderChange");
+    assert!(top.parent_source_key.is_empty());
+    for name in [
+        "Deferred Action",
+        "Spooler Queue",
+        "Common Views",
+        "Schedule",
+        "Search",
+        "Views",
+        "Shortcuts",
+    ] {
+        let folder = decoded
+            .folder_changes
+            .iter()
+            .find(|folder| folder.display_name == name)
+            .unwrap_or_else(|| panic!("{name} folderChange"));
+        assert!(folder.parent_source_key.is_empty());
+    }
+    let ipm_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
+    for name in ["Inbox", "Outbox", "Sent Items", "Deleted Items"] {
+        let folder = decoded
+            .folder_changes
+            .iter()
+            .find(|folder| folder.display_name == name)
+            .unwrap_or_else(|| panic!("{name} folderChange"));
+        assert_eq!(folder.parent_source_key, ipm_source_key);
+    }
+}
+
+#[tokio::test]
 async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
     let parent_id = Uuid::parse_str("90909090-9090-4090-9090-909090909090").unwrap();
     let child_id = Uuid::parse_str("91919191-9191-4191-9191-919191919191").unwrap();
@@ -12433,6 +12501,79 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
 
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_with_client_state() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            None,
+            MapiCheckpointKind::Hierarchy,
+            42,
+            7,
+            serde_json::json!({
+                "source": "emsmdb-ics-download",
+                "syncType": 2,
+                "syncRootFolderId": test_mapi_folder_id(1),
+                "hierarchySyncVersion": 2
+            }),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 42,
+        current_modseq: 7,
+        ..Default::default()
+    };
+
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut rops,
+        1,
+        2,
+        4096,
+        b"client-hierarchy-state",
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    assert!(decoded
+        .folder_changes
+        .iter()
+        .any(|folder| folder.display_name == "Inbox"));
 }
 
 #[tokio::test]
