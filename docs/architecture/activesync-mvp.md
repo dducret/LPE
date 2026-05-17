@@ -27,6 +27,13 @@
   - accepts common protocol options that are not fully material to the adapter response
   - uses persisted sync keys and canonical collection state
   - supports shared mailbox projection for canonical mail folders
+- `FolderSync` behavior:
+  - projects canonical mailbox folders, including `Inbox`, `Sent`, `Drafts`,
+    `Trash`, `Junk`, `Archive`, and user-created mail folders when present
+  - preserves canonical mailbox parent-child relationships with ActiveSync
+    `ParentId` values instead of flattening mail folders under the root
+  - maps unsupported or non-default mail roles to the ActiveSync user-created
+    mail folder type instead of inventing ActiveSync-only folder classes
 - `SendMail`, `SmartReply`, and `SmartForward`:
   - parse submitted `MIME`
   - validate attachments through the canonical file-validation path

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -34,6 +35,7 @@ struct FakeStore {
     session: Option<AuthenticatedAccount>,
     login: Option<AccountLogin>,
     mailboxes: Vec<JmapMailbox>,
+    mailboxes_by_account: HashMap<Uuid, Vec<JmapMailbox>>,
     accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
     contacts: Arc<Mutex<Vec<ClientContact>>>,
@@ -82,42 +84,50 @@ impl FakeStore {
     }
 
     fn draft_mailbox() -> JmapMailbox {
-        JmapMailbox {
-            id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
-            parent_id: None,
-            role: "drafts".to_string(),
-            name: "Drafts".to_string(),
-            sort_order: 10,
-            modseq: 1,
-            total_emails: 1,
-            unread_emails: 0,
-            is_subscribed: true,
-        }
+        Self::mailbox(
+            "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            "drafts",
+            "Drafts",
+            10,
+            None,
+        )
     }
 
     fn inbox_mailbox() -> JmapMailbox {
-        JmapMailbox {
-            id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
-            parent_id: None,
-            role: "inbox".to_string(),
-            name: "Inbox".to_string(),
-            sort_order: 1,
-            modseq: 1,
-            total_emails: 1,
-            unread_emails: 1,
-            is_subscribed: true,
-        }
+        Self::mailbox(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "inbox",
+            "Inbox",
+            1,
+            None,
+        )
     }
 
     fn sent_mailbox() -> JmapMailbox {
+        Self::mailbox(
+            "cccccccc-cccc-cccc-cccc-cccccccccccc",
+            "sent",
+            "Sent",
+            2,
+            None,
+        )
+    }
+
+    fn mailbox(
+        id: &str,
+        role: &str,
+        name: &str,
+        sort_order: i32,
+        parent_id: Option<Uuid>,
+    ) -> JmapMailbox {
         JmapMailbox {
-            id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
-            parent_id: None,
-            role: "sent".to_string(),
-            name: "Sent".to_string(),
-            sort_order: 2,
+            id: Uuid::parse_str(id).unwrap(),
+            parent_id,
+            role: role.to_string(),
+            name: name.to_string(),
+            sort_order,
             modseq: 1,
-            total_emails: 1,
+            total_emails: 0,
             unread_emails: 0,
             is_subscribed: true,
         }
@@ -254,8 +264,12 @@ impl ActiveSyncStore for FakeStore {
         Box::pin(async move { Ok(accesses) })
     }
 
-    fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
-        let mailboxes = self.mailboxes.clone();
+    fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
+        let mailboxes = self
+            .mailboxes_by_account
+            .get(&account_id)
+            .cloned()
+            .unwrap_or_else(|| self.mailboxes.clone());
         Box::pin(async move { Ok(mailboxes) })
     }
 
@@ -1029,6 +1043,42 @@ fn collection_sync_key(sync: &WbxmlNode, collection_id: &str) -> String {
         .unwrap()
 }
 
+async fn folder_sync(
+    service: &ActiveSyncService<FakeStore>,
+    sync_key: &str,
+    device_id: &str,
+) -> WbxmlNode {
+    let request = encode_wbxml(&{
+        let mut node = WbxmlNode::new(7, "FolderSync");
+        node.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
+        node
+    });
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("FolderSync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some(device_id.to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    decode_response_body(response).await
+}
+
+fn folder_add<'a>(changes: &'a WbxmlNode, server_id: &str) -> &'a WbxmlNode {
+    changes
+        .children_named("Add")
+        .into_iter()
+        .find(|change| change.child("ServerId").unwrap().text_value() == server_id)
+        .unwrap()
+}
+
 #[test]
 fn wbxml_roundtrip_preserves_tokens_and_text() {
     let mut root = WbxmlNode::new(7, "FolderSync");
@@ -1080,76 +1130,96 @@ fn wbxml_roundtrip_preserves_get_item_estimate_tokens() {
 #[tokio::test]
 async fn folder_sync_returns_mail_and_collaboration_collections() {
     let inbox = FakeStore::inbox_mailbox();
+    let drafts = FakeStore::draft_mailbox();
+    let sent = FakeStore::sent_mailbox();
+    let trash = FakeStore::mailbox(
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "trash",
+        "Trash",
+        30,
+        None,
+    );
+    let junk = FakeStore::mailbox(
+        "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        "junk",
+        "Junk",
+        40,
+        None,
+    );
+    let archive = FakeStore::mailbox(
+        "12121212-1212-4212-9212-121212121212",
+        "archive",
+        "Archive",
+        50,
+        None,
+    );
+    let custom = FakeStore::mailbox(
+        "34343434-3434-4434-9434-343434343434",
+        "custom",
+        "Projects",
+        60,
+        None,
+    );
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: vec![
             inbox.clone(),
-            FakeStore::draft_mailbox(),
-            FakeStore::sent_mailbox(),
+            drafts.clone(),
+            sent.clone(),
+            trash.clone(),
+            junk.clone(),
+            archive.clone(),
+            custom.clone(),
         ],
         ..Default::default()
     };
     let service = ActiveSyncService::new(store);
-    let request = encode_wbxml(&{
-        let mut node = WbxmlNode::new(7, "FolderSync");
-        node.push(WbxmlNode::with_text(7, "SyncKey", "0"));
-        node
-    });
 
-    let response = service
-        .handle_request(
-            ActiveSyncQuery {
-                cmd: Some("FolderSync".to_string()),
-                user: Some("alice@example.test".to_string()),
-                device_id: Some("dev1".to_string()),
-                _device_type: Some("phone".to_string()),
-            },
-            &bearer_headers(),
-            &request,
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let first_body = decode_response_body(response).await;
+    let first_body = folder_sync(&service, "0", "dev1").await;
     let changes = first_body.child("Changes").unwrap();
-    assert_eq!(changes.child("Count").unwrap().text_value(), "5");
-    assert!(changes.children_named("Add").iter().any(|change| {
-        change.child("ServerId").unwrap().text_value() == inbox.id.to_string()
-            && change.child("ParentId").unwrap().text_value() == "0"
-            && change.child("DisplayName").unwrap().text_value() == "Inbox"
-            && change.child("Type").unwrap().text_value() == "2"
-    }));
-    assert!(changes.children_named("Add").iter().any(|change| {
-        change.child("ServerId").unwrap().text_value() == "contacts"
-            && change.child("ParentId").unwrap().text_value() == "0"
-            && change.child("DisplayName").unwrap().text_value() == "Contacts"
-            && change.child("Type").unwrap().text_value() == "9"
+    assert_eq!(changes.child("Count").unwrap().text_value(), "9");
+
+    for (mailbox, display_name, folder_type) in [
+        (&inbox, "Inbox", "2"),
+        (&drafts, "Drafts", "3"),
+        (&sent, "Sent", "5"),
+        (&trash, "Trash", "4"),
+        (&junk, "Junk", "12"),
+        (&archive, "Archive", "12"),
+        (&custom, "Projects", "12"),
+    ] {
+        let add = folder_add(changes, &mailbox.id.to_string());
+        assert_eq!(add.child("ParentId").unwrap().text_value(), "0");
+        assert_eq!(add.child("DisplayName").unwrap().text_value(), display_name);
+        assert_eq!(add.child("Type").unwrap().text_value(), folder_type);
+    }
+
+    let contacts = folder_add(changes, "contacts");
+    assert_eq!(contacts.child("ParentId").unwrap().text_value(), "0");
+    assert_eq!(
+        contacts.child("DisplayName").unwrap().text_value(),
+        "Contacts"
+    );
+    assert_eq!(contacts.child("Type").unwrap().text_value(), "9");
+
+    let calendar = folder_add(changes, "calendar");
+    assert_eq!(calendar.child("ParentId").unwrap().text_value(), "0");
+    assert_eq!(
+        calendar.child("DisplayName").unwrap().text_value(),
+        "Calendar"
+    );
+    assert_eq!(calendar.child("Type").unwrap().text_value(), "8");
+    assert!(!changes.children_named("Add").iter().any(|change| {
+        change.child("Type").unwrap().text_value() == "7"
+            || change.child("Type").unwrap().text_value() == "15"
     }));
 
-    let stable_request = encode_wbxml(&{
-        let mut node = WbxmlNode::new(7, "FolderSync");
-        node.push(WbxmlNode::with_text(
-            7,
-            "SyncKey",
-            first_body.child("SyncKey").unwrap().text_value(),
-        ));
-        node
-    });
-    let stable_response = service
-        .handle_request(
-            ActiveSyncQuery {
-                cmd: Some("FolderSync".to_string()),
-                user: Some("alice@example.test".to_string()),
-                device_id: Some("dev1".to_string()),
-                _device_type: Some("phone".to_string()),
-            },
-            &bearer_headers(),
-            &stable_request,
-        )
-        .await
-        .unwrap();
-    let stable_body = decode_response_body(stable_response).await;
+    let stable_body = folder_sync(
+        &service,
+        first_body.child("SyncKey").unwrap().text_value(),
+        "dev1",
+    )
+    .await;
     assert_eq!(
         stable_body
             .child("Changes")
@@ -1159,6 +1229,129 @@ async fn folder_sync_returns_mail_and_collaboration_collections() {
             .text_value(),
         "0"
     );
+}
+
+#[tokio::test]
+async fn folder_sync_preserves_nested_mailbox_parent_ids() {
+    let parent = FakeStore::mailbox(
+        "45454545-4545-4545-8545-454545454545",
+        "custom",
+        "Projects",
+        60,
+        None,
+    );
+    let child = FakeStore::mailbox(
+        "56565656-5656-4656-9656-565656565656",
+        "custom",
+        "Alpha",
+        61,
+        Some(parent.id),
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![parent.clone(), child.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let body = folder_sync(&service, "0", "dev-nested").await;
+    let changes = body.child("Changes").unwrap();
+    assert_eq!(
+        folder_add(changes, &parent.id.to_string())
+            .child("ParentId")
+            .unwrap()
+            .text_value(),
+        "0"
+    );
+    let child_add = folder_add(changes, &child.id.to_string());
+    assert_eq!(
+        child_add.child("ParentId").unwrap().text_value(),
+        parent.id.to_string()
+    );
+    assert_eq!(
+        child_add.child("DisplayName").unwrap().text_value(),
+        "Alpha"
+    );
+}
+
+#[tokio::test]
+async fn folder_sync_projects_shared_mailbox_folders_with_hierarchy() {
+    let account = FakeStore::account();
+    let own_inbox = FakeStore::inbox_mailbox();
+    let shared_access = FakeStore::shared_mailbox_access(false, true);
+    let shared_parent = FakeStore::mailbox(
+        "67676767-6767-4767-9767-676767676767",
+        "custom",
+        "Projects",
+        10,
+        None,
+    );
+    let shared_child = FakeStore::mailbox(
+        "78787878-7878-4878-9878-787878787878",
+        "archive",
+        "Closed",
+        11,
+        Some(shared_parent.id),
+    );
+    let store = FakeStore {
+        session: Some(account.clone()),
+        accessible_mailbox_accounts: vec![FakeStore::mailbox_access(), shared_access.clone()],
+        mailboxes_by_account: HashMap::from([
+            (account.account_id, vec![own_inbox]),
+            (
+                shared_access.account_id,
+                vec![shared_parent.clone(), shared_child.clone()],
+            ),
+        ]),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let body = folder_sync(&service, "0", "dev-shared").await;
+    let changes = body.child("Changes").unwrap();
+    let shared_parent_add = folder_add(changes, &shared_parent.id.to_string());
+    assert_eq!(
+        shared_parent_add.child("DisplayName").unwrap().text_value(),
+        "shared@example.test / Projects"
+    );
+    assert_eq!(
+        shared_parent_add.child("ParentId").unwrap().text_value(),
+        "0"
+    );
+
+    let shared_child_add = folder_add(changes, &shared_child.id.to_string());
+    assert_eq!(
+        shared_child_add.child("ParentId").unwrap().text_value(),
+        shared_parent.id.to_string()
+    );
+    assert_eq!(
+        shared_child_add.child("DisplayName").unwrap().text_value(),
+        "Closed"
+    );
+    assert_eq!(shared_child_add.child("Type").unwrap().text_value(), "12");
+}
+
+#[tokio::test]
+async fn stale_folder_sync_key_is_rejected_after_completed_round() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let primed = folder_sync(&service, "0", "dev-stale-folder").await;
+    let primed_key = primed.child("SyncKey").unwrap().text_value().to_string();
+    let stable = folder_sync(&service, &primed_key, "dev-stale-folder").await;
+    assert_ne!(
+        primed_key,
+        stable.child("SyncKey").unwrap().text_value().to_string()
+    );
+
+    let stale = folder_sync(&service, &primed_key, "dev-stale-folder").await;
+    assert_eq!(stale.child("Status").unwrap().text_value(), "9");
+    assert!(stale.child("SyncKey").is_none());
+    assert!(stale.child("Changes").is_none());
 }
 
 #[tokio::test]

@@ -286,8 +286,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 .map(|collection| SnapshotEntry {
                     server_id: collection.id.clone(),
                     fingerprint: format!(
-                        "{}:{}:{}",
-                        collection.class_name, collection.display_name, collection.folder_type
+                        "{}:{}:{}:{}",
+                        collection.class_name,
+                        collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
+                        collection.display_name,
+                        collection.folder_type
                     ),
                     data: json!({
                         "page": 7,
@@ -349,14 +352,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .find(|collection| collection.id == change.server_id)
                     {
                         let mut node = WbxmlNode::new(7, "Add");
-                        node.push(WbxmlNode::with_text(7, "ServerId", &collection.id));
-                        node.push(WbxmlNode::with_text(7, "ParentId", ROOT_FOLDER_ID));
-                        node.push(WbxmlNode::with_text(
-                            7,
-                            "DisplayName",
-                            &collection.display_name,
-                        ));
-                        node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
+                        push_folder_metadata(&mut node, collection);
                         changes_node.push(node);
                     }
                 }
@@ -366,14 +362,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .find(|collection| collection.id == change.server_id)
                     {
                         let mut node = WbxmlNode::new(7, "Update");
-                        node.push(WbxmlNode::with_text(7, "ServerId", &collection.id));
-                        node.push(WbxmlNode::with_text(7, "ParentId", ROOT_FOLDER_ID));
-                        node.push(WbxmlNode::with_text(
-                            7,
-                            "DisplayName",
-                            &collection.display_name,
-                        ));
-                        node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
+                        push_folder_metadata(&mut node, collection);
                         changes_node.push(node);
                     }
                 }
@@ -1781,33 +1770,36 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .fetch_accessible_mailbox_accounts(account_id)
             .await?
         {
-            for mailbox in self.store.fetch_jmap_mailboxes(access.account_id).await? {
-                let display_name = if access.is_owned {
+            let mailboxes = self.store.fetch_jmap_mailboxes(access.account_id).await?;
+            let mailbox_ids = mailboxes
+                .iter()
+                .map(|mailbox| mailbox.id)
+                .collect::<std::collections::HashSet<_>>();
+            for mailbox in mailboxes {
+                let parent_id = mailbox
+                    .parent_id
+                    .filter(|parent_id| mailbox_ids.contains(parent_id))
+                    .map(|parent_id| parent_id.to_string());
+                let display_name = if access.is_owned || parent_id.is_some() {
                     mailbox.name.clone()
                 } else {
                     format!("{} / {}", access.email, mailbox.name)
                 };
-                let folder = match mailbox.role.as_str() {
-                    "inbox" => Some(("2", display_name)),
-                    "sent" => Some(("5", display_name)),
-                    "drafts" => Some(("3", display_name)),
-                    _ => None,
-                };
-                if let Some((folder_type, display_name)) = folder {
-                    collections.push(CollectionDefinition {
-                        id: mailbox.id.to_string(),
-                        account_id: access.account_id,
-                        class_name: MAIL_CLASS.to_string(),
-                        display_name,
-                        folder_type: folder_type.to_string(),
-                        mailbox_id: Some(mailbox.id),
-                    });
-                }
+                collections.push(CollectionDefinition {
+                    id: mailbox.id.to_string(),
+                    parent_id,
+                    account_id: access.account_id,
+                    class_name: MAIL_CLASS.to_string(),
+                    display_name,
+                    folder_type: folder_type_for_mailbox_role(&mailbox.role).to_string(),
+                    mailbox_id: Some(mailbox.id),
+                });
             }
         }
 
         collections.push(CollectionDefinition {
             id: "contacts".to_string(),
+            parent_id: None,
             account_id,
             class_name: CONTACTS_CLASS.to_string(),
             display_name: "Contacts".to_string(),
@@ -1816,6 +1808,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         });
         collections.push(CollectionDefinition {
             id: "calendar".to_string(),
+            parent_id: None,
             account_id,
             class_name: CALENDAR_CLASS.to_string(),
             display_name: "Calendar".to_string(),
@@ -1835,6 +1828,31 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .await?
             .into_iter()
             .find(|collection| collection.id == collection_id))
+    }
+}
+
+fn push_folder_metadata(node: &mut WbxmlNode, collection: &CollectionDefinition) {
+    node.push(WbxmlNode::with_text(7, "ServerId", &collection.id));
+    node.push(WbxmlNode::with_text(
+        7,
+        "ParentId",
+        collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
+    ));
+    node.push(WbxmlNode::with_text(
+        7,
+        "DisplayName",
+        &collection.display_name,
+    ));
+    node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
+}
+
+fn folder_type_for_mailbox_role(role: &str) -> &'static str {
+    match role {
+        "inbox" => "2",
+        "drafts" => "3",
+        "trash" => "4",
+        "sent" => "5",
+        _ => "12",
     }
 }
 
