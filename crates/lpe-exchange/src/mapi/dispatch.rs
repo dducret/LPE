@@ -2383,9 +2383,7 @@ where
                     )
                     .await
                 {
-                    Ok(checkpoint) => checkpoint.filter(|checkpoint| {
-                        hierarchy_checkpoint_is_usable(checkpoint_kind, folder_id, checkpoint)
-                    }),
+                    Ok(checkpoint) => checkpoint,
                     Err(_) => {
                         responses.extend_from_slice(&rop_error_response(
                             0x70,
@@ -2395,6 +2393,39 @@ where
                         continue;
                     }
                 };
+                let checkpoint_status = checkpoint
+                    .as_ref()
+                    .map(|checkpoint| {
+                        hierarchy_checkpoint_status(checkpoint_kind, folder_id, checkpoint)
+                    })
+                    .unwrap_or("missing");
+                let checkpoint_cursor_source = checkpoint
+                    .as_ref()
+                    .and_then(|checkpoint| checkpoint.cursor_json.get("source"))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                let checkpoint_cursor_sync_root_folder_id = checkpoint
+                    .as_ref()
+                    .and_then(|checkpoint| checkpoint.cursor_json.get("syncRootFolderId"))
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|id| format!("0x{id:016x}"))
+                    .unwrap_or_default();
+                let checkpoint_cursor_hierarchy_sync_version = checkpoint
+                    .as_ref()
+                    .and_then(|checkpoint| checkpoint.cursor_json.get("hierarchySyncVersion"))
+                    .and_then(serde_json::Value::as_u64)
+                    .map(|version| version.to_string())
+                    .unwrap_or_default();
+                let checkpoint_cursor_change_sequence = checkpoint
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.last_change_sequence)
+                    .unwrap_or_default();
+                let checkpoint_cursor_modseq = checkpoint
+                    .as_ref()
+                    .map(|checkpoint| checkpoint.last_modseq)
+                    .unwrap_or_default();
+                let checkpoint = checkpoint.filter(|_| checkpoint_status == "usable");
                 let since = checkpoint
                     .as_ref()
                     .map(|checkpoint| checkpoint.last_change_sequence)
@@ -2529,7 +2560,16 @@ where
                     sync_extra_flags = format_args!("0x{sync_extra_flags:08x}"),
                     sync_property_tag_count = sync_property_tags.len(),
                     sync_property_tags = %sync_property_tags_hex,
+                    sync_property_filter_mode =
+                        sync_property_filter_mode(sync_flags, &sync_property_tags),
                     checkpoint_loaded = checkpoint.is_some(),
+                    checkpoint_status,
+                    checkpoint_cursor_source,
+                    checkpoint_cursor_sync_root_folder_id = %checkpoint_cursor_sync_root_folder_id,
+                    checkpoint_cursor_hierarchy_sync_version =
+                        %checkpoint_cursor_hierarchy_sync_version,
+                    checkpoint_cursor_change_sequence,
+                    checkpoint_cursor_modseq,
                     snapshot_mailbox_count = mailboxes.len(),
                     snapshot_email_count = emails.len(),
                     available_sync_mailbox_count,
@@ -2684,7 +2724,22 @@ where
                         mailbox = %principal.email,
                         request_type = "Execute",
                         request_rop_id = "0x4e",
+                        folder_id = format_args!("0x{:016x}", *folder_id),
                         sync_type = format_args!("0x{:02x}", *sync_type),
+                        checkpoint_kind = checkpoint_kind.as_str(),
+                        checkpoint_mailbox_id = (*mailbox_id)
+                            .map(|id| id.to_string())
+                            .unwrap_or_default(),
+                        checkpoint_change_sequence = *checkpoint_change_sequence,
+                        checkpoint_modseq = *checkpoint_modseq,
+                        sync_state_bytes = state.len(),
+                        upload_state_buffer_bytes = state_upload_buffer.len(),
+                        upload_state_client_bytes = *client_state_uploaded_bytes,
+                        incremental_transfer_available = incremental_transfer_buffer.is_some(),
+                        incremental_transfer_buffer_bytes = incremental_transfer_buffer
+                            .as_ref()
+                            .map(|buffer| buffer.len())
+                            .unwrap_or_default(),
                         requested_buffer_bytes,
                         transfer_position_before = previous_transfer_position,
                         transfer_position_after = *transfer_position,
@@ -3677,29 +3732,49 @@ where
     Ok(object_id)
 }
 
-fn hierarchy_checkpoint_is_usable(
+fn hierarchy_checkpoint_status(
     checkpoint_kind: MapiCheckpointKind,
     folder_id: u64,
     checkpoint: &MapiSyncCheckpoint,
-) -> bool {
+) -> &'static str {
     if checkpoint_kind != MapiCheckpointKind::Hierarchy {
-        return true;
+        return "usable";
     }
-    checkpoint
+    if checkpoint
         .cursor_json
         .get("source")
         .and_then(serde_json::Value::as_str)
-        == Some("emsmdb-ics-download")
-        && checkpoint
-            .cursor_json
-            .get("hierarchySyncVersion")
-            .and_then(serde_json::Value::as_u64)
-            == Some(HIERARCHY_SYNC_CURSOR_VERSION)
-        && checkpoint
-            .cursor_json
-            .get("syncRootFolderId")
-            .and_then(serde_json::Value::as_u64)
-            == Some(folder_id)
+        != Some("emsmdb-ics-download")
+    {
+        return "stale-source";
+    }
+    if checkpoint
+        .cursor_json
+        .get("hierarchySyncVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(HIERARCHY_SYNC_CURSOR_VERSION)
+    {
+        return "stale-version";
+    }
+    if checkpoint
+        .cursor_json
+        .get("syncRootFolderId")
+        .and_then(serde_json::Value::as_u64)
+        != Some(folder_id)
+    {
+        return "stale-root";
+    }
+    "usable"
+}
+
+fn sync_property_filter_mode(sync_flags: u16, requested_property_tags: &[u32]) -> &'static str {
+    if requested_property_tags.is_empty() {
+        "none"
+    } else if sync_flags & 0x0080 == 0 {
+        "exclude"
+    } else {
+        "only-specified"
+    }
 }
 
 #[cfg(test)]

@@ -565,6 +565,45 @@ fn log_mapi_session_disconnect(
         })
         .collect::<Vec<_>>()
         .join("|");
+    let mut hierarchy_sync_source_count = 0usize;
+    let mut content_sync_source_count = 0usize;
+    let mut read_state_sync_source_count = 0usize;
+    let mut completed_sync_source_count = 0usize;
+    let mut completed_hierarchy_sync_source_count = 0usize;
+    let mut completed_content_sync_source_count = 0usize;
+    let mut incomplete_sync_source_count = 0usize;
+    let mut total_transfer_buffer_bytes = 0usize;
+    let mut total_transfer_position_bytes = 0usize;
+    for object in session.handles.values() {
+        let MapiObject::SynchronizationSource {
+            sync_type,
+            transfer_buffer,
+            transfer_position,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        match *sync_type {
+            0x01 => content_sync_source_count += 1,
+            0x02 => hierarchy_sync_source_count += 1,
+            0x03 => read_state_sync_source_count += 1,
+            _ => {}
+        }
+        total_transfer_buffer_bytes += transfer_buffer.len();
+        total_transfer_position_bytes += *transfer_position;
+        let completed = *transfer_position >= transfer_buffer.len();
+        if completed {
+            completed_sync_source_count += 1;
+            match *sync_type {
+                0x01 => completed_content_sync_source_count += 1,
+                0x02 => completed_hierarchy_sync_source_count += 1,
+                _ => {}
+            }
+        } else {
+            incomplete_sync_source_count += 1;
+        }
+    }
     let sync_source_count = session
         .handles
         .values()
@@ -596,6 +635,17 @@ fn log_mapi_session_disconnect(
         notification_subscription_count,
         pending_notification_count = session.pending_notifications.len(),
         completed_execute_request_count = session.completed_execute_requests.len(),
+        hierarchy_sync_source_count,
+        content_sync_source_count,
+        read_state_sync_source_count,
+        completed_sync_source_count,
+        completed_hierarchy_sync_source_count,
+        completed_content_sync_source_count,
+        incomplete_sync_source_count,
+        total_transfer_buffer_bytes,
+        total_transfer_position_bytes,
+        completed_hierarchy_without_content_sync =
+            completed_hierarchy_sync_source_count > 0 && content_sync_source_count == 0,
         sync_source_summaries = %sync_source_summaries,
         "rca debug mapi session disconnect"
     );
