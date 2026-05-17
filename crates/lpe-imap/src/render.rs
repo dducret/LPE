@@ -1342,6 +1342,7 @@ mod tests {
             role: "sent".to_string(),
             name: "Gesendet".to_string(),
             sort_order: 20,
+            modseq: 1,
             total_emails: 0,
             unread_emails: 0,
             is_subscribed: true,

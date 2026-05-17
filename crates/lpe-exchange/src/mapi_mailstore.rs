@@ -68,14 +68,7 @@ pub(crate) struct MessageAttachmentSyncFacts {
 }
 
 pub(crate) fn canonical_folder_change_number(mailbox: &JmapMailbox) -> u64 {
-    stable_change_counter([
-        mailbox.id.as_bytes().as_slice(),
-        mailbox.role.as_bytes(),
-        mailbox.name.as_bytes(),
-        &mailbox.sort_order.to_le_bytes(),
-        &mailbox.total_emails.to_le_bytes(),
-        &mailbox.unread_emails.to_le_bytes(),
-    ])
+    canonical_modseq_change_number(mailbox.modseq)
 }
 
 pub(crate) fn canonical_message_change_number(email: &JmapEmail) -> u64 {
@@ -84,97 +77,17 @@ pub(crate) fn canonical_message_change_number(email: &JmapEmail) -> u64 {
 
 pub(crate) fn canonical_message_change_number_with_attachments(
     email: &JmapEmail,
-    attachments: &[AttachmentSyncFact],
+    _attachments: &[AttachmentSyncFact],
 ) -> u64 {
-    let mut hash = FNV_OFFSET;
-    hash = hash_bytes(hash, email.id.as_bytes());
-    hash = hash_bytes(hash, email.thread_id.as_bytes());
-    hash = hash_bytes(hash, email.mailbox_id.as_bytes());
-    hash = hash_bytes(hash, email.mailbox_role.as_bytes());
-    hash = hash_bytes(hash, email.mailbox_name.as_bytes());
-    hash = hash_message_mailbox_membership(hash, email);
-    hash = hash_bytes(hash, email.received_at.as_bytes());
-    hash = hash_bytes(
-        hash,
-        email.sent_at.as_deref().unwrap_or_default().as_bytes(),
-    );
-    hash = hash_bytes(hash, email.from_address.as_bytes());
-    hash = hash_bytes(
-        hash,
-        email.from_display.as_deref().unwrap_or_default().as_bytes(),
-    );
-    hash = hash_bytes(hash, email.subject.as_bytes());
-    hash = hash_bytes(hash, email.preview.as_bytes());
-    hash = hash_bytes(hash, email.body_text.as_bytes());
-    hash = hash_bytes(
-        hash,
-        &[
-            email.unread as u8,
-            email.flagged as u8,
-            email.has_attachments as u8,
-        ],
-    );
-    hash = hash_bytes(hash, &email.size_octets.to_le_bytes());
-    hash = hash_bytes(
-        hash,
+    canonical_modseq_change_number(
         email
-            .internet_message_id
-            .as_deref()
-            .unwrap_or_default()
-            .as_bytes(),
-    );
-    for recipient in email.to.iter().chain(email.cc.iter()) {
-        hash = hash_bytes(hash, recipient.address.as_bytes());
-        hash = hash_bytes(
-            hash,
-            recipient
-                .display_name
-                .as_deref()
-                .unwrap_or_default()
-                .as_bytes(),
-        );
-    }
-    let mut attachments = attachments.iter().collect::<Vec<_>>();
-    attachments.sort_by(|left, right| {
-        left.file_name
-            .cmp(&right.file_name)
-            .then(left.media_type.cmp(&right.media_type))
-            .then(left.id.cmp(&right.id))
-    });
-    for attachment in attachments {
-        hash = hash_bytes(hash, attachment.id.as_bytes());
-        hash = hash_bytes(hash, attachment.file_reference.as_bytes());
-        hash = hash_bytes(hash, attachment.file_name.as_bytes());
-        hash = hash_bytes(hash, attachment.media_type.as_bytes());
-        hash = hash_bytes(hash, &attachment.size_octets.to_le_bytes());
-    }
-    change_counter_from_hash(hash)
-}
-
-fn hash_message_mailbox_membership(mut hash: u64, email: &JmapEmail) -> u64 {
-    let mut mailbox_ids = email.mailbox_ids.iter().collect::<Vec<_>>();
-    mailbox_ids.sort();
-    for mailbox_id in mailbox_ids {
-        hash = hash_bytes(hash, mailbox_id.as_bytes());
-    }
-
-    let mut mailbox_states = email.mailbox_states.iter().collect::<Vec<_>>();
-    mailbox_states.sort_by(|left, right| {
-        left.mailbox_id
-            .cmp(&right.mailbox_id)
-            .then(left.role.cmp(&right.role))
-            .then(left.name.cmp(&right.name))
-    });
-    for state in mailbox_states {
-        hash = hash_bytes(hash, state.mailbox_id.as_bytes());
-        hash = hash_bytes(hash, state.role.as_bytes());
-        hash = hash_bytes(hash, state.name.as_bytes());
-        hash = hash_bytes(
-            hash,
-            &[state.unread as u8, state.flagged as u8, state.draft as u8],
-        );
-    }
-    hash
+            .mailbox_states
+            .iter()
+            .map(|state| state.modseq)
+            .chain(std::iter::once(email.modseq))
+            .max()
+            .unwrap_or(1),
+    )
 }
 
 pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
@@ -220,6 +133,7 @@ pub(crate) fn virtual_special_mailbox(folder_id: u64) -> Option<JmapMailbox> {
         role: role.to_string(),
         name: name.to_string(),
         sort_order,
+        modseq: change_number_for_store_id(folder_id),
         total_emails: 0,
         unread_emails: 0,
         is_subscribed: true,
@@ -1648,20 +1562,16 @@ fn stable_hash64<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> u64 {
     hash.max(1)
 }
 
-fn stable_change_counter<'a>(parts: impl IntoIterator<Item = &'a [u8]>) -> u64 {
-    change_counter_from_hash(stable_hash64(parts))
-}
-
-fn change_counter_from_hash(hash: u64) -> u64 {
-    (hash & 0x0000_FFFF_FFFF_FFFF).max(1)
-}
-
 fn hash_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
+}
+
+fn canonical_modseq_change_number(modseq: u64) -> u64 {
+    modseq.clamp(1, 0x0000_FFFF_FFFF_FFFF)
 }
 
 fn write_prefixed_bytes(buffer: &mut Vec<u8>, bytes: &[u8]) {
@@ -1800,6 +1710,7 @@ mod tests {
             address: "visible@example.test".to_string(),
             display_name: None,
         });
+        email.mailbox_states[0].modseq += 1;
         assert_ne!(canonical_message_change_number(&email), baseline);
     }
 
@@ -1814,6 +1725,7 @@ mod tests {
             mailbox_id: archive_id,
             role: String::new(),
             name: "Archive".to_string(),
+            modseq: 43,
             unread: false,
             flagged: false,
             draft: false,
@@ -1827,6 +1739,12 @@ mod tests {
             .find(|state| state.mailbox_id == archive_id)
             .unwrap()
             .unread = true;
+        email
+            .mailbox_states
+            .iter_mut()
+            .find(|state| state.mailbox_id == archive_id)
+            .unwrap()
+            .modseq += 1;
         assert_ne!(canonical_message_change_number(&email), with_archive);
     }
 
@@ -1838,6 +1756,7 @@ mod tests {
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 40,
+            modseq: 42,
             total_emails: 1,
             unread_emails: 1,
             is_subscribed: true,
@@ -1901,6 +1820,7 @@ mod tests {
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 40,
+            modseq: 42,
             total_emails: 0,
             unread_emails: 0,
             is_subscribed: true,
@@ -1923,51 +1843,47 @@ mod tests {
     }
 
     #[test]
-    fn attachment_facts_advance_message_change_without_bcc_leakage() {
+    fn unchanged_object_keeps_source_key_and_changed_object_advances_change_number() {
+        let mut email = test_email();
+        crate::mapi::identity::remember_mapi_identity(
+            email.id,
+            crate::mapi::identity::mapi_store_id(50),
+        );
+        let source_key = source_key_for_uuid(&email.id);
+        let baseline_change_number = canonical_message_change_number(&email);
+
+        email.subject = "Client-local stale subject".to_string();
+        assert_eq!(source_key_for_uuid(&email.id), source_key);
+        assert_eq!(
+            canonical_message_change_number(&email),
+            baseline_change_number
+        );
+
+        email.modseq = email.modseq.saturating_add(1);
+        email.mailbox_states[0].modseq = email.modseq;
+        let changed_change_number = canonical_message_change_number(&email);
+        assert_eq!(source_key_for_uuid(&email.id), source_key);
+        assert!(changed_change_number > baseline_change_number);
+        assert_eq!(
+            &change_key_for_change_number(changed_change_number)[16..22],
+            &globcnt_bytes(changed_change_number)
+        );
+    }
+
+    #[test]
+    fn canonical_message_change_number_uses_membership_modseq_without_bcc_leakage() {
         let mut email = test_email();
         email.has_attachments = true;
-        let baseline = canonical_message_change_number_with_attachments(
-            &email,
-            &[AttachmentSyncFact {
-                id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
-                file_reference: "attachment:one".to_string(),
-                file_name: "first.pdf".to_string(),
-                media_type: "application/pdf".to_string(),
-                size_octets: 10,
-            }],
-        );
+        let baseline = canonical_message_change_number(&email);
 
         email.bcc.push(JmapEmailAddress {
             address: "hidden@example.test".to_string(),
             display_name: None,
         });
-        assert_eq!(
-            canonical_message_change_number_with_attachments(
-                &email,
-                &[AttachmentSyncFact {
-                    id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
-                    file_reference: "attachment:one".to_string(),
-                    file_name: "first.pdf".to_string(),
-                    media_type: "application/pdf".to_string(),
-                    size_octets: 10,
-                }],
-            ),
-            baseline
-        );
+        assert_eq!(canonical_message_change_number(&email), baseline);
 
-        assert_ne!(
-            canonical_message_change_number_with_attachments(
-                &email,
-                &[AttachmentSyncFact {
-                    id: Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap(),
-                    file_reference: "attachment:one".to_string(),
-                    file_name: "renamed.pdf".to_string(),
-                    media_type: "application/pdf".to_string(),
-                    size_octets: 10,
-                }],
-            ),
-            baseline
-        );
+        email.mailbox_states[0].modseq = email.mailbox_states[0].modseq.saturating_add(1);
+        assert_ne!(canonical_message_change_number(&email), baseline);
     }
 
     #[test]
@@ -1988,6 +1904,7 @@ mod tests {
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 40,
+            modseq: 42,
             total_emails: 1,
             unread_emails: 1,
             is_subscribed: true,
@@ -2068,6 +1985,7 @@ mod tests {
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 40,
+            modseq: 42,
             total_emails: 1,
             unread_emails: 1,
             is_subscribed: true,
@@ -2110,6 +2028,7 @@ mod tests {
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 40,
+            modseq: 42,
             total_emails: 1,
             unread_emails: 1,
             is_subscribed: true,
@@ -2178,6 +2097,27 @@ mod tests {
 
         assert_variable_property(&token, META_TAG_IDSET_GIVEN, &expected_idset);
         assert_variable_property(&token, META_TAG_CNSET_SEEN, &expected_cnset);
+    }
+
+    #[test]
+    fn hierarchy_and_content_cnsets_replay_in_globcnt_order() {
+        let hierarchy = final_sync_state_stream(
+            0x02,
+            &[crate::mapi::identity::mapi_store_id(7)],
+            &[12, 10, 11],
+        );
+        let content = final_sync_state_stream(
+            0x01,
+            &[crate::mapi::identity::mapi_store_id(50)],
+            &[22, 20, 21],
+        );
+        let expected_hierarchy_cnset = replguid_idset_from_counters(&[10, 11, 12]);
+        let expected_content_cnset = replguid_idset_from_counters(&[20, 21, 22]);
+
+        assert_variable_property(&hierarchy, META_TAG_CNSET_SEEN, &expected_hierarchy_cnset);
+        assert_variable_property(&content, META_TAG_CNSET_SEEN, &expected_content_cnset);
+        assert_variable_property(&content, META_TAG_CNSET_SEEN_FAI, &expected_content_cnset);
+        assert_variable_property(&content, META_TAG_CNSET_READ, &expected_content_cnset);
     }
 
     #[test]
@@ -2270,11 +2210,13 @@ mod tests {
             mailbox_id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
             mailbox_role: "inbox".to_string(),
             mailbox_name: "Inbox".to_string(),
+            modseq: 42,
             mailbox_ids: vec![Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap()],
             mailbox_states: vec![JmapEmailMailboxState {
                 mailbox_id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
                 role: "inbox".to_string(),
                 name: "Inbox".to_string(),
+                modseq: 42,
                 unread: true,
                 flagged: false,
                 draft: false,

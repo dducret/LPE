@@ -56,6 +56,7 @@ pub struct JmapMailbox {
     pub role: String,
     pub name: String,
     pub sort_order: i32,
+    pub modseq: u64,
     pub total_emails: u32,
     pub unread_emails: u32,
     pub is_subscribed: bool,
@@ -76,6 +77,7 @@ pub struct JmapEmail {
     pub mailbox_id: Uuid,
     pub mailbox_role: String,
     pub mailbox_name: String,
+    pub modseq: u64,
     pub received_at: String,
     pub sent_at: Option<String>,
     pub from_address: String,
@@ -105,6 +107,7 @@ pub struct JmapEmailMailboxState {
     pub mailbox_id: Uuid,
     pub role: String,
     pub name: String,
+    pub modseq: u64,
     pub unread: bool,
     pub flagged: bool,
     pub draft: bool,
@@ -606,6 +609,7 @@ impl Storage {
                 mb.role,
                 mb.display_name,
                 mb.sort_order,
+                mb.modseq,
                 mb.total_messages::bigint AS total_emails,
                 mb.unread_messages::bigint AS unread_emails,
                 COALESCE(ms.is_subscribed, TRUE) AS is_subscribed
@@ -625,19 +629,22 @@ impl Storage {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows
-            .into_iter()
-            .map(|row| JmapMailbox {
-                id: row.id,
-                parent_id: row.parent_mailbox_id,
-                role: row.role,
-                name: row.display_name,
-                sort_order: row.sort_order,
-                total_emails: row.total_emails.max(0) as u32,
-                unread_emails: row.unread_emails.max(0) as u32,
-                is_subscribed: row.is_subscribed,
+        rows.into_iter()
+            .map(|row| {
+                Ok(JmapMailbox {
+                    id: row.id,
+                    parent_id: row.parent_mailbox_id,
+                    role: row.role,
+                    name: row.display_name,
+                    sort_order: row.sort_order,
+                    modseq: u64::try_from(row.modseq)
+                        .map_err(|_| anyhow!("mailbox modseq is out of range"))?,
+                    total_emails: row.total_emails.max(0) as u32,
+                    unread_emails: row.unread_emails.max(0) as u32,
+                    is_subscribed: row.is_subscribed,
+                })
             })
-            .collect())
+            .collect()
     }
 
     pub async fn ensure_imap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
@@ -1833,6 +1840,7 @@ impl Storage {
                     mm.is_seen,
                     mm.is_flagged,
                     mm.is_draft,
+                    mm.modseq,
                     mm.updated_at,
                     mb.id AS mailbox_id,
                     mb.role AS mailbox_role,
@@ -1855,6 +1863,7 @@ impl Storage {
                     array_agg(mailbox_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_ids,
                     array_agg(mailbox_role ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_roles,
                     array_agg(mailbox_name ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_names,
+                    array_agg(modseq ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_modseqs,
                     array_agg(NOT is_seen ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_unreads,
                     array_agg(is_flagged ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_flaggeds,
                     array_agg(is_draft ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_drafts,
@@ -1871,6 +1880,7 @@ impl Storage {
                 rollup.mailbox_ids,
                 rollup.mailbox_roles,
                 rollup.mailbox_names,
+                rollup.mailbox_modseqs,
                 rollup.mailbox_unreads,
                 rollup.mailbox_flaggeds,
                 rollup.mailbox_drafts,
@@ -1995,6 +2005,12 @@ impl Storage {
                         mailbox_id: *mailbox_id,
                         role: row.mailbox_roles.get(index).cloned().unwrap_or_default(),
                         name: row.mailbox_names.get(index).cloned().unwrap_or_default(),
+                        modseq: row
+                            .mailbox_modseqs
+                            .get(index)
+                            .copied()
+                            .and_then(|modseq| u64::try_from(modseq).ok())
+                            .unwrap_or(1),
                         unread: row.mailbox_unreads.get(index).copied().unwrap_or(false),
                         flagged: row.mailbox_flaggeds.get(index).copied().unwrap_or(false),
                         draft: row.mailbox_drafts.get(index).copied().unwrap_or(false),
@@ -2006,6 +2022,7 @@ impl Storage {
                 let primary_mailbox_id = primary_mailbox.mailbox_id;
                 let primary_mailbox_role = primary_mailbox.role.clone();
                 let primary_mailbox_name = primary_mailbox.name.clone();
+                let primary_modseq = primary_mailbox.modseq;
 
                 emails.push(JmapEmail {
                     id: row.id,
@@ -2015,6 +2032,7 @@ impl Storage {
                     mailbox_id: primary_mailbox_id,
                     mailbox_role: primary_mailbox_role,
                     mailbox_name: primary_mailbox_name,
+                    modseq: primary_modseq,
                     received_at: row.received_at.clone(),
                     sent_at: row.sent_at.clone(),
                     from_address: row.from_address.clone(),

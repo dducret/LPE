@@ -14,8 +14,8 @@ use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState,
     ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
-    JmapEmail, JmapEmailAddress, JmapEmailQuery, JmapMailbox, MailboxAccountAccess,
-    JmapEmailMailboxState, SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput,
+    JmapEmail, JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapMailbox,
+    MailboxAccountAccess, SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput,
     SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
@@ -88,6 +88,7 @@ impl FakeStore {
             role: "drafts".to_string(),
             name: "Drafts".to_string(),
             sort_order: 10,
+            modseq: 1,
             total_emails: 1,
             unread_emails: 0,
             is_subscribed: true,
@@ -101,6 +102,7 @@ impl FakeStore {
             role: "inbox".to_string(),
             name: "Inbox".to_string(),
             sort_order: 1,
+            modseq: 1,
             total_emails: 1,
             unread_emails: 1,
             is_subscribed: true,
@@ -114,6 +116,7 @@ impl FakeStore {
             role: "sent".to_string(),
             name: "Sent".to_string(),
             sort_order: 2,
+            modseq: 1,
             total_emails: 1,
             unread_emails: 0,
             is_subscribed: true,
@@ -129,6 +132,7 @@ impl FakeStore {
                 mailbox_id,
                 role: role.to_string(),
                 name: role.to_string(),
+                modseq: 1,
                 unread: true,
                 flagged: false,
                 draft: role == "drafts",
@@ -136,6 +140,7 @@ impl FakeStore {
             mailbox_id,
             mailbox_role: role.to_string(),
             mailbox_name: role.to_string(),
+            modseq: 1,
             received_at: "2026-04-18T20:00:00Z".to_string(),
             sent_at: Some("2026-04-18T20:00:00Z".to_string()),
             from_address: "bob@example.test".to_string(),
@@ -962,11 +967,7 @@ async fn provision_returns_policy_key_and_lightweight_policy_document() {
         .await
         .unwrap();
     let body = decode_response_body(response).await;
-    let policy = body
-        .child("Policies")
-        .unwrap()
-        .child("Policy")
-        .unwrap();
+    let policy = body.child("Policies").unwrap().child("Policy").unwrap();
 
     assert_eq!(body.child("Status").unwrap().text_value(), "1");
     assert_eq!(
