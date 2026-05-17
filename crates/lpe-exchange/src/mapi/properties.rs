@@ -304,7 +304,7 @@ fn folder_entry_id(folder_id: u64) -> MapiValue {
 
 fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
     let entry = super::nspi::principal_address_book_entry(principal);
-    let legacy_dn = super::nspi::nspi_entry_legacy_dn(&entry);
+    let legacy_dn = super::nspi::nspi_entry_unprefixed_legacy_dn(&entry);
     let mut value = Vec::with_capacity(28 + legacy_dn.len() + 1);
     value.extend_from_slice(&[0, 0, 0, 0]);
     value.extend_from_slice(&NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID);

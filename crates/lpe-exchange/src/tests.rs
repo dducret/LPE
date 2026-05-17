@@ -5662,7 +5662,8 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     assert_eq!(offset, response_rops.len());
 
     assert!(contains_bytes(&response_rops, &utf16z("Bob Store")));
-    assert!(contains_bytes(&response_rops, b"acct-bob-example-test\0"));
+    assert!(contains_bytes(&response_rops, b"bob-example-test\0"));
+    assert!(!contains_bytes(&response_rops, b"acct-bob-example-test\0"));
     assert!(contains_bytes(&response_rops, &utf16z("LPE")));
     assert!(contains_bytes(
         &response_rops,
