@@ -12397,8 +12397,8 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
-    assert!(!contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert!(contains_bytes(
         &response_rops,
         &0x403A_0003u32.to_le_bytes()

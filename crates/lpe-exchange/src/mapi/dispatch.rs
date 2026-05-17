@@ -2939,7 +2939,7 @@ where
                     *client_state_uploaded_bytes =
                         (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
                     let mut selected_checkpoint_delta = false;
-                    if may_use_incremental {
+                    if may_use_incremental && uploaded_bytes > 0 {
                         if let Some(buffer) = incremental_transfer_buffer.take() {
                             *transfer_buffer = buffer;
                             *transfer_position = 0;
@@ -2955,6 +2955,7 @@ where
                         request_rop_id = "0x77",
                         folder_id = format_args!("0x{:016x}", *folder_id),
                         upload_state_total_bytes = state.len(),
+                        upload_state_stream_bytes = uploaded_bytes,
                         upload_state_client_bytes = *client_state_uploaded_bytes,
                         upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
                         transfer_buffer_bytes = transfer_buffer.len(),
