@@ -11299,7 +11299,7 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
         current_modseq: 6,
         ..Default::default()
     };
-    let restarted = ExchangeService::new(store);
+    let restarted = ExchangeService::new(store.clone());
     let connect = restarted
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
@@ -12304,13 +12304,20 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
             .and_then(serde_json::Value::as_str),
         Some("emsmdb-ics-download")
     );
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("syncRootFolderId")
+            .and_then(serde_json::Value::as_u64),
+        Some(test_mapi_folder_id(4))
+    );
 
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
         current_change_sequence: 42,
         current_modseq: 7,
         ..Default::default()
     };
-    let restarted = ExchangeService::new(store);
+    let restarted = ExchangeService::new(store.clone());
     let connect = restarted
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
@@ -12348,6 +12355,42 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
     assert!(contains_bytes(
         &response_rops,
         &0x4014_0003u32.to_le_bytes()
+    ));
+
+    let restarted = ExchangeService::new(store.clone());
+    let connect = restarted
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut restarted_headers = mapi_headers("Execute");
+    restarted_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut restart_rops = Vec::new();
+    append_rop_open_folder(&mut restart_rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
+        &mut restart_rops,
+        1,
+        2,
+        4096,
+        &[],
+    );
+    let response = restarted
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &restarted_headers,
+            &execute_body(&rop_buffer(&restart_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
+    assert!(!contains_bytes(&response_rops, &utf16z("Inbox")));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x403A_0003u32.to_le_bytes()
     ));
 }
 

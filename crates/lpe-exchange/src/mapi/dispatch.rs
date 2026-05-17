@@ -2382,7 +2382,7 @@ where
                     .await
                 {
                     Ok(checkpoint) => checkpoint.filter(|checkpoint| {
-                        hierarchy_checkpoint_is_usable(checkpoint_kind, checkpoint)
+                        hierarchy_checkpoint_is_usable(checkpoint_kind, folder_id, checkpoint)
                     }),
                     Err(_) => {
                         responses.extend_from_slice(&rop_error_response(
@@ -2699,6 +2699,7 @@ where
                         *checkpoint_change_sequence,
                         *checkpoint_modseq,
                         *sync_type,
+                        *folder_id,
                     );
                     responses.extend_from_slice(&response);
                     if completed && matches!(checkpoint.4, 0x01 | 0x02) {
@@ -2711,6 +2712,7 @@ where
                                 checkpoint.3,
                                 serde_json::json!({
                                     "syncType": checkpoint.4,
+                                    "syncRootFolderId": checkpoint.5,
                                     "source": "emsmdb-ics-download"
                                 }),
                             )
@@ -2870,8 +2872,7 @@ where
                     ..
                 }) => {
                     let uploaded_bytes = state_upload_buffer.len();
-                    let may_use_incremental =
-                        uploaded_bytes > 0 && *client_state_uploaded_bytes == 0;
+                    let may_use_incremental = *client_state_uploaded_bytes == 0;
                     commit_uploaded_sync_state(state, state_upload_buffer);
                     *client_state_uploaded_bytes =
                         (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
@@ -3671,14 +3672,22 @@ where
 
 fn hierarchy_checkpoint_is_usable(
     checkpoint_kind: MapiCheckpointKind,
+    folder_id: u64,
     checkpoint: &MapiSyncCheckpoint,
 ) -> bool {
-    checkpoint_kind != MapiCheckpointKind::Hierarchy
-        || checkpoint
+    if checkpoint_kind != MapiCheckpointKind::Hierarchy {
+        return true;
+    }
+    checkpoint
+        .cursor_json
+        .get("source")
+        .and_then(serde_json::Value::as_str)
+        == Some("emsmdb-ics-download")
+        && checkpoint
             .cursor_json
-            .get("source")
-            .and_then(serde_json::Value::as_str)
-            == Some("emsmdb-ics-download")
+            .get("syncRootFolderId")
+            .and_then(serde_json::Value::as_u64)
+            == Some(folder_id)
 }
 
 #[cfg(test)]
