@@ -331,7 +331,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         request: &WbxmlNode,
     ) -> Result<Response> {
         if request.name != "Provision" {
-            bail!("invalid Provision payload");
+            return command_status_response(protocol_version, 14, "Provision", "2");
         }
 
         let requested_key = request
@@ -458,7 +458,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         request: &WbxmlNode,
     ) -> Result<Response> {
         if request.name != "FolderSync" {
-            bail!("invalid FolderSync payload");
+            return command_status_response(protocol_version, 7, "FolderSync", "10");
         }
 
         let requested_key = request
@@ -929,7 +929,14 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         protocol_version: &str,
         request: &WbxmlNode,
     ) -> Result<Response> {
-        let collection_nodes = require_sync_collections(request)?;
+        let collection_nodes = match require_sync_collections(request) {
+            Ok(collection_nodes) => collection_nodes,
+            Err(_) => {
+                let mut sync = WbxmlNode::new(0, "Sync");
+                sync.push(WbxmlNode::with_text(0, "Status", "13"));
+                return wbxml_response(protocol_version, encode_wbxml(&sync));
+            }
+        };
         let mut sync = WbxmlNode::new(0, "Sync");
         let mut collections_node = WbxmlNode::new(0, "Collections");
 
@@ -951,7 +958,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         request: &WbxmlNode,
         collection_node: &WbxmlNode,
     ) -> Result<WbxmlNode> {
-        let collection_id = require_collection_id(collection_node)?;
+        let collection_id = match require_collection_id(collection_node) {
+            Ok(collection_id) => collection_id,
+            Err(_) => return Ok(sync_collection_status_node(None, "4")),
+        };
         let sync_key = collection_node
             .child("SyncKey")
             .map(|node| node.text_value().trim().to_string())
@@ -1004,6 +1014,9 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
 
         let body_preference = collection_body_preference(collection_node);
+        if sync_collection_has_unsupported_command(collection_node, &collection) {
+            return Ok(sync_status_node(&collection.id, "4"));
+        }
         let client_responses = if drafts_collection(&collection) {
             self.apply_draft_sync_commands(principal, &collection, collection_node)
                 .await?
@@ -1574,7 +1587,6 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     delete.push(WbxmlNode::with_text(0, "Status", "1"));
                     responses.push(delete);
                 }
-                "Fetch" => {}
                 _ => {}
             }
         }
@@ -1724,7 +1736,6 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     delete.push(WbxmlNode::with_text(0, "Status", "1"));
                     responses.push(delete);
                 }
-                "Fetch" => {}
                 _ => {}
             }
         }
@@ -1910,22 +1921,30 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         } else {
             let request = decode_wbxml(body)?;
             if request.name != "SendMail" {
-                bail!("invalid SendMail payload");
+                return command_status_response(protocol_version, 21, "SendMail", "103");
             }
-            request
-                .child("Mime")
-                .map(|node| node.text_value().as_bytes().to_vec())
-                .ok_or_else(|| anyhow!("SendMail is missing MIME content"))?
+            match request.child("Mime") {
+                Some(node) => node.text_value().as_bytes().to_vec(),
+                None => return command_status_response(protocol_version, 21, "SendMail", "103"),
+            }
         };
 
-        let parsed = parse_mime_message(&mime_payload)?;
-        validate_mime_attachments(&mime_payload)?;
+        let parsed = match parse_mime_message(&mime_payload) {
+            Ok(parsed) => parsed,
+            Err(_) => return command_status_response(protocol_version, 21, "SendMail", "107"),
+        };
+        if validate_mime_attachments(&mime_payload).is_err() {
+            return command_status_response(protocol_version, 21, "SendMail", "107");
+        }
         let mailbox_access = self
             .mailbox_access_for_from_address(
                 principal,
                 parsed.from.as_ref().map(|mailbox| mailbox.address.as_str()),
             )
-            .await?;
+            .await;
+        let Ok(mailbox_access) = mailbox_access else {
+            return command_status_response(protocol_version, 21, "SendMail", "166");
+        };
         let from_display = parsed
             .from
             .as_ref()
@@ -1939,7 +1958,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             Some(sender) => (sender.display_name, Some(sender.address)),
             None => default_sender(&mailbox_access, principal, None, None),
         };
-        self.store
+        let submitted = self
+            .store
             .submit_message(
                 SubmitMessageInput {
                     draft_message_id: None,
@@ -1969,7 +1989,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     subject: "native client message submission".to_string(),
                 },
             )
-            .await?;
+            .await;
+        if submitted.is_err() {
+            return command_status_response(protocol_version, 21, "SendMail", "120");
+        }
 
         if is_message_rfc822(headers) {
             Ok(empty_response())
@@ -1985,15 +2008,25 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         request: &WbxmlNode,
     ) -> Result<Response> {
         if request.name != "ItemOperations" {
-            bail!("invalid ItemOperations payload");
+            return command_status_response(protocol_version, 20, "ItemOperations", "2");
         }
 
         let mut root = WbxmlNode::new(20, "ItemOperations");
-        root.push(WbxmlNode::with_text(20, "Status", "1"));
         let mut response = WbxmlNode::new(20, "Response");
+        let mut unsupported_child = false;
 
-        for fetch in request.children_named("Fetch") {
-            response.push(self.handle_item_operations_fetch(principal, fetch).await?);
+        for child in &request.children {
+            if child.name == "Fetch" {
+                response.push(self.handle_item_operations_fetch(principal, child).await?);
+            } else {
+                unsupported_child = true;
+            }
+        }
+
+        if unsupported_child || response.children.is_empty() {
+            root.push(WbxmlNode::with_text(20, "Status", "2"));
+        } else {
+            root.push(WbxmlNode::with_text(20, "Status", "1"));
         }
 
         if !response.children.is_empty() {
@@ -2012,6 +2045,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         if let Some(file_reference) = fetch
             .child("FileReference")
             .map(|value| value.text_value().trim())
+            .filter(|value| !value.is_empty())
         {
             let mut attachment = None;
             for access in self.mailbox_accesses(principal).await? {
@@ -2039,7 +2073,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 properties.push(WbxmlNode::with_opaque(20, "Data", attachment.blob_bytes));
                 node.push(properties);
             } else {
-                node.push(WbxmlNode::with_text(20, "Status", "6"));
+                node.push(WbxmlNode::with_text(20, "Status", "15"));
             }
             return Ok(node);
         }
@@ -2048,10 +2082,16 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .child("ServerId")
             .map(|value| value.text_value().trim())
         else {
-            node.push(WbxmlNode::with_text(20, "Status", "2"));
+            node.push(WbxmlNode::with_text(20, "Status", "15"));
             return Ok(node);
         };
-        let message_id = Uuid::parse_str(server_id)?;
+        let message_id = match Uuid::parse_str(server_id) {
+            Ok(message_id) => message_id,
+            Err(_) => {
+                node.push(WbxmlNode::with_text(20, "Status", "6"));
+                return Ok(node);
+            }
+        };
         let mut resolved = None;
         if let Some(collection_id) = fetch
             .child("CollectionId")
@@ -2062,7 +2102,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 .resolve_collection(principal.account_id, &collection_id)
                 .await?
                 .map(|collection| collection.account_id)
-                .ok_or_else(|| anyhow!("collection not found"))?;
+                .ok_or_else(|| anyhow!("collection not found"));
+            let Ok(account_id) = account_id else {
+                node.push(WbxmlNode::with_text(20, "Status", "6"));
+                return Ok(node);
+            };
             if let Some(email) = self
                 .store
                 .fetch_jmap_emails(account_id, &[message_id])
@@ -2128,12 +2172,20 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         request: &WbxmlNode,
     ) -> Result<Response> {
         if request.name != "MoveItems" {
-            bail!("invalid MoveItems payload");
+            return command_status_response(protocol_version, 5, "MoveItems", "5");
         }
 
         let mut root = WbxmlNode::new(5, "MoveItems");
-        for move_node in request.children_named("Move") {
-            root.push(self.handle_move_item(principal, move_node).await?);
+        let mut unsupported_child = false;
+        for child in &request.children {
+            if child.name == "Move" {
+                root.push(self.handle_move_item(principal, child).await?);
+            } else {
+                unsupported_child = true;
+            }
+        }
+        if unsupported_child || root.children.is_empty() {
+            root.push(WbxmlNode::with_text(5, "Status", "5"));
         }
         wbxml_response(protocol_version, encode_wbxml(&root))
     }
@@ -2516,20 +2568,24 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         request: &WbxmlNode,
     ) -> Result<Response> {
         if request.name != "Search" {
-            bail!("invalid Search payload");
+            return search_status_response(protocol_version, "3", None);
         }
 
-        let store = request
-            .child("Store")
-            .ok_or_else(|| anyhow!("Search payload is missing Store"))?;
+        let Some(store) = request.child("Store") else {
+            return search_status_response(protocol_version, "3", None);
+        };
         let query_text = search_query_text(store);
-        let (start, end) = parse_range(
+        let range = parse_range(
             store
                 .child("Options")
                 .and_then(|options| options.child("Range"))
                 .or_else(|| store.child("Range"))
                 .map(|node| node.text_value()),
         );
+        let (start, end) = match range {
+            Ok(range) => range,
+            Err(_) => return search_status_response(protocol_version, "1", Some("2")),
+        };
         let limit = end.saturating_sub(start) + 1;
         let query = self
             .store
@@ -2600,17 +2656,27 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         command_name: &str,
     ) -> Result<Response> {
         if request.name != command_name {
-            bail!("invalid {command_name} payload");
+            return command_status_response(protocol_version, 21, command_name, "103");
         }
 
-        let (source_mailbox_access, source_message) =
-            self.resolve_source_message(principal, request).await?;
+        let source = self.resolve_source_message(principal, request).await;
+        let Ok((source_mailbox_access, source_message)) = source else {
+            return command_status_response(protocol_version, 21, command_name, "150");
+        };
         let mime_payload = request
             .child("Mime")
             .map(|node| node.text_value().as_bytes().to_vec())
-            .ok_or_else(|| anyhow!("{command_name} is missing MIME content"))?;
-        validate_mime_attachments(&mime_payload)?;
-        let parsed = parse_mime_message(&mime_payload)?;
+            .ok_or_else(|| anyhow!("{command_name} is missing MIME content"));
+        let Ok(mime_payload) = mime_payload else {
+            return command_status_response(protocol_version, 21, command_name, "103");
+        };
+        if validate_mime_attachments(&mime_payload).is_err() {
+            return command_status_response(protocol_version, 21, command_name, "107");
+        }
+        let parsed = match parse_mime_message(&mime_payload) {
+            Ok(parsed) => parsed,
+            Err(_) => return command_status_response(protocol_version, 21, command_name, "107"),
+        };
         let mailbox_access = match self
             .mailbox_access_for_from_address(
                 principal,
@@ -2653,7 +2719,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             Some(sender) => (sender.display_name, Some(sender.address)),
             None => default_sender(&mailbox_access, principal, None, None),
         };
-        self.store
+        let submitted = self
+            .store
             .submit_message(
                 SubmitMessageInput {
                     draft_message_id: None,
@@ -2690,7 +2757,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     subject: source_message.id.to_string(),
                 },
             )
-            .await?;
+            .await;
+        if submitted.is_err() {
+            return command_status_response(protocol_version, 21, command_name, "120");
+        }
 
         let mut response = WbxmlNode::new(21, command_name);
         response.push(WbxmlNode::with_text(21, "Status", "1"));
@@ -2889,6 +2959,34 @@ fn folder_mutation_response(
         if let Some(server_id) = server_id {
             response.push(WbxmlNode::with_text(7, "ServerId", server_id));
         }
+    }
+    wbxml_response(protocol_version, encode_wbxml(&response))
+}
+
+fn command_status_response(
+    protocol_version: &str,
+    page: u8,
+    command: &str,
+    status: &str,
+) -> Result<Response> {
+    let mut response = WbxmlNode::new(page, command);
+    response.push(WbxmlNode::with_text(page, "Status", status));
+    wbxml_response(protocol_version, encode_wbxml(&response))
+}
+
+fn search_status_response(
+    protocol_version: &str,
+    search_status: &str,
+    store_status: Option<&str>,
+) -> Result<Response> {
+    let mut response = WbxmlNode::new(15, "Search");
+    response.push(WbxmlNode::with_text(15, "Status", search_status));
+    if let Some(store_status) = store_status {
+        let mut response_node = WbxmlNode::new(15, "Response");
+        let mut store = WbxmlNode::new(15, "Store");
+        store.push(WbxmlNode::with_text(15, "Status", store_status));
+        response_node.push(store);
+        response.push(response_node);
     }
     wbxml_response(protocol_version, encode_wbxml(&response))
 }
@@ -3137,6 +3235,41 @@ fn has_client_commands(collection_node: &WbxmlNode) -> bool {
         .child("Commands")
         .map(|commands| !commands.children.is_empty())
         .unwrap_or(false)
+}
+
+fn sync_collection_status_node(collection_id: Option<&str>, status: &str) -> WbxmlNode {
+    let mut collection = WbxmlNode::new(0, "Collection");
+    if let Some(collection_id) = collection_id {
+        collection.push(WbxmlNode::with_text(0, "CollectionId", collection_id));
+    }
+    collection.push(WbxmlNode::with_text(0, "Status", status));
+    collection
+}
+
+fn sync_collection_has_unsupported_command(
+    collection_node: &WbxmlNode,
+    collection: &CollectionDefinition,
+) -> bool {
+    let Some(commands) = collection_node.child("Commands") else {
+        return false;
+    };
+    commands
+        .children
+        .iter()
+        .any(|command| !sync_command_supported_for_collection(command.name.as_str(), collection))
+}
+
+fn sync_command_supported_for_collection(command: &str, collection: &CollectionDefinition) -> bool {
+    if drafts_collection(collection) {
+        return matches!(command, "Add" | "Change" | "Delete");
+    }
+    if mail_collection(collection) {
+        return matches!(command, "Change" | "Delete");
+    }
+    if collection.class_name == CONTACTS_CLASS || collection.class_name == CALENDAR_CLASS {
+        return matches!(command, "Add" | "Change" | "Delete");
+    }
+    false
 }
 
 fn pending_page(
@@ -3519,16 +3652,19 @@ fn search_query_text(store: &WbxmlNode) -> Option<String> {
         .or_else(|| field_text(store, "Query"))
 }
 
-fn parse_range(value: Option<&str>) -> (u64, u64) {
+fn parse_range(value: Option<&str>) -> Result<(u64, u64)> {
     let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
-        return (0, 49);
+        return Ok((0, 49));
     };
     let Some((start, end)) = value.split_once('-') else {
-        return (0, 49);
+        bail!("invalid Search range");
     };
-    let start = start.trim().parse::<u64>().unwrap_or(0);
-    let end = end.trim().parse::<u64>().unwrap_or(start + 49);
-    (start, end.max(start))
+    let start = start.trim().parse::<u64>()?;
+    let end = end.trim().parse::<u64>()?;
+    if end < start {
+        bail!("invalid Search range");
+    }
+    Ok((start, end))
 }
 
 fn trim_preview(value: &str) -> String {

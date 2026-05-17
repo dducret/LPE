@@ -1776,6 +1776,19 @@ fn only_sync_collection<'a>(sync: &'a WbxmlNode, collection_id: &str) -> &'a Wbx
         .unwrap()
 }
 
+fn first_sync_collection(sync: &WbxmlNode) -> &WbxmlNode {
+    sync.child("Collections")
+        .unwrap()
+        .children_named("Collection")
+        .into_iter()
+        .next()
+        .unwrap()
+}
+
+fn status_value(node: &WbxmlNode) -> &str {
+    node.child("Status").unwrap().text_value()
+}
+
 async fn folder_sync(
     service: &ActiveSyncService<FakeStore>,
     sync_key: &str,
@@ -2052,6 +2065,287 @@ async fn base64_move_items_request_dispatches() {
             .text_value(),
         "3"
     );
+}
+
+#[tokio::test]
+async fn sync_missing_and_invalid_collection_ids_return_status_nodes() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let missing = handle_sync_node(&service, {
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    })
+    .await;
+    assert_eq!(status_value(first_sync_collection(&missing)), "4");
+
+    let invalid = sync_collection(
+        &service,
+        "99999999-9999-9999-9999-999999999999",
+        "0",
+        "dev-sync-invalid",
+    )
+    .await;
+    assert_eq!(
+        status_value(only_sync_collection(
+            &invalid,
+            "99999999-9999-9999-9999-999999999999"
+        )),
+        "8"
+    );
+}
+
+#[tokio::test]
+async fn folder_sync_stale_key_returns_status_9() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let response = folder_sync(&service, "stale-folder-key", "dev-folder-stale").await;
+
+    assert_eq!(status_value(&response), "9");
+}
+
+#[tokio::test]
+async fn move_items_invalid_source_and_destination_return_item_statuses() {
+    let inbox = FakeStore::inbox_mailbox();
+    let archive = FakeStore::mailbox(
+        "99999999-9999-9999-9999-999999999999",
+        "archive",
+        "Archive",
+        20,
+        None,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone(), archive.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(5, "MoveItems");
+        let mut invalid_source = WbxmlNode::new(5, "Move");
+        invalid_source.push(WbxmlNode::with_text(
+            5,
+            "SrcMsgId",
+            Uuid::new_v4().to_string(),
+        ));
+        invalid_source.push(WbxmlNode::with_text(
+            5,
+            "SrcFldId",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        ));
+        invalid_source.push(WbxmlNode::with_text(5, "DstFldId", archive.id.to_string()));
+        root.push(invalid_source);
+        let mut invalid_destination = WbxmlNode::new(5, "Move");
+        invalid_destination.push(WbxmlNode::with_text(
+            5,
+            "SrcMsgId",
+            Uuid::new_v4().to_string(),
+        ));
+        invalid_destination.push(WbxmlNode::with_text(5, "SrcFldId", inbox.id.to_string()));
+        invalid_destination.push(WbxmlNode::with_text(
+            5,
+            "DstFldId",
+            "ffffffff-eeee-dddd-cccc-bbbbbbbbbbbb",
+        ));
+        root.push(invalid_destination);
+        root
+    });
+
+    let response = service
+        .handle_request(
+            active_sync_query("MoveItems", "dev-move-invalid"),
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = decode_response_body(response).await;
+    let statuses = body
+        .children_named("Response")
+        .into_iter()
+        .map(status_value)
+        .collect::<Vec<_>>();
+
+    assert_eq!(statuses, vec!["1", "2"]);
+}
+
+#[tokio::test]
+async fn item_operations_missing_and_unknown_file_reference_return_attachment_status() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(20, "ItemOperations");
+        root.push(WbxmlNode::new(20, "Fetch"));
+        let mut unknown = WbxmlNode::new(20, "Fetch");
+        unknown.push(WbxmlNode::with_text(
+            17,
+            "FileReference",
+            "missing-file-reference",
+        ));
+        root.push(unknown);
+        root
+    });
+
+    let response = service
+        .handle_request(
+            active_sync_query("ItemOperations", "dev-itemops-errors"),
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = decode_response_body(response).await;
+    let response_node = body.child("Response").unwrap();
+    let statuses = response_node
+        .children_named("Fetch")
+        .into_iter()
+        .map(status_value)
+        .collect::<Vec<_>>();
+
+    assert_eq!(status_value(&body), "1");
+    assert_eq!(statuses, vec!["15", "15"]);
+}
+
+#[tokio::test]
+async fn search_malformed_range_returns_store_status_2() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(15, "Search");
+        let mut store = WbxmlNode::new(15, "Store");
+        store.push(WbxmlNode::with_text(15, "Name", "Mailbox"));
+        let mut query = WbxmlNode::new(15, "Query");
+        query.push(WbxmlNode::with_text(15, "FreeText", "budget"));
+        store.push(query);
+        let mut options = WbxmlNode::new(15, "Options");
+        options.push(WbxmlNode::with_text(15, "Range", "10-2"));
+        store.push(options);
+        root.push(store);
+        root
+    });
+
+    let response = service
+        .handle_request(
+            active_sync_query("Search", "dev-search-range"),
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = decode_response_body(response).await;
+    let store_status = body
+        .child("Response")
+        .unwrap()
+        .child("Store")
+        .unwrap()
+        .child("Status")
+        .unwrap()
+        .text_value();
+
+    assert_eq!(status_value(&body), "1");
+    assert_eq!(store_status, "2");
+}
+
+#[tokio::test]
+async fn ping_recoverable_errors_return_documented_statuses() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let missing = ping(&service, "dev-ping-status", &ping_request(None, &[])).await;
+    let too_short = ping(
+        &service,
+        "dev-ping-status",
+        &ping_request(Some("1"), &[("missing", "Email")]),
+    )
+    .await;
+    let too_many_folders = (0..201)
+        .map(|index| (format!("folder-{index}"), "Email".to_string()))
+        .collect::<Vec<_>>();
+    let folder_refs = too_many_folders
+        .iter()
+        .map(|(id, class_name)| (id.as_str(), class_name.as_str()))
+        .collect::<Vec<_>>();
+    let too_many = ping(
+        &service,
+        "dev-ping-status",
+        &ping_request(Some("60"), &folder_refs),
+    )
+    .await;
+    let folder_sync_required = ping(
+        &service,
+        "dev-ping-status",
+        &ping_request(Some("60"), &[("missing", "Email")]),
+    )
+    .await;
+
+    assert_eq!(status_value(&missing), "3");
+    assert_eq!(status_value(&too_short), "5");
+    assert_eq!(status_value(&too_many), "6");
+    assert_eq!(status_value(&folder_sync_required), "7");
+}
+
+#[tokio::test]
+async fn unsupported_sync_child_command_returns_protocol_status() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let request = {
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", "0"));
+        collection.push(WbxmlNode::with_text(
+            0,
+            "CollectionId",
+            inbox.id.to_string(),
+        ));
+        let mut commands = WbxmlNode::new(0, "Commands");
+        commands.push(WbxmlNode::new(0, "SoftDelete"));
+        collection.push(commands);
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    };
+
+    let response = handle_sync_node(&service, request).await;
+    let collection = only_sync_collection(&response, &inbox.id.to_string());
+
+    assert_eq!(status_value(collection), "4");
+    assert!(collection.child("SyncKey").is_none());
 }
 
 fn one_collection_sync(collection_id: &str, sync_key: &str) -> WbxmlNode {
@@ -4053,7 +4347,7 @@ async fn send_mail_rejects_inaccessible_shared_mailbox_address() {
     };
     let service = ActiveSyncService::new(store);
 
-    let result = service
+    let response = service
         .handle_request(
             ActiveSyncQuery {
                 cmd: Some("SendMail".to_string()),
@@ -4064,9 +4358,13 @@ async fn send_mail_rejects_inaccessible_shared_mailbox_address() {
             &mime_headers(),
             b"From: Shared Mailbox <shared@example.test>\r\nTo: Bob <bob@example.test>\r\nSubject: Nope\r\n\r\nBody",
         )
-        .await;
+        .await
+        .unwrap();
 
-    assert!(result.is_err());
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = decode_response_body(response).await;
+    assert_eq!(body.name, "SendMail");
+    assert_eq!(status_value(&body), "166");
 }
 
 #[tokio::test]
