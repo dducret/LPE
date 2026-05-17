@@ -653,7 +653,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
         Some(MapiObject::Folder {
             folder_id,
             properties,
-        }) => serialize_session_folder_row(*folder_id, properties, mailboxes, snapshot, &columns),
+        }) => serialize_session_folder_row(
+            *folder_id, properties, principal, mailboxes, snapshot, &columns,
+        ),
         Some(MapiObject::Attachment {
             folder_id,
             message_id,
@@ -793,9 +795,6 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_PRIVATE
                 | PID_TAG_OUTLOOK_STORE_STATE
         ),
-        Some(MapiObject::Folder { folder_id, .. }) => {
-            *folder_id == IPM_SUBTREE_FOLDER_ID && tag == PID_TAG_OST_OSTID
-        }
         _ => false,
     }
 }
@@ -1139,7 +1138,14 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::Folder {
             folder_id,
             properties,
-        }) => serialize_session_folder_row(*folder_id, properties, mailboxes, snapshot, &[tag]),
+        }) => serialize_session_folder_row(
+            *folder_id,
+            properties,
+            principal,
+            mailboxes,
+            snapshot,
+            &[tag],
+        ),
         Some(MapiObject::Attachment {
             folder_id,
             message_id,
@@ -1192,6 +1198,7 @@ pub(in crate::mapi) fn serialize_object_property(
 fn serialize_session_folder_row(
     folder_id: u64,
     properties: &HashMap<u32, MapiValue>,
+    principal: &AccountPrincipal,
     mailboxes: &[JmapMailbox],
     snapshot: &MapiMailStoreSnapshot,
     columns: &[u32],
@@ -1199,6 +1206,15 @@ fn serialize_session_folder_row(
     let mut row = Vec::new();
     for column in columns {
         let storage_tag = canonical_property_storage_tag(*column);
+        if folder_id == IPM_SUBTREE_FOLDER_ID && storage_tag == PID_TAG_OST_OSTID {
+            write_mapi_value(
+                &mut row,
+                *column,
+                &MapiValue::Binary(ipm_subtree_ost_ostid(principal)),
+            );
+            continue;
+        }
+
         if let Some(value) = properties
             .get(&storage_tag)
             .or_else(|| properties.get(column))

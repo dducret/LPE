@@ -284,6 +284,13 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
     }
 }
 
+pub(in crate::mapi) fn ipm_subtree_ost_ostid(principal: &AccountPrincipal) -> Vec<u8> {
+    let mut value = Vec::with_capacity(20);
+    value.extend_from_slice(principal.account_id.as_bytes());
+    value.extend_from_slice(&1u32.to_le_bytes());
+    value
+}
+
 fn valid_folder_mask() -> u32 {
     FOLDER_IPM_SUBTREE_VALID
         | FOLDER_IPM_INBOX_VALID
@@ -2118,8 +2125,13 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             }
             Ok(())
         }
-        Some(MapiObject::Folder { properties, .. }) => {
-            properties.extend(values);
+        Some(MapiObject::Folder {
+            folder_id,
+            properties,
+        }) => {
+            properties.extend(values.into_iter().filter(|(tag, _)| {
+                !(*folder_id == IPM_SUBTREE_FOLDER_ID && *tag == PID_TAG_OST_OSTID)
+            }));
             Ok(())
         }
         Some(MapiObject::Logon) => Ok(()),

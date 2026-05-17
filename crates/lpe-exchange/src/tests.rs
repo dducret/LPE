@@ -11377,6 +11377,121 @@ async fn mapi_over_http_set_properties_updates_open_message_flags() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_ipm_subtree_returns_stable_ost_identity() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(4).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the IPM subtree
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x7C04_0102u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut expected = 20u16.to_le_bytes().to_vec();
+    expected.extend_from_slice(account.account_id.as_bytes());
+    expected.extend_from_slice(&1u32.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &expected));
+}
+
+#[tokio::test]
+async fn mapi_over_http_ipm_subtree_ost_identity_ignores_client_set_blob() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let client_blob = [0x44; 20];
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(&mut property_values, 0x7C04_0102, &client_blob);
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(4).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on the IPM subtree
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the same folder
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x7C04_0102u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut expected = 20u16.to_le_bytes().to_vec();
+    expected.extend_from_slice(account.account_id.as_bytes());
+    expected.extend_from_slice(&1u32.to_le_bytes());
+    assert!(contains_bytes(&response_rops, &expected));
+    let mut overridden = 20u16.to_le_bytes().to_vec();
+    overridden.extend_from_slice(&client_blob);
+    assert!(!contains_bytes(&response_rops, &overridden));
+}
+
+#[tokio::test]
 async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let message_id = "39393939-3939-3939-3939-393939393939";
     let mailbox_id = "55555555-5555-5555-5555-555555555555";
@@ -16945,6 +17060,50 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     let body = response_bytes(response).await;
     assert_eq!(body[9], 0);
     assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_ids_ignore_generic_mapi_identity_cache_collisions() {
+    let contact_id = Uuid::parse_str("d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0").unwrap();
+    let contact = FakeStore::contact(
+        "d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0",
+        "Cache Collision Contact",
+        "cache.collision@example.test",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![contact])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let poisoned_object_id = crate::mapi::identity::mapi_store_id(22);
+    let poisoned_mid = 0x4000_0016;
+    crate::mapi::identity::remember_mapi_identity(contact_id, poisoned_object_id);
+
+    let lookup = b"cache.collision@example.test\0";
+    let matches_headers = nspi_bound_headers(&service, "GetMatches").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &matches_headers, lookup)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[9], 1);
+    let visible_mid = u32::from_le_bytes(body[14..18].try_into().unwrap());
+    assert_ne!(visible_mid, poisoned_mid);
+
+    let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, lookup)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(
+        u32::from_le_bytes(body[13..17].try_into().unwrap()),
+        visible_mid
+    );
 }
 
 #[tokio::test]

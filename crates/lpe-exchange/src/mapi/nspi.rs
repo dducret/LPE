@@ -3,6 +3,10 @@ use super::rop::*;
 use super::session::*;
 use super::transport::*;
 use super::*;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+static NSPI_OBJECT_IDS: OnceLock<Mutex<HashMap<(Uuid, u8, Uuid), u64>>> = OnceLock::new();
 
 pub(in crate::mapi) async fn handle_nspi_request<S>(
     store: &S,
@@ -183,7 +187,7 @@ where
     let principal_entry = principal_address_book_entry(principal);
     let matched = requested_names
         .first()
-        .and_then(|name| nspi_match_entry(&entries, name))
+        .and_then(|name| nspi_match_entry(principal.account_id, &entries, name))
         .or_else(|| {
             requested_names
                 .iter()
@@ -219,7 +223,11 @@ where
         body.push(1);
         write_large_property_tag_array(&mut body, &columns);
         write_u32(&mut body, 1);
-        body.extend_from_slice(&nspi_resolved_entry_row(entry, &columns));
+        body.extend_from_slice(&nspi_resolved_entry_row(
+            principal.account_id,
+            entry,
+            &columns,
+        ));
     } else {
         body.push(0);
     }
@@ -345,8 +353,8 @@ where
     let values = scan_address_book_lookup_values(request);
     let matched_mid = values
         .first()
-        .and_then(|value| nspi_match_entry(&entries, value))
-        .map(nspi_entry_id)
+        .and_then(|value| nspi_match_entry(principal.account_id, &entries, value))
+        .map(|entry| nspi_entry_id(principal.account_id, entry))
         .or_else(|| {
             values
                 .iter()
@@ -362,7 +370,7 @@ where
                         .find(|entry| nspi_entry_is_principal(entry, principal))
                 })
                 .flatten()
-                .map(nspi_entry_id)
+                .map(|entry| nspi_entry_id(principal.account_id, entry))
         });
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -485,16 +493,16 @@ where
         .filter(|tag| !tags.contains(tag))
         .collect::<Vec<_>>();
     let principal_entry = principal_address_book_entry(principal);
-    let principal_id = nspi_entry_id(&principal_entry);
+    let principal_id = nspi_entry_id(principal.account_id, &principal_entry);
     let entry = nspi_stat_current_rec(request)
         .and_then(|current_rec| {
             entries
                 .iter()
-                .find(|entry| nspi_entry_id(entry) == current_rec)
+                .find(|entry| nspi_entry_id(principal.account_id, entry) == current_rec)
                 .cloned()
                 .or_else(|| (current_rec == principal_id).then_some(principal_entry.clone()))
         })
-        .or_else(|| nspi_requested_entry(request, &entries).cloned())
+        .or_else(|| nspi_requested_entry(principal.account_id, request, &entries).cloned())
         .or_else(|| {
             nspi_requested_entry_ids(request)
                 .contains(&principal_id)
@@ -521,7 +529,11 @@ where
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     if let Some(entry) = entry.as_ref() {
         body.push(1);
-        body.extend_from_slice(&nspi_entry_property_value_list(entry, &tags));
+        body.extend_from_slice(&nspi_entry_property_value_list(
+            principal.account_id,
+            entry,
+            &tags,
+        ));
     } else {
         body.push(0);
     }
@@ -548,7 +560,7 @@ fn log_nspi_get_props_debug(
     entry: Option<&ExchangeAddressBookEntry>,
 ) {
     let entry_id = entry
-        .map(nspi_entry_id)
+        .map(|entry| nspi_entry_id(principal.account_id, entry))
         .map(|id| format!("{id:#010x}"))
         .unwrap_or_default();
     let entry_kind = entry
@@ -694,7 +706,7 @@ where
         write_large_property_tag_array(&mut body, &tags);
         write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
         for entry in &entries {
-            body.extend_from_slice(&nspi_resolved_entry_row(entry, &tags));
+            body.extend_from_slice(&nspi_resolved_entry_row(principal.account_id, entry, &tags));
         }
     }
     write_u32(&mut body, 0);
@@ -737,14 +749,14 @@ where
     body.push((!entries.is_empty()) as u8);
     write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
     for entry in &entries {
-        write_u32(&mut body, nspi_entry_id(entry));
+        write_u32(&mut body, nspi_entry_id(principal.account_id, entry));
     }
     body.push((!entries.is_empty()) as u8);
     if !entries.is_empty() {
         write_large_property_tag_array(&mut body, &tags);
         write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
         for entry in &entries {
-            body.extend_from_slice(&nspi_resolved_entry_row(entry, &tags));
+            body.extend_from_slice(&nspi_resolved_entry_row(principal.account_id, entry, &tags));
         }
     }
     write_u32(&mut body, 0);
@@ -833,6 +845,7 @@ where
     write_u32(&mut body, NSPI_UNICODE_CODEPAGE);
     body.push(1);
     body.extend_from_slice(&nspi_entry_property_value_list(
+        principal.account_id,
         &entry,
         NSPI_BOOTSTRAP_PROPERTY_TAGS,
     ));
@@ -851,6 +864,7 @@ pub(in crate::mapi) fn nspi_update_stat_response(request_id: &str) -> Response {
 }
 
 pub(in crate::mapi) fn nspi_resolved_entry_row(
+    account_id: Uuid,
     entry: &ExchangeAddressBookEntry,
     columns: &[u32],
 ) -> Vec<u8> {
@@ -860,13 +874,14 @@ pub(in crate::mapi) fn nspi_resolved_entry_row(
         write_address_book_property_value(
             &mut row,
             *property_tag,
-            &nspi_entry_value(entry, *property_tag),
+            &nspi_entry_value(account_id, entry, *property_tag),
         );
     }
     row
 }
 
 pub(in crate::mapi) fn nspi_entry_property_value_list(
+    account_id: Uuid,
     entry: &ExchangeAddressBookEntry,
     tags: &[u32],
 ) -> Vec<u8> {
@@ -877,7 +892,7 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
         write_address_book_tagged_property_value(
             &mut values,
             *property_tag,
-            &nspi_entry_value(entry, *property_tag),
+            &nspi_entry_value(account_id, entry, *property_tag),
         );
     }
     values
@@ -892,6 +907,7 @@ pub(in crate::mapi) enum NspiValue<'a> {
 }
 
 pub(in crate::mapi) fn nspi_entry_value(
+    account_id: Uuid,
     entry: &ExchangeAddressBookEntry,
     property_tag: u32,
 ) -> NspiValue<'_> {
@@ -902,7 +918,7 @@ pub(in crate::mapi) fn nspi_entry_value(
         0x3A00_001F | 0x3A00_001E => NspiValue::String(&entry.display_name),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
         0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
-        0x3000_0003 => NspiValue::U32(nspi_entry_id(entry)),
+        0x3000_0003 => NspiValue::U32(nspi_entry_id(account_id, entry)),
         0x3004_001F | 0x3004_001E => NspiValue::String(&entry.email),
         0x3002_001F | 0x3002_001E => NspiValue::String("SMTP"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
@@ -954,11 +970,18 @@ where
     if requests.is_empty() {
         return Ok(());
     }
-    for record in store
+    let records = store
         .fetch_or_allocate_mapi_identities(principal.account_id, requests)
-        .await?
-    {
-        identity::remember_mapi_identity(record.canonical_id, record.object_id);
+        .await?;
+    for (request, record) in requests.iter().zip(records.iter()) {
+        if let Some(kind_key) = nspi_identity_kind_key_for_request(request.object_kind) {
+            remember_nspi_identity(
+                principal.account_id,
+                kind_key,
+                record.canonical_id,
+                record.object_id,
+            );
+        }
     }
     Ok(())
 }
@@ -974,8 +997,44 @@ fn nspi_identity_request(entry: &ExchangeAddressBookEntry) -> MapiIdentityReques
     }
 }
 
-pub(in crate::mapi) fn nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
-    identity::mapped_mapi_object_id(&entry.id)
+fn remember_nspi_identity(account_id: Uuid, kind_key: u8, canonical_id: Uuid, object_id: u64) {
+    let mut ids = NSPI_OBJECT_IDS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    ids.insert((account_id, kind_key, canonical_id), object_id);
+}
+
+fn mapped_nspi_object_id(account_id: Uuid, entry: &ExchangeAddressBookEntry) -> Option<u64> {
+    NSPI_OBJECT_IDS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&(
+            account_id,
+            nspi_identity_kind_key(entry.entry_kind),
+            entry.id,
+        ))
+        .copied()
+}
+
+fn nspi_identity_kind_key(entry_kind: ExchangeAddressBookEntryKind) -> u8 {
+    match entry_kind {
+        ExchangeAddressBookEntryKind::Account => 1,
+        ExchangeAddressBookEntryKind::Contact => 2,
+    }
+}
+
+fn nspi_identity_kind_key_for_request(object_kind: MapiIdentityObjectKind) -> Option<u8> {
+    match object_kind {
+        MapiIdentityObjectKind::Account => Some(1),
+        MapiIdentityObjectKind::Contact => Some(2),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn nspi_entry_id(account_id: Uuid, entry: &ExchangeAddressBookEntry) -> u32 {
+    mapped_nspi_object_id(account_id, entry)
         .and_then(|object_id| nspi_minimal_id_from_object_id(object_id, entry.entry_kind))
         .unwrap_or_else(|| legacy_nspi_entry_id(entry))
 }
@@ -1004,7 +1063,10 @@ fn legacy_nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
 }
 
 pub(in crate::mapi) fn principal_minimal_entry_id(principal: &AccountPrincipal) -> u32 {
-    nspi_entry_id(&principal_address_book_entry(principal))
+    nspi_entry_id(
+        principal.account_id,
+        &principal_address_book_entry(principal),
+    )
 }
 
 pub(in crate::mapi) fn principal_address_book_entry(
@@ -1154,16 +1216,21 @@ pub(in crate::mapi) fn nspi_lookup_matches_principal(
 }
 
 pub(in crate::mapi) fn nspi_requested_entry<'a>(
+    account_id: Uuid,
     request: &[u8],
     entries: &'a [ExchangeAddressBookEntry],
 ) -> Option<&'a ExchangeAddressBookEntry> {
     let ids = nspi_requested_entry_ids(request);
     ids.iter()
-        .find_map(|id| entries.iter().find(|entry| nspi_entry_id(entry) == *id))
+        .find_map(|id| {
+            entries
+                .iter()
+                .find(|entry| nspi_entry_id(account_id, entry) == *id)
+        })
         .or_else(|| {
             scan_address_book_lookup_values(request)
                 .iter()
-                .find_map(|value| nspi_match_entry(entries, value))
+                .find_map(|value| nspi_match_entry(account_id, entries, value))
         })
 }
 
@@ -1188,6 +1255,7 @@ pub(in crate::mapi) fn nspi_filter_entries_for_request(
 }
 
 pub(in crate::mapi) fn nspi_match_entry<'a>(
+    account_id: Uuid,
     entries: &'a [ExchangeAddressBookEntry],
     value: &str,
 ) -> Option<&'a ExchangeAddressBookEntry> {
@@ -1202,7 +1270,7 @@ pub(in crate::mapi) fn nspi_match_entry<'a>(
                 },
                 entry.display_name.to_ascii_lowercase(),
                 entry.email.to_ascii_lowercase(),
-                nspi_entry_id(entry),
+                nspi_entry_id(account_id, entry),
                 entry,
             ))
         })
