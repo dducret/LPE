@@ -12315,6 +12315,13 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
             .and_then(serde_json::Value::as_u64),
         Some(test_mapi_folder_id(4))
     );
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("hierarchySyncVersion")
+            .and_then(serde_json::Value::as_u64),
+        Some(2)
+    );
 
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
         current_change_sequence: 42,

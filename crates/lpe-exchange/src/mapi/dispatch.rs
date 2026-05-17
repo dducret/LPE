@@ -10,6 +10,8 @@ use super::transport::*;
 use super::*;
 use crate::store::MapiSyncCheckpoint;
 
+const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
+
 pub(in crate::mapi) async fn execute_response<S, V>(
     store: &S,
     validator: &Validator<V>,
@@ -2703,6 +2705,15 @@ where
                     );
                     responses.extend_from_slice(&response);
                     if completed && matches!(checkpoint.4, 0x01 | 0x02) {
+                        let mut cursor_json = serde_json::json!({
+                            "syncType": checkpoint.4,
+                            "syncRootFolderId": checkpoint.5,
+                            "source": "emsmdb-ics-download"
+                        });
+                        if checkpoint.1 == MapiCheckpointKind::Hierarchy {
+                            cursor_json["hierarchySyncVersion"] =
+                                serde_json::json!(HIERARCHY_SYNC_CURSOR_VERSION);
+                        }
                         let checkpoint_result = store
                             .store_mapi_sync_checkpoint(
                                 principal.account_id,
@@ -2710,11 +2721,7 @@ where
                                 checkpoint.1,
                                 checkpoint.2,
                                 checkpoint.3,
-                                serde_json::json!({
-                                    "syncType": checkpoint.4,
-                                    "syncRootFolderId": checkpoint.5,
-                                    "source": "emsmdb-ics-download"
-                                }),
+                                cursor_json,
                             )
                             .await;
                         match checkpoint_result {
@@ -3683,6 +3690,11 @@ fn hierarchy_checkpoint_is_usable(
         .get("source")
         .and_then(serde_json::Value::as_str)
         == Some("emsmdb-ics-download")
+        && checkpoint
+            .cursor_json
+            .get("hierarchySyncVersion")
+            .and_then(serde_json::Value::as_u64)
+            == Some(HIERARCHY_SYNC_CURSOR_VERSION)
         && checkpoint
             .cursor_json
             .get("syncRootFolderId")
