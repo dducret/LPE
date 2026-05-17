@@ -204,6 +204,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .ok_or_else(|| anyhow!("missing DeviceId"))?;
         let protocol_version =
             protocol_version.unwrap_or_else(|| crate::auth::protocol_version(headers));
+        crate::auth::ensure_supported_protocol_version(&protocol_version)?;
         let principal = self.authenticate(query.user.as_deref(), headers).await?;
         self.store
             .cleanup_expired_activesync_sync_cursors(principal.account_id, device_id)

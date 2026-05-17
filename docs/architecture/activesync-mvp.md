@@ -16,6 +16,12 @@
   challenge with the same protocol capability headers used by successful
   authenticated probes.
 - Protocol behavior:
+  - supports only ActiveSync protocol version `16.1`; `OPTIONS` advertises
+    exactly `MS-ASProtocolVersions: 16.1`, successful `POST` responses use
+    `MS-ASProtocolVersion: 16.1`, and explicit unsupported versions in
+    `MS-ASProtocolVersion` or base64 ASHTTP query values are rejected with a
+    predictable `400 Bad Request` response that still advertises the supported
+    version set
   - supports both plain ASHTTP query parameters and base64-encoded ASHTTP query values for implemented commands
   - parses only the `WBXML` code pages required by the supported command set
   - uses canonical mailbox, contact, and calendar data

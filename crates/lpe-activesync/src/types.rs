@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::constants::ACTIVE_SYNC_VERSION;
+
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct ActiveSyncQuery {
     #[serde(rename = "Cmd")]
@@ -154,11 +156,7 @@ fn decode_parameter_value(value: &[u8]) -> Result<String> {
 
 fn decode_protocol_version(value: u8) -> Result<&'static str> {
     match value {
-        121 => Ok("12.1"),
-        140 => Ok("14.0"),
-        141 => Ok("14.1"),
-        160 => Ok("16.0"),
-        161 => Ok("16.1"),
+        161 => Ok(ACTIVE_SYNC_VERSION),
         _ => bail!("unsupported ActiveSync protocol version"),
     }
 }

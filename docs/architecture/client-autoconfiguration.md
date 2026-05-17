@@ -12,6 +12,10 @@
 - Never advertise the internal `LPE -> LPE-CT` relay as client `SMTP`.
 - Publish `ActiveSync` only for clients that support `Exchange ActiveSync`.
 - Do not advertise `ActiveSync` as the Outlook for Windows desktop Exchange route.
+- The ActiveSync endpoint currently supports and advertises exactly protocol
+  version `16.1`; autodiscover may publish the endpoint for mobile
+  ActiveSync/MobileSync probes, but it must not imply support for older
+  ActiveSync protocol versions.
 - Publish `EWS` only when `LPE_AUTOCONFIG_EWS_ENABLED` is true.
 - Publish `mapiHttp` only when the local MAPI tests and project-owned scripted readiness harness pass, Microsoft Remote Connectivity Analyzer Outlook Connectivity passes, Outlook 2016 / 2019 cached-mode profile labs pass, and both `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true. A client `X-MapiHttpCapability` probe must be a positive integer supported by `LPE`; it never publishes MAPI by itself and suppresses legacy `EXCH` / `EXPR` metadata only when the gated `mapiHttp` response is actually being published.
 - Publish top-level `EXCH` only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is true and an Exchange-style surface is enabled.

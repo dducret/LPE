@@ -85,7 +85,8 @@ def check_options(args, failures: list[str]) -> None:
         for value in headers.get("MS-ASProtocolCommands", "").split(",")
         if value.strip()
     }
-    check("16.1" in {value.strip() for value in versions.split(",")}, "OPTIONS advertises ActiveSync 16.1", failures)
+    supported_versions = {value.strip() for value in versions.split(",") if value.strip()}
+    check(supported_versions == {"16.1"}, "OPTIONS advertises exactly ActiveSync 16.1", failures)
     check(REQUIRED_COMMANDS <= commands, "OPTIONS advertises the implemented lab command set", failures)
     check("GetAttachment" not in commands, "OPTIONS does not advertise unsupported GetAttachment", failures)
     if not args.password:

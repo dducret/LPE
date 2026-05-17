@@ -72,6 +72,7 @@ pub(crate) fn error_response(error: anyhow::Error) -> Response {
 
     let mut response = Response::new(axum::body::Body::from(message));
     *response.status_mut() = StatusCode::BAD_REQUEST;
+    add_common_headers(response.headers_mut());
     response.headers_mut().insert(
         CONTENT_TYPE,
         HeaderValue::from_static("text/plain; charset=utf-8"),

@@ -23,7 +23,8 @@ python tools/activesync_mobile_lab_preflight.py --base-url https://mail.example.
 
 Use `--insecure` only for a closed lab with a temporary certificate. The helper checks:
 
-- `OPTIONS /Microsoft-Server-ActiveSync` advertises protocol version `16.1` and only the implemented command set.
+- `OPTIONS /Microsoft-Server-ActiveSync` advertises exactly protocol version
+  `16.1` and only the implemented command set.
 - anonymous `OPTIONS` still returns ActiveSync capability headers with a `Basic` challenge when no password is supplied.
 - Autodiscover v2 `Protocol=ActiveSync` and `Protocol=MobileSync` return the ActiveSync endpoint.
 - default Outlook POX Autodiscover does not publish `MobileSync`.
@@ -54,7 +55,7 @@ Run this checklist for Outlook mobile on iOS and Android when both are available
 | Step | Expected evidence |
 | --- | --- |
 | Enrollment | Account adds successfully through mobile Autodiscover or explicit Exchange/ActiveSync server entry; server logs show the mobile ActiveSync endpoint, not Outlook desktop MAPI/EWS publication. |
-| `OPTIONS` and version negotiation | Client probes `OPTIONS /Microsoft-Server-ActiveSync`; response includes `MS-ASProtocolVersions: 16.1` and the implemented command list. The client uses a supported `MS-ASProtocolVersion` on later POSTs. |
+| `OPTIONS` and version negotiation | Client probes `OPTIONS /Microsoft-Server-ActiveSync`; response includes exactly `MS-ASProtocolVersions: 16.1` and the implemented command list. The client uses `MS-ASProtocolVersion: 16.1` on later POSTs; explicit unsupported versions receive a predictable `400 Bad Request` with the supported version set. |
 | `Provision` | Initial Provision and acknowledgment complete with policy status `1`; no unsupported device-policy requirement blocks enrollment. |
 | `FolderSync` | Initial `FolderSync` with key `0` returns canonical folders including `Inbox`, `Sent`, `Drafts`, `Trash`, and user mail folders with stable server ids. |
 | Initial `Sync` | Inbox initial collection `Sync` starts with key `0`, receives a new key, and retrieves the first page without duplicate or missing messages. |
@@ -77,7 +78,7 @@ Run this checklist with the native iOS Mail account type that uses Exchange Acti
 | Step | Expected evidence |
 | --- | --- |
 | Enrollment | Account adds successfully through mobile Autodiscover or explicit server entry; Mail, Contacts, and Calendars toggles may be enabled only for implemented classes. |
-| `OPTIONS` and version negotiation | Device probes `OPTIONS /Microsoft-Server-ActiveSync`; response includes `16.1` and the implemented command list; later POSTs use a supported version. |
+| `OPTIONS` and version negotiation | Device probes `OPTIONS /Microsoft-Server-ActiveSync`; response includes exactly `16.1` and the implemented command list; later POSTs use `16.1`, while explicit unsupported versions receive a predictable `400 Bad Request` with the supported version set. |
 | `Provision` | Device policy handshake completes; iOS does not demand an unsupported policy before first sync. |
 | `FolderSync` | Initial folder hierarchy includes canonical mail folders, contacts, and calendar collections that the user enabled. |
 | Initial `Sync` | Mail, contacts, and calendar collections that are enabled start with collection sync key `0` and receive stable follow-up keys. |

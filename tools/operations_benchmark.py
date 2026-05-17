@@ -618,7 +618,7 @@ def benchmark_activesync(base_url: str, account: AccountLogin, password: str, it
     auth = basic_header(account.email, password)
     headers = {
         "Authorization": auth,
-        "MS-ASProtocolVersion": "14.1",
+        "MS-ASProtocolVersion": "16.1",
         "Content-Type": "application/vnd.ms-sync.wbxml",
         "User-Agent": "lpe-ops-bench/0.1",
     }

@@ -1184,6 +1184,15 @@ fn basic_headers() -> HeaderMap {
     headers
 }
 
+fn bearer_headers_with_protocol_version(protocol_version: &str) -> HeaderMap {
+    let mut headers = bearer_headers();
+    headers.insert(
+        "ms-asprotocolversion",
+        HeaderValue::from_str(protocol_version).unwrap(),
+    );
+    headers
+}
+
 fn mime_headers() -> HeaderMap {
     let mut headers = bearer_headers();
     headers.insert(
@@ -1296,6 +1305,98 @@ fn post_authentication_errors_return_http_challenge() {
             .get(axum::http::header::WWW_AUTHENTICATE)
             .and_then(|value| value.to_str().ok()),
         Some("Basic realm=\"LPE ActiveSync\"")
+    );
+}
+
+#[tokio::test]
+async fn post_with_supported_protocol_version_succeeds() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let response = service
+        .handle_request(
+            active_sync_query("FolderSync", "dev1"),
+            &bearer_headers_with_protocol_version("16.1"),
+            &folder_sync_request("0"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversion")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
+}
+
+#[tokio::test]
+async fn post_with_unsupported_protocol_version_is_rejected_predictably() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let error = service
+        .handle_request(
+            active_sync_query("FolderSync", "dev1"),
+            &bearer_headers_with_protocol_version("14.1"),
+            &folder_sync_request("0"),
+        )
+        .await
+        .unwrap_err();
+    let response = error_response(error);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversions")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
+}
+
+#[tokio::test]
+async fn unsupported_protocol_version_response_does_not_echo_request_version() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let error = service
+        .handle_request(
+            active_sync_query("FolderSync", "dev1"),
+            &bearer_headers_with_protocol_version("99.9"),
+            &folder_sync_request("0"),
+        )
+        .await
+        .unwrap_err();
+    let response = error_response(error);
+
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversion")
+            .and_then(|value| value.to_str().ok()),
+        None
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversions")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
     );
 }
 
@@ -1650,7 +1751,22 @@ fn active_sync_query(cmd: &str, device_id: &str) -> ActiveSyncQuery {
 }
 
 fn base64_query(command_code: u8, device_id: &str, params: &[(u8, &[u8])]) -> String {
-    let mut bytes = vec![161, command_code, 0x09, 0x04, device_id.len() as u8];
+    base64_query_with_version(161, command_code, device_id, params)
+}
+
+fn base64_query_with_version(
+    protocol_version: u8,
+    command_code: u8,
+    device_id: &str,
+    params: &[(u8, &[u8])],
+) -> String {
+    let mut bytes = vec![
+        protocol_version,
+        command_code,
+        0x09,
+        0x04,
+        device_id.len() as u8,
+    ];
     bytes.extend_from_slice(device_id.as_bytes());
     bytes.push(4);
     bytes.extend_from_slice(&1234_u32.to_le_bytes());
@@ -1732,6 +1848,27 @@ fn malformed_base64_query_is_rejected_predictably() {
     let response = error_response(error);
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn base64_query_rejects_unsupported_protocol_version() {
+    let error = ParsedActiveSyncQuery::from_raw_query(Some(&base64_query_with_version(
+        141,
+        0,
+        "dev-b64",
+        &[(8, b"alice@example.test".as_slice())],
+    )))
+    .unwrap_err();
+    let response = error_response(error);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response
+            .headers()
+            .get("ms-asprotocolversions")
+            .and_then(|value| value.to_str().ok()),
+        Some("16.1")
+    );
 }
 
 async fn sync_collection(
