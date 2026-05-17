@@ -16,6 +16,7 @@
   challenge with the same protocol capability headers used by successful
   authenticated probes.
 - Protocol behavior:
+  - supports both plain ASHTTP query parameters and base64-encoded ASHTTP query values for implemented commands
   - parses only the `WBXML` code pages required by the supported command set
   - uses canonical mailbox, contact, and calendar data
   - creates authoritative `Sent` copies through canonical submission

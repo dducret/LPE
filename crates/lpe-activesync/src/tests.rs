@@ -11,6 +11,7 @@ use argon2::{
 };
 use axum::body::to_bytes;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState,
@@ -26,7 +27,7 @@ use crate::{
     response::error_response,
     service::ActiveSyncService,
     store::{ActiveSyncStore, StoreFuture},
-    types::ActiveSyncQuery,
+    types::{ActiveSyncQuery, ParsedActiveSyncQuery},
     wbxml::{decode_wbxml, encode_wbxml, WbxmlNode},
 };
 
@@ -1179,6 +1180,91 @@ fn active_sync_query(cmd: &str, device_id: &str) -> ActiveSyncQuery {
     }
 }
 
+fn base64_query(command_code: u8, device_id: &str, params: &[(u8, &[u8])]) -> String {
+    let mut bytes = vec![161, command_code, 0x09, 0x04, device_id.len() as u8];
+    bytes.extend_from_slice(device_id.as_bytes());
+    bytes.push(4);
+    bytes.extend_from_slice(&1234_u32.to_le_bytes());
+    bytes.push(5);
+    bytes.extend_from_slice(b"phone");
+    for (tag, value) in params {
+        bytes.push(*tag);
+        bytes.push(value.len() as u8);
+        bytes.extend_from_slice(value);
+    }
+    BASE64.encode(bytes)
+}
+
+fn parsed_base64_query(command_code: u8, device_id: &str) -> ParsedActiveSyncQuery {
+    ParsedActiveSyncQuery::from_raw_query(Some(&base64_query(
+        command_code,
+        device_id,
+        &[(8, b"alice@example.test".as_slice())],
+    )))
+    .unwrap()
+}
+
+async fn handle_base64_request(
+    service: &ActiveSyncService<FakeStore>,
+    parsed: ParsedActiveSyncQuery,
+    headers: HeaderMap,
+    body: &[u8],
+) -> axum::response::Response {
+    service
+        .handle_parsed_request(parsed, &headers, body)
+        .await
+        .unwrap()
+}
+
+#[test]
+fn base64_query_decodes_ashttp_fields() {
+    let parsed = ParsedActiveSyncQuery::from_raw_query(Some(&base64_query(
+        3,
+        "dev-b64",
+        &[
+            (8, b"alice@example.test".as_slice()),
+            (1, b"collection-1".as_slice()),
+            (3, b"item-1".as_slice()),
+            (0, b"attachment-1".as_slice()),
+            (7, &[0x01][..]),
+        ],
+    )))
+    .unwrap();
+
+    assert_eq!(parsed.query.cmd.as_deref(), Some("SmartReply"));
+    assert_eq!(parsed.query.user.as_deref(), Some("alice@example.test"));
+    assert_eq!(parsed.query.device_id.as_deref(), Some("dev-b64"));
+    assert_eq!(parsed.query._device_type.as_deref(), Some("phone"));
+    assert_eq!(parsed.protocol_version.as_deref(), Some("16.1"));
+    assert_eq!(parsed._policy_key, Some(1234));
+    assert_eq!(parsed._collection_id.as_deref(), Some("collection-1"));
+    assert_eq!(parsed._item_id.as_deref(), Some("item-1"));
+    assert_eq!(parsed._attachment_name.as_deref(), Some("attachment-1"));
+    assert_eq!(parsed._options, Some(0x01));
+}
+
+#[test]
+fn plain_query_parsing_keeps_existing_fields() {
+    let parsed = ParsedActiveSyncQuery::from_raw_query(Some(
+        "Cmd=Sync&User=alice%40example.test&DeviceId=dev1&DeviceType=phone",
+    ))
+    .unwrap();
+
+    assert_eq!(parsed.query.cmd.as_deref(), Some("Sync"));
+    assert_eq!(parsed.query.user.as_deref(), Some("alice@example.test"));
+    assert_eq!(parsed.query.device_id.as_deref(), Some("dev1"));
+    assert_eq!(parsed.query._device_type.as_deref(), Some("phone"));
+    assert_eq!(parsed.protocol_version, None);
+}
+
+#[test]
+fn malformed_base64_query_is_rejected_predictably() {
+    let error = ParsedActiveSyncQuery::from_raw_query(Some("not base64!")).unwrap_err();
+    let response = error_response(error);
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
 async fn sync_collection(
     service: &ActiveSyncService<FakeStore>,
     collection_id: &str,
@@ -1305,6 +1391,198 @@ async fn handle_sync_node(service: &ActiveSyncService<FakeStore>, node: WbxmlNod
         .await
         .unwrap();
     decode_response_body(response).await
+}
+
+#[tokio::test]
+async fn base64_sync_request_dispatches() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let parsed = parsed_base64_query(0, "dev-b64-sync");
+    let request = encode_wbxml(&one_collection_sync(&inbox.id.to_string(), "0"));
+
+    let response = handle_base64_request(&service, parsed, bearer_headers(), &request).await;
+    let body = decode_response_body(response).await;
+
+    assert_eq!(body.name, "Sync");
+}
+
+#[tokio::test]
+async fn base64_ping_request_dispatches() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let parsed = parsed_base64_query(18, "dev-b64-ping");
+
+    let response = handle_base64_request(&service, parsed, bearer_headers(), &[]).await;
+    let body = decode_response_body(response).await;
+
+    assert_eq!(body.name, "Ping");
+    assert_eq!(body.child("Status").unwrap().text_value(), "3");
+}
+
+#[tokio::test]
+async fn base64_send_mail_request_dispatches() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let parsed = parsed_base64_query(1, "dev-b64-send");
+
+    let response = handle_base64_request(
+        &service,
+        parsed,
+        mime_headers(),
+        b"To: Bob <bob@example.test>\r\nSubject: Hello\r\n\r\nBody",
+    )
+    .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(store.submitted_messages.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn base64_smart_reply_request_dispatches() {
+    let inbox = FakeStore::inbox_mailbox();
+    let source_message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            FakeStore::inbox_mailbox().id,
+            "inbox",
+            "Source subject",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let parsed = parsed_base64_query(3, "dev-b64-reply");
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(21, "SmartReply");
+        let mut source = WbxmlNode::new(21, "Source");
+        source.push(WbxmlNode::with_text(
+            21,
+            "ItemId",
+            source_message_id.to_string(),
+        ));
+        root.push(source);
+        root.push(WbxmlNode::with_text(
+            21,
+            "Mime",
+            "From: Alice <alice@example.test>\r\n\r\nThanks",
+        ));
+        root
+    });
+
+    let response = handle_base64_request(&service, parsed, bearer_headers(), &request).await;
+    let body = decode_response_body(response).await;
+
+    assert_eq!(body.name, "SmartReply");
+    assert_eq!(store.submitted_messages.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn base64_smart_forward_request_dispatches() {
+    let inbox = FakeStore::inbox_mailbox();
+    let source_message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            FakeStore::inbox_mailbox().id,
+            "inbox",
+            "Source subject",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let parsed = parsed_base64_query(2, "dev-b64-forward");
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(21, "SmartForward");
+        let mut source = WbxmlNode::new(21, "Source");
+        source.push(WbxmlNode::with_text(
+            21,
+            "ItemId",
+            source_message_id.to_string(),
+        ));
+        root.push(source);
+        root.push(WbxmlNode::with_text(
+            21,
+            "Mime",
+            "From: Alice <alice@example.test>\r\nTo: bob@example.test\r\n\r\nForwarding",
+        ));
+        root
+    });
+
+    let response = handle_base64_request(&service, parsed, bearer_headers(), &request).await;
+    let body = decode_response_body(response).await;
+
+    assert_eq!(body.name, "SmartForward");
+    assert_eq!(store.submitted_messages.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn base64_move_items_request_dispatches() {
+    let inbox = FakeStore::inbox_mailbox();
+    let archive = FakeStore::mailbox(
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "archive",
+        "Archive",
+        20,
+        None,
+    );
+    let message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone(), archive.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "Move me",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let parsed = parsed_base64_query(13, "dev-b64-move");
+    let request = encode_wbxml(&{
+        let mut root = WbxmlNode::new(5, "MoveItems");
+        let mut move_node = WbxmlNode::new(5, "Move");
+        move_node.push(WbxmlNode::with_text(5, "SrcMsgId", message_id.to_string()));
+        move_node.push(WbxmlNode::with_text(5, "SrcFldId", inbox.id.to_string()));
+        move_node.push(WbxmlNode::with_text(5, "DstFldId", archive.id.to_string()));
+        root.push(move_node);
+        root
+    });
+
+    let response = handle_base64_request(&service, parsed, bearer_headers(), &request).await;
+    let body = decode_response_body(response).await;
+
+    assert_eq!(body.name, "MoveItems");
+    assert_eq!(
+        body.child("Response")
+            .unwrap()
+            .child("Status")
+            .unwrap()
+            .text_value(),
+        "3"
+    );
 }
 
 fn one_collection_sync(collection_id: &str, sync_key: &str) -> WbxmlNode {

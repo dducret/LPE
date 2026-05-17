@@ -51,7 +51,6 @@ enum PingResolution {
 }
 
 use crate::{
-    auth::protocol_version,
     constants::{
         CALENDAR_CLASS, CONTACTS_CLASS, FOLDER_SYNC_COLLECTION_ID, MAIL_CLASS,
         PING_SETTINGS_COLLECTION_ID, ROOT_FOLDER_ID,
@@ -69,11 +68,14 @@ use crate::{
     },
     store::ActiveSyncStore,
     types::{
-        ActiveSyncQuery, AuthenticatedPrincipal, CollectionDefinition, CollectionStateEntry,
+        AuthenticatedPrincipal, CollectionDefinition, CollectionStateEntry, ParsedActiveSyncQuery,
         SnapshotChange, SnapshotEntry, StoredSyncState,
     },
     wbxml::{decode_wbxml, encode_wbxml, WbxmlNode},
 };
+
+#[cfg(test)]
+use crate::types::ActiveSyncQuery;
 
 #[derive(Clone)]
 pub struct ActiveSyncService<S> {
@@ -130,12 +132,35 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
     }
 
+    #[cfg(test)]
     pub(crate) async fn handle_request(
         &self,
         query: ActiveSyncQuery,
         headers: &HeaderMap,
         body: &[u8],
     ) -> Result<Response> {
+        self.handle_parsed_request(
+            ParsedActiveSyncQuery {
+                query,
+                ..Default::default()
+            },
+            headers,
+            body,
+        )
+        .await
+    }
+
+    pub(crate) async fn handle_parsed_request(
+        &self,
+        parsed: ParsedActiveSyncQuery,
+        headers: &HeaderMap,
+        body: &[u8],
+    ) -> Result<Response> {
+        let ParsedActiveSyncQuery {
+            query,
+            protocol_version,
+            ..
+        } = parsed;
         let command = query
             .cmd
             .as_deref()
@@ -148,7 +173,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| anyhow!("missing DeviceId"))?;
-        let protocol_version = protocol_version(headers);
+        let protocol_version =
+            protocol_version.unwrap_or_else(|| crate::auth::protocol_version(headers));
         let principal = self.authenticate(query.user.as_deref(), headers).await?;
         self.store
             .cleanup_expired_activesync_sync_cursors(principal.account_id, device_id)

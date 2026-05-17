@@ -1,6 +1,6 @@
 use axum::{
     body::Bytes,
-    extract::{Query, State},
+    extract::{RawQuery, State},
     http::HeaderMap,
     response::Response,
     routing::{on, MethodFilter},
@@ -14,7 +14,7 @@ use crate::{
     response::{auth_challenge_response, empty_response, error_response},
     service::ActiveSyncService,
     store::ActiveSyncStore,
-    types::ActiveSyncQuery,
+    types::{ActiveSyncQuery, ParsedActiveSyncQuery},
 };
 
 pub fn router() -> Router<Storage> {
@@ -26,10 +26,14 @@ pub fn router() -> Router<Storage> {
 
 async fn options_handler(
     State(storage): State<Storage>,
-    Query(query): Query<ActiveSyncQuery>,
+    RawQuery(raw_query): RawQuery,
     headers: HeaderMap,
 ) -> Response {
-    options_response_for_store(&storage, &query, &headers).await
+    let parsed = match ParsedActiveSyncQuery::from_raw_query(raw_query.as_deref()) {
+        Ok(parsed) => parsed,
+        Err(error) => return error_response(error),
+    };
+    options_response_for_store(&storage, &parsed.query, &headers).await
 }
 
 pub(crate) async fn options_response_for_store<S: ActiveSyncStore>(
@@ -45,12 +49,19 @@ pub(crate) async fn options_response_for_store<S: ActiveSyncStore>(
 
 async fn post_handler(
     State(storage): State<Storage>,
-    Query(query): Query<ActiveSyncQuery>,
+    RawQuery(raw_query): RawQuery,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let parsed = match ParsedActiveSyncQuery::from_raw_query(raw_query.as_deref()) {
+        Ok(parsed) => parsed,
+        Err(error) => return error_response(error),
+    };
     let service = ActiveSyncService::new(storage);
-    match service.handle_request(query, &headers, body.as_ref()).await {
+    match service
+        .handle_parsed_request(parsed, &headers, body.as_ref())
+        .await
+    {
         Ok(response) => response,
         Err(error) => error_response(error),
     }
