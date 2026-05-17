@@ -19,6 +19,21 @@
   - supports both plain ASHTTP query parameters and base64-encoded ASHTTP query values for implemented commands
   - parses only the `WBXML` code pages required by the supported command set
   - uses canonical mailbox, contact, and calendar data
+  - stores durable protocol-local device/provisioning records with account id,
+    device id, device type, pending and active policy key, provision status,
+    last-seen time, and remote-wipe/account-only-wipe status; those records
+    never store canonical mailbox, contact, calendar, task, attachment, `Sent`,
+    draft, outbox, search, rights, or quarantine data
+  - `Provision` follows the compatible two-phase shape: the initial request
+    creates or refreshes a pending device record and returns the policy document
+    with a policy key, while the acknowledgment request records the active
+    policy key for later command validation
+  - permissive provisioning mode remains the default lab mode so current
+    Outlook mobile and iOS compatibility work can continue when clients probe
+    before completing the policy handshake; setting
+    `LPE_ACTIVESYNC_PROVISIONING_MODE=enforced` makes later non-`Provision`,
+    non-`Ping` commands require the stored active policy key from
+    `X-MS-PolicyKey` or the base64 ASHTTP policy-key field
   - creates authoritative `Sent` copies through canonical submission
   - hands outbound relay to `LPE-CT`
   - never implements client `SMTP`

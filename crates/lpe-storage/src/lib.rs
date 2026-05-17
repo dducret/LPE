@@ -47,11 +47,11 @@ pub use crate::collaboration::{
 };
 pub use crate::core::Storage;
 pub use crate::protocols::{
-    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
-    ImapEmail, ImapMailboxState, ImapMimePart, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
-    JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
-    JmapThreadQuery, JmapUploadBlob,
+    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
+    ActiveSyncSyncState, ImapEmail, ImapMailboxState, ImapMimePart, JmapEmail, JmapEmailAddress,
+    JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
+    JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
+    JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::submission::{

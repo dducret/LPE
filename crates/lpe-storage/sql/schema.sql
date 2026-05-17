@@ -1538,6 +1538,27 @@ CREATE INDEX jmap_query_states_account_idx
 CREATE INDEX jmap_query_states_expiry_idx
     ON jmap_query_states (tenant_id, expires_at);
 
+CREATE TABLE activesync_devices (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    device_id TEXT NOT NULL CHECK (btrim(device_id) <> ''),
+    device_type TEXT NOT NULL DEFAULT 'unknown' CHECK (btrim(device_type) <> ''),
+    policy_key TEXT CHECK (policy_key IS NULL OR (btrim(policy_key) <> '' AND length(policy_key) <= 64)),
+    pending_policy_key TEXT CHECK (pending_policy_key IS NULL OR (btrim(pending_policy_key) <> '' AND length(pending_policy_key) <= 64)),
+    provision_status TEXT NOT NULL DEFAULT 'pending' CHECK (provision_status IN ('pending', 'active', 'blocked')),
+    wipe_status TEXT NOT NULL DEFAULT 'none' CHECK (wipe_status IN ('none', 'pending', 'acknowledged')),
+    account_wipe_status TEXT NOT NULL DEFAULT 'none' CHECK (account_wipe_status IN ('none', 'pending', 'acknowledged')),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, account_id, device_id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX activesync_devices_account_idx
+    ON activesync_devices (tenant_id, account_id, last_seen_at DESC);
+
 CREATE TABLE activesync_sync_cursors (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

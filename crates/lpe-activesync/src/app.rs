@@ -57,7 +57,7 @@ async fn post_handler(
         Ok(parsed) => parsed,
         Err(error) => return error_response(error),
     };
-    let service = ActiveSyncService::new(storage);
+    let service = ActiveSyncService::from_env(storage);
     match service
         .handle_parsed_request(parsed, &headers, body.as_ref())
         .await

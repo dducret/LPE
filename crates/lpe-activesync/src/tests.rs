@@ -14,9 +14,9 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState,
-    ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
-    JmapEmail, JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapMailbox,
+    AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState,
+    ActiveSyncItemState, ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact,
+    ClientEvent, JmapEmail, JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapMailbox,
     JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, StoredAccountAppPassword,
     SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
@@ -50,6 +50,7 @@ struct FakeStore {
     sync_states: Arc<Mutex<std::collections::HashMap<String, ActiveSyncSyncState>>>,
     sync_state_order: Arc<Mutex<Vec<String>>>,
     expired_sync_states: Arc<Mutex<HashSet<String>>>,
+    devices: Arc<Mutex<std::collections::HashMap<String, ActiveSyncDeviceState>>>,
     full_email_fetches: Arc<Mutex<u32>>,
 }
 
@@ -210,6 +211,10 @@ impl FakeStore {
             may_send_on_behalf,
         }
     }
+
+    fn device_key(account_id: Uuid, device_id: &str) -> String {
+        format!("{account_id}:{device_id}")
+    }
 }
 
 impl AccountAuthStore for FakeStore {
@@ -347,6 +352,86 @@ impl ActiveSyncStore for FakeStore {
             .and_then(|key| states.get(key))
             .cloned();
         Box::pin(async move { Ok(state) })
+    }
+
+    fn fetch_activesync_device<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncDeviceState>> {
+        let device = self
+            .devices
+            .lock()
+            .unwrap()
+            .get(&FakeStore::device_key(account_id, device_id))
+            .cloned();
+        Box::pin(async move { Ok(device) })
+    }
+
+    fn store_activesync_device_pending_policy<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        device_type: &'a str,
+        pending_policy_key: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        let key = FakeStore::device_key(account_id, device_id);
+        self.devices.lock().unwrap().insert(
+            key,
+            ActiveSyncDeviceState {
+                account_id,
+                device_id: device_id.to_string(),
+                device_type: device_type.to_string(),
+                policy_key: None,
+                pending_policy_key: Some(pending_policy_key.to_string()),
+                provision_status: "pending".to_string(),
+                wipe_status: "none".to_string(),
+                account_wipe_status: "none".to_string(),
+                last_seen_at: "2026-04-18T10:00:00Z".to_string(),
+            },
+        );
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn acknowledge_activesync_device_policy<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        device_type: &'a str,
+        policy_key: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        let key = FakeStore::device_key(account_id, device_id);
+        self.devices.lock().unwrap().insert(
+            key,
+            ActiveSyncDeviceState {
+                account_id,
+                device_id: device_id.to_string(),
+                device_type: device_type.to_string(),
+                policy_key: Some(policy_key.to_string()),
+                pending_policy_key: None,
+                provision_status: "active".to_string(),
+                wipe_status: "none".to_string(),
+                account_wipe_status: "none".to_string(),
+                last_seen_at: "2026-04-18T10:00:01Z".to_string(),
+            },
+        );
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn touch_activesync_device<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        if let Some(device) = self
+            .devices
+            .lock()
+            .unwrap()
+            .get_mut(&FakeStore::device_key(account_id, device_id))
+        {
+            device.last_seen_at = "2026-04-18T10:00:02Z".to_string();
+        }
+        Box::pin(async move { Ok(()) })
     }
 
     fn create_canonical_change_listener<'a>(
@@ -1077,23 +1162,8 @@ async fn provision_returns_policy_key_and_lightweight_policy_document() {
         session: Some(FakeStore::account()),
         ..Default::default()
     };
-    let service = ActiveSyncService::new(store);
-    let request = encode_wbxml(&{
-        let mut root = WbxmlNode::new(14, "Provision");
-        let mut device_information = WbxmlNode::new(18, "DeviceInformation");
-        device_information.push(WbxmlNode::with_text(18, "Set", "1"));
-        root.push(device_information);
-        let mut policies = WbxmlNode::new(14, "Policies");
-        let mut policy = WbxmlNode::new(14, "Policy");
-        policy.push(WbxmlNode::with_text(
-            14,
-            "PolicyType",
-            "MS-EAS-Provisioning-WBXML",
-        ));
-        policies.push(policy);
-        root.push(policies);
-        root
-    });
+    let service = ActiveSyncService::new(store.clone());
+    let request = provision_request(None, None);
 
     let response = service
         .handle_request(
@@ -1148,6 +1218,208 @@ async fn provision_returns_policy_key_and_lightweight_policy_document() {
             .text_value(),
         "0"
     );
+    let device = store
+        .devices
+        .lock()
+        .unwrap()
+        .get(&FakeStore::device_key(
+            FakeStore::account().account_id,
+            "dev1",
+        ))
+        .cloned()
+        .unwrap();
+    assert_eq!(device.device_type, "phone");
+    assert_eq!(device.provision_status, "pending");
+    assert!(device.pending_policy_key.is_some());
+    assert_eq!(device.policy_key, None);
+}
+
+#[tokio::test]
+async fn provision_acknowledgement_stores_active_policy_key() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let first = service
+        .handle_request(
+            active_sync_query("Provision", "dev1"),
+            &bearer_headers(),
+            &provision_request(None, None),
+        )
+        .await
+        .unwrap();
+    let first_body = decode_response_body(first).await;
+    let policy_key = first_body
+        .child("Policies")
+        .unwrap()
+        .child("Policy")
+        .unwrap()
+        .child("PolicyKey")
+        .unwrap()
+        .text_value()
+        .to_string();
+
+    let acknowledged = service
+        .handle_request(
+            active_sync_query("Provision", "dev1"),
+            &bearer_headers(),
+            &provision_request(Some(&policy_key), Some("1")),
+        )
+        .await
+        .unwrap();
+    let acknowledged_body = decode_response_body(acknowledged).await;
+    let device = store
+        .devices
+        .lock()
+        .unwrap()
+        .get(&FakeStore::device_key(
+            FakeStore::account().account_id,
+            "dev1",
+        ))
+        .cloned()
+        .unwrap();
+
+    assert_eq!(acknowledged_body.child("Status").unwrap().text_value(), "1");
+    assert_eq!(device.provision_status, "active");
+    assert_eq!(device.policy_key.as_deref(), Some(policy_key.as_str()));
+    assert_eq!(device.pending_policy_key, None);
+}
+
+#[tokio::test]
+async fn enforced_mode_validates_later_command_policy_key() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::with_policy_enforcement(store.clone());
+    let first = service
+        .handle_request(
+            active_sync_query("Provision", "dev1"),
+            &bearer_headers(),
+            &provision_request(None, None),
+        )
+        .await
+        .unwrap();
+    let policy_key = decode_response_body(first)
+        .await
+        .child("Policies")
+        .unwrap()
+        .child("Policy")
+        .unwrap()
+        .child("PolicyKey")
+        .unwrap()
+        .text_value()
+        .to_string();
+    service
+        .handle_request(
+            active_sync_query("Provision", "dev1"),
+            &bearer_headers(),
+            &provision_request(Some(&policy_key), Some("1")),
+        )
+        .await
+        .unwrap();
+
+    let rejected = service
+        .handle_request(
+            active_sync_query("FolderSync", "dev1"),
+            &bearer_headers(),
+            &folder_sync_request("0"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        decode_response_body(rejected)
+            .await
+            .child("Status")
+            .unwrap()
+            .text_value(),
+        "142"
+    );
+
+    let mut headers = bearer_headers();
+    headers.insert(
+        "x-ms-policykey",
+        HeaderValue::from_str(&policy_key).unwrap(),
+    );
+    let accepted = service
+        .handle_request(
+            active_sync_query("FolderSync", "dev1"),
+            &headers,
+            &folder_sync_request("0"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        decode_response_body(accepted)
+            .await
+            .child("Status")
+            .unwrap()
+            .text_value(),
+        "1"
+    );
+}
+
+#[tokio::test]
+async fn permissive_mode_preserves_current_unprovisioned_behavior() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let response = service
+        .handle_request(
+            active_sync_query("FolderSync", "dev1"),
+            &bearer_headers(),
+            &folder_sync_request("0"),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        decode_response_body(response)
+            .await
+            .child("Status")
+            .unwrap()
+            .text_value(),
+        "1"
+    );
+}
+
+fn provision_request(policy_key: Option<&str>, status: Option<&str>) -> Vec<u8> {
+    encode_wbxml(&{
+        let mut root = WbxmlNode::new(14, "Provision");
+        let mut device_information = WbxmlNode::new(18, "DeviceInformation");
+        device_information.push(WbxmlNode::with_text(18, "Set", "1"));
+        root.push(device_information);
+        let mut policies = WbxmlNode::new(14, "Policies");
+        let mut policy = WbxmlNode::new(14, "Policy");
+        policy.push(WbxmlNode::with_text(
+            14,
+            "PolicyType",
+            "MS-EAS-Provisioning-WBXML",
+        ));
+        if let Some(policy_key) = policy_key {
+            policy.push(WbxmlNode::with_text(14, "PolicyKey", policy_key));
+        }
+        if let Some(status) = status {
+            policy.push(WbxmlNode::with_text(14, "Status", status));
+        }
+        policies.push(policy);
+        root.push(policies);
+        root
+    })
+}
+
+fn folder_sync_request(sync_key: &str) -> Vec<u8> {
+    encode_wbxml(&{
+        let mut root = WbxmlNode::new(7, "FolderSync");
+        root.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
+        root
+    })
 }
 
 async fn decode_response_body(response: axum::response::Response) -> WbxmlNode {

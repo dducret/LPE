@@ -1152,6 +1152,7 @@ fn bcc_is_absent_from_search_log_cursor_and_ai_projection_tables() {
         "document_chunks",
         "mail_change_log",
         "jmap_query_states",
+        "activesync_devices",
         "activesync_sync_cursors",
         "mapi_sync_checkpoints",
     ] {
@@ -1167,6 +1168,7 @@ fn bcc_is_absent_from_search_log_cursor_and_ai_projection_tables() {
 fn protocol_cursor_tables_do_not_store_canonical_content() {
     for table_name in [
         "jmap_query_states",
+        "activesync_devices",
         "activesync_sync_cursors",
         "mapi_sync_checkpoints",
     ] {
@@ -1221,6 +1223,14 @@ fn core_schema_excludes_lpe_ct_quarantine_and_perimeter_tables() {
 #[test]
 fn activesync_sync_state_uses_v2_cursor_table() {
     assert_schema_contains_all(&[
+        "CREATE TABLE activesync_devices",
+        "device_type TEXT NOT NULL DEFAULT 'unknown' CHECK (btrim(device_type) <> '')",
+        "policy_key TEXT CHECK (policy_key IS NULL OR (btrim(policy_key) <> '' AND length(policy_key) <= 64))",
+        "pending_policy_key TEXT CHECK (pending_policy_key IS NULL OR (btrim(pending_policy_key) <> '' AND length(pending_policy_key) <= 64))",
+        "provision_status TEXT NOT NULL DEFAULT 'pending' CHECK (provision_status IN ('pending', 'active', 'blocked'))",
+        "wipe_status TEXT NOT NULL DEFAULT 'none' CHECK (wipe_status IN ('none', 'pending', 'acknowledged'))",
+        "account_wipe_status TEXT NOT NULL DEFAULT 'none' CHECK (account_wipe_status IN ('none', 'pending', 'acknowledged'))",
+        "UNIQUE (tenant_id, account_id, device_id)",
         "CREATE TABLE activesync_sync_cursors",
         "collection_kind TEXT NOT NULL CHECK (collection_kind IN ('folders', 'mail', 'contacts', 'calendar', 'tasks'))",
         "collection_key TEXT NOT NULL CHECK (btrim(collection_key) <> '')",
@@ -1234,6 +1244,8 @@ fn activesync_sync_state_uses_v2_cursor_table() {
     );
     assert!(
         PROTOCOLS_STORAGE.contains("INSERT INTO activesync_sync_cursors")
+            && PROTOCOLS_STORAGE.contains("INSERT INTO activesync_devices")
+            && PROTOCOLS_STORAGE.contains("UPDATE activesync_devices")
             && PROTOCOLS_STORAGE.contains("state_json")
             && PROTOCOLS_STORAGE.contains("DELETE FROM activesync_sync_cursors")
             && PROTOCOLS_STORAGE.contains("expires_at <= NOW()")

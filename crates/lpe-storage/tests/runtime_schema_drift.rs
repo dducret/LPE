@@ -1483,6 +1483,28 @@ async fn exercise_activesync_path(storage: &Storage, fixture: &RuntimeFixture) -
         .await
         .context("fetch_activesync_sync_state")?;
     storage
+        .store_activesync_device_pending_policy(
+            fixture.account_id,
+            "runtime-drift-device",
+            "phone",
+            "12345",
+        )
+        .await
+        .context("store_activesync_device_pending_policy")?;
+    storage
+        .acknowledge_activesync_device_policy(
+            fixture.account_id,
+            "runtime-drift-device",
+            "phone",
+            "67890",
+        )
+        .await
+        .context("acknowledge_activesync_device_policy")?;
+    storage
+        .fetch_activesync_device(fixture.account_id, "runtime-drift-device")
+        .await
+        .context("fetch_activesync_device")?;
+    storage
         .fetch_activesync_email_states(fixture.account_id, fixture.inbox_id, 0, 10)
         .await
         .context("fetch_activesync_email_states")?;

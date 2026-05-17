@@ -14,10 +14,23 @@ use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
     util::{canonical_system_mailbox_display_name, system_mailbox_role_for_display_name},
-    AccountQuotaRow, ActiveSyncSyncStateRow, AuditEntryInput, ImapEmailRow, JmapEmailRecipientRow,
-    JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow,
+    AccountQuotaRow, ActiveSyncDeviceRow, ActiveSyncSyncStateRow, AuditEntryInput, ImapEmailRow,
+    JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow,
     MessageBccRecipientRecordRow, Storage,
 };
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ActiveSyncDeviceState {
+    pub account_id: Uuid,
+    pub device_id: String,
+    pub device_type: String,
+    pub policy_key: Option<String>,
+    pub pending_policy_key: Option<String>,
+    pub provision_status: String,
+    pub wipe_status: String,
+    pub account_wipe_status: String,
+    pub last_seen_at: String,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ActiveSyncSyncState {
@@ -3243,6 +3256,127 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn fetch_activesync_device(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+    ) -> Result<Option<ActiveSyncDeviceState>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query_as::<_, ActiveSyncDeviceRow>(
+            r#"
+            SELECT account_id, device_id, device_type, policy_key, pending_policy_key,
+                   provision_status, wipe_status, account_wipe_status, last_seen_at::text AS last_seen_at
+            FROM activesync_devices
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND device_id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(active_sync_device_state_from_row))
+    }
+
+    pub async fn store_activesync_device_pending_policy(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        device_type: &str,
+        pending_policy_key: &str,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let device_type = normalized_device_type(device_type);
+        sqlx::query(
+            r#"
+            INSERT INTO activesync_devices (
+                id, tenant_id, account_id, device_id, device_type, pending_policy_key,
+                provision_status, last_seen_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+            ON CONFLICT (tenant_id, account_id, device_id)
+            DO UPDATE SET
+                device_type = EXCLUDED.device_type,
+                pending_policy_key = EXCLUDED.pending_policy_key,
+                provision_status = 'pending',
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .bind(device_type)
+        .bind(pending_policy_key.trim())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn acknowledge_activesync_device_policy(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        device_type: &str,
+        policy_key: &str,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let device_type = normalized_device_type(device_type);
+        sqlx::query(
+            r#"
+            INSERT INTO activesync_devices (
+                id, tenant_id, account_id, device_id, device_type, policy_key,
+                provision_status, last_seen_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'active', NOW())
+            ON CONFLICT (tenant_id, account_id, device_id)
+            DO UPDATE SET
+                device_type = EXCLUDED.device_type,
+                policy_key = EXCLUDED.policy_key,
+                pending_policy_key = NULL,
+                provision_status = 'active',
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .bind(device_type)
+        .bind(policy_key.trim())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn touch_activesync_device(&self, account_id: Uuid, device_id: &str) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        sqlx::query(
+            r#"
+            UPDATE activesync_devices
+            SET last_seen_at = NOW(), updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND device_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn cleanup_expired_activesync_sync_cursors(
         &self,
         account_id: Uuid,
@@ -4083,6 +4217,29 @@ pub(crate) fn activesync_collection_kind(collection_id: &str) -> &'static str {
         "calendar" => "calendar",
         "tasks" => "tasks",
         _ => "mail",
+    }
+}
+
+fn active_sync_device_state_from_row(row: ActiveSyncDeviceRow) -> ActiveSyncDeviceState {
+    ActiveSyncDeviceState {
+        account_id: row.account_id,
+        device_id: row.device_id,
+        device_type: row.device_type,
+        policy_key: row.policy_key,
+        pending_policy_key: row.pending_policy_key,
+        provision_status: row.provision_status,
+        wipe_status: row.wipe_status,
+        account_wipe_status: row.account_wipe_status,
+        last_seen_at: row.last_seen_at,
+    }
+}
+
+fn normalized_device_type(device_type: &str) -> String {
+    let trimmed = device_type.trim();
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 

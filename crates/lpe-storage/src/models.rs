@@ -341,6 +341,19 @@ pub(crate) struct ActiveSyncSyncStateRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct ActiveSyncDeviceRow {
+    pub(crate) account_id: Uuid,
+    pub(crate) device_id: String,
+    pub(crate) device_type: String,
+    pub(crate) policy_key: Option<String>,
+    pub(crate) pending_policy_key: Option<String>,
+    pub(crate) provision_status: String,
+    pub(crate) wipe_status: String,
+    pub(crate) account_wipe_status: String,
+    pub(crate) last_seen_at: String,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct ClientMessageRow {
     pub(crate) id: Uuid,
     pub(crate) mailbox_role: String,

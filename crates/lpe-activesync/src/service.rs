@@ -80,11 +80,37 @@ use crate::types::ActiveSyncQuery;
 #[derive(Clone)]
 pub struct ActiveSyncService<S> {
     store: S,
+    policy_mode: PolicyMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PolicyMode {
+    Permissive,
+    Enforced,
 }
 
 impl<S> ActiveSyncService<S> {
     pub fn new(store: S) -> Self {
-        Self { store }
+        Self {
+            store,
+            policy_mode: PolicyMode::Permissive,
+        }
+    }
+
+    pub fn with_policy_enforcement(store: S) -> Self {
+        Self {
+            store,
+            policy_mode: PolicyMode::Enforced,
+        }
+    }
+
+    pub fn from_env(store: S) -> Self {
+        match std::env::var("LPE_ACTIVESYNC_PROVISIONING_MODE") {
+            Ok(value) if value.trim().eq_ignore_ascii_case("enforced") => {
+                Self::with_policy_enforcement(store)
+            }
+            _ => Self::new(store),
+        }
     }
 }
 
@@ -159,6 +185,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         let ParsedActiveSyncQuery {
             query,
             protocol_version,
+            _policy_key,
             ..
         } = parsed;
         let command = query
@@ -179,12 +206,39 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         self.store
             .cleanup_expired_activesync_sync_cursors(principal.account_id, device_id)
             .await?;
+        let device_type = query._device_type.as_deref().unwrap_or("unknown");
+        let request_policy_key = _policy_key
+            .map(|value| value.to_string())
+            .or_else(|| header_policy_key(headers));
+
+        if command != "Provision" && command != "Ping" {
+            if self.policy_mode == PolicyMode::Enforced
+                && !self
+                    .policy_key_is_current(
+                        principal.account_id,
+                        device_id,
+                        request_policy_key.as_deref(),
+                    )
+                    .await?
+            {
+                return policy_required_response(command, &protocol_version);
+            }
+            self.store
+                .touch_activesync_device(principal.account_id, device_id)
+                .await?;
+        }
 
         match command {
             "Provision" => {
                 let request = decode_wbxml(body)?;
-                self.handle_provision(&principal, device_id, &protocol_version, &request)
-                    .await
+                self.handle_provision(
+                    &principal,
+                    device_id,
+                    device_type,
+                    &protocol_version,
+                    &request,
+                )
+                .await
             }
             "FolderSync" => {
                 let request = decode_wbxml(body)?;
@@ -255,6 +309,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         &self,
         principal: &AuthenticatedPrincipal,
         device_id: &str,
+        device_type: &str,
         protocol_version: &str,
         request: &WbxmlNode,
     ) -> Result<Response> {
@@ -275,6 +330,25 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .map(|node| node.text_value().trim().to_string());
 
         let current_policy_key = policy_key(principal.account_id, device_id);
+        if client_status.as_deref() == Some("1") && requested_key == current_policy_key {
+            self.store
+                .acknowledge_activesync_device_policy(
+                    principal.account_id,
+                    device_id,
+                    device_type,
+                    &current_policy_key,
+                )
+                .await?;
+        } else {
+            self.store
+                .store_activesync_device_pending_policy(
+                    principal.account_id,
+                    device_id,
+                    device_type,
+                    &current_policy_key,
+                )
+                .await?;
+        }
         let mut response = WbxmlNode::new(14, "Provision");
 
         if request
@@ -330,6 +404,33 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         policies.push(policy);
         response.push(policies);
         wbxml_response(protocol_version, encode_wbxml(&response))
+    }
+
+    async fn policy_key_is_current(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        request_policy_key: Option<&str>,
+    ) -> Result<bool> {
+        let Some(request_policy_key) = request_policy_key
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return Ok(false);
+        };
+        let Some(device) = self
+            .store
+            .fetch_activesync_device(account_id, device_id)
+            .await?
+        else {
+            return Ok(false);
+        };
+        Ok(device.provision_status == "active"
+            && device
+                .policy_key
+                .as_deref()
+                .map(|policy_key| policy_key == request_policy_key)
+                .unwrap_or(false))
     }
 
     async fn handle_folder_sync(
@@ -3081,6 +3182,33 @@ fn merge_smart_body(command_name: &str, composed: &str, original: &str) -> Strin
     } else {
         format!("{composed}\n\n----- {label} -----\n{original}")
     }
+}
+
+fn header_policy_key(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-ms-policykey")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn policy_required_response(command: &str, protocol_version: &str) -> Result<Response> {
+    let (page, root) = match command {
+        "FolderSync" => (7, "FolderSync"),
+        "GetItemEstimate" => (6, "GetItemEstimate"),
+        "ItemOperations" => (20, "ItemOperations"),
+        "MoveItems" => (5, "MoveItems"),
+        "Search" => (15, "Search"),
+        "SendMail" => (21, "SendMail"),
+        "SmartForward" => (21, "SmartForward"),
+        "SmartReply" => (21, "SmartReply"),
+        "Sync" => (0, "Sync"),
+        _ => (0, "Sync"),
+    };
+    let mut response = WbxmlNode::new(page, root);
+    response.push(WbxmlNode::with_text(page, "Status", "142"));
+    wbxml_response(protocol_version, encode_wbxml(&response))
 }
 
 #[cfg(test)]

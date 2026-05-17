@@ -208,6 +208,11 @@ Protocol adapters store only cursor rows:
   outbox, search, rights, or quarantine data. Expired ActiveSync cursor cleanup
   is scoped to device cursor rows and must not delete canonical mailbox or
   collaboration data.
+- `activesync_devices` stores protocol-local device identity and provisioning
+  state: account id, device id, device type, pending and active policy keys,
+  provision status, last-seen time, and remote-wipe/account-only-wipe status.
+  It is not a mailbox, contact, calendar, task, attachment, `Sent`, draft,
+  outbox, search, rights, or quarantine store.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS folder or hierarchy cursor state.
   Hierarchy checkpoints are account-wide and must have `mailbox_id IS NULL`.
   Content and read-state checkpoints are mailbox-scoped and must have a real
@@ -558,6 +563,7 @@ collaboration, rights, or user-visible state.
 - `tombstones`
 - `jmap_upload_blobs`
 - `jmap_query_states`
+- `activesync_devices`
 - `activesync_sync_cursors`
 - `mapi_sync_checkpoints`
 - `mapi_mailbox_replicas`

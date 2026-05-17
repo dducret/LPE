@@ -1,10 +1,10 @@
 use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
-    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
-    AuditEntryInput, CanonicalChangeListener, ClientContact, ClientEvent, JmapEmail, JmapMailbox,
-    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
+    ActiveSyncSyncState, AuditEntryInput, CanonicalChangeListener, ClientContact, ClientEvent,
+    JmapEmail, JmapMailbox, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -36,6 +36,30 @@ pub trait ActiveSyncStore: AccountAuthStore {
         device_id: &'a str,
         collection_id: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>>;
+    fn fetch_activesync_device<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncDeviceState>>;
+    fn store_activesync_device_pending_policy<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        device_type: &'a str,
+        pending_policy_key: &'a str,
+    ) -> StoreFuture<'a, ()>;
+    fn acknowledge_activesync_device_policy<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        device_type: &'a str,
+        policy_key: &'a str,
+    ) -> StoreFuture<'a, ()>;
+    fn touch_activesync_device<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, ()>;
     fn create_canonical_change_listener<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -226,6 +250,58 @@ impl ActiveSyncStore for Storage {
             self.fetch_latest_activesync_sync_state(account_id, device_id, collection_id)
                 .await
         })
+    }
+
+    fn fetch_activesync_device<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, Option<ActiveSyncDeviceState>> {
+        Box::pin(async move { self.fetch_activesync_device(account_id, device_id).await })
+    }
+
+    fn store_activesync_device_pending_policy<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        device_type: &'a str,
+        pending_policy_key: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.store_activesync_device_pending_policy(
+                account_id,
+                device_id,
+                device_type,
+                pending_policy_key,
+            )
+            .await
+        })
+    }
+
+    fn acknowledge_activesync_device_policy<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+        device_type: &'a str,
+        policy_key: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.acknowledge_activesync_device_policy(
+                account_id,
+                device_id,
+                device_type,
+                policy_key,
+            )
+            .await
+        })
+    }
+
+    fn touch_activesync_device<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.touch_activesync_device(account_id, device_id).await })
     }
 
     fn create_canonical_change_listener<'a>(
