@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use axum::{http::HeaderMap, response::Response};
+use lpe_domain::MailboxNamePolicy;
 use lpe_magika::{
     collect_mime_attachment_parts, Detector, ExpectedKind, IngressContext, PolicyDecision,
     ValidationRequest, Validator,
@@ -8,8 +9,9 @@ use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     calendar_attendee_labels, serialize_calendar_participants_metadata, ActiveSyncItemState,
     AuditEntryInput, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    CanonicalChangeCategory, CanonicalChangeListener, SubmitMessageInput, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput,
+    CanonicalChangeCategory, CanonicalChangeListener, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -245,6 +247,21 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 self.handle_folder_sync(&principal, device_id, &protocol_version, &request)
                     .await
             }
+            "FolderCreate" => {
+                let request = decode_wbxml(body)?;
+                self.handle_folder_create(&principal, device_id, &protocol_version, &request)
+                    .await
+            }
+            "FolderDelete" => {
+                let request = decode_wbxml(body)?;
+                self.handle_folder_delete(&principal, device_id, &protocol_version, &request)
+                    .await
+            }
+            "FolderUpdate" => {
+                let request = decode_wbxml(body)?;
+                self.handle_folder_update(&principal, device_id, &protocol_version, &request)
+                    .await
+            }
             "GetItemEstimate" => {
                 let request = decode_wbxml(body)?;
                 self.handle_get_item_estimate(&principal, device_id, &protocol_version, &request)
@@ -449,26 +466,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .map(|node| node.text_value().trim().to_string())
             .unwrap_or_default();
         let collections = self.folder_collections(principal.account_id).await?;
-        let snapshot = snapshot_to_value(
-            &collections
-                .iter()
-                .map(|collection| SnapshotEntry {
-                    server_id: collection.id.clone(),
-                    fingerprint: format!(
-                        "{}:{}:{}:{}",
-                        collection.class_name,
-                        collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
-                        collection.display_name,
-                        collection.folder_type
-                    ),
-                    data: json!({
-                        "page": 7,
-                        "name": "Folder",
-                        "children": [],
-                    }),
-                })
-                .collect::<Vec<_>>(),
-        );
+        let snapshot = folder_hierarchy_snapshot(&collections);
 
         let old_snapshot = if requested_key == "0" || requested_key.is_empty() {
             None
@@ -545,6 +543,298 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
         response.push(changes_node);
         wbxml_response(protocol_version, encode_wbxml(&response))
+    }
+
+    async fn handle_folder_create(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        device_id: &str,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "FolderCreate" {
+            bail!("invalid FolderCreate payload");
+        }
+
+        let Some(sync_key) = request
+            .child("SyncKey")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderCreate", "10", None, None);
+        };
+        let Some(parent_id) = request
+            .child("ParentId")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderCreate", "10", None, None);
+        };
+        let Some(display_name) = request
+            .child("DisplayName")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderCreate", "10", None, None);
+        };
+        let folder_type = request
+            .child("Type")
+            .map(|node| node.text_value().trim())
+            .unwrap_or_default();
+        if folder_type != "12"
+            || MailboxNamePolicy::system_role_for_display_name(display_name).is_some()
+        {
+            return folder_mutation_response(protocol_version, "FolderCreate", "10", None, None);
+        }
+
+        if self
+            .load_requested_sync_state(
+                principal.account_id,
+                device_id,
+                FOLDER_SYNC_COLLECTION_ID,
+                sync_key,
+            )
+            .await?
+            .is_none()
+        {
+            return folder_mutation_response(protocol_version, "FolderCreate", "9", None, None);
+        }
+
+        let parent_mailbox_id = if parent_id == ROOT_FOLDER_ID {
+            None
+        } else {
+            let Some(parent) = self
+                .resolve_collection(principal.account_id, parent_id)
+                .await?
+                .filter(|collection| {
+                    collection.account_id == principal.account_id
+                        && mail_collection(collection)
+                        && collection.mailbox_id.is_some()
+                })
+            else {
+                return folder_mutation_response(protocol_version, "FolderCreate", "5", None, None);
+            };
+            parent.mailbox_id
+        };
+
+        let created = match self
+            .store
+            .create_jmap_mailbox(
+                JmapMailboxCreateInput {
+                    account_id: principal.account_id,
+                    name: display_name.to_string(),
+                    parent_id: parent_mailbox_id,
+                    sort_order: None,
+                    is_subscribed: true,
+                },
+                active_sync_audit(principal, "activesync.folder_create", display_name),
+            )
+            .await
+        {
+            Ok(created) => created,
+            Err(error) => {
+                let status = folder_create_error_status(&error.to_string());
+                return folder_mutation_response(
+                    protocol_version,
+                    "FolderCreate",
+                    status,
+                    None,
+                    None,
+                );
+            }
+        };
+
+        let new_key = self
+            .store_current_folder_hierarchy(principal.account_id, device_id)
+            .await?;
+        folder_mutation_response(
+            protocol_version,
+            "FolderCreate",
+            "1",
+            Some(&new_key),
+            Some(&created.id.to_string()),
+        )
+    }
+
+    async fn handle_folder_delete(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        device_id: &str,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "FolderDelete" {
+            bail!("invalid FolderDelete payload");
+        }
+
+        let Some(sync_key) = request
+            .child("SyncKey")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderDelete", "10", None, None);
+        };
+        let Some(server_id) = request
+            .child("ServerId")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderDelete", "10", None, None);
+        };
+
+        if self
+            .load_requested_sync_state(
+                principal.account_id,
+                device_id,
+                FOLDER_SYNC_COLLECTION_ID,
+                sync_key,
+            )
+            .await?
+            .is_none()
+        {
+            return folder_mutation_response(protocol_version, "FolderDelete", "9", None, None);
+        }
+
+        let Some(folder) = self
+            .owned_mail_folder(principal.account_id, server_id)
+            .await?
+        else {
+            return folder_mutation_response(protocol_version, "FolderDelete", "4", None, None);
+        };
+        if folder.folder_type != "12" {
+            return folder_mutation_response(protocol_version, "FolderDelete", "3", None, None);
+        }
+        let Some(mailbox_id) = folder.mailbox_id else {
+            return folder_mutation_response(protocol_version, "FolderDelete", "4", None, None);
+        };
+
+        if let Err(error) = self
+            .store
+            .destroy_jmap_mailbox(
+                principal.account_id,
+                mailbox_id,
+                active_sync_audit(principal, "activesync.folder_delete", server_id),
+            )
+            .await
+        {
+            let status = folder_delete_error_status(&error.to_string());
+            return folder_mutation_response(protocol_version, "FolderDelete", status, None, None);
+        }
+
+        let new_key = self
+            .store_current_folder_hierarchy(principal.account_id, device_id)
+            .await?;
+        folder_mutation_response(protocol_version, "FolderDelete", "1", Some(&new_key), None)
+    }
+
+    async fn handle_folder_update(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        device_id: &str,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "FolderUpdate" {
+            bail!("invalid FolderUpdate payload");
+        }
+
+        let Some(sync_key) = request
+            .child("SyncKey")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "10", None, None);
+        };
+        let Some(server_id) = request
+            .child("ServerId")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "10", None, None);
+        };
+        let Some(parent_id) = request
+            .child("ParentId")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "10", None, None);
+        };
+        let Some(display_name) = request
+            .child("DisplayName")
+            .map(|node| node.text_value().trim())
+            .filter(|value| !value.is_empty())
+        else {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "10", None, None);
+        };
+        if MailboxNamePolicy::system_role_for_display_name(display_name).is_some() {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "10", None, None);
+        }
+
+        if self
+            .load_requested_sync_state(
+                principal.account_id,
+                device_id,
+                FOLDER_SYNC_COLLECTION_ID,
+                sync_key,
+            )
+            .await?
+            .is_none()
+        {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "9", None, None);
+        }
+
+        let Some(folder) = self
+            .owned_mail_folder(principal.account_id, server_id)
+            .await?
+        else {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "4", None, None);
+        };
+        if folder.folder_type != "12" {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "2", None, None);
+        }
+        let Some(mailbox_id) = folder.mailbox_id else {
+            return folder_mutation_response(protocol_version, "FolderUpdate", "4", None, None);
+        };
+        let parent_mailbox_id = if parent_id == ROOT_FOLDER_ID {
+            None
+        } else {
+            let Some(parent) = self
+                .resolve_collection(principal.account_id, parent_id)
+                .await?
+                .filter(|collection| {
+                    collection.account_id == principal.account_id
+                        && mail_collection(collection)
+                        && collection.mailbox_id.is_some()
+                })
+            else {
+                return folder_mutation_response(protocol_version, "FolderUpdate", "5", None, None);
+            };
+            parent.mailbox_id
+        };
+
+        if let Err(error) = self
+            .store
+            .update_jmap_mailbox(
+                JmapMailboxUpdateInput {
+                    account_id: principal.account_id,
+                    mailbox_id,
+                    name: Some(display_name.to_string()),
+                    parent_id: Some(parent_mailbox_id),
+                    sort_order: None,
+                    is_subscribed: None,
+                },
+                active_sync_audit(principal, "activesync.folder_update", server_id),
+            )
+            .await
+        {
+            let status = folder_update_error_status(&error.to_string());
+            return folder_mutation_response(protocol_version, "FolderUpdate", status, None, None);
+        }
+
+        let new_key = self
+            .store_current_folder_hierarchy(principal.account_id, device_id)
+            .await?;
+        folder_mutation_response(protocol_version, "FolderUpdate", "1", Some(&new_key), None)
     }
 
     async fn handle_get_item_estimate(
@@ -911,6 +1201,26 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         Ok(hierarchy_generation(
             &self.folder_collections(account_id).await?,
         ))
+    }
+
+    async fn store_current_folder_hierarchy(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+    ) -> Result<String> {
+        let collections = self.folder_collections(account_id).await?;
+        let snapshot = folder_hierarchy_snapshot(&collections);
+        let new_key = Uuid::new_v4().to_string();
+        self.store
+            .store_activesync_sync_state(
+                account_id,
+                device_id,
+                FOLDER_SYNC_COLLECTION_ID,
+                &new_key,
+                snapshot.to_string(),
+            )
+            .await?;
+        Ok(new_key)
     }
 
     async fn device_hierarchy_is_current(
@@ -2510,6 +2820,42 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .into_iter()
             .find(|collection| collection.id == collection_id))
     }
+
+    async fn owned_mail_folder(
+        &self,
+        account_id: Uuid,
+        collection_id: &str,
+    ) -> Result<Option<CollectionDefinition>> {
+        Ok(self
+            .resolve_collection(account_id, collection_id)
+            .await?
+            .filter(|collection| {
+                collection.account_id == account_id && mail_collection(collection)
+            }))
+    }
+}
+
+fn folder_hierarchy_snapshot(collections: &[CollectionDefinition]) -> Value {
+    snapshot_to_value(
+        &collections
+            .iter()
+            .map(|collection| SnapshotEntry {
+                server_id: collection.id.clone(),
+                fingerprint: format!(
+                    "{}:{}:{}:{}",
+                    collection.class_name,
+                    collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
+                    collection.display_name,
+                    collection.folder_type
+                ),
+                data: json!({
+                    "page": 7,
+                    "name": "Folder",
+                    "children": [],
+                }),
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn push_folder_metadata(node: &mut WbxmlNode, collection: &CollectionDefinition) {
@@ -2525,6 +2871,74 @@ fn push_folder_metadata(node: &mut WbxmlNode, collection: &CollectionDefinition)
         &collection.display_name,
     ));
     node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
+}
+
+fn folder_mutation_response(
+    protocol_version: &str,
+    command: &str,
+    status: &str,
+    sync_key: Option<&str>,
+    server_id: Option<&str>,
+) -> Result<Response> {
+    let mut response = WbxmlNode::new(7, command);
+    response.push(WbxmlNode::with_text(7, "Status", status));
+    if status == "1" {
+        if let Some(sync_key) = sync_key {
+            response.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
+        }
+        if let Some(server_id) = server_id {
+            response.push(WbxmlNode::with_text(7, "ServerId", server_id));
+        }
+    }
+    wbxml_response(protocol_version, encode_wbxml(&response))
+}
+
+fn active_sync_audit(
+    principal: &AuthenticatedPrincipal,
+    action: &str,
+    subject: &str,
+) -> AuditEntryInput {
+    AuditEntryInput {
+        actor: principal.email.clone(),
+        action: action.to_string(),
+        subject: subject.to_string(),
+    }
+}
+
+fn folder_create_error_status(error: &str) -> &'static str {
+    if error.contains("already exists") {
+        "2"
+    } else if error.contains("parent") || error.contains("not found") {
+        "5"
+    } else if error.contains("ReservedName") || error.contains("system mailbox") {
+        "10"
+    } else {
+        "6"
+    }
+}
+
+fn folder_delete_error_status(error: &str) -> &'static str {
+    if error.contains("system mailbox") {
+        "3"
+    } else if error.contains("not found") {
+        "4"
+    } else {
+        "6"
+    }
+}
+
+fn folder_update_error_status(error: &str) -> &'static str {
+    if error.contains("system mailbox") || error.contains("already exists") {
+        "2"
+    } else if error.contains("not found") {
+        "4"
+    } else if error.contains("parent") {
+        "5"
+    } else if error.contains("ReservedName") {
+        "10"
+    } else {
+        "6"
+    }
 }
 
 fn collection_body_preference(collection_node: &WbxmlNode) -> BodyPreference {

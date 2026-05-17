@@ -17,8 +17,9 @@ use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState,
     ActiveSyncItemState, ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact,
     ClientEvent, JmapEmail, JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapMailbox,
-    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapUploadBlob, MailboxAccountAccess,
+    SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -36,6 +37,7 @@ struct FakeStore {
     session: Option<AuthenticatedAccount>,
     login: Option<AccountLogin>,
     mailboxes: Vec<JmapMailbox>,
+    mutated_mailboxes: Arc<Mutex<Option<Vec<JmapMailbox>>>>,
     mailboxes_by_account: HashMap<Uuid, Vec<JmapMailbox>>,
     accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
@@ -215,6 +217,18 @@ impl FakeStore {
     fn device_key(account_id: Uuid, device_id: &str) -> String {
         format!("{account_id}:{device_id}")
     }
+
+    fn current_mailboxes(&self) -> Vec<JmapMailbox> {
+        self.mutated_mailboxes
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_else(|| self.mailboxes.clone())
+    }
+
+    fn set_current_mailboxes(&self, mailboxes: Vec<JmapMailbox>) {
+        *self.mutated_mailboxes.lock().unwrap() = Some(mailboxes);
+    }
 }
 
 impl AccountAuthStore for FakeStore {
@@ -277,8 +291,137 @@ impl ActiveSyncStore for FakeStore {
             .mailboxes_by_account
             .get(&account_id)
             .cloned()
-            .unwrap_or_else(|| self.mailboxes.clone());
+            .unwrap_or_else(|| self.current_mailboxes());
         Box::pin(async move { Ok(mailboxes) })
+    }
+
+    fn create_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxCreateInput,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        let mut mailboxes = self.current_mailboxes();
+        let name_exists = mailboxes
+            .iter()
+            .any(|mailbox| mailbox.parent_id == input.parent_id && mailbox.name == input.name);
+        let parent_exists = input
+            .parent_id
+            .map(|parent_id| mailboxes.iter().any(|mailbox| mailbox.id == parent_id))
+            .unwrap_or(true);
+        let created = if name_exists {
+            Err(anyhow!("mailbox already exists"))
+        } else if !parent_exists {
+            Err(anyhow!(
+                "mailbox parentId must reference a mailbox in the same account"
+            ))
+        } else {
+            let mailbox = JmapMailbox {
+                id: Uuid::new_v4(),
+                parent_id: input.parent_id,
+                role: "custom".to_string(),
+                name: input.name,
+                sort_order: input.sort_order.unwrap_or(100),
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: input.is_subscribed,
+            };
+            mailboxes.push(mailbox.clone());
+            Ok(mailbox)
+        };
+        if created.is_ok() {
+            self.set_current_mailboxes(mailboxes);
+        }
+        Box::pin(async move { created })
+    }
+
+    fn update_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxUpdateInput,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        let mut mailboxes = self.current_mailboxes();
+        let Some(index) = mailboxes
+            .iter()
+            .position(|mailbox| mailbox.id == input.mailbox_id)
+        else {
+            return Box::pin(async move { Err(anyhow!("mailbox not found")) });
+        };
+        if mailboxes[index].role != "custom" {
+            return Box::pin(async move {
+                Err(anyhow!("system mailbox cannot be modified through JMAP"))
+            });
+        }
+        let parent_id = input.parent_id.unwrap_or(mailboxes[index].parent_id);
+        if parent_id.is_some_and(|parent_id| parent_id == input.mailbox_id) {
+            return Box::pin(async move { Err(anyhow!("mailbox parentId creates a cycle")) });
+        }
+        if let Some(parent_id) = parent_id {
+            if !mailboxes.iter().any(|mailbox| mailbox.id == parent_id) {
+                return Box::pin(async move {
+                    Err(anyhow!(
+                        "mailbox parentId must reference a mailbox in the same account"
+                    ))
+                });
+            }
+        }
+        let name = input.name.unwrap_or_else(|| mailboxes[index].name.clone());
+        if mailboxes
+            .iter()
+            .enumerate()
+            .any(|(candidate_index, mailbox)| {
+                candidate_index != index && mailbox.parent_id == parent_id && mailbox.name == name
+            })
+        {
+            return Box::pin(async move { Err(anyhow!("mailbox already exists")) });
+        }
+        mailboxes[index].name = name;
+        mailboxes[index].parent_id = parent_id;
+        if let Some(sort_order) = input.sort_order {
+            mailboxes[index].sort_order = sort_order;
+        }
+        if let Some(is_subscribed) = input.is_subscribed {
+            mailboxes[index].is_subscribed = is_subscribed;
+        }
+        let updated = mailboxes[index].clone();
+        self.set_current_mailboxes(mailboxes);
+        Box::pin(async move { Ok(updated) })
+    }
+
+    fn destroy_jmap_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let Some(mailbox) = self
+            .current_mailboxes()
+            .into_iter()
+            .find(|mailbox| mailbox.id == mailbox_id)
+        else {
+            return Box::pin(async move { Err(anyhow!("mailbox not found")) });
+        };
+        if mailbox.role != "custom" {
+            return Box::pin(async move {
+                Err(anyhow!("system mailbox cannot be deleted through JMAP"))
+            });
+        }
+        if self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|email| email.mailbox_id == mailbox_id)
+        {
+            return Box::pin(async move { Err(anyhow!("mailbox is not empty")) });
+        }
+        let mailboxes = self
+            .current_mailboxes()
+            .into_iter()
+            .filter(|mailbox| mailbox.id != mailbox_id)
+            .collect();
+        self.set_current_mailboxes(mailboxes);
+        Box::pin(async move { Ok(()) })
     }
 
     fn query_jmap_email_ids<'a>(
@@ -1093,7 +1236,7 @@ async fn options_challenges_anonymous_requests() {
             .get("ms-asprotocolcommands")
             .and_then(|value| value.to_str().ok()),
         Some(
-            "FolderSync,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+            "FolderCreate,FolderDelete,FolderSync,FolderUpdate,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
         )
     );
 }
@@ -1137,7 +1280,7 @@ async fn options_returns_capabilities_after_authentication() {
             .get("ms-asprotocolcommands")
             .and_then(|value| value.to_str().ok()),
         Some(
-            "FolderSync,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+            "FolderCreate,FolderDelete,FolderSync,FolderUpdate,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
         )
     );
 }
@@ -1420,6 +1563,60 @@ fn folder_sync_request(sync_key: &str) -> Vec<u8> {
         root.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
         root
     })
+}
+
+fn folder_create_request(sync_key: &str, parent_id: &str, display_name: &str) -> Vec<u8> {
+    encode_wbxml(&{
+        let mut root = WbxmlNode::new(7, "FolderCreate");
+        root.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
+        root.push(WbxmlNode::with_text(7, "ParentId", parent_id));
+        root.push(WbxmlNode::with_text(7, "DisplayName", display_name));
+        root.push(WbxmlNode::with_text(7, "Type", "12"));
+        root
+    })
+}
+
+fn folder_update_request(
+    sync_key: &str,
+    server_id: &str,
+    parent_id: &str,
+    display_name: &str,
+) -> Vec<u8> {
+    encode_wbxml(&{
+        let mut root = WbxmlNode::new(7, "FolderUpdate");
+        root.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
+        root.push(WbxmlNode::with_text(7, "ServerId", server_id));
+        root.push(WbxmlNode::with_text(7, "ParentId", parent_id));
+        root.push(WbxmlNode::with_text(7, "DisplayName", display_name));
+        root
+    })
+}
+
+fn folder_delete_request(sync_key: &str, server_id: &str) -> Vec<u8> {
+    encode_wbxml(&{
+        let mut root = WbxmlNode::new(7, "FolderDelete");
+        root.push(WbxmlNode::with_text(7, "SyncKey", sync_key));
+        root.push(WbxmlNode::with_text(7, "ServerId", server_id));
+        root
+    })
+}
+
+async fn folder_command(
+    service: &ActiveSyncService<FakeStore>,
+    command: &str,
+    device_id: &str,
+    request: Vec<u8>,
+) -> WbxmlNode {
+    let response = service
+        .handle_request(
+            active_sync_query(command, device_id),
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    decode_response_body(response).await
 }
 
 async fn decode_response_body(response: axum::response::Response) -> WbxmlNode {
@@ -2451,6 +2648,326 @@ async fn stale_folder_sync_key_is_rejected_after_completed_round() {
     assert_eq!(stale.child("Status").unwrap().text_value(), "9");
     assert!(stale.child("SyncKey").is_none());
     assert!(stale.child("Changes").is_none());
+}
+
+#[tokio::test]
+async fn folder_create_creates_root_custom_mail_folder_and_advances_hierarchy_key() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let primed = folder_sync(&service, "0", "dev-folder-create").await;
+    let primed_key = primed.child("SyncKey").unwrap().text_value().to_string();
+    let created = folder_command(
+        &service,
+        "FolderCreate",
+        "dev-folder-create",
+        folder_create_request(&primed_key, "0", "Projects"),
+    )
+    .await;
+
+    assert_eq!(created.name, "FolderCreate");
+    assert_eq!(created.child("Status").unwrap().text_value(), "1");
+    let created_key = created.child("SyncKey").unwrap().text_value().to_string();
+    let server_id = created.child("ServerId").unwrap().text_value().to_string();
+    assert_ne!(created_key, primed_key);
+
+    let stable = folder_sync(&service, &created_key, "dev-folder-create").await;
+    assert_eq!(stable.child("Status").unwrap().text_value(), "1");
+    assert_eq!(
+        stable
+            .child("Changes")
+            .unwrap()
+            .child("Count")
+            .unwrap()
+            .text_value(),
+        "0"
+    );
+    let stale = folder_sync(&service, &primed_key, "dev-folder-create").await;
+    assert_eq!(stale.child("Status").unwrap().text_value(), "9");
+    assert!(stale.child("SyncKey").is_none());
+    assert!(!server_id.is_empty());
+}
+
+#[tokio::test]
+async fn folder_create_creates_nested_custom_mail_folder() {
+    let parent = FakeStore::mailbox(
+        "45454545-4545-4545-8545-454545454545",
+        "custom",
+        "Projects",
+        60,
+        None,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![parent.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let primed = folder_sync(&service, "0", "dev-folder-create-nested").await;
+    let primed_key = primed.child("SyncKey").unwrap().text_value().to_string();
+    let created = folder_command(
+        &service,
+        "FolderCreate",
+        "dev-folder-create-nested",
+        folder_create_request(&primed_key, &parent.id.to_string(), "Alpha"),
+    )
+    .await;
+    let created_key = created.child("SyncKey").unwrap().text_value().to_string();
+    let server_id = created.child("ServerId").unwrap().text_value().to_string();
+
+    let full = folder_sync(&service, "0", "dev-folder-create-nested-fresh").await;
+    let child_add = folder_add(full.child("Changes").unwrap(), &server_id);
+    assert_eq!(
+        child_add.child("ParentId").unwrap().text_value(),
+        parent.id.to_string()
+    );
+    assert_eq!(
+        child_add.child("DisplayName").unwrap().text_value(),
+        "Alpha"
+    );
+    assert_eq!(child_add.child("Type").unwrap().text_value(), "12");
+    assert!(!created_key.is_empty());
+}
+
+#[tokio::test]
+async fn folder_update_renames_custom_mail_folder() {
+    let folder = FakeStore::mailbox(
+        "56565656-5656-4656-9656-565656565656",
+        "custom",
+        "Projects",
+        60,
+        None,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![folder.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let primed = folder_sync(&service, "0", "dev-folder-rename").await;
+    let primed_key = primed.child("SyncKey").unwrap().text_value().to_string();
+    let updated = folder_command(
+        &service,
+        "FolderUpdate",
+        "dev-folder-rename",
+        folder_update_request(&primed_key, &folder.id.to_string(), "0", "Renamed"),
+    )
+    .await;
+    let updated_key = updated.child("SyncKey").unwrap().text_value().to_string();
+
+    let full = folder_sync(&service, "0", "dev-folder-rename-fresh").await;
+    let renamed = folder_add(full.child("Changes").unwrap(), &folder.id.to_string());
+    assert_eq!(updated.child("Status").unwrap().text_value(), "1");
+    assert_eq!(
+        renamed.child("DisplayName").unwrap().text_value(),
+        "Renamed"
+    );
+    assert!(!updated_key.is_empty());
+}
+
+#[tokio::test]
+async fn folder_update_moves_custom_mail_folder() {
+    let source = FakeStore::mailbox(
+        "67676767-6767-4767-9767-676767676767",
+        "custom",
+        "Alpha",
+        60,
+        None,
+    );
+    let destination = FakeStore::mailbox(
+        "78787878-7878-4878-9878-787878787878",
+        "custom",
+        "Projects",
+        61,
+        None,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![source.clone(), destination.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let primed = folder_sync(&service, "0", "dev-folder-move").await;
+    let primed_key = primed.child("SyncKey").unwrap().text_value().to_string();
+    let updated = folder_command(
+        &service,
+        "FolderUpdate",
+        "dev-folder-move",
+        folder_update_request(
+            &primed_key,
+            &source.id.to_string(),
+            &destination.id.to_string(),
+            "Alpha",
+        ),
+    )
+    .await;
+
+    let full = folder_sync(&service, "0", "dev-folder-move-fresh").await;
+    let moved = folder_add(full.child("Changes").unwrap(), &source.id.to_string());
+    assert_eq!(updated.child("Status").unwrap().text_value(), "1");
+    assert_eq!(
+        moved.child("ParentId").unwrap().text_value(),
+        destination.id.to_string()
+    );
+}
+
+#[tokio::test]
+async fn folder_delete_deletes_custom_mail_folder() {
+    let folder = FakeStore::mailbox(
+        "89898989-8989-4898-9898-898989898989",
+        "custom",
+        "Projects",
+        60,
+        None,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![folder.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let primed = folder_sync(&service, "0", "dev-folder-delete").await;
+    let primed_key = primed.child("SyncKey").unwrap().text_value().to_string();
+    let deleted = folder_command(
+        &service,
+        "FolderDelete",
+        "dev-folder-delete",
+        folder_delete_request(&primed_key, &folder.id.to_string()),
+    )
+    .await;
+
+    assert_eq!(deleted.child("Status").unwrap().text_value(), "1");
+    let full = folder_sync(&service, "0", "dev-folder-delete-fresh").await;
+    assert!(full
+        .child("Changes")
+        .unwrap()
+        .children_named("Add")
+        .into_iter()
+        .all(|node| node.child("ServerId").unwrap().text_value() != folder.id.to_string()));
+}
+
+#[tokio::test]
+async fn folder_mutations_reject_system_mail_folders() {
+    let system_folders = vec![
+        FakeStore::inbox_mailbox(),
+        FakeStore::sent_mailbox(),
+        FakeStore::draft_mailbox(),
+        FakeStore::mailbox(
+            "99999999-9999-4999-9999-999999999999",
+            "trash",
+            "Trash",
+            30,
+            None,
+        ),
+    ];
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: system_folders.clone(),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    for folder in system_folders {
+        let primed = folder_sync(&service, "0", &format!("dev-system-{}", folder.role)).await;
+        let sync_key = primed.child("SyncKey").unwrap().text_value().to_string();
+        let update = folder_command(
+            &service,
+            "FolderUpdate",
+            &format!("dev-system-{}", folder.role),
+            folder_update_request(&sync_key, &folder.id.to_string(), "0", "System Renamed"),
+        )
+        .await;
+        assert_eq!(update.child("Status").unwrap().text_value(), "2");
+        assert!(update.child("SyncKey").is_none());
+
+        let primed =
+            folder_sync(&service, "0", &format!("dev-system-delete-{}", folder.role)).await;
+        let sync_key = primed.child("SyncKey").unwrap().text_value().to_string();
+        let delete = folder_command(
+            &service,
+            "FolderDelete",
+            &format!("dev-system-delete-{}", folder.role),
+            folder_delete_request(&sync_key, &folder.id.to_string()),
+        )
+        .await;
+        assert_eq!(delete.child("Status").unwrap().text_value(), "3");
+        assert!(delete.child("SyncKey").is_none());
+    }
+}
+
+#[tokio::test]
+async fn folder_mutation_with_stale_hierarchy_key_is_rejected() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let first = folder_sync(&service, "0", "dev-folder-stale-mutation").await;
+    let first_key = first.child("SyncKey").unwrap().text_value().to_string();
+    let second = folder_sync(&service, &first_key, "dev-folder-stale-mutation").await;
+    assert_eq!(second.child("Status").unwrap().text_value(), "1");
+
+    let stale_create = folder_command(
+        &service,
+        "FolderCreate",
+        "dev-folder-stale-mutation",
+        folder_create_request(&first_key, "0", "Projects"),
+    )
+    .await;
+    assert_eq!(stale_create.child("Status").unwrap().text_value(), "9");
+    assert!(stale_create.child("SyncKey").is_none());
+}
+
+#[tokio::test]
+async fn successful_folder_mutation_advances_device_hierarchy_for_collection_sync() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let collection_id = inbox.id.to_string();
+
+    let folder_state = folder_sync(&service, "0", "dev-folder-mutation-sync").await;
+    let folder_key = folder_state
+        .child("SyncKey")
+        .unwrap()
+        .text_value()
+        .to_string();
+    let content_state =
+        sync_collection(&service, &collection_id, "0", "dev-folder-mutation-sync").await;
+    let content_key = collection_sync_key(&content_state, &collection_id);
+
+    let created = folder_command(
+        &service,
+        "FolderCreate",
+        "dev-folder-mutation-sync",
+        folder_create_request(&folder_key, "0", "Projects"),
+    )
+    .await;
+    assert_eq!(created.child("Status").unwrap().text_value(), "1");
+
+    let continued_sync = sync_collection(
+        &service,
+        &collection_id,
+        &content_key,
+        "dev-folder-mutation-sync",
+    )
+    .await;
+    let collection = only_sync_collection(&continued_sync, &collection_id);
+    assert_eq!(collection.child("Status").unwrap().text_value(), "1");
+    assert!(collection.child("SyncKey").is_some());
 }
 
 #[tokio::test]

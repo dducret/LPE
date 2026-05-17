@@ -71,6 +71,15 @@
     superseded hierarchy sync keys
   - advances the device hierarchy generation used to validate later collection
     `Sync` retries after hierarchy changes
+- `FolderCreate`, `FolderDelete`, and `FolderUpdate`:
+  - are advertised only for canonical custom mail-folder mutation
+  - accept ActiveSync user-created mail folders (`Type` `12`) and reject
+    default/system-folder creation or mutation
+  - create, rename, move, and delete folders through canonical mailbox APIs
+  - reject system-folder update with FolderUpdate status `2` and system-folder
+    delete with FolderDelete status `3`
+  - return a new hierarchy `SyncKey` after successful mutation and store that
+    hierarchy state for later `FolderSync` and collection `Sync` validation
 - `Ping` behavior:
   - requires an initial request with `HeartbeatInterval` and at least one
     monitored `Folder` containing both `Id` and `Class`
@@ -150,7 +159,7 @@
 
 | Area | Current support |
 | --- | --- |
-| Commands | `OPTIONS`, `Provision`, `FolderSync`, `Sync`, `MoveItems`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
+| Commands | `OPTIONS`, `Provision`, `FolderSync`, `FolderCreate`, `FolderDelete`, `FolderUpdate`, `Sync`, `MoveItems`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
 | Mail folders | canonical mailbox folders |
 | Contacts | canonical contacts projection; `Sync` create/update/delete for name, email, phone, organization, title, notes |
 | Calendar | canonical events projection; `Sync` create/update/delete for UID, title, start, duration, time-zone string, location, body, attendees, simple recurrence |

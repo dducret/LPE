@@ -3,8 +3,9 @@ use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
     ActiveSyncSyncState, AuditEntryInput, CanonicalChangeListener, ClientContact, ClientEvent,
-    JmapEmail, JmapMailbox, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    JmapEmail, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapUploadBlob,
+    MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -17,6 +18,22 @@ pub trait ActiveSyncStore: AccountAuthStore {
         principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<MailboxAccountAccess>>;
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>>;
+    fn create_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
+    fn update_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxUpdateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
+    fn destroy_jmap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
     fn query_jmap_email_ids<'a>(
         &'a self,
         account_id: Uuid,
@@ -216,6 +233,34 @@ impl ActiveSyncStore for Storage {
 
     fn fetch_jmap_mailboxes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
         Box::pin(async move { self.fetch_jmap_mailboxes(account_id).await })
+    }
+
+    fn create_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move { self.create_jmap_mailbox(input, audit).await })
+    }
+
+    fn update_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxUpdateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move { self.update_jmap_mailbox(input, audit).await })
+    }
+
+    fn destroy_jmap_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.destroy_jmap_mailbox(account_id, mailbox_id, audit)
+                .await
+        })
     }
 
     fn query_jmap_email_ids<'a>(
