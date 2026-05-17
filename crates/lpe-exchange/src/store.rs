@@ -605,11 +605,8 @@ impl ExchangeStore for Storage {
                     } else {
                         allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id).await?
                     };
-                    let object_id = crate::mapi::identity::mapi_store_id(global_counter);
-                    let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
-                    let change_key =
-                        crate::mapi::identity::change_key_for_change_number(global_counter);
-                    let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
+                    let (object_id, source_key, change_key, instance_key) =
+                        crate::mapi::identity::persisted_identity_material(global_counter);
                     let row = sqlx::query(
                         r#"
                         INSERT INTO mapi_object_identities (
@@ -1817,10 +1814,8 @@ async fn repair_reserved_mapi_identity_counter_collisions(
 
     for row in rows {
         let global_counter = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
-        let object_id = crate::mapi::identity::mapi_store_id(global_counter);
-        let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
-        let change_key = crate::mapi::identity::change_key_for_change_number(global_counter);
-        let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
+        let (object_id, source_key, change_key, instance_key) =
+            crate::mapi::identity::persisted_identity_material(global_counter);
 
         sqlx::query(
             r#"
@@ -1897,7 +1892,8 @@ async fn repair_invalid_mapi_identity_change_keys(
 
     for row in rows {
         let global_counter = row.get::<i64, _>("mapi_global_counter") as u64;
-        let change_key = crate::mapi::identity::change_key_for_change_number(global_counter);
+        let (_, _, change_key, _) =
+            crate::mapi::identity::persisted_identity_material(global_counter);
         sqlx::query(
             r#"
             UPDATE mapi_object_identities

@@ -136,6 +136,17 @@ pub(crate) fn instance_key_for_object_id(object_id: u64) -> Vec<u8> {
     source_key_for_object_id(object_id)
 }
 
+pub(crate) fn persisted_identity_material(global_counter: u64) -> (u64, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let object_id = mapi_store_id(global_counter);
+    let source_key = source_key_for_object_id(object_id);
+    let change_key = change_key_for_change_number(global_counter);
+    let instance_key = instance_key_for_object_id(object_id);
+    debug_assert_eq!(source_key.len(), 22);
+    debug_assert_eq!(change_key.len(), 22);
+    debug_assert_eq!(instance_key.len(), 22);
+    (object_id, source_key, change_key, instance_key)
+}
+
 #[allow(dead_code)]
 pub(crate) fn legacy_migration_object_id(canonical_id: &Uuid) -> u64 {
     let bytes = canonical_id.as_bytes();
@@ -188,6 +199,30 @@ mod tests {
     fn dynamic_counters_start_after_reserved_special_folders() {
         assert_eq!(FIRST_DYNAMIC_GLOBAL_COUNTER, REMINDERS_FOLDER_COUNTER + 1);
         assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > REMINDERS_FOLDER_COUNTER);
+    }
+
+    #[test]
+    fn persisted_identity_material_matches_schema_key_lengths() {
+        for global_counter in [
+            ROOT_FOLDER_COUNTER,
+            INBOX_FOLDER_COUNTER,
+            REMINDERS_FOLDER_COUNTER,
+            FIRST_DYNAMIC_GLOBAL_COUNTER,
+            FIRST_DYNAMIC_GLOBAL_COUNTER + 42,
+        ] {
+            let (object_id, source_key, change_key, instance_key) =
+                persisted_identity_material(global_counter);
+            assert_eq!(
+                global_counter_from_store_id(object_id),
+                Some(global_counter)
+            );
+            assert_eq!(source_key.len(), 22);
+            assert_eq!(change_key.len(), 22);
+            assert_eq!(instance_key.len(), 22);
+            assert_eq!(&source_key[16..22], &globcnt_bytes(global_counter));
+            assert_eq!(&change_key[16..22], &globcnt_bytes(global_counter));
+            assert_eq!(&instance_key[16..22], &globcnt_bytes(global_counter));
+        }
     }
 
     #[test]
