@@ -1404,9 +1404,10 @@ pub(in crate::mapi) fn serialize_special_folder_row(
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     columns: &[u32],
+    principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
     match folder_id {
-        IPM_SUBTREE_FOLDER_ID => serialize_ipm_subtree_folder_row(mailboxes, columns),
+        IPM_SUBTREE_FOLDER_ID => serialize_ipm_subtree_folder_row(mailboxes, columns, principal),
         ROOT_FOLDER_ID => serialize_root_folder_row(mailboxes, columns),
         _ => serialize_advertised_special_folder_row(folder_id, columns),
     }
@@ -1540,6 +1541,7 @@ pub(in crate::mapi) fn serialize_root_folder_row(
 pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
     mailboxes: &[JmapMailbox],
     columns: &[u32],
+    principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
     let mut row = Vec::new();
     let change_number = mapi_mailstore::change_number_for_store_id(IPM_SUBTREE_FOLDER_ID);
@@ -1579,7 +1581,10 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
                 &mapi_mailstore::predecessor_change_list(change_number),
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
-            PID_TAG_OST_OSTID => write_u16_prefixed_bytes(&mut row, &[]),
+            PID_TAG_OST_OSTID => write_u16_prefixed_bytes(
+                &mut row,
+                &principal.map(ipm_subtree_ost_ostid).unwrap_or_default(),
+            ),
             _ => write_property_default(&mut row, *column),
         }
     }
@@ -1601,6 +1606,7 @@ mod tests {
             INBOX_FOLDER_ID,
             &[],
             &[PID_TAG_CHANGE_NUMBER, PID_TAG_CHANGE_KEY],
+            None,
         );
         let change_number = u64::from_le_bytes(row[0..8].try_into().unwrap());
         let change_key_len = u16::from_le_bytes(row[8..10].try_into().unwrap()) as usize;
@@ -1612,6 +1618,29 @@ mod tests {
             &change_key[16..22],
             &crate::mapi::identity::globcnt_bytes(change_number)
         );
+    }
+
+    #[test]
+    fn ipm_subtree_row_projects_principal_ost_identity_when_available() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+        let row =
+            serialize_special_folder_row(IPM_SUBTREE_FOLDER_ID, &[], &[PID_TAG_OST_OSTID], None);
+        assert_eq!(u16::from_le_bytes(row[0..2].try_into().unwrap()), 0);
+
+        let row = serialize_special_folder_row(
+            IPM_SUBTREE_FOLDER_ID,
+            &[],
+            &[PID_TAG_OST_OSTID],
+            Some(&principal),
+        );
+        assert_eq!(u16::from_le_bytes(row[0..2].try_into().unwrap()), 20);
+        assert_eq!(&row[2..18], principal.account_id.as_bytes());
+        assert_eq!(u32::from_le_bytes(row[18..22].try_into().unwrap()), 1);
     }
 }
 

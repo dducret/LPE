@@ -704,7 +704,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
                         .collaboration_folder_for_id(folder_id)
                         .map(|folder| serialize_collaboration_folder_row(folder, &columns))
                 })
-                .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &columns))
+                .unwrap_or_else(|| {
+                    serialize_special_folder_row(folder_id, mailboxes, &columns, Some(principal))
+                })
         }
     };
     log_get_properties_specific_debug(
@@ -1190,7 +1192,9 @@ pub(in crate::mapi) fn serialize_object_property(
                         .collaboration_folder_for_id(folder_id)
                         .map(|folder| serialize_collaboration_folder_row(folder, &[tag]))
                 })
-                .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &[tag]))
+                .unwrap_or_else(|| {
+                    serialize_special_folder_row(folder_id, mailboxes, &[tag], Some(principal))
+                })
         }
     }
 }
@@ -1230,7 +1234,9 @@ fn serialize_session_folder_row(
                     .collaboration_folder_for_id(folder_id)
                     .map(|folder| serialize_collaboration_folder_row(folder, &[*column]))
             })
-            .unwrap_or_else(|| serialize_special_folder_row(folder_id, mailboxes, &[*column]));
+            .unwrap_or_else(|| {
+                serialize_special_folder_row(folder_id, mailboxes, &[*column], Some(principal))
+            });
         row.extend_from_slice(&value);
     }
     row
