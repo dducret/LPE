@@ -1958,6 +1958,28 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     let sent_membership_id: Uuid = membership.try_get("id")?;
     let sent_uid: i64 = membership.try_get("imap_uid")?;
     let sent_modseq: i64 = membership.try_get("modseq")?;
+    let sent_membership_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.sent_mailbox_id)
+    .bind(submitted.message_id)
+    .fetch_one(pool)
+    .await
+    .context("count MAPI sent memberships")?;
+    anyhow::ensure!(
+        sent_membership_count == 1,
+        "MAPI canonical submission must create exactly one visible Sent membership"
+    );
     anyhow::ensure!(
         membership.try_get::<bool, _>("is_seen")?
             && !membership.try_get::<bool, _>("is_flagged")?,

@@ -206,6 +206,25 @@ fn test_message_flags(email: &JmapEmail) -> u32 {
     flags
 }
 
+fn jmap_search_matches(email: &JmapEmail, search_text: &str) -> bool {
+    let needle = search_text.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return true;
+    }
+
+    let contains = |value: &str| value.to_ascii_lowercase().contains(&needle);
+    contains(&email.subject)
+        || contains(&email.preview)
+        || contains(&email.body_text)
+        || contains(&email.from_address)
+        || email.from_display.as_deref().is_some_and(contains)
+        || email.sender_address.as_deref().is_some_and(contains)
+        || email.sender_display.as_deref().is_some_and(contains)
+        || email.to.iter().chain(email.cc.iter()).any(|recipient| {
+            contains(&recipient.address) || recipient.display_name.as_deref().is_some_and(contains)
+        })
+}
+
 #[derive(Clone)]
 struct FakeDetector {
     detection: MagikaDetection,
@@ -1271,7 +1290,7 @@ impl ExchangeStore for FakeStore {
         &'a self,
         _account_id: Uuid,
         mailbox_id: Option<Uuid>,
-        _search_text: Option<&'a str>,
+        search_text: Option<&'a str>,
         _position: u64,
         _limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {
@@ -1282,6 +1301,9 @@ impl ExchangeStore for FakeStore {
             .unwrap()
             .iter()
             .filter(|email| mailbox_id.map_or(true, |mailbox_id| email.mailbox_id == mailbox_id))
+            .filter(|email| {
+                search_text.map_or(true, |search_text| jmap_search_matches(email, search_text))
+            })
             .map(|email| email.id)
             .collect::<Vec<_>>();
         Box::pin(async move {
@@ -1762,6 +1784,16 @@ impl ExchangeStore for FakeStore {
         sent.flagged = input.flagged.unwrap_or(false);
         sent.has_attachments = !input.attachments.is_empty();
         sent.delivery_status = submitted.delivery_status.clone();
+        sent.mailbox_ids = vec![sent_mailbox_id];
+        sent.mailbox_states = vec![JmapEmailMailboxState {
+            mailbox_id: sent_mailbox_id,
+            role: "sent".to_string(),
+            name: sent.mailbox_name.clone(),
+            modseq: sent.modseq,
+            unread: sent.unread,
+            flagged: sent.flagged,
+            draft: false,
+        }];
 
         let mut emails = self.emails.lock().unwrap();
         if let Some(draft_message_id) = input.draft_message_id {
@@ -8161,14 +8193,15 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            &inbox_id.to_string(),
-            "inbox",
-            "Inbox",
-        )])),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox("22222222-2222-2222-2222-222222222222", "sent", "Sent"),
+        ])),
         ..Default::default()
     };
     let submitted_messages = store.submitted_messages.clone();
+    let emails = store.emails.clone();
+    let projection_store = store.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -8250,21 +8283,79 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
     let response_rops = &rop_buffer[2..2 + response_rop_size];
 
     assert!(contains_bytes(response_rops, &[0x32, 0x02, 0, 0, 0, 0]));
-    let recorded = submitted_messages.lock().unwrap();
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].source, "mapi-submit-message");
-    assert_eq!(recorded[0].draft_message_id, None);
-    assert_eq!(recorded[0].subject, "Submit from MAPI");
-    assert_eq!(recorded[0].body_text, "Canonical submit body");
-    assert_eq!(recorded[0].from_address, "alice@example.test");
-    assert_eq!(recorded[0].to.len(), 1);
-    assert_eq!(recorded[0].to[0].address, "bob@example.test");
-    assert_eq!(recorded[0].bcc.len(), 1);
-    assert_eq!(recorded[0].bcc[0].address, "hidden@example.test");
+    {
+        let recorded = submitted_messages.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].source, "mapi-submit-message");
+        assert_eq!(recorded[0].draft_message_id, None);
+        assert_eq!(recorded[0].subject, "Submit from MAPI");
+        assert_eq!(recorded[0].body_text, "Canonical submit body");
+        assert_eq!(recorded[0].from_address, "alice@example.test");
+        assert_eq!(recorded[0].to.len(), 1);
+        assert_eq!(recorded[0].to[0].address, "bob@example.test");
+        assert_eq!(recorded[0].bcc.len(), 1);
+        assert_eq!(recorded[0].bcc[0].address, "hidden@example.test");
+        assert_eq!(
+            recorded[0].internet_message_id.as_deref(),
+            Some("<mapi-submit@example.test>")
+        );
+    }
+
+    let sent = {
+        let canonical = emails.lock().unwrap();
+        let sent = canonical
+            .iter()
+            .filter(|email| email.mailbox_role == "sent" && email.subject == "Submit from MAPI")
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(sent.len(), 1);
+        assert!(canonical.iter().all(|email| email.mailbox_role != "outbox"));
+        sent[0].clone()
+    };
     assert_eq!(
-        recorded[0].internet_message_id.as_deref(),
-        Some("<mapi-submit@example.test>")
+        sent.mailbox_id,
+        Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
     );
+    assert_eq!(sent.mailbox_ids, vec![sent.mailbox_id]);
+    assert_eq!(sent.mailbox_states.len(), 1);
+    assert_eq!(sent.mailbox_states[0].mailbox_id, sent.mailbox_id);
+    assert_eq!(sent.mailbox_states[0].modseq, sent.modseq);
+    assert_eq!(sent.delivery_status, "queued");
+
+    let visible = projection_store
+        .fetch_jmap_emails(FakeStore::account().account_id, &[sent.id])
+        .await
+        .unwrap();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].mailbox_role, "sent");
+    assert!(visible[0].bcc.is_empty());
+    let protected = projection_store
+        .fetch_jmap_emails_with_protected_bcc(FakeStore::account().account_id, &[sent.id])
+        .await
+        .unwrap();
+    assert_eq!(protected[0].bcc[0].address, "hidden@example.test");
+    let hidden_search = projection_store
+        .query_jmap_email_ids(
+            FakeStore::account().account_id,
+            Some(sent.mailbox_id),
+            Some("hidden@example.test"),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
+    assert!(hidden_search.ids.is_empty());
+    let subject_search = projection_store
+        .query_jmap_email_ids(
+            FakeStore::account().account_id,
+            Some(sent.mailbox_id),
+            Some("Submit from MAPI"),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(subject_search.ids, vec![sent.id]);
 }
 
 #[tokio::test]
@@ -8272,14 +8363,15 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            &inbox_id.to_string(),
-            "inbox",
-            "Inbox",
-        )])),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox"),
+            FakeStore::mailbox("22222222-2222-2222-2222-222222222222", "sent", "Sent"),
+        ])),
         ..Default::default()
     };
     let submitted_messages = store.submitted_messages.clone();
+    let emails = store.emails.clone();
+    let projection_store = store.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -8332,6 +8424,184 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
     assert_eq!(recorded[0].from_address, "alice@example.test");
     assert_eq!(recorded[0].to.len(), 1);
     assert_eq!(recorded[0].to[0].address, "bob@example.test");
+    drop(recorded);
+
+    let sent = {
+        let canonical = emails.lock().unwrap();
+        let sent = canonical
+            .iter()
+            .filter(|email| {
+                email.mailbox_role == "sent" && email.subject == "Transport send from MAPI"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(sent.len(), 1);
+        assert!(canonical.iter().all(|email| email.mailbox_role != "outbox"));
+        sent[0].clone()
+    };
+    assert_eq!(sent.delivery_status, "queued");
+    assert_eq!(sent.mailbox_states[0].modseq, sent.modseq);
+    let visible = projection_store
+        .fetch_jmap_emails(FakeStore::account().account_id, &[sent.id])
+        .await
+        .unwrap();
+    assert_eq!(visible[0].mailbox_role, "sent");
+    assert!(visible[0].bcc.is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachment_and_bcc_guards()
+{
+    let draft_id = Uuid::parse_str("20202020-2020-2020-2020-202020202020").unwrap();
+    let draft_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let sent_mailbox_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let mut draft = FakeStore::email(
+        &draft_id.to_string(),
+        &draft_mailbox_id.to_string(),
+        "drafts",
+        "Transport saved draft",
+    );
+    draft.body_text = "Draft body for transport send".to_string();
+    draft.bcc.push(JmapEmailAddress {
+        address: "transport-hidden@example.test".to_string(),
+        display_name: Some("Transport Hidden".to_string()),
+    });
+    draft.has_attachments = true;
+    let attachment_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let attachment_reference = format!("attachment:{draft_id}:{attachment_id}");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&draft_mailbox_id.to_string(), "drafts", "Drafts"),
+            FakeStore::mailbox(&sent_mailbox_id.to_string(), "sent", "Sent"),
+        ])),
+        attachments: Arc::new(Mutex::new(HashMap::from([(
+            draft_id,
+            vec![ActiveSyncAttachment {
+                id: attachment_id,
+                message_id: draft_id,
+                file_name: "transport.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 7,
+                file_reference: attachment_reference.clone(),
+            }],
+        )]))),
+        attachment_contents: Arc::new(Mutex::new(HashMap::from([(
+            attachment_reference.clone(),
+            ActiveSyncAttachmentContent {
+                file_reference: attachment_reference,
+                file_name: "transport.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                blob_bytes: b"PDFDATA".to_vec(),
+            },
+        )]))),
+        emails: Arc::new(Mutex::new(vec![draft])),
+        ..Default::default()
+    };
+    let submitted_messages = store.submitted_messages.clone();
+    let emails = store.emails.clone();
+    let projection_store = store.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(14));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(14),
+        test_mapi_message_id(&draft_id.to_string()),
+    );
+    append_rop_transport_send(&mut rops, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x4A, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+
+    {
+        let recorded = submitted_messages.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].source, "mapi-submit-message");
+        assert_eq!(recorded[0].draft_message_id, Some(draft_id));
+        assert_eq!(recorded[0].subject, "Transport saved draft");
+        assert_eq!(recorded[0].bcc[0].address, "transport-hidden@example.test");
+        assert_eq!(recorded[0].attachments.len(), 1);
+        assert_eq!(recorded[0].attachments[0].file_name, "transport.pdf");
+        assert_eq!(recorded[0].attachments[0].media_type, "application/pdf");
+        assert_eq!(recorded[0].attachments[0].blob_bytes, b"PDFDATA");
+    }
+
+    let sent = {
+        let canonical = emails.lock().unwrap();
+        assert!(canonical.iter().all(|email| email.id != draft_id));
+        let sent = canonical
+            .iter()
+            .filter(|email| {
+                email.mailbox_role == "sent" && email.subject == "Transport saved draft"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(sent.len(), 1);
+        assert!(canonical.iter().all(|email| email.mailbox_role != "outbox"));
+        sent[0].clone()
+    };
+    assert_eq!(sent.mailbox_id, sent_mailbox_id);
+    assert_eq!(sent.mailbox_ids, vec![sent_mailbox_id]);
+    assert_eq!(sent.mailbox_states[0].mailbox_id, sent_mailbox_id);
+    assert_eq!(sent.mailbox_states[0].modseq, sent.modseq);
+    assert!(sent.has_attachments);
+    assert_eq!(sent.delivery_status, "queued");
+
+    let visible = projection_store
+        .fetch_jmap_emails(FakeStore::account().account_id, &[sent.id])
+        .await
+        .unwrap();
+    assert_eq!(visible.len(), 1);
+    assert!(visible[0].bcc.is_empty());
+    assert!(visible[0].has_attachments);
+    let protected = projection_store
+        .fetch_jmap_emails_with_protected_bcc(FakeStore::account().account_id, &[sent.id])
+        .await
+        .unwrap();
+    assert_eq!(protected[0].bcc[0].address, "transport-hidden@example.test");
+    let hidden_search = projection_store
+        .query_jmap_email_ids(
+            FakeStore::account().account_id,
+            Some(sent_mailbox_id),
+            Some("transport-hidden@example.test"),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
+    assert!(hidden_search.ids.is_empty());
+    let subject_search = projection_store
+        .query_jmap_email_ids(
+            FakeStore::account().account_id,
+            Some(sent_mailbox_id),
+            Some("Transport saved draft"),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
+    assert_eq!(subject_search.ids, vec![sent.id]);
 }
 
 #[tokio::test]
