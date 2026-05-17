@@ -414,11 +414,22 @@ impl FakeStore {
                     || crate::mapi::identity::legacy_migration_object_id(&event.id) == object_id
             })
             .map(|event| (MapiIdentityObjectKind::CalendarEvent, event.id));
+        let task_match = self
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|task| {
+                identities.get(&task.id).copied() == Some(object_id)
+                    || crate::mapi::identity::legacy_migration_object_id(&task.id) == object_id
+            })
+            .map(|task| (MapiIdentityObjectKind::Task, task.id));
 
         let (object_kind, canonical_id) = mailbox_match
             .or(message_match)
             .or(contact_match)
-            .or(event_match)?;
+            .or(event_match)
+            .or(task_match)?;
         Some(MapiIdentityLookupRecord {
             object_kind,
             canonical_id,
@@ -3580,6 +3591,172 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     assert!(events.lock().unwrap().is_empty());
     assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_task_crud_uses_canonical_tasks() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        task_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "tasks", "Tasks",
+        )])),
+        ..Default::default()
+    };
+    let tasks = store.tasks.clone();
+    let deleted_tasks = store.deleted_tasks.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "RCA Task");
+    append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Created through MAPI");
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(19));
+    append_rop_set_properties(&mut rops, 1, 2, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x1000_001F]);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let _response_rops = response_rops_from_execute_response(response).await;
+    {
+        let stored = tasks.lock().unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].title, "RCA Task");
+        assert_eq!(stored[0].description, "Created through MAPI");
+        assert_eq!(stored[0].status, "needs-action");
+    }
+
+    let task_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated RCA Task");
+    append_mapi_i32_property(&mut update_values, 0x1090_0003, 1);
+    let mut update_rops = Vec::new();
+    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(19));
+    append_rop_open_message(
+        &mut update_rops,
+        1,
+        2,
+        test_mapi_folder_id(19),
+        test_mapi_uuid_id(&task_id),
+    );
+    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    {
+        let stored = tasks.lock().unwrap();
+        assert_eq!(stored[0].title, "Updated RCA Task");
+        assert_eq!(stored[0].status, "completed");
+    }
+
+    let mut delete_rops = Vec::new();
+    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(19));
+    append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&task_id)]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(tasks.lock().unwrap().is_empty());
+    assert_eq!(deleted_tasks.lock().unwrap().as_slice(), &[task_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_task_contents_table_lists_canonical_tasks() {
+    let task_list_id = "99999999-9999-9999-9999-999999999999";
+    let task = FakeStore::task(
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        task_list_id,
+        "Existing RCA Task",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        task_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "tasks", "Tasks",
+        )])),
+        tasks: Arc::new(Mutex::new(vec![task])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(19).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&10u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &utf16z("Existing RCA Task")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Task")));
 }
 
 #[tokio::test]
@@ -12099,7 +12276,9 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
         .position(|name| *name == "Archive")
         .expect("Archive folderChange");
     assert!(projects < archive);
-    assert!(decoded.folder_changes[projects].parent_source_key.is_empty());
+    assert!(decoded.folder_changes[projects]
+        .parent_source_key
+        .is_empty());
     assert!(decoded.folder_changes[archive]
         .parent_source_key
         .eq(&decoded.folder_changes[projects].source_key));

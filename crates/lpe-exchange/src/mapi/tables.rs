@@ -276,6 +276,26 @@ pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
     ]
 }
 
+pub(in crate::mapi) fn default_task_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_FLAG_STATUS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
 pub(in crate::mapi) fn rop_query_rows_response(
     request: &RopRequest,
     object: Option<&mut MapiObject>,
@@ -359,6 +379,18 @@ pub(in crate::mapi) fn rop_query_rows_response(
                                     event.folder_id,
                                     &columns,
                                 )
+                            })
+                            .collect::<Vec<_>>()
+                    }
+                    MapiCollaborationFolderKind::Task => {
+                        let mut rows = snapshot.tasks_for_folder(*folder_id);
+                        rows.retain(|task| {
+                            restriction_matches_task(restriction.as_ref(), &task.task)
+                        });
+                        sort_tasks(&mut rows, sort_orders);
+                        rows.into_iter()
+                            .map(|task| {
+                                serialize_task_row(&task.task, task.id, task.folder_id, &columns)
                             })
                             .collect::<Vec<_>>()
                     }
@@ -494,6 +526,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
         {
             Some(MapiCollaborationFolderKind::Contacts) => default_contact_property_tags(),
             Some(MapiCollaborationFolderKind::Calendar) => default_event_property_tags(),
+            Some(MapiCollaborationFolderKind::Task) => default_task_property_tags(),
             None => default_message_property_tags(),
         },
         Some(MapiObject::AttachmentTable { .. }) => default_attachment_columns(),
@@ -628,6 +661,34 @@ pub(in crate::mapi) fn sort_events(
                 }
                 PID_TAG_LOCATION_W => {
                     compare_case_insensitive(&left.event.location, &right.event.location)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+pub(in crate::mapi) fn sort_tasks(
+    rows: &mut [&crate::mapi_store::MapiTask],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+                    compare_case_insensitive(&left.task.title, &right.task.title)
+                }
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+                    left.task.updated_at.cmp(&right.task.updated_at)
                 }
                 PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
@@ -1786,6 +1847,22 @@ pub(in crate::mapi) fn serialize_event_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_task_row(
+    task: &ClientTask,
+    item_id: u64,
+    folder_id: u64,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match task_property_value(task, item_id, folder_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
 pub(in crate::mapi) fn serialize_pending_message_row(
     principal: &AccountPrincipal,
     properties: &HashMap<u32, MapiValue>,
@@ -1886,6 +1963,38 @@ pub(in crate::mapi) fn serialize_pending_event_row(
     serialize_event_row(&event, 0, CALENDAR_FOLDER_ID, columns)
 }
 
+pub(in crate::mapi) fn serialize_pending_task_row(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let task = task_input_from_mapi(
+        principal.account_id,
+        None,
+        &default_task_for_mapping(principal.account_id, "default"),
+        Some("default"),
+        properties,
+    );
+    let task = ClientTask {
+        id: Uuid::nil(),
+        owner_account_id: principal.account_id,
+        owner_email: principal.email.clone(),
+        owner_display_name: principal.display_name.clone(),
+        is_owned: true,
+        rights: default_mapping_rights(),
+        task_list_id: task.task_list_id.unwrap_or_else(Uuid::nil),
+        task_list_sort_order: 0,
+        title: task.title,
+        description: task.description,
+        status: task.status,
+        due_at: task.due_at,
+        completed_at: task.completed_at,
+        sort_order: task.sort_order,
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    };
+    serialize_task_row(&task, 0, TASKS_FOLDER_ID, columns)
+}
+
 pub(in crate::mapi) fn display_to(email: &JmapEmail) -> String {
     email
         .to
@@ -1977,6 +2086,13 @@ pub(in crate::mapi) fn event_size(event: &AccessibleEvent) -> i64 {
         .len()
         .saturating_add(event.location.len())
         .saturating_add(event.notes.len())
+        .min(i64::MAX as usize) as i64
+}
+
+pub(in crate::mapi) fn task_size(task: &ClientTask) -> i64 {
+    task.title
+        .len()
+        .saturating_add(task.description.len())
         .min(i64::MAX as usize) as i64
 }
 
@@ -2086,6 +2202,7 @@ pub(in crate::mapi) fn collaboration_folder_message_class(
     match kind {
         MapiCollaborationFolderKind::Contacts => "IPF.Contact",
         MapiCollaborationFolderKind::Calendar => "IPF.Appointment",
+        MapiCollaborationFolderKind::Task => "IPF.Task",
     }
 }
 

@@ -12,10 +12,10 @@ use lpe_magika::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
-    AttachmentUploadInput, AuditEntryInput, CalendarParticipantsMetadata, CollaborationRights,
-    JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput,
+    AttachmentUploadInput, AuditEntryInput, CalendarParticipantsMetadata, ClientTask,
+    CollaborationRights, JmapEmail, JmapEmailAddress, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
 };
 use std::{
     cmp::Ordering,

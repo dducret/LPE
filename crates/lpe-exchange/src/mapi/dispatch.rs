@@ -538,6 +538,21 @@ where
                         0,
                     ));
                     output_handles.push(handle);
+                } else if let Some(task) = snapshot.task_for_id(folder_id, message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Task {
+                            folder_id,
+                            task_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &task.task.title,
+                        0,
+                    ));
+                    output_handles.push(handle);
                 } else {
                     responses.extend_from_slice(&rop_error_response(
                         0x03,
@@ -662,6 +677,10 @@ where
                         folder_id,
                         properties: HashMap::new(),
                     },
+                    Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
                     _ => MapiObject::PendingMessage {
                         folder_id,
                         properties: HashMap::new(),
@@ -725,6 +744,12 @@ where
                         }) => {
                             apply_canonical_event_property_values(
                                 store, principal, folder_id, event_id, values, snapshot,
+                            )
+                            .await
+                        }
+                        Some(MapiObject::Task { folder_id, task_id }) => {
+                            apply_canonical_task_property_values(
+                                store, principal, folder_id, task_id, values, snapshot,
                             )
                             .await
                         }
@@ -921,9 +946,75 @@ where
                         }
                         continue;
                     }
+                    Some(MapiObject::PendingTask {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) else {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        };
+                        let input = task_input_from_mapi(
+                            principal.account_id,
+                            None,
+                            &default_task_for_mapping(principal.account_id, &folder.collection.id),
+                            Some(&folder.collection.id),
+                            &properties,
+                        );
+                        match store
+                            .create_accessible_task(principal.account_id, input)
+                            .await
+                        {
+                            Ok(task) => {
+                                let task_id = match remember_created_mapi_identity(
+                                    store,
+                                    principal,
+                                    MapiIdentityObjectKind::Task,
+                                    task.id,
+                                    None,
+                                )
+                                .await
+                                {
+                                    Ok(task_id) => task_id,
+                                    Err(_) => {
+                                        responses.extend_from_slice(&rop_error_response(
+                                            0x0C,
+                                            request.response_handle_index(),
+                                            0x8004_010F,
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                session
+                                    .handles
+                                    .insert(handle, MapiObject::Task { folder_id, task_id });
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request, task_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
                     Some(MapiObject::Contact { contact_id, .. })
                     | Some(MapiObject::Event {
                         event_id: contact_id,
+                        ..
+                    })
+                    | Some(MapiObject::Task {
+                        task_id: contact_id,
                         ..
                     }) => {
                         responses.extend_from_slice(&rop_save_changes_message_response(
@@ -1470,6 +1561,16 @@ where
                     if let Some(event) = snapshot.event_for_id(folder_id, message_id) {
                         if store
                             .delete_accessible_event(principal.account_id, event.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(task) = snapshot.task_for_id(folder_id, message_id) {
+                        if store
+                            .delete_accessible_task(principal.account_id, task.canonical_id)
                             .await
                             .is_err()
                         {

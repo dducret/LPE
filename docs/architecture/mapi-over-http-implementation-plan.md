@@ -14,6 +14,14 @@ MAPI over HTTP is the first Outlook desktop Exchange-account path for this work.
 
 Single-node sticky MAPI sessions are acceptable for the first Outlook 2016 / 2019 lab gate. Cross-process session replay, durable session migration, and load-balanced session failover remain production hardening.
 
+Readiness terminology is intentionally split:
+
+- Local harness pass means `crates/lpe-exchange` tests and project-owned live scripts, including `tools/rca_outlook_connectivity_check.py --outlook-rca-readiness`, pass against a configured deployment. This proves LPE's scripted compatibility path, not public Outlook readiness by itself.
+- RCA pass means Microsoft Remote Connectivity Analyzer Outlook Connectivity passes from the Internet against the same public host and account that will be advertised.
+- Real Outlook profile pass means Outlook 2016 and Outlook 2019 each create an Exchange account profile, complete cached-mode synchronization, close and reopen without a full-cache wipe, resolve NSPI entries, send through canonical submission, and show the authoritative `Sent` copy.
+
+Current MAPI status: local harness and server-side hierarchy-sync traces have passed through the stages recorded below, but the full publication gate remains pending until Microsoft RCA evidence and real Outlook 2016 / 2019 cached-mode profile evidence are both recorded.
+
 Successful EMSMDB `Execute` responses refresh both the `MapiContext` session cookie and the matching `MapiSequence` cookie so request replay and later session-bound requests can continue with a complete single-node in-process session context.
 
 Reserved or otherwise unsupported ROPs are terminal within the current ROP request buffer: the server returns one parseable unsupported ROP error and does not execute later ROP bytes from that batch.
@@ -47,6 +55,7 @@ Current investigation focus:
 - Outlook safe mode reproduced the same stop point, so add-ins are unlikely to explain the current disconnect after hierarchy sync.
 - The converted Outlook ETL files did not expose a decoded MAPI exception through `tracerpt`; the next lab run should preserve both server RCA logs and any Outlook UI/profile status so this stop point can be tied to a user-visible state.
 - RCA logs now include `rca debug mapi sync checkpoint store` when `RopFastTransferSourceGetBuffer` completes an ICS download and attempts to persist the hierarchy/content checkpoint, plus `rca debug mapi session disconnect` when a MAPI session is removed. Sync configure logs expose checkpoint acceptance or rejection reasons, `GetBuffer` logs expose checkpoint and transfer-state fields, and disconnect logs aggregate completed hierarchy/content sync handles. Use these fields to distinguish a clean completed hierarchy sync from a checkpoint persistence failure, incomplete transfer state, hierarchy-only disconnect, pending notification state, or unexpected live synchronization handles at disconnect.
+- RCA hierarchy-row log checklist: every `rca debug mapi hierarchy row` entry used as evidence must include `folder_id`, `parent_folder_id`, `source_key_len`, `parent_source_key_len`, `display_name`, `container_class`, and `change_number`. Keep this checklist aligned with the decoded `rca debug mapi hierarchy transfer row semantics` log so emitted rows and parsed transfer rows can be compared without changing runtime behavior.
 
 ## Source Set
 
@@ -170,7 +179,7 @@ The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardP
 | --- | --- | --- |
 | Hierarchy tables | Root and IPM subtree child folders, including canonical mail folders and collaboration folders. | Uses mailbox and collaboration collection projections; no mailbox-message scan is required. |
 | Hierarchy table ordering | Canonical mailbox folders and collaboration folders are sorted as one projected row set when `RopSortTable` is active. | Prevents folder-family grouping from overriding caller-selected table sort order; no separate MAPI folder store is introduced. |
-| Contents tables | Mail, contact, and calendar contents projections with caller-selected columns. | Mail contents `QueryRows` without a restriction and with supported sort keys uses a paged PostgreSQL ID query before fetching only returned rows. Contacts and calendar contents remain snapshot-backed. |
+| Contents tables | Mail, contact, calendar, and task contents projections with caller-selected columns. | Mail contents `QueryRows` without a restriction and with supported sort keys uses a paged PostgreSQL ID query before fetching only returned rows. Contacts, calendar, and task contents remain snapshot-backed over canonical collaboration state. |
 | Attachment tables | Canonical message attachment rows with caller-selected columns. | Uses the addressed message attachment set only. |
 | Permission tables | Folder permission rows for `Default`, `Anonymous`, mailbox owner, and canonical mailbox delegation grantees. Supported columns are `PidTagMemberId`, `PidTagMemberName`, and `PidTagMemberRights`. | Uses existing `mailbox_delegation_grants`; no Exchange-specific ACL store is added. |
 | Supported SQL-backed mail sorts | `PidTagMessageDeliveryTime`, `PidTagLastModificationTime`, `PidTagSubject`, `PidTagNormalizedSubject`, `PidTagSenderName`, `PidTagSenderEmailAddress`, `PidTagDisplayTo`, `PidTagMessageSize`, `PidTagHasAttachments`, and `PidTagMessageFlags`, ascending or descending. | Sorts are translated to PostgreSQL `ORDER BY` with a stable message-id tie-breaker. |

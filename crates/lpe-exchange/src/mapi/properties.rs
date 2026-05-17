@@ -433,6 +433,15 @@ pub(in crate::mapi) fn restriction_matches_event(
     })
 }
 
+pub(in crate::mapi) fn restriction_matches_task(
+    restriction: Option<&MapiRestriction>,
+    task: &ClientTask,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        task_property_value(task, mapi_item_id(&task.id), TASKS_FOLDER_ID, property_tag)
+    })
+}
+
 pub(in crate::mapi) fn restriction_matches_attachment(
     restriction: Option<&MapiRestriction>,
     attachment: &MapiAttachment,
@@ -740,6 +749,56 @@ pub(in crate::mapi) fn event_property_value(
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
+    }
+}
+
+pub(in crate::mapi) fn task_property_value(
+    task: &ClientTask,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(task.title.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(task.description.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Task".to_string())),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0001)),
+        PID_TAG_FLAG_STATUS => Some(MapiValue::U32(task_flag_status(task))),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(task_size(task))),
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&task.updated_at),
+        )),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(item_id),
+        )),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+            &task.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
+fn task_flag_status(task: &ClientTask) -> u32 {
+    if task.status == "completed" {
+        0x0000_0001
+    } else {
+        0x0000_0002
     }
 }
 
@@ -1367,6 +1426,33 @@ pub(in crate::mapi) fn default_event_input(
     }
 }
 
+pub(in crate::mapi) fn default_task_for_mapping(
+    account_id: Uuid,
+    collection_id: &str,
+) -> ClientTask {
+    ClientTask {
+        id: Uuid::nil(),
+        owner_account_id: account_id,
+        owner_email: String::new(),
+        owner_display_name: String::new(),
+        is_owned: true,
+        rights: default_mapping_rights(),
+        task_list_id: Uuid::nil(),
+        task_list_sort_order: 0,
+        title: String::new(),
+        description: String::new(),
+        status: "needs-action".to_string(),
+        due_at: None,
+        completed_at: None,
+        sort_order: if matches!(collection_id, "tasks" | "default") {
+            0
+        } else {
+            10
+        },
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    }
+}
+
 pub(in crate::mapi) fn contact_input_from_mapi(
     account_id: Uuid,
     id: Option<Uuid>,
@@ -1416,6 +1502,57 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             .unwrap_or_else(|| existing.team.clone()),
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
+    }
+}
+
+pub(in crate::mapi) fn task_input_from_mapi(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &ClientTask,
+    collection_id: Option<&str>,
+    properties: &HashMap<u32, MapiValue>,
+) -> UpsertClientTaskInput {
+    let title = optional_pending_text_property(
+        properties,
+        &[
+            PID_TAG_SUBJECT_W,
+            PID_TAG_NORMALIZED_SUBJECT_W,
+            PID_TAG_DISPLAY_NAME_W,
+        ],
+    )
+    .unwrap_or_else(|| existing.title.clone());
+    let status = properties
+        .get(&PID_TAG_FLAG_STATUS)
+        .and_then(MapiValue::as_i64)
+        .map(|value| {
+            if value == 0x0000_0001 {
+                "completed"
+            } else {
+                "needs-action"
+            }
+        })
+        .unwrap_or(&existing.status)
+        .to_string();
+    let due_at = properties
+        .get(&PID_TAG_END_DATE)
+        .and_then(MapiValue::as_i64)
+        .and_then(filetime_to_date_time)
+        .map(|(date, time)| format!("{date}T{time}:00Z"))
+        .or_else(|| existing.due_at.clone());
+    UpsertClientTaskInput {
+        id,
+        principal_account_id: account_id,
+        account_id,
+        task_list_id: collection_id
+            .and_then(|value| Uuid::parse_str(value).ok())
+            .or_else(|| (existing.task_list_id != Uuid::nil()).then_some(existing.task_list_id)),
+        title,
+        description: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
+            .unwrap_or_else(|| existing.description.clone()),
+        status,
+        due_at,
+        completed_at: existing.completed_at.clone(),
+        sort_order: existing.sort_order,
     }
 }
 
@@ -1921,6 +2058,34 @@ where
     Ok(())
 }
 
+pub(in crate::mapi) async fn apply_canonical_task_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    task_id: u64,
+    values: Vec<(u32, MapiValue)>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let task = snapshot
+        .task_for_id(folder_id, task_id)
+        .ok_or_else(|| anyhow!("canonical MAPI task was not found"))?;
+    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let input = task_input_from_mapi(
+        principal.account_id,
+        Some(task.canonical_id),
+        &task.task,
+        None,
+        &properties,
+    );
+    store
+        .update_accessible_task(principal.account_id, task.canonical_id, input)
+        .await?;
+    Ok(())
+}
+
 pub(in crate::mapi) fn apply_mapi_property_values(
     object: Option<&mut MapiObject>,
     values: Vec<(u32, MapiValue)>,
@@ -1935,7 +2100,8 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             Ok(())
         }
         Some(MapiObject::PendingContact { properties, .. })
-        | Some(MapiObject::PendingEvent { properties, .. }) => {
+        | Some(MapiObject::PendingEvent { properties, .. })
+        | Some(MapiObject::PendingTask { properties, .. }) => {
             properties.extend(values);
             Ok(())
         }
@@ -1977,7 +2143,8 @@ pub(in crate::mapi) fn delete_mapi_properties(
             Ok(())
         }
         Some(MapiObject::PendingContact { properties, .. })
-        | Some(MapiObject::PendingEvent { properties, .. }) => {
+        | Some(MapiObject::PendingEvent { properties, .. })
+        | Some(MapiObject::PendingTask { properties, .. }) => {
             for tag in &property_tags {
                 properties.remove(tag);
             }

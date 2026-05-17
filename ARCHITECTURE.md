@@ -38,6 +38,7 @@ That means:
 - `EWS` is the `0.2.0` Exchange compatibility focus for Exchange-style folder, mail, contacts, calendar, and task synchronization; it must not imply `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox` model
 - `MAPI over HTTP` must be completed first in `0.2.0` for Outlook 2016 and Outlook 2019 desktop: profile creation, EMSMDB mailbox synchronization, NSPI address book behavior, send and draft flows through canonical submission, reconnect behavior, cached-mode ICS stability, and authoritative `Sent` visibility
 - Outlook Anywhere / RPC over HTTP is a legacy compatibility shim after the MAPI over HTTP path; when administrators publish legacy `EXPR` autodiscover metadata, `/rpc/rpcproxy.dll` must implement authenticated RPC/HTTP mailbox transport, not only HTTP authentication
+- MAPI readiness evidence must distinguish project-owned local harness passes, Microsoft Remote Connectivity Analyzer passes, and real Outlook 2016 / 2019 cached-mode profile passes; public MAPI autodiscover waits for all three evidence classes
 - Outlook for Windows desktop can continue to use the supported `IMAP` communication path when configured that way; administrators can explicitly publish `EWS` plus legacy `EXCH` / `EXPR` autodiscover metadata only behind the documented gates, while the first supported Exchange-account publication path is completed `MAPI over HTTP`
 - `DAV` and `ManageSieve` after that: focus on correctness, canonical execution, and client-matrix interoperability rather than feature sprawl
 

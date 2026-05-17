@@ -216,6 +216,11 @@ where
     let calendar_collections = store
         .fetch_accessible_calendar_collections(account_id)
         .await?;
+    let task_collections = store.fetch_accessible_task_collections(account_id).await?;
+    let snapshot_backed_contents = plan
+        .content_queries
+        .iter()
+        .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none());
     let contact_ids = identities
         .iter()
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Contact)
@@ -226,12 +231,80 @@ where
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::CalendarEvent)
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
-    let contacts = store
-        .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
-        .await?;
-    let events = store
-        .fetch_accessible_events_by_ids(account_id, &event_ids)
-        .await?;
+    let task_ids = identities
+        .iter()
+        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Task)
+        .map(|identity| identity.canonical_id)
+        .collect::<Vec<_>>();
+    let contacts = if snapshot_backed_contents {
+        let mut contacts = Vec::new();
+        for collection in &contact_collections {
+            contacts.extend(
+                store
+                    .fetch_accessible_contacts_in_collection(account_id, &collection.id)
+                    .await?,
+            );
+        }
+        contacts
+    } else {
+        store
+            .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
+            .await?
+    };
+    let events = if snapshot_backed_contents {
+        let mut events = Vec::new();
+        for collection in &calendar_collections {
+            events.extend(
+                store
+                    .fetch_accessible_events_in_collection(account_id, &collection.id)
+                    .await?,
+            );
+        }
+        events
+    } else {
+        store
+            .fetch_accessible_events_by_ids(account_id, &event_ids)
+            .await?
+    };
+    let tasks = if snapshot_backed_contents {
+        let mut tasks = Vec::new();
+        for collection in &task_collections {
+            tasks.extend(
+                store
+                    .fetch_accessible_tasks_in_collection(account_id, &collection.id)
+                    .await?,
+            );
+        }
+        tasks
+    } else {
+        store
+            .fetch_accessible_tasks_by_ids(account_id, &task_ids)
+            .await?
+    };
+    let identity_requests = contacts
+        .iter()
+        .map(|contact| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Contact,
+            canonical_id: contact.id,
+            reserved_global_counter: None,
+        })
+        .chain(events.iter().map(|event| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::CalendarEvent,
+            canonical_id: event.id,
+            reserved_global_counter: None,
+        }))
+        .chain(tasks.iter().map(|task| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Task,
+            canonical_id: task.id,
+            reserved_global_counter: None,
+        }))
+        .collect::<Vec<_>>();
+    for identity in store
+        .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
+        .await?
+    {
+        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+    }
     let mailbox_ids = mailboxes
         .iter()
         .map(|mailbox| mailbox.id)
@@ -246,8 +319,10 @@ where
         attachments,
         contact_collections,
         calendar_collections,
+        task_collections,
         contacts,
         events,
+        tasks,
         folder_permissions,
     )
     .with_content_windows(content_windows))
@@ -533,6 +608,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingMessage { folder_id, .. }
         | MapiObject::PendingContact { folder_id, .. }
         | MapiObject::PendingEvent { folder_id, .. }
+        | MapiObject::PendingTask { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
         | MapiObject::SynchronizationCollector { folder_id, .. }
         | MapiObject::PermissionTable { folder_id, .. } => {
@@ -578,6 +654,10 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *event_id);
+        }
+        MapiObject::Task { folder_id, task_id } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *task_id);
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }

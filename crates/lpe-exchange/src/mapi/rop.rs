@@ -213,6 +213,17 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
             ),
             0,
         ),
+        Some(MapiObject::PendingTask { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
+        ),
         _ => return rop_error_response(0x10, request.response_handle_index(), 0x0000_04B9),
     };
 
@@ -542,6 +553,9 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
         Some(MapiObject::Event { .. }) | Some(MapiObject::PendingEvent { .. }) => {
             default_event_property_tags()
         }
+        Some(MapiObject::Task { .. }) | Some(MapiObject::PendingTask { .. }) => {
+            default_task_property_tags()
+        }
         Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
             default_message_property_tags()
         }
@@ -622,6 +636,19 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
         }
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &columns)
+        }
+        Some(MapiObject::PendingTask { properties, .. }) => {
+            serialize_pending_task_row(principal, properties, &columns)
+        }
+        Some(MapiObject::Task { folder_id, task_id }) => {
+            let Some(task) = snapshot.task_for_id(*folder_id, *task_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_task_row(&task.task, task.id, task.folder_id, &columns)
         }
         Some(MapiObject::Folder {
             folder_id,
@@ -803,6 +830,11 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{event_id:#018x}"),
         ),
+        Some(MapiObject::Task { folder_id, task_id }) => (
+            "task",
+            format!("{folder_id:#018x}"),
+            format!("{task_id:#018x}"),
+        ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
             format!("{folder_id:#018x}"),
@@ -815,6 +847,9 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
         ),
         Some(MapiObject::PendingEvent { folder_id, .. }) => {
             ("pending_event", format!("{folder_id:#018x}"), String::new())
+        }
+        Some(MapiObject::PendingTask { folder_id, .. }) => {
+            ("pending_task", format!("{folder_id:#018x}"), String::new())
         }
         Some(MapiObject::HierarchyTable { folder_id, .. }) => (
             "hierarchy_table",
@@ -1090,6 +1125,17 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &[tag])
         }
+        Some(MapiObject::PendingTask { properties, .. }) => {
+            serialize_pending_task_row(principal, properties, &[tag])
+        }
+        Some(MapiObject::Task { folder_id, task_id }) => snapshot
+            .task_for_id(*folder_id, *task_id)
+            .map(|task| serialize_task_row(&task.task, task.id, task.folder_id, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
         Some(MapiObject::Folder {
             folder_id,
             properties,

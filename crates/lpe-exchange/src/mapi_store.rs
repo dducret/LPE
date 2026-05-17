@@ -1,7 +1,7 @@
 use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CollaborationCollection, JmapEmail,
-    JmapMailbox,
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ClientTask, CollaborationCollection,
+    JmapEmail, JmapMailbox,
 };
 use uuid::Uuid;
 
@@ -18,6 +18,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     messages: Vec<MapiMessage>,
     contacts: Vec<MapiContact>,
     events: Vec<MapiEvent>,
+    tasks: Vec<MapiTask>,
     folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
 }
@@ -41,6 +42,7 @@ pub(crate) struct MapiCollaborationFolder {
 pub(crate) enum MapiCollaborationFolderKind {
     Contacts,
     Calendar,
+    Task,
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +75,15 @@ pub(crate) struct MapiEvent {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
+pub(crate) struct MapiTask {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) task: ClientTask,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub(crate) struct MapiAttachment {
     pub(crate) attach_num: u32,
     pub(crate) canonical_id: Uuid,
@@ -98,8 +109,10 @@ impl MapiMailStoreSnapshot {
         attachments: Vec<(Uuid, Vec<ActiveSyncAttachment>)>,
         contact_collections: Vec<CollaborationCollection>,
         calendar_collections: Vec<CollaborationCollection>,
+        task_collections: Vec<CollaborationCollection>,
         contacts: Vec<AccessibleContact>,
         events: Vec<AccessibleEvent>,
+        tasks: Vec<ClientTask>,
         folder_permissions: Vec<MapiFolderPermission>,
     ) -> Self {
         let folders = mailboxes
@@ -170,6 +183,20 @@ impl MapiMailStoreSnapshot {
                 item_count,
             }
         }));
+        collaboration_folders.extend(task_collections.into_iter().map(|collection| {
+            let id = mapi_collaboration_folder_id(MapiCollaborationFolderKind::Task, &collection);
+            let item_count = tasks
+                .iter()
+                .filter(|task| task_collection_matches(task, &collection.id))
+                .count()
+                .min(u32::MAX as usize) as u32;
+            MapiCollaborationFolder {
+                id,
+                kind: MapiCollaborationFolderKind::Task,
+                collection,
+                item_count,
+            }
+        }));
         let contacts = contacts
             .into_iter()
             .filter_map(|contact| {
@@ -206,12 +233,31 @@ impl MapiMailStoreSnapshot {
                 })
             })
             .collect();
+        let tasks = tasks
+            .into_iter()
+            .filter_map(|task| {
+                let folder_id = collaboration_folders
+                    .iter()
+                    .find(|folder| {
+                        folder.kind == MapiCollaborationFolderKind::Task
+                            && task_collection_matches(&task, &folder.collection.id)
+                    })
+                    .map(|folder| folder.id)?;
+                Some(MapiTask {
+                    id: mapi_item_id(&task.id),
+                    folder_id,
+                    canonical_id: task.id,
+                    task,
+                })
+            })
+            .collect();
         Self {
             folders,
             collaboration_folders,
             messages,
             contacts,
             events,
+            tasks,
             folder_permissions,
             content_windows: Vec::new(),
         }
@@ -334,6 +380,19 @@ impl MapiMailStoreSnapshot {
             .find(|event| event.folder_id == folder_id && event.id == item_id)
     }
 
+    pub(crate) fn tasks_for_folder(&self, folder_id: u64) -> Vec<&MapiTask> {
+        self.tasks
+            .iter()
+            .filter(|task| task.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn task_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiTask> {
+        self.tasks
+            .iter()
+            .find(|task| task.folder_id == folder_id && task.id == item_id)
+    }
+
     pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
         let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) else {
             return Vec::new();
@@ -404,6 +463,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let calendar_collections = self
                 .fetch_accessible_calendar_collections(account_id)
                 .await?;
+            let task_collections = self.fetch_accessible_task_collections(account_id).await?;
             let mut contacts = Vec::new();
             for collection in &contact_collections {
                 contacts.extend(
@@ -418,7 +478,15 @@ impl<T: ExchangeStore> MapiStore for T {
                         .await?,
                 );
             }
-            let identity_requests = mapi_identity_requests(&mailboxes, &emails, &contacts, &events);
+            let mut tasks = Vec::new();
+            for collection in &task_collections {
+                tasks.extend(
+                    self.fetch_accessible_tasks_in_collection(account_id, &collection.id)
+                        .await?,
+                );
+            }
+            let identity_requests =
+                mapi_identity_requests(&mailboxes, &emails, &contacts, &events, &tasks);
             for identity in self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
                 .await?
@@ -441,8 +509,10 @@ impl<T: ExchangeStore> MapiStore for T {
                 attachments,
                 contact_collections,
                 calendar_collections,
+                task_collections,
                 contacts,
                 events,
+                tasks,
                 folder_permissions,
             ))
         })
@@ -454,6 +524,7 @@ fn mapi_identity_requests(
     emails: &[JmapEmail],
     contacts: &[AccessibleContact],
     events: &[AccessibleEvent],
+    tasks: &[ClientTask],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
     requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
@@ -474,6 +545,11 @@ fn mapi_identity_requests(
     requests.extend(events.iter().map(|event| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::CalendarEvent,
         canonical_id: event.id,
+        reserved_global_counter: None,
+    }));
+    requests.extend(tasks.iter().map(|task| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Task,
+        canonical_id: task.id,
         reserved_global_counter: None,
     }));
     requests
@@ -516,6 +592,9 @@ fn mapi_collaboration_folder_id(
         (MapiCollaborationFolderKind::Calendar, "default" | "calendar") => {
             crate::mapi::identity::CALENDAR_FOLDER_ID
         }
+        (MapiCollaborationFolderKind::Task, "default" | "tasks") => {
+            crate::mapi::identity::TASKS_FOLDER_ID
+        }
         _ => collection
             .id
             .rsplit('-')
@@ -526,10 +605,15 @@ fn mapi_collaboration_folder_id(
                 let seed = match kind {
                     MapiCollaborationFolderKind::Contacts => 1_000,
                     MapiCollaborationFolderKind::Calendar => 2_000,
+                    MapiCollaborationFolderKind::Task => 3_000,
                 };
                 crate::mapi::identity::mapi_store_id(seed + stable_text_counter(&collection.id))
             }),
     }
+}
+
+fn task_collection_matches(task: &ClientTask, collection_id: &str) -> bool {
+    matches!(collection_id, "tasks" | "default") || task.task_list_id.to_string() == collection_id
 }
 
 fn stable_text_counter(value: &str) -> u64 {
@@ -641,6 +725,8 @@ mod tests {
             vec![mailbox],
             vec![email],
             vec![(message_id, vec![attachment])],
+            Vec::new(),
+            Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),

@@ -84,6 +84,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         event_id: u64,
     },
+    Task {
+        folder_id: u64,
+        task_id: u64,
+    },
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -94,6 +98,10 @@ pub(in crate::mapi) enum MapiObject {
         properties: HashMap<u32, MapiValue>,
     },
     PendingEvent {
+        folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
+    },
+    PendingTask {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
     },
@@ -609,9 +617,11 @@ impl MapiObject {
             | MapiObject::Message { folder_id, .. }
             | MapiObject::Contact { folder_id, .. }
             | MapiObject::Event { folder_id, .. }
+            | MapiObject::Task { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
             | MapiObject::PendingContact { folder_id, .. }
             | MapiObject::PendingEvent { folder_id, .. }
+            | MapiObject::PendingTask { folder_id, .. }
             | MapiObject::HierarchyTable { folder_id, .. }
             | MapiObject::ContentsTable { folder_id, .. }
             | MapiObject::AttachmentTable { folder_id, .. }

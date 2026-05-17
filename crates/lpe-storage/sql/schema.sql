@@ -1614,7 +1614,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),

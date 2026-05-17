@@ -19,6 +19,7 @@ pub(crate) enum MapiIdentityObjectKind {
     Message,
     Contact,
     CalendarEvent,
+    Task,
 }
 
 impl MapiIdentityObjectKind {
@@ -29,6 +30,7 @@ impl MapiIdentityObjectKind {
             Self::Message => "message",
             Self::Contact => "contact",
             Self::CalendarEvent => "calendar_event",
+            Self::Task => "task",
         }
     }
 }
@@ -1977,6 +1979,7 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         "message" => MapiIdentityObjectKind::Message,
         "contact" => MapiIdentityObjectKind::Contact,
         "calendar_event" => MapiIdentityObjectKind::CalendarEvent,
+        "task" => MapiIdentityObjectKind::Task,
         value => anyhow::bail!("unsupported MAPI object kind: {value}"),
     };
     Ok(MapiIdentityLookupRecord {
