@@ -348,6 +348,13 @@ impl ActiveSyncStore for FakeStore {
         Box::pin(async move { Ok(state) })
     }
 
+    fn create_canonical_change_listener<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Option<lpe_storage::CanonicalChangeListener>> {
+        Box::pin(async move { Ok(None) })
+    }
+
     fn fetch_jmap_draft<'a>(
         &'a self,
         _account_id: Uuid,
@@ -3487,6 +3494,28 @@ async fn ping_invalid_folder_id_requires_folder_sync() {
 }
 
 #[tokio::test]
+async fn ping_invalid_folder_class_requires_folder_sync() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    sync_collection(&service, &inbox.id.to_string(), "0", "dev-invalid-class").await;
+
+    let request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Contacts")]);
+    let body = ping(&service, "dev-invalid-class", &request).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "7");
+}
+
+#[tokio::test]
 async fn ping_no_changes_returns_no_change_status() {
     let inbox = FakeStore::inbox_mailbox();
     let store = FakeStore {
@@ -3504,9 +3533,19 @@ async fn ping_no_changes_returns_no_change_status() {
     sync_collection(&service, &inbox.id.to_string(), "0", "dev-no-change").await;
 
     let request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Email")]);
+    let started = Instant::now();
     let body = ping(&service, "dev-no-change", &request).await;
+    let elapsed = started.elapsed();
     assert_eq!(body.child("Status").unwrap().text_value(), "1");
     assert!(body.child("Folders").is_none());
+    assert!(
+        elapsed >= std::time::Duration::from_millis(45),
+        "Ping returned before the bounded heartbeat elapsed: {elapsed:?}"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_millis(500),
+        "Ping exceeded the short test heartbeat by too much: {elapsed:?}"
+    );
 }
 
 #[tokio::test]
@@ -3534,8 +3573,14 @@ async fn ping_reports_changed_folder_ids_as_folder_values() {
     ));
 
     let request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Email")]);
+    let started = Instant::now();
     let body = ping(&service, "dev-changed", &request).await;
+    let elapsed = started.elapsed();
     assert_eq!(body.child("Status").unwrap().text_value(), "2");
+    assert!(
+        elapsed < std::time::Duration::from_millis(45),
+        "changed Ping did not return immediately: {elapsed:?}"
+    );
     let folder = body
         .child("Folders")
         .unwrap()

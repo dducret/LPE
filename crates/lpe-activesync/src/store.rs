@@ -2,9 +2,9 @@ use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
-    AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox, JmapUploadBlob,
-    MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
-    UpsertClientContactInput, UpsertClientEventInput,
+    AuditEntryInput, CanonicalChangeListener, ClientContact, ClientEvent, JmapEmail, JmapMailbox,
+    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -36,6 +36,10 @@ pub trait ActiveSyncStore: AccountAuthStore {
         device_id: &'a str,
         collection_id: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>>;
+    fn create_canonical_change_listener<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Option<CanonicalChangeListener>>;
     fn fetch_activesync_email_states<'a>(
         &'a self,
         account_id: Uuid,
@@ -221,6 +225,17 @@ impl ActiveSyncStore for Storage {
         Box::pin(async move {
             self.fetch_latest_activesync_sync_state(account_id, device_id, collection_id)
                 .await
+        })
+    }
+
+    fn create_canonical_change_listener<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Option<CanonicalChangeListener>> {
+        Box::pin(async move {
+            Storage::create_canonical_change_listener(self, principal_account_id)
+                .await
+                .map(Some)
         })
     }
 

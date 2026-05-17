@@ -72,11 +72,14 @@
     monitored collections, and status `2` with response `Folders/Folder`
     string values for collections with additions or moves/copies into the
     collection
+  - waits up to the bounded `HeartbeatInterval` before returning status `1`;
+    canonical mail, contact, and calendar change notifications wake the
+    request early so the adapter can re-check canonical collection state
   - returns status `7` when a monitored folder id/class is no longer valid or
     when the device's acknowledged folder hierarchy is stale; clients must run
     `FolderSync` and then reissue `Ping`
-  - remains a bounded persisted-state delta check; it does not add separate
-    push-notification infrastructure
+  - remains a bounded persisted-state delta check over canonical state; it does
+    not add separate ActiveSync push state
 - `SendMail`, `SmartReply`, and `SmartForward`:
   - parse submitted `MIME`
   - validate attachments through the canonical file-validation path
@@ -138,5 +141,5 @@
 | Mail lifecycle | canonical folder moves, delete/move-to-trash, read/unread state |
 | Body preferences | text, stored sanitized HTML, canonical MIME blob with truncation |
 | Attachments | common MIME attachment parsing and canonical `FileReference` retrieval |
-| Long poll | lightweight `Ping` delta detection against persisted sync state |
+| Long poll | canonical-change-aware `Ping` long polling against persisted sync state |
 | Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync`, contact photos/postal addresses/categories, binary Windows time-zone conversion, calendar recurrence exceptions/all-day/reminders/busy status/client-originated organizer changes |

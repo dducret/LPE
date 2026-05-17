@@ -7,12 +7,15 @@ use lpe_magika::{
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     calendar_attendee_labels, serialize_calendar_participants_metadata, ActiveSyncItemState,
-    AuditEntryInput, CalendarParticipantMetadata, CalendarParticipantsMetadata, SubmitMessageInput,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    AuditEntryInput, CalendarParticipantMetadata, CalendarParticipantsMetadata,
+    CanonicalChangeCategory, CanonicalChangeListener, SubmitMessageInput, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::time::Duration;
+use tokio::time::{sleep, timeout, Instant};
 use uuid::Uuid;
 
 trait Pipe: Sized {
@@ -27,6 +30,7 @@ const PING_SETTINGS_SYNC_KEY: &str = "current";
 const PING_MIN_HEARTBEAT_SECONDS: u32 = 60;
 const PING_MAX_HEARTBEAT_SECONDS: u32 = 3540;
 const PING_MAX_FOLDERS: usize = 200;
+const PING_FALLBACK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PingSettings {
@@ -1824,6 +1828,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             );
         }
 
+        let mut change_listener = self
+            .store
+            .create_canonical_change_listener(principal.account_id)
+            .await?;
         let collections = self.folder_collections(principal.account_id).await?;
         let monitored = match self
             .resolve_ping_collections(principal, device_id, &collections, &settings.folders)
@@ -1840,37 +1848,30 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         self.store_ping_settings(principal.account_id, device_id, &settings)
             .await?;
 
-        let current_hierarchy_generation = self
-            .current_hierarchy_generation(principal.account_id)
-            .await?;
-        if monitored.iter().any(|(_, previous_state)| {
-            previous_state
-                .hierarchy_generation
-                .as_deref()
-                .is_some_and(|generation| generation != current_hierarchy_generation)
-        }) && !self
-            .device_hierarchy_is_current(
-                principal.account_id,
-                device_id,
-                &current_hierarchy_generation,
-            )
-            .await?
-        {
-            return self.ping_status_response(protocol_version, "7", None, None, &[]);
-        };
-
-        let mut changed = Vec::new();
-        for (collection, previous_state) in monitored {
-            let current_state = self
-                .collection_state(principal.account_id, &collection)
-                .await?;
-            if diff_collection_states(&previous_state.collection_state, &current_state)
-                .iter()
-                .any(|change| change.kind == "Add")
+        let categories = ping_change_categories(&monitored);
+        let deadline = ping_deadline(settings.heartbeat_interval);
+        let changed = loop {
+            if self
+                .ping_requires_folder_sync(principal.account_id, device_id, &monitored)
+                .await?
             {
-                changed.push(collection.id);
+                return self.ping_status_response(protocol_version, "7", None, None, &[]);
+            };
+
+            let changed = self
+                .changed_ping_collections(principal.account_id, &monitored)
+                .await?;
+            if !changed.is_empty() {
+                break changed;
             }
-        }
+
+            let now = Instant::now();
+            if now >= deadline {
+                break Vec::new();
+            }
+            self.wait_for_ping_change(&mut change_listener, &categories, deadline - now)
+                .await?;
+        };
 
         self.ping_status_response(
             protocol_version,
@@ -1879,6 +1880,66 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             None,
             &changed,
         )
+    }
+
+    async fn ping_requires_folder_sync(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        monitored: &[(CollectionDefinition, StoredSyncState)],
+    ) -> Result<bool> {
+        let current_hierarchy_generation = self.current_hierarchy_generation(account_id).await?;
+        if monitored.iter().any(|(_, previous_state)| {
+            previous_state
+                .hierarchy_generation
+                .as_deref()
+                .is_some_and(|generation| generation != current_hierarchy_generation)
+        }) {
+            return Ok(!self
+                .device_hierarchy_is_current(account_id, device_id, &current_hierarchy_generation)
+                .await?);
+        }
+
+        Ok(false)
+    }
+
+    async fn changed_ping_collections(
+        &self,
+        account_id: Uuid,
+        monitored: &[(CollectionDefinition, StoredSyncState)],
+    ) -> Result<Vec<String>> {
+        let mut changed = Vec::new();
+        for (collection, previous_state) in monitored {
+            let current_state = self.collection_state(account_id, collection).await?;
+            if diff_collection_states(&previous_state.collection_state, &current_state)
+                .iter()
+                .any(|change| change.kind == "Add")
+            {
+                changed.push(collection.id.clone());
+            }
+        }
+        Ok(changed)
+    }
+
+    async fn wait_for_ping_change(
+        &self,
+        change_listener: &mut Option<CanonicalChangeListener>,
+        categories: &[CanonicalChangeCategory],
+        remaining: Duration,
+    ) -> Result<()> {
+        if remaining.is_zero() {
+            return Ok(());
+        }
+
+        if let Some(listener) = change_listener {
+            if let Ok(result) = timeout(remaining, listener.wait_for_change(categories)).await {
+                result?;
+            }
+            return Ok(());
+        }
+
+        sleep(remaining.min(PING_FALLBACK_POLL_INTERVAL)).await;
+        Ok(())
     }
 
     fn ping_status_response(
@@ -2491,6 +2552,43 @@ fn completed_sync_state(
         pending_changes: Vec::new(),
         next_offset: 0,
     }
+}
+
+fn ping_change_categories(
+    monitored: &[(CollectionDefinition, StoredSyncState)],
+) -> Vec<CanonicalChangeCategory> {
+    let mut categories = Vec::new();
+    for (collection, _) in monitored {
+        let category = if mail_collection(collection) {
+            Some(CanonicalChangeCategory::Mail)
+        } else if collection.class_name == CONTACTS_CLASS {
+            Some(CanonicalChangeCategory::Contacts)
+        } else if collection.class_name == CALENDAR_CLASS {
+            Some(CanonicalChangeCategory::Calendar)
+        } else {
+            None
+        };
+        if let Some(category) = category {
+            if !categories.contains(&category) {
+                categories.push(category);
+            }
+        }
+    }
+    categories
+}
+
+fn ping_deadline(heartbeat_interval: u32) -> Instant {
+    Instant::now() + ping_heartbeat_duration(heartbeat_interval)
+}
+
+#[cfg(not(test))]
+fn ping_heartbeat_duration(heartbeat_interval: u32) -> Duration {
+    Duration::from_secs(u64::from(heartbeat_interval))
+}
+
+#[cfg(test)]
+fn ping_heartbeat_duration(heartbeat_interval: u32) -> Duration {
+    Duration::from_millis(u64::from(heartbeat_interval))
 }
 
 fn has_client_commands(collection_node: &WbxmlNode) -> bool {
