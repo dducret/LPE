@@ -13,6 +13,85 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 - Treat attachment fetch consistency across send, sync, and fetch as mandatory.
 - Keep Outlook desktop ActiveSync testing separate from classic Outlook Exchange-account testing.
 - Do not use ActiveSync as the Outlook for Windows desktop Exchange-account gate; that belongs to the EWS/MAPI readiness path.
+- Distinguish local harness evidence from real-client evidence. `cargo test -p lpe-activesync` and the preflight helper below prove local behavior and publication shape only; Outlook mobile and iOS Mail passes require device logs/screenshots or packet/server traces from those clients.
+
+Run the live preflight before manual client enrollment:
+
+```powershell
+python tools/activesync_mobile_lab_preflight.py --base-url https://mail.example.test --email alice@example.test --password <mailbox-password>
+```
+
+Use `--insecure` only for a closed lab with a temporary certificate. The helper checks:
+
+- `OPTIONS /Microsoft-Server-ActiveSync` advertises protocol version `16.1` and only the implemented command set.
+- anonymous `OPTIONS` still returns ActiveSync capability headers with a `Basic` challenge when no password is supplied.
+- Autodiscover v2 `Protocol=ActiveSync` and `Protocol=MobileSync` return the ActiveSync endpoint.
+- default Outlook POX Autodiscover does not publish `MobileSync`.
+- MobileSync POX Autodiscover publishes the ActiveSync endpoint for mobile-client schema requests.
+
+The helper does not exercise `Provision`, `FolderSync`, `Sync`, send flows, attachments, search, `Ping`, reconnect, stale-key recovery, or `Sent` visibility. Those remain real-client lab steps.
+
+## Real-Client Lab Gate
+
+Record one evidence row per client/build/device. Do not mark the gate passed from local tests alone.
+
+| Field | Required value |
+| --- | --- |
+| Date | calendar date of the run |
+| Public host | exact `LPE-CT` HTTPS host used by the client |
+| Server revision | Git commit or release build |
+| Client | Outlook mobile for iOS, Outlook mobile for Android, or iOS Mail |
+| Client build | app version and OS version |
+| Account | test mailbox, shared mailbox if used, and auth method |
+| Preflight | command line and pass/fail output from `tools/activesync_mobile_lab_preflight.py` |
+| Evidence | server trace ids, sanitized HTTP/WBXML transcript ids, client screenshots, or device logs |
+| Result | pass/fail plus defects opened or fixed |
+
+### Outlook Mobile Checklist
+
+Run this checklist for Outlook mobile on iOS and Android when both are available. The `0.2.0` publication gate requires at least Outlook mobile and iOS Mail evidence; Android evidence is additional coverage unless the release explicitly targets it.
+
+| Step | Expected evidence |
+| --- | --- |
+| Enrollment | Account adds successfully through mobile Autodiscover or explicit Exchange/ActiveSync server entry; server logs show the mobile ActiveSync endpoint, not Outlook desktop MAPI/EWS publication. |
+| `OPTIONS` and version negotiation | Client probes `OPTIONS /Microsoft-Server-ActiveSync`; response includes `MS-ASProtocolVersions: 16.1` and the implemented command list. The client uses a supported `MS-ASProtocolVersion` on later POSTs. |
+| `Provision` | Initial Provision and acknowledgment complete with policy status `1`; no unsupported device-policy requirement blocks enrollment. |
+| `FolderSync` | Initial `FolderSync` with key `0` returns canonical folders including `Inbox`, `Sent`, `Drafts`, `Trash`, and user mail folders with stable server ids. |
+| Initial `Sync` | Inbox initial collection `Sync` starts with key `0`, receives a new key, and retrieves the first page without duplicate or missing messages. |
+| Incremental `Sync` | A message delivered after initial sync appears once; a no-change sync does not reload the mailbox. |
+| `SendMail` | Message sent from Outlook mobile is accepted through ActiveSync, relayed through canonical submission, and appears in LPE `Sent`. |
+| `SmartReply` | Reply from a synced message sends successfully and creates the authoritative `Sent` copy. |
+| `SmartForward` | Forward from a synced message sends successfully, includes expected original content/attachments, and creates the authoritative `Sent` copy. |
+| Attachments | Client can open a received attachment through `ItemOperations Fetch`; forwarded attachment content remains readable by the recipient. |
+| `Search` | Mail search returns expected mailbox results; selecting a result opens/fetches the message instead of producing a client error. |
+| `Ping` no-change | After a completed collection `Sync`, `Ping` returns no-change status when no monitored folder changes occur during the heartbeat. |
+| `Ping` change | New mail in a monitored folder wakes `Ping`, returns the changed folder id, and the following `Sync` retrieves the message. |
+| Reconnect | Restart the service or drop the mobile network after a valid `Ping`; the client reconnects without deleting and recreating the account. |
+| Stale-key recovery | Present or simulate a stale collection key; client performs the required recovery flow and resumes sync after `FolderSync` or collection re-prime. |
+| `Sent` visibility | Every `SendMail`, `SmartReply`, and `SmartForward` message is visible in LPE web/JMAP/IMAP `Sent` and on the mobile client after sync. |
+
+### iOS Mail Checklist
+
+Run this checklist with the native iOS Mail account type that uses Exchange ActiveSync.
+
+| Step | Expected evidence |
+| --- | --- |
+| Enrollment | Account adds successfully through mobile Autodiscover or explicit server entry; Mail, Contacts, and Calendars toggles may be enabled only for implemented classes. |
+| `OPTIONS` and version negotiation | Device probes `OPTIONS /Microsoft-Server-ActiveSync`; response includes `16.1` and the implemented command list; later POSTs use a supported version. |
+| `Provision` | Device policy handshake completes; iOS does not demand an unsupported policy before first sync. |
+| `FolderSync` | Initial folder hierarchy includes canonical mail folders, contacts, and calendar collections that the user enabled. |
+| Initial `Sync` | Mail, contacts, and calendar collections that are enabled start with collection sync key `0` and receive stable follow-up keys. |
+| Incremental `Sync` | New mail, contact changes, and calendar changes appear once and preserve canonical fields documented in `activesync-mvp.md`. |
+| `SendMail` | Sending from iOS Mail uses ActiveSync submission and creates the authoritative LPE `Sent` copy. |
+| Attachments | Received attachment opens through `ItemOperations Fetch`; sent attachment passes canonical validation and is visible to the recipient. |
+| `Search` | Native Mail search returns expected mailbox results and can open the selected message. |
+| `Ping` no-change | Empty/no-change long poll succeeds after prior collection sync. |
+| `Ping` change | New mail wakes the monitored folder and the following sync retrieves the message. |
+| Reconnect | Airplane-mode toggle, network switch, or service restart does not force account recreation. |
+| Stale-key recovery | Stale key response leads iOS Mail to re-prime folder or collection state and resume sync. |
+| `Sent` visibility | Sent messages are visible in LPE web/JMAP/IMAP `Sent` and on iOS Mail after sync. |
+
+Known unsupported ActiveSync behavior for this gate remains the unsupported set in `docs/architecture/activesync-mvp.md`: full Exchange server semantics, client `SMTP`, ActiveSync task class, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync`, unsupported contact fields, and unsupported calendar fields such as recurrence exceptions and all-day events.
 
 ## Reference Table/List
 
