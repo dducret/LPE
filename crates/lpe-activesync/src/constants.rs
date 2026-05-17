@@ -4,6 +4,7 @@ pub(crate) const ACTIVE_SYNC_COMMANDS: &str =
     "FolderSync,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync";
 pub(crate) const ROOT_FOLDER_ID: &str = "0";
 pub(crate) const FOLDER_SYNC_COLLECTION_ID: &str = "__folders__";
+pub(crate) const PING_SETTINGS_COLLECTION_ID: &str = "__ping__";
 pub(crate) const MAIL_CLASS: &str = "Email";
 pub(crate) const CONTACTS_CLASS: &str = "Contacts";
 pub(crate) const CALENDAR_CLASS: &str = "Calendar";

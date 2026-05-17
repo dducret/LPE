@@ -1155,6 +1155,15 @@ fn collection_sync_key(sync: &WbxmlNode, collection_id: &str) -> String {
         .unwrap()
 }
 
+fn active_sync_query(cmd: &str, device_id: &str) -> ActiveSyncQuery {
+    ActiveSyncQuery {
+        cmd: Some(cmd.to_string()),
+        user: Some("alice@example.test".to_string()),
+        device_id: Some(device_id.to_string()),
+        _device_type: Some("phone".to_string()),
+    }
+}
+
 async fn sync_collection(
     service: &ActiveSyncService<FakeStore>,
     collection_id: &str,
@@ -1173,12 +1182,7 @@ async fn sync_collection(
     });
     let response = service
         .handle_request(
-            ActiveSyncQuery {
-                cmd: Some("Sync".to_string()),
-                user: Some("alice@example.test".to_string()),
-                device_id: Some(device_id.to_string()),
-                _device_type: Some("phone".to_string()),
-            },
+            active_sync_query("Sync", device_id),
             &bearer_headers(),
             &request,
         )
@@ -1226,6 +1230,39 @@ async fn folder_sync(
         .await
         .unwrap();
 
+    assert_eq!(response.status(), StatusCode::OK);
+    decode_response_body(response).await
+}
+
+fn ping_request(heartbeat: Option<&str>, folders: &[(&str, &str)]) -> Vec<u8> {
+    encode_wbxml(&{
+        let mut ping = WbxmlNode::new(13, "Ping");
+        if let Some(heartbeat) = heartbeat {
+            ping.push(WbxmlNode::with_text(13, "HeartbeatInterval", heartbeat));
+        }
+        if !folders.is_empty() {
+            let mut folders_node = WbxmlNode::new(13, "Folders");
+            for (id, class_name) in folders {
+                let mut folder = WbxmlNode::new(13, "Folder");
+                folder.push(WbxmlNode::with_text(13, "Id", *id));
+                folder.push(WbxmlNode::with_text(13, "Class", *class_name));
+                folders_node.push(folder);
+            }
+            ping.push(folders_node);
+        }
+        ping
+    })
+}
+
+async fn ping(service: &ActiveSyncService<FakeStore>, device_id: &str, body: &[u8]) -> WbxmlNode {
+    let response = service
+        .handle_request(
+            active_sync_query("Ping", device_id),
+            &bearer_headers(),
+            body,
+        )
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     decode_response_body(response).await
 }
@@ -3334,6 +3371,10 @@ async fn ping_reconnects_after_service_restart_using_persisted_sync_state() {
         .await
         .unwrap();
 
+    let full_ping_request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Email")]);
+    let primed_ping = ping(&service, "dev1", &full_ping_request).await;
+    assert_eq!(primed_ping.child("Status").unwrap().text_value(), "1");
+
     let restarted_service = ActiveSyncService::new(store);
     emails.lock().unwrap().push(FakeStore::inbox_email(
         "22222222-2222-2222-2222-222222222222",
@@ -3342,32 +3383,16 @@ async fn ping_reconnects_after_service_restart_using_persisted_sync_state() {
         "Two",
     ));
 
-    let ping_request = encode_wbxml(&{
-        let mut ping = WbxmlNode::new(13, "Ping");
-        ping.push(WbxmlNode::with_text(13, "HeartbeatInterval", "60"));
-        let mut folders = WbxmlNode::new(13, "Folders");
-        let mut folder = WbxmlNode::new(13, "Folder");
-        folder.push(WbxmlNode::with_text(13, "Id", inbox.id.to_string()));
-        folder.push(WbxmlNode::with_text(13, "Class", "Email"));
-        folders.push(folder);
-        ping.push(folders);
-        ping
-    });
-    let response = restarted_service
-        .handle_request(
-            ActiveSyncQuery {
-                cmd: Some("Ping".to_string()),
-                user: Some("alice@example.test".to_string()),
-                device_id: Some("dev1".to_string()),
-                _device_type: Some("phone".to_string()),
-            },
-            &bearer_headers(),
-            &ping_request,
-        )
-        .await
-        .unwrap();
-    let body = decode_response_body(response).await;
+    let body = ping(&restarted_service, "dev1", &[]).await;
     assert_eq!(body.child("Status").unwrap().text_value(), "2");
+    let changed = body
+        .child("Folders")
+        .unwrap()
+        .children_named("Folder")
+        .into_iter()
+        .map(|folder| folder.text_value().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(changed, vec![inbox.id.to_string()]);
 }
 
 #[tokio::test]
@@ -3413,6 +3438,237 @@ async fn ping_rejects_unsynchronized_folders() {
     let body = decode_response_body(response).await;
     assert_eq!(body.child("Status").unwrap().text_value(), "3");
     assert!(body.child("Folders").is_none());
+}
+
+#[tokio::test]
+async fn ping_empty_request_without_cached_parameters_returns_missing_parameters() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let body = ping(&service, "dev-empty", &[]).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "3");
+}
+
+#[tokio::test]
+async fn ping_invalid_folder_id_requires_folder_sync() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    sync_collection(&service, &inbox.id.to_string(), "0", "dev-invalid").await;
+
+    let request = ping_request(
+        Some("60"),
+        &[("99999999-9999-9999-9999-999999999999", "Email")],
+    );
+    let body = ping(&service, "dev-invalid", &request).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "7");
+}
+
+#[tokio::test]
+async fn ping_no_changes_returns_no_change_status() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    sync_collection(&service, &inbox.id.to_string(), "0", "dev-no-change").await;
+
+    let request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Email")]);
+    let body = ping(&service, "dev-no-change", &request).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "1");
+    assert!(body.child("Folders").is_none());
+}
+
+#[tokio::test]
+async fn ping_reports_changed_folder_ids_as_folder_values() {
+    let inbox = FakeStore::inbox_mailbox();
+    let emails = Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "One",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    sync_collection(&service, &inbox.id.to_string(), "0", "dev-changed").await;
+    emails.lock().unwrap().push(FakeStore::inbox_email(
+        "22222222-2222-2222-2222-222222222222",
+        inbox.id,
+        "inbox",
+        "Two",
+    ));
+
+    let request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Email")]);
+    let body = ping(&service, "dev-changed", &request).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "2");
+    let folder = body
+        .child("Folders")
+        .unwrap()
+        .children_named("Folder")
+        .into_iter()
+        .next()
+        .unwrap();
+    assert_eq!(folder.text_value(), inbox.id.to_string());
+    assert!(folder.child("Id").is_none());
+}
+
+#[tokio::test]
+async fn ping_detects_changes_across_multiple_monitored_collections() {
+    let inbox = FakeStore::inbox_mailbox();
+    let sent = FakeStore::sent_mailbox();
+    let emails = Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "One",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone(), sent.clone()],
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    sync_collection(&service, &inbox.id.to_string(), "0", "dev-multi").await;
+    sync_collection(&service, &sent.id.to_string(), "0", "dev-multi").await;
+    emails.lock().unwrap().push(FakeStore::inbox_email(
+        "22222222-2222-2222-2222-222222222222",
+        sent.id,
+        "sent",
+        "Sent copy",
+    ));
+
+    let request = ping_request(
+        Some("60"),
+        &[
+            (&inbox.id.to_string(), "Email"),
+            (&sent.id.to_string(), "Email"),
+        ],
+    );
+    let body = ping(&service, "dev-multi", &request).await;
+    let changed = body
+        .child("Folders")
+        .unwrap()
+        .children_named("Folder")
+        .into_iter()
+        .map(|folder| folder.text_value().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(body.child("Status").unwrap().text_value(), "2");
+    assert_eq!(changed, vec![sent.id.to_string()]);
+}
+
+#[tokio::test]
+async fn ping_heartbeat_outside_supported_range_returns_limit() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let too_low = ping_request(Some("30"), &[(&inbox.id.to_string(), "Email")]);
+    let too_low_body = ping(&service, "dev-heartbeat", &too_low).await;
+    assert_eq!(too_low_body.child("Status").unwrap().text_value(), "5");
+    assert_eq!(
+        too_low_body
+            .child("HeartbeatInterval")
+            .unwrap()
+            .text_value(),
+        "60"
+    );
+
+    let too_high = ping_request(Some("4000"), &[(&inbox.id.to_string(), "Email")]);
+    let too_high_body = ping(&service, "dev-heartbeat", &too_high).await;
+    assert_eq!(too_high_body.child("Status").unwrap().text_value(), "5");
+    assert_eq!(
+        too_high_body
+            .child("HeartbeatInterval")
+            .unwrap()
+            .text_value(),
+        "3540"
+    );
+}
+
+#[tokio::test]
+async fn ping_too_many_monitored_folders_returns_max_folders() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let folders = vec![(inbox.id.to_string(), "Email".to_string()); 201];
+    let folder_refs = folders
+        .iter()
+        .map(|(id, class_name)| (id.as_str(), class_name.as_str()))
+        .collect::<Vec<_>>();
+
+    let request = ping_request(Some("60"), &folder_refs);
+    let body = ping(&service, "dev-max-folders", &request).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "6");
+    assert_eq!(body.child("MaxFolders").unwrap().text_value(), "200");
+}
+
+#[tokio::test]
+async fn ping_surfaces_hierarchy_change_as_folder_sync_required() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "One",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    sync_collection(&service, &inbox.id.to_string(), "0", "dev-hierarchy-ping").await;
+
+    let archive = FakeStore::mailbox(
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "archive",
+        "Archive",
+        20,
+        None,
+    );
+    let mut changed_store = store.clone();
+    changed_store.mailboxes.push(archive);
+    let changed_service = ActiveSyncService::new(changed_store);
+
+    let request = ping_request(Some("60"), &[(&inbox.id.to_string(), "Email")]);
+    let body = ping(&changed_service, "dev-hierarchy-ping", &request).await;
+    assert_eq!(body.child("Status").unwrap().text_value(), "7");
 }
 
 #[tokio::test]

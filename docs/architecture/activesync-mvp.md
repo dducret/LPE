@@ -55,6 +55,28 @@
     superseded hierarchy sync keys
   - advances the device hierarchy generation used to validate later collection
     `Sync` retries after hierarchy changes
+- `Ping` behavior:
+  - requires an initial request with `HeartbeatInterval` and at least one
+    monitored `Folder` containing both `Id` and `Class`
+  - persists the latest valid Ping heartbeat and monitored folder list per
+    account/device so later empty Ping requests remain restart-safe
+  - uses implementation-specific heartbeat bounds of 60 through 3540 seconds;
+    out-of-range requests return ActiveSync `Ping` status `5` with the nearest
+    supported `HeartbeatInterval`
+  - limits one Ping request to 200 monitored folders and returns status `6`
+    with `MaxFolders` when the request exceeds that limit
+  - returns status `3` when required Ping parameters are missing and no cached
+    value exists, or when a monitored collection has no prior completed `Sync`
+    state for the device
+  - returns status `1` when the heartbeat decision finds no additions into the
+    monitored collections, and status `2` with response `Folders/Folder`
+    string values for collections with additions or moves/copies into the
+    collection
+  - returns status `7` when a monitored folder id/class is no longer valid or
+    when the device's acknowledged folder hierarchy is stale; clients must run
+    `FolderSync` and then reissue `Ping`
+  - remains a bounded persisted-state delta check; it does not add separate
+    push-notification infrastructure
 - `SendMail`, `SmartReply`, and `SmartForward`:
   - parse submitted `MIME`
   - validate attachments through the canonical file-validation path

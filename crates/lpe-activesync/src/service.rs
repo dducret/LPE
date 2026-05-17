@@ -9,6 +9,7 @@ use lpe_storage::{
     ActiveSyncItemState, AuditEntryInput, SubmitMessageInput, SubmittedRecipientInput,
     UpsertClientContactInput, UpsertClientEventInput,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -21,10 +22,34 @@ trait Pipe: Sized {
 
 impl<T> Pipe for T {}
 
+const PING_SETTINGS_SYNC_KEY: &str = "current";
+const PING_MIN_HEARTBEAT_SECONDS: u32 = 60;
+const PING_MAX_HEARTBEAT_SECONDS: u32 = 3540;
+const PING_MAX_FOLDERS: usize = 200;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PingSettings {
+    heartbeat_interval: u32,
+    folders: Vec<PingFolder>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PingFolder {
+    id: String,
+    class_name: String,
+}
+
+enum PingResolution {
+    Ready(Vec<(CollectionDefinition, StoredSyncState)>),
+    MissingParameters,
+    FolderSyncRequired,
+}
+
 use crate::{
     auth::protocol_version,
     constants::{
-        CALENDAR_CLASS, CONTACTS_CLASS, FOLDER_SYNC_COLLECTION_ID, MAIL_CLASS, ROOT_FOLDER_ID,
+        CALENDAR_CLASS, CONTACTS_CLASS, FOLDER_SYNC_COLLECTION_ID, MAIL_CLASS,
+        PING_SETTINGS_COLLECTION_ID, ROOT_FOLDER_ID,
     },
     message::{
         default_sender, draft_input_from_application_data, field_text, merged_draft_input,
@@ -156,7 +181,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     .await
             }
             "Ping" => {
-                let request = decode_wbxml(body)?;
+                let request = if body.is_empty() {
+                    WbxmlNode::new(13, "Ping")
+                } else {
+                    decode_wbxml(body)?
+                };
                 self.handle_ping(&principal, device_id, &protocol_version, &request)
                     .await
             }
@@ -1758,27 +1787,75 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             bail!("invalid Ping payload");
         }
 
-        let folders = request
-            .child("Folders")
-            .map(|folders| folders.children_named("Folder"))
-            .unwrap_or_default();
-        if folders.is_empty() {
-            let mut response = WbxmlNode::new(13, "Ping");
-            response.push(WbxmlNode::with_text(13, "Status", "3"));
-            return wbxml_response(protocol_version, encode_wbxml(&response));
+        let cached_settings = self
+            .load_ping_settings(principal.account_id, device_id)
+            .await?;
+        let Some(settings) = self.ping_settings_from_request(request, cached_settings.as_ref())
+        else {
+            return self.ping_status_response(protocol_version, "3", None, None, &[]);
+        };
+
+        if settings.heartbeat_interval < PING_MIN_HEARTBEAT_SECONDS {
+            return self.ping_status_response(
+                protocol_version,
+                "5",
+                Some(PING_MIN_HEARTBEAT_SECONDS),
+                None,
+                &[],
+            );
+        }
+        if settings.heartbeat_interval > PING_MAX_HEARTBEAT_SECONDS {
+            return self.ping_status_response(
+                protocol_version,
+                "5",
+                Some(PING_MAX_HEARTBEAT_SECONDS),
+                None,
+                &[],
+            );
+        }
+        if settings.folders.len() > PING_MAX_FOLDERS {
+            return self.ping_status_response(
+                protocol_version,
+                "6",
+                None,
+                Some(PING_MAX_FOLDERS),
+                &[],
+            );
         }
 
         let collections = self.folder_collections(principal.account_id).await?;
         let monitored = match self
-            .resolve_ping_collections(principal, device_id, &collections, &folders)
+            .resolve_ping_collections(principal, device_id, &collections, &settings.folders)
             .await?
         {
-            Some(monitored) => monitored,
-            None => {
-                let mut response = WbxmlNode::new(13, "Ping");
-                response.push(WbxmlNode::with_text(13, "Status", "3"));
-                return wbxml_response(protocol_version, encode_wbxml(&response));
+            PingResolution::Ready(monitored) => monitored,
+            PingResolution::MissingParameters => {
+                return self.ping_status_response(protocol_version, "3", None, None, &[]);
             }
+            PingResolution::FolderSyncRequired => {
+                return self.ping_status_response(protocol_version, "7", None, None, &[]);
+            }
+        };
+        self.store_ping_settings(principal.account_id, device_id, &settings)
+            .await?;
+
+        let current_hierarchy_generation = self
+            .current_hierarchy_generation(principal.account_id)
+            .await?;
+        if monitored.iter().any(|(_, previous_state)| {
+            previous_state
+                .hierarchy_generation
+                .as_deref()
+                .is_some_and(|generation| generation != current_hierarchy_generation)
+        }) && !self
+            .device_hierarchy_is_current(
+                principal.account_id,
+                device_id,
+                &current_hierarchy_generation,
+            )
+            .await?
+        {
+            return self.ping_status_response(protocol_version, "7", None, None, &[]);
         };
 
         let mut changed = Vec::new();
@@ -1786,24 +1863,51 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             let current_state = self
                 .collection_state(principal.account_id, &collection)
                 .await?;
-            if !diff_collection_states(&previous_state.collection_state, &current_state).is_empty()
+            if diff_collection_states(&previous_state.collection_state, &current_state)
+                .iter()
+                .any(|change| change.kind == "Add")
             {
                 changed.push(collection.id);
             }
         }
 
-        let mut response = WbxmlNode::new(13, "Ping");
-        response.push(WbxmlNode::with_text(
-            13,
-            "Status",
+        self.ping_status_response(
+            protocol_version,
             if changed.is_empty() { "1" } else { "2" },
-        ));
+            None,
+            None,
+            &changed,
+        )
+    }
+
+    fn ping_status_response(
+        &self,
+        protocol_version: &str,
+        status: &str,
+        heartbeat_interval: Option<u32>,
+        max_folders: Option<usize>,
+        changed: &[String],
+    ) -> Result<Response> {
+        let mut response = WbxmlNode::new(13, "Ping");
+        response.push(WbxmlNode::with_text(13, "Status", status));
+        if let Some(heartbeat_interval) = heartbeat_interval {
+            response.push(WbxmlNode::with_text(
+                13,
+                "HeartbeatInterval",
+                heartbeat_interval.to_string(),
+            ));
+        }
+        if let Some(max_folders) = max_folders {
+            response.push(WbxmlNode::with_text(
+                13,
+                "MaxFolders",
+                max_folders.to_string(),
+            ));
+        }
         if !changed.is_empty() {
             let mut folders_node = WbxmlNode::new(13, "Folders");
             for collection_id in changed {
-                let mut folder = WbxmlNode::new(13, "Folder");
-                folder.push(WbxmlNode::with_text(13, "Id", collection_id));
-                folders_node.push(folder);
+                folders_node.push(WbxmlNode::with_text(13, "Folder", collection_id));
             }
             response.push(folders_node);
         }
@@ -1811,37 +1915,99 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         wbxml_response(protocol_version, encode_wbxml(&response))
     }
 
+    fn ping_settings_from_request(
+        &self,
+        request: &WbxmlNode,
+        cached: Option<&PingSettings>,
+    ) -> Option<PingSettings> {
+        let heartbeat_interval = match request.child("HeartbeatInterval") {
+            Some(node) => node.text_value().trim().parse::<u32>().ok()?,
+            None => cached?.heartbeat_interval,
+        };
+
+        let folders = match request.child("Folders") {
+            Some(folders) => {
+                let mut parsed = Vec::new();
+                for folder in folders.children_named("Folder") {
+                    let id = folder
+                        .child("Id")
+                        .map(|node| node.text_value().trim().to_string())
+                        .filter(|value| !value.is_empty())?;
+                    let class_name = folder
+                        .child("Class")
+                        .map(|node| node.text_value().trim().to_string())
+                        .filter(|value| !value.is_empty())?;
+                    parsed.push(PingFolder { id, class_name });
+                }
+                if parsed.is_empty() {
+                    return None;
+                }
+                parsed
+            }
+            None => cached?.folders.clone(),
+        };
+
+        Some(PingSettings {
+            heartbeat_interval,
+            folders,
+        })
+    }
+
+    async fn load_ping_settings(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+    ) -> Result<Option<PingSettings>> {
+        self.store
+            .fetch_latest_activesync_sync_state(account_id, device_id, PING_SETTINGS_COLLECTION_ID)
+            .await?
+            .map(|state| serde_json::from_str(&state.snapshot_json).map_err(Into::into))
+            .transpose()
+    }
+
+    async fn store_ping_settings(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        settings: &PingSettings,
+    ) -> Result<()> {
+        self.store
+            .store_activesync_sync_state(
+                account_id,
+                device_id,
+                PING_SETTINGS_COLLECTION_ID,
+                PING_SETTINGS_SYNC_KEY,
+                serde_json::to_string(settings)?,
+            )
+            .await
+    }
+
     async fn resolve_ping_collections(
         &self,
         principal: &AuthenticatedPrincipal,
         device_id: &str,
         collections: &[CollectionDefinition],
-        folders: &[&WbxmlNode],
-    ) -> Result<Option<Vec<(CollectionDefinition, StoredSyncState)>>> {
+        folders: &[PingFolder],
+    ) -> Result<PingResolution> {
         let mut monitored = Vec::new();
         for folder in folders {
-            let Some(collection_id) = folder
-                .child("Id")
-                .map(|node| node.text_value().trim().to_string())
-                .filter(|value| !value.is_empty())
-            else {
-                return Ok(None);
+            let Some(collection) = collections.iter().find(|entry| entry.id == folder.id) else {
+                return Ok(PingResolution::FolderSyncRequired);
             };
-            let Some(collection) = collections.iter().find(|entry| entry.id == collection_id)
-            else {
-                return Ok(None);
-            };
+            if collection.class_name != folder.class_name {
+                return Ok(PingResolution::FolderSyncRequired);
+            }
             let Some(state) = self
                 .store
                 .fetch_latest_activesync_sync_state(principal.account_id, device_id, &collection.id)
                 .await?
             else {
-                return Ok(None);
+                return Ok(PingResolution::MissingParameters);
             };
             monitored.push((collection.clone(), decode_sync_state(&state.snapshot_json)?));
         }
 
-        Ok(Some(monitored))
+        Ok(PingResolution::Ready(monitored))
     }
 
     async fn handle_search(

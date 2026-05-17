@@ -49,6 +49,7 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 | smart forward | `smart_forward_reuses_source_message_and_attachments` |
 | attachment fetch | `item_operations_fetch_returns_attachment_bytes` |
 | search | `search_queries_canonical_mail_projection` |
-| long poll | `ping_reports_changed_collections_after_sync_state_exists` |
+| long poll | `ping_no_changes_returns_no_change_status`; `ping_reports_changed_folder_ids_as_folder_values`; `ping_detects_changes_across_multiple_monitored_collections` |
+| long-poll validation | `ping_empty_request_without_cached_parameters_returns_missing_parameters`; `ping_invalid_folder_id_requires_folder_sync`; `ping_rejects_unsynchronized_folders`; `ping_heartbeat_outside_supported_range_returns_limit`; `ping_too_many_monitored_folders_returns_max_folders`; `ping_surfaces_hierarchy_change_as_folder_sync_required` |
 | long-poll reconnect | `ping_reconnects_after_service_restart_using_persisted_sync_state` |
 | contact/calendar mutations | `sync_contact_and_calendar_mutations_update_canonical_models` |
