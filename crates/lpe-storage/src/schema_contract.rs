@@ -303,7 +303,7 @@ fn mapi_identity_mapping_is_store_backed() {
     let replicas = table_definition("mapi_mailbox_replicas");
     for required in [
         "replica_guid UUID NOT NULL",
-        "next_global_counter BIGINT NOT NULL DEFAULT 17",
+        "next_global_counter BIGINT NOT NULL DEFAULT 21",
         "PRIMARY KEY (tenant_id, account_id)",
         "UNIQUE (tenant_id, account_id, replica_guid)",
     ] {

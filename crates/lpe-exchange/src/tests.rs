@@ -495,8 +495,8 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move {
             let mut identities = self.mapi_identities.lock().unwrap();
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
-            if *next_counter < 17 {
-                *next_counter = 17;
+            if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+                *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
             }
             let mut records = Vec::with_capacity(requests.len());
             for request in requests {

@@ -546,16 +546,35 @@ impl ExchangeStore for Storage {
             let mut tx = self.pool().begin().await?;
             sqlx::query(
                 r#"
-                INSERT INTO mapi_mailbox_replicas (tenant_id, account_id, replica_guid)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (tenant_id, account_id) DO NOTHING
+                INSERT INTO mapi_mailbox_replicas (
+                    tenant_id,
+                    account_id,
+                    replica_guid,
+                    next_global_counter
+                )
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (tenant_id, account_id)
+                DO UPDATE SET
+                    next_global_counter = GREATEST(
+                        mapi_mailbox_replicas.next_global_counter,
+                        $4
+                    ),
+                    updated_at = CASE
+                        WHEN mapi_mailbox_replicas.next_global_counter < $4 THEN NOW()
+                        ELSE mapi_mailbox_replicas.updated_at
+                    END
                 "#,
             )
             .bind(tenant_id)
             .bind(account_id)
             .bind(Uuid::from_bytes(crate::mapi::identity::STORE_REPLICA_GUID))
+            .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
             .execute(&mut *tx)
             .await?;
+            advance_mapi_replica_counter_past_allocated(&mut tx, tenant_id, account_id).await?;
+            repair_reserved_mapi_identity_counter_collisions(&mut tx, tenant_id, account_id)
+                .await?;
+            repair_invalid_mapi_identity_change_keys(&mut tx, tenant_id, account_id).await?;
 
             let mut records = Vec::with_capacity(requests.len());
             for request in requests {
@@ -584,21 +603,7 @@ impl ExchangeStore for Storage {
                     let global_counter = if let Some(counter) = request.reserved_global_counter {
                         counter
                     } else {
-                        let next = sqlx::query_scalar::<_, i64>(
-                            r#"
-                            UPDATE mapi_mailbox_replicas
-                            SET next_global_counter = next_global_counter + 1,
-                                updated_at = NOW()
-                            WHERE tenant_id = $1
-                              AND account_id = $2
-                            RETURNING next_global_counter - 1
-                            "#,
-                        )
-                        .bind(tenant_id)
-                        .bind(account_id)
-                        .fetch_one(&mut *tx)
-                        .await?;
-                        next as u64
+                        allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id).await?
                     };
                     let object_id = crate::mapi::identity::mapi_store_id(global_counter);
                     let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
@@ -1742,6 +1747,178 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, SubmittedMessage> {
         Box::pin(async move { self.submit_message(input, audit).await })
     }
+}
+
+async fn advance_mapi_replica_counter_past_allocated(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<()> {
+    let next_counter = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT GREATEST(
+            COALESCE(MAX(mapi_global_counter), $3 - 1) + 1,
+            $3
+        )
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        r#"
+        UPDATE mapi_mailbox_replicas
+        SET next_global_counter = GREATEST(next_global_counter, $3),
+            updated_at = CASE
+                WHEN next_global_counter < $3 THEN NOW()
+                ELSE updated_at
+            END
+        WHERE tenant_id = $1
+          AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(next_counter)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn repair_reserved_mapi_identity_counter_collisions(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<()> {
+    let rows = sqlx::query(
+        r#"
+        SELECT object_kind, canonical_id
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mapi_global_counter >= $3
+          AND mapi_global_counter < $4
+        ORDER BY mapi_global_counter, created_at, canonical_id
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(crate::mapi::identity::JOURNAL_FOLDER_COUNTER as i64)
+    .bind(crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER as i64)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    for row in rows {
+        let global_counter = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
+        let object_id = crate::mapi::identity::mapi_store_id(global_counter);
+        let source_key = crate::mapi::identity::source_key_for_object_id(object_id);
+        let change_key = crate::mapi::identity::change_key_for_change_number(global_counter);
+        let instance_key = crate::mapi::identity::instance_key_for_object_id(object_id);
+
+        sqlx::query(
+            r#"
+            UPDATE mapi_object_identities
+            SET mapi_global_counter = $5,
+                mapi_object_id = $6,
+                source_key = $7,
+                change_key = $8,
+                instance_key = $9,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND object_kind = $3
+              AND canonical_id = $4
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(row.get::<String, _>("object_kind"))
+        .bind(row.get::<Uuid, _>("canonical_id"))
+        .bind(global_counter as i64)
+        .bind(object_id as i64)
+        .bind(source_key)
+        .bind(change_key)
+        .bind(instance_key)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn allocate_next_mapi_global_counter(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<u64> {
+    let next = sqlx::query_scalar::<_, i64>(
+        r#"
+        UPDATE mapi_mailbox_replicas
+        SET next_global_counter = next_global_counter + 1,
+            updated_at = NOW()
+        WHERE tenant_id = $1
+          AND account_id = $2
+        RETURNING next_global_counter - 1
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    Ok(next as u64)
+}
+
+async fn repair_invalid_mapi_identity_change_keys(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<()> {
+    let rows = sqlx::query(
+        r#"
+        SELECT object_kind, canonical_id, mapi_global_counter
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND octet_length(change_key) <> 22
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    for row in rows {
+        let global_counter = row.get::<i64, _>("mapi_global_counter") as u64;
+        let change_key = crate::mapi::identity::change_key_for_change_number(global_counter);
+        sqlx::query(
+            r#"
+            UPDATE mapi_object_identities
+            SET change_key = $5,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND object_kind = $3
+              AND canonical_id = $4
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(row.get::<String, _>("object_kind"))
+        .bind(row.get::<Uuid, _>("canonical_id"))
+        .bind(change_key)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
 }
 
 fn mapi_content_table_order_by(sort_orders: &[MapiContentTableSort]) -> String {

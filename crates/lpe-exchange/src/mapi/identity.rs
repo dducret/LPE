@@ -27,6 +27,7 @@ pub(crate) const JOURNAL_FOLDER_COUNTER: u64 = 17;
 pub(crate) const NOTES_FOLDER_COUNTER: u64 = 18;
 pub(crate) const TASKS_FOLDER_COUNTER: u64 = 19;
 pub(crate) const REMINDERS_FOLDER_COUNTER: u64 = 20;
+pub(crate) const FIRST_DYNAMIC_GLOBAL_COUNTER: u64 = REMINDERS_FOLDER_COUNTER + 1;
 
 pub(crate) const ROOT_FOLDER_ID: u64 = mapi_store_id(ROOT_FOLDER_COUNTER);
 pub(crate) const DEFERRED_ACTION_FOLDER_ID: u64 = mapi_store_id(DEFERRED_ACTION_FOLDER_COUNTER);
@@ -181,6 +182,12 @@ mod tests {
         );
         assert!(source_key_for_object_id(object_id).starts_with(&STORE_REPLICA_GUID));
         assert!(change_key_for_change_number(7).starts_with(&STORE_REPLICA_GUID));
+    }
+
+    #[test]
+    fn dynamic_counters_start_after_reserved_special_folders() {
+        assert_eq!(FIRST_DYNAMIC_GLOBAL_COUNTER, REMINDERS_FOLDER_COUNTER + 1);
+        assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > REMINDERS_FOLDER_COUNTER);
     }
 
     #[test]

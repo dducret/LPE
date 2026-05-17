@@ -1603,7 +1603,7 @@ CREATE TABLE mapi_mailbox_replicas (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
     replica_guid UUID NOT NULL,
-    next_global_counter BIGINT NOT NULL DEFAULT 17 CHECK (next_global_counter > 16),
+    next_global_counter BIGINT NOT NULL DEFAULT 21 CHECK (next_global_counter > 20),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id),
