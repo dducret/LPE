@@ -2596,6 +2596,8 @@ where
                     &all_sync_emails,
                     &state_attachment_facts,
                 );
+                let force_hierarchy_count_properties =
+                    force_hierarchy_count_properties_experiment_enabled();
                 let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
                     sync_type,
                     sync_flags,
@@ -2613,6 +2615,7 @@ where
                     &aggregate_sync_emails,
                     &aggregate_attachment_facts,
                     changes.current_change_sequence,
+                    force_hierarchy_count_properties,
                 );
                 let hierarchy_content_candidate =
                     mapi_mailstore::hierarchy_content_count_omission_candidate(
@@ -2648,6 +2651,7 @@ where
                         &aggregate_sync_emails,
                         &aggregate_attachment_facts,
                         changes.current_change_sequence,
+                        force_hierarchy_count_properties,
                     )
                 });
                 let incremental_hierarchy_content_candidate = checkpoint.as_ref().and_then(|_| {
@@ -2682,6 +2686,8 @@ where
                     sync_property_tags = %sync_property_tags_hex,
                     sync_property_filter_mode =
                         sync_property_filter_mode(sync_flags, &sync_property_tags),
+                    force_hierarchy_count_properties_experiment =
+                        force_hierarchy_count_properties,
                     checkpoint_loaded = checkpoint.is_some(),
                     checkpoint_status,
                     checkpoint_cursor_source,

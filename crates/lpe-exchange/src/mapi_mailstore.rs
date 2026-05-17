@@ -268,6 +268,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
         emails,
         attachment_facts,
         final_change_sequence,
+        false,
     )
 }
 
@@ -289,6 +290,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     aggregate_emails: &[JmapEmail],
     aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
     _final_change_sequence: u64,
+    force_excluded_hierarchy_count_properties: bool,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     let sync_root_folder_id = folder_id;
@@ -328,6 +330,15 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         let container_class = mapi_folder_message_class(mailbox);
         let (content_count, content_unread_count, content_count_source) =
             folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
+        let content_count_excluded =
+            property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
+        let unread_count_excluded =
+            property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
+        let force_count_properties = force_excluded_hierarchy_count_properties
+            && sync_type == 0x02
+            && content_count_source == "snapshot";
+        let content_count_forced = force_count_properties && content_count_excluded;
+        let unread_count_forced = force_count_properties && unread_count_excluded;
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -346,6 +357,9 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             computed_content_count = content_count,
             computed_unread_count = content_unread_count,
             content_count_source,
+            hierarchy_count_experiment_enabled = force_excluded_hierarchy_count_properties,
+            content_count_forced_by_experiment = content_count_forced,
+            content_unread_count_forced_by_experiment = unread_count_forced,
             aggregate_email_count = aggregate_emails.len(),
             "rca debug mapi hierarchy row"
         );
@@ -378,10 +392,10 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         }
         write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
         write_i64(&mut buffer, change_number as i64);
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
+        if !content_count_excluded || content_count_forced {
             write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
         }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT) {
+        if !unread_count_excluded || unread_count_forced {
             write_i32_property(
                 &mut buffer,
                 PID_TAG_CONTENT_UNREAD_COUNT,
@@ -2207,6 +2221,92 @@ mod tests {
             &[email],
         )
         .is_none());
+    }
+
+    #[test]
+    fn hierarchy_sync_omits_excluded_count_properties_by_default() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let email = test_email();
+        let buffer = sync_manifest_buffer_with_final_state(
+            0x02,
+            0x0100,
+            0,
+            &[PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            1,
+            false,
+        );
+
+        assert_absent_property(&buffer, PID_TAG_CONTENT_COUNT);
+        assert_absent_property(&buffer, PID_TAG_CONTENT_UNREAD_COUNT);
+    }
+
+    #[test]
+    fn hierarchy_sync_experiment_forces_excluded_computed_count_properties() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let email = test_email();
+        let buffer = sync_manifest_buffer_with_final_state(
+            0x02,
+            0x0100,
+            0,
+            &[PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            1,
+            true,
+        );
+
+        assert_i32_property(&buffer, PID_TAG_CONTENT_COUNT, 1);
+        assert_i32_property(&buffer, PID_TAG_CONTENT_UNREAD_COUNT, 1);
     }
 
     #[test]

@@ -1257,6 +1257,18 @@ pub(in crate::mapi) fn debug_payload_preview_limit() -> usize {
         .min(512)
 }
 
+pub(in crate::mapi) fn force_hierarchy_count_properties_experiment_enabled() -> bool {
+    env::var("LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "true" | "1" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 pub(crate) fn hex_preview(bytes: &[u8], limit: usize) -> String {
     bytes
         .iter()

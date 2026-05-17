@@ -8,7 +8,7 @@ The reference is documentation-only. It does not change runtime behavior. `LPE` 
 
 The initial ticket sequence has been completed and removed from this document. The remaining matrices describe implemented coverage, release gates, and deferred surfaces.
 
-The Microsoft protocol specifications were checked on 2026-05-14. The cited specifications define wire contracts and data structures, but they do not define Outlook's exact tolerance for partial Exchange compatibility. Real Outlook 2016 and Outlook 2019 profile creation, cached-mode synchronization, reconnect, and RCA evidence remain required release gates.
+The Microsoft protocol specifications were checked on 2026-05-17 for `MS-OXCFXICS` `RopSynchronizationConfigure` and `hierarchySync`. The cited specifications define wire contracts and data structures, but they do not define Outlook's exact tolerance for partial Exchange compatibility. Real Outlook 2016 and Outlook 2019 profile creation, cached-mode synchronization, reconnect, and RCA evidence remain required release gates.
 
 MAPI over HTTP is the first Outlook desktop Exchange-account path for this work. Outlook Anywhere / RPC over HTTP is a legacy compatibility shim for later `EXPR` publication and must not drive the initial MAPI over HTTP implementation order.
 
@@ -56,6 +56,27 @@ Current investigation focus:
 - The converted Outlook ETL files did not expose a decoded MAPI exception through `tracerpt`; the next lab run should preserve both server RCA logs and any Outlook UI/profile status so this stop point can be tied to a user-visible state.
 - RCA logs now include `rca debug mapi sync checkpoint store` when `RopFastTransferSourceGetBuffer` completes an ICS download and attempts to persist the hierarchy/content checkpoint, plus `rca debug mapi session disconnect` when a MAPI session is removed. Sync configure logs expose checkpoint acceptance or rejection reasons, `GetBuffer` logs expose checkpoint and transfer-state fields, and disconnect logs aggregate completed hierarchy/content sync handles. Use these fields to distinguish a clean completed hierarchy sync from a checkpoint persistence failure, incomplete transfer state, hierarchy-only disconnect, pending notification state, or unexpected live synchronization handles at disconnect.
 - RCA hierarchy-row log checklist: every `rca debug mapi hierarchy row` entry used as evidence must include `folder_id`, `parent_folder_id`, `source_key_len`, `parent_source_key_len`, `display_name`, `container_class`, and `change_number`. Keep this checklist aligned with the decoded `rca debug mapi hierarchy transfer row semantics` log so emitted rows and parsed transfer rows can be compared without changing runtime behavior.
+
+## Outlook Hierarchy Count Interoperability Experiment
+
+`LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES` is an opt-in MAPI/HTTP experiment and is disabled by default. When set to `true`, `1`, `yes`, or `on`, authenticated EMSMDB hierarchy sync emits `PidTagContentCount` and `PidTagContentUnreadCount` from snapshot-computed folder counts even when Outlook supplied those tags in the `RopSynchronizationConfigure` `PropertyTags` exclusion list. The default path still treats `PropertyTags` without `OnlySpecifiedProperties` as exclusions.
+
+Rationale: current Outlook 16 traces show a valid hierarchy ICS stream followed by disconnect before content sync. The affected mailbox has snapshot-computed `Inbox` content and unread counts, but Outlook excluded the count properties. This experiment tests whether Outlook's cached-mode bootstrap expects those folder aggregate properties despite sending them as exclusions. This is not a protocol MUST and must not become the default without real Outlook evidence.
+
+RCA evidence requirements:
+
+- `rca debug mapi sync configure` records `force_hierarchy_count_properties_experiment`.
+- `rca debug mapi hierarchy row` records `hierarchy_count_experiment_enabled`, `content_count_forced_by_experiment`, and `content_unread_count_forced_by_experiment`.
+- `rca debug mapi hierarchy transfer row semantics` must show count-property presence when the experiment forces them.
+
+Rollback condition: remove or keep disabled by default if Outlook still disconnects after hierarchy sync, if Microsoft RCA regresses, if real Outlook profile creation does not proceed to content synchronization, or if any client/parser rejects the hierarchy FastTransfer stream with the forced properties present.
+
+Outlook A/B lab:
+
+1. A disabled: leave `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES` unset or set it to `false`, restart the core service, create a fresh Outlook 2016 or Outlook 2019 cached-mode profile, and capture server RCA logs plus Outlook status.
+2. B enabled: set `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true`, restart the core service, create another fresh cached-mode profile against the same mailbox state, and capture the same logs.
+3. Expected success signal: after hierarchy sync, Outlook issues a content synchronization request (`RopSynchronizationConfigure` with `SynchronizationType` `0x01`) instead of disconnecting after the hierarchy FastTransfer stream.
+4. If B succeeds, repeat close/reopen and initial sync with the flag still enabled, then record whether canonical `Sent` visibility and reconnect behavior remain unchanged.
 
 ## Source Set
 
