@@ -397,7 +397,11 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         let parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
         let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
         let source_key = source_key_for_store_id(folder_id);
-        let parent_source_key = source_key_for_store_id(parent_folder_id);
+        let parent_source_key = if sync_type == 0x02 && parent_folder_id == sync_root_folder_id {
+            Vec::new()
+        } else {
+            source_key_for_store_id(parent_folder_id)
+        };
         let container_class = mapi_folder_message_class(mailbox);
         let (content_count, content_unread_count, content_count_source) =
             folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
@@ -2128,7 +2132,7 @@ mod tests {
         assert_eq!(summary.folder_change_count, 1);
         assert!(summary.final_state_present);
         assert_eq!(summary.parent_before_child_violations, 0);
-        assert_eq!(summary.zero_length_parent_source_key_count, 0);
+        assert_eq!(summary.zero_length_parent_source_key_count, 1);
         assert_eq!(summary.source_key_lengths, vec![22]);
         assert_eq!(summary.change_key_lengths, vec![22]);
         assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
@@ -2140,7 +2144,7 @@ mod tests {
         assert_eq!(summary.rows[0].display_name, "Inbox");
         assert_eq!(summary.rows[0].container_class, "IPF.Note");
         assert_eq!(summary.rows[0].source_key_len, 22);
-        assert_eq!(summary.rows[0].parent_source_key_len, 22);
+        assert_eq!(summary.rows[0].parent_source_key_len, 0);
         assert!(summary.rows[0].missing_core_property_tags.is_empty());
     }
 
