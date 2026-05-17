@@ -16466,6 +16466,78 @@ async fn mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_nspi_bootstrap_requests_reject_stale_and_wrong_endpoint_cookies() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let bind = service
+        .handle_mapi(MapiEndpoint::Nspi, &mapi_headers("Bind"), b"")
+        .await
+        .unwrap();
+    let stale_cookie = mapi_cookie_header(&bind);
+    let mut unbind_headers = mapi_headers("Unbind");
+    unbind_headers.insert("cookie", HeaderValue::from_str(&stale_cookie).unwrap());
+    let unbind = service
+        .handle_mapi(MapiEndpoint::Nspi, &unbind_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(unbind.headers().get("x-responsecode").unwrap(), "0");
+
+    for request_type in [
+        "DNToMId",
+        "GetProps",
+        "GetSpecialTable",
+        "GetMatches",
+        "ResolveNames",
+        "GetMailboxUrl",
+        "GetAddressBookUrl",
+    ] {
+        let mut headers = mapi_headers(request_type);
+        headers.insert("cookie", HeaderValue::from_str(&stale_cookie).unwrap());
+        let response = service
+            .handle_mapi(MapiEndpoint::Nspi, &headers, b"alice@example.test\0")
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK, "{request_type}");
+        assert_eq!(
+            response.headers().get("x-requesttype").unwrap(),
+            request_type,
+            "{request_type}"
+        );
+        assert_eq!(
+            response.headers().get("x-responsecode").unwrap(),
+            "10",
+            "{request_type}"
+        );
+        let body = String::from_utf8(response_bytes(response).await).unwrap();
+        assert!(
+            body.contains("MAPI session context not found"),
+            "{request_type}"
+        );
+    }
+
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut headers = mapi_headers("GetProps");
+    headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, b"alice@example.test\0")
+        .await
+        .unwrap();
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "10");
+    let body = String::from_utf8(response_bytes(response).await).unwrap();
+    assert!(body.contains("MAPI authentication context changed"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_returns_nspi_and_mailbox_urls() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -16645,6 +16717,120 @@ async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
     assert!(contains_bytes(&body, &utf16z("bob@example.test")));
     assert!(contains_bytes(&body, &utf16z("Bob Contact")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
+    let mut visible_contact = FakeStore::contact(
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "Bob Contact",
+        "bob.contact@example.test",
+    );
+    visible_contact.collection_id = "shared".to_string();
+    let mut visible_collection = FakeStore::collection("shared", "contacts", "Shared Contacts");
+    visible_collection.owner_account_id =
+        Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    visible_collection.rights.may_read = true;
+
+    let mut hidden_contact = FakeStore::contact(
+        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        "Carol Hidden",
+        "carol.hidden@example.test",
+    );
+    hidden_contact.collection_id = "private".to_string();
+    hidden_contact.owner_account_id =
+        Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let mut hidden_collection = FakeStore::collection("private", "contacts", "Private Contacts");
+    hidden_collection.owner_account_id = hidden_contact.owner_account_id;
+    hidden_collection.rights.may_read = false;
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![visible_collection, hidden_collection])),
+        contacts: Arc::new(Mutex::new(vec![visible_contact, hidden_contact])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let visible_lookup = b"bob.contact@example.test\0";
+    let hidden_lookup = b"carol.hidden@example.test\0";
+
+    let query_headers = nspi_bound_headers(&service, "QueryRows").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &query_headers, visible_lookup)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Bob Contact")));
+    assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+
+    let matches_headers = nspi_bound_headers(&service, "GetMatches").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &matches_headers, visible_lookup)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[9], 1);
+    let visible_mid = u32::from_le_bytes(body[14..18].try_into().unwrap());
+    assert_ne!(visible_mid, 0);
+    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+
+    let resolve_request =
+        resolve_names_request("bob.contact@example.test", &[0x3003_001F, 0x3001_001F]);
+    let resolve_headers = nspi_bound_headers(&service, "ResolveNames").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &resolve_headers, &resolve_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
+    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+
+    let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &dn_to_mid_headers, visible_lookup)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(
+        u32::from_le_bytes(body[13..17].try_into().unwrap()),
+        visible_mid
+    );
+
+    let mut props_request = Vec::new();
+    props_request.extend_from_slice(&visible_mid.to_le_bytes());
+    props_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
+    props_request.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    let props_headers = nspi_bound_headers(&service, "GetProps").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &props_headers, &props_request)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(contains_bytes(&body, &utf16z("Bob Contact")));
+    assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+
+    let special_headers = nspi_bound_headers(&service, "GetSpecialTable").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &special_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert!(contains_bytes(&body, &utf16z("Global Address List")));
+    assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
+
+    let hidden_matches_headers = nspi_bound_headers(&service, "GetMatches").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &hidden_matches_headers, hidden_lookup)
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(body[9], 0);
+    assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
 }
 
 #[tokio::test]
@@ -16840,6 +17026,19 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[9], 0);
+    assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
+
+    let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &dn_to_mid_headers,
+            b"mallory@other.test\0",
+        )
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[13..17].try_into().unwrap()), 0);
     assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
 
     let props_headers = nspi_bound_headers(&service, "GetProps").await;
