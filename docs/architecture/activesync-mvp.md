@@ -31,6 +31,18 @@
   - returns ActiveSync `Sync` status `12` when a collection sync key predates a
     folder hierarchy change that the device has not yet acknowledged through
     `FolderSync`
+  - applies mail `Change` requests for `email:Read` to canonical mailbox read
+    state
+  - applies mail `Delete` requests to canonical mailbox state; `DeletesAsMoves`
+    is honored by moving the addressed source membership to canonical `Trash`
+    when available, while `DeletesAsMoves=0` permanently removes the addressed
+    canonical mailbox membership
+  - does not accept client-originated mail body, recipient, subject, or
+    attachment mutation through non-draft `Sync`; those remain unsupported until
+    canonical mailbox edit semantics are documented
+  - honors `BodyPreference` for plain text, sanitized HTML when stored, and
+    MIME when the canonical raw-message blob is available; unsupported body
+    types fall back to plain text
   - supports shared mailbox projection for canonical mail folders
 - `FolderSync` behavior:
   - projects canonical mailbox folders, including `Inbox`, `Sent`, `Drafts`,
@@ -47,6 +59,20 @@
   - parse submitted `MIME`
   - validate attachments through the canonical file-validation path
   - create the authoritative `Sent` message before outbound relay
+- `MoveItems`:
+  - moves mail between canonical mail folders for the same accessible mailbox
+    account
+  - returns ActiveSync `MoveItems` status `3` on success, `1` for invalid source
+    item/source collection, `2` for invalid destination collection, and `4`
+    when source and destination folders are the same
+  - preserves the canonical message identifier as the destination server ID
+- `ItemOperations Fetch`:
+  - fetches message application data by `CollectionId` and `ServerId`
+  - fetches attachment bytes by `FileReference` from canonical attachment blobs
+  - returns attachment content inline in WBXML; multipart response streaming is
+    not implemented
+  - does not implement legacy `GetAttachment`; protocol versions that need
+    attachment bytes must use `ItemOperations Fetch`
 - Contacts and calendar:
   - use canonical `contacts` and `calendar_events`
   - support basic client-originated mutations through `Sync`
@@ -58,10 +84,12 @@
 
 | Area | Current support |
 | --- | --- |
-| Commands | `OPTIONS`, `Provision`, `FolderSync`, `Sync`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
+| Commands | `OPTIONS`, `Provision`, `FolderSync`, `Sync`, `MoveItems`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
 | Mail folders | canonical mailbox folders |
 | Contacts | canonical contacts projection and basic mutations |
 | Calendar | canonical events projection and basic mutations |
-| Attachments | common MIME attachment parsing and canonical retrieval |
+| Mail lifecycle | canonical folder moves, delete/move-to-trash, read/unread state |
+| Body preferences | text, stored sanitized HTML, canonical MIME blob with truncation |
+| Attachments | common MIME attachment parsing and canonical `FileReference` retrieval |
 | Long poll | lightweight `Ping` delta detection against persisted sync state |
-| Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic |
+| Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync` |

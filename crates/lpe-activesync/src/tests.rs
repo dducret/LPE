@@ -16,8 +16,8 @@ use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState,
     ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent,
     JmapEmail, JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapMailbox,
-    MailboxAccountAccess, SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -42,6 +42,7 @@ struct FakeStore {
     events: Arc<Mutex<Vec<ClientEvent>>>,
     attachments: Arc<Mutex<std::collections::HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
     attachment_contents: Arc<Mutex<std::collections::HashMap<String, ActiveSyncAttachmentContent>>>,
+    raw_message_blobs: Arc<Mutex<std::collections::HashMap<Uuid, Vec<u8>>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
     deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
@@ -360,6 +361,95 @@ impl ActiveSyncStore for FakeStore {
             .find(|email| email.id == id)
             .cloned();
         Box::pin(async move { Ok(email) })
+    }
+
+    fn fetch_jmap_message_blob<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Option<JmapUploadBlob>> {
+        let blob_bytes = self
+            .raw_message_blobs
+            .lock()
+            .unwrap()
+            .get(&message_id)
+            .cloned();
+        Box::pin(async move {
+            Ok(blob_bytes.map(|blob_bytes| JmapUploadBlob {
+                id: message_id,
+                account_id,
+                media_type: "message/rfc822".to_string(),
+                octet_size: blob_bytes.len() as u64,
+                blob_bytes,
+            }))
+        })
+    }
+
+    fn move_jmap_email_from_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id && email.mailbox_id == source_mailbox_id)
+            .map(|email| {
+                email.mailbox_id = target_mailbox_id;
+                email.mailbox_ids = vec![target_mailbox_id];
+                for state in &mut email.mailbox_states {
+                    state.mailbox_id = target_mailbox_id;
+                }
+                email.clone()
+            });
+        Box::pin(async move { email.ok_or_else(|| anyhow!("message not found")) })
+    }
+
+    fn delete_jmap_email_from_mailbox<'a>(
+        &'a self,
+        _account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        self.emails
+            .lock()
+            .unwrap()
+            .retain(|email| !(email.id == message_id && email.mailbox_id == mailbox_id));
+        Box::pin(async move { Ok(()) })
+    }
+
+    fn update_jmap_email_flags<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .map(|email| {
+                if let Some(unread) = unread {
+                    email.unread = unread;
+                    for state in &mut email.mailbox_states {
+                        state.unread = unread;
+                    }
+                }
+                if let Some(flagged) = flagged {
+                    email.flagged = flagged;
+                    for state in &mut email.mailbox_states {
+                        state.flagged = flagged;
+                    }
+                }
+                email.clone()
+            });
+        Box::pin(async move { email.ok_or_else(|| anyhow!("message not found")) })
     }
 
     fn fetch_activesync_message_attachments<'a>(
@@ -902,7 +992,7 @@ async fn options_challenges_anonymous_requests() {
             .get("ms-asprotocolcommands")
             .and_then(|value| value.to_str().ok()),
         Some(
-            "FolderSync,GetItemEstimate,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+            "FolderSync,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
         )
     );
 }
@@ -946,7 +1036,7 @@ async fn options_returns_capabilities_after_authentication() {
             .get("ms-asprotocolcommands")
             .and_then(|value| value.to_str().ok()),
         Some(
-            "FolderSync,GetItemEstimate,ItemOperations,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
+            "FolderSync,GetItemEstimate,ItemOperations,MoveItems,Ping,Provision,Search,SendMail,SmartForward,SmartReply,Sync"
         )
     );
 }
@@ -1148,6 +1238,34 @@ fn folder_add<'a>(changes: &'a WbxmlNode, server_id: &str) -> &'a WbxmlNode {
         .unwrap()
 }
 
+async fn handle_sync_node(service: &ActiveSyncService<FakeStore>, node: WbxmlNode) -> WbxmlNode {
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &encode_wbxml(&node),
+        )
+        .await
+        .unwrap();
+    decode_response_body(response).await
+}
+
+fn one_collection_sync(collection_id: &str, sync_key: &str) -> WbxmlNode {
+    let mut sync = WbxmlNode::new(0, "Sync");
+    let mut collections = WbxmlNode::new(0, "Collections");
+    let mut collection = WbxmlNode::new(0, "Collection");
+    collection.push(WbxmlNode::with_text(0, "SyncKey", sync_key));
+    collection.push(WbxmlNode::with_text(0, "CollectionId", collection_id));
+    collections.push(collection);
+    sync.push(collections);
+    sync
+}
+
 #[test]
 fn wbxml_roundtrip_preserves_tokens_and_text() {
     let mut root = WbxmlNode::new(7, "FolderSync");
@@ -1194,6 +1312,316 @@ fn wbxml_roundtrip_preserves_get_item_estimate_tokens() {
             .text_value(),
         "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
     );
+}
+
+#[tokio::test]
+async fn move_items_moves_message_between_canonical_mail_folders() {
+    let inbox = FakeStore::inbox_mailbox();
+    let archive = FakeStore::mailbox(
+        "99999999-9999-9999-9999-999999999999",
+        "archive",
+        "Archive",
+        20,
+        None,
+    );
+    let message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone(), archive.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "Move me",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let inbox_id = inbox.id.to_string();
+    let archive_id = archive.id.to_string();
+    let first_inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, "0")).await,
+        &inbox_id,
+    );
+    let inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, &first_inbox_key)).await,
+        &inbox_id,
+    );
+    let archive_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&archive_id, "0")).await,
+        &archive_id,
+    );
+
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("MoveItems".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev1".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &encode_wbxml(&{
+                let mut root = WbxmlNode::new(5, "MoveItems");
+                let mut move_node = WbxmlNode::new(5, "Move");
+                move_node.push(WbxmlNode::with_text(5, "SrcMsgId", message_id.to_string()));
+                move_node.push(WbxmlNode::with_text(5, "SrcFldId", &inbox_id));
+                move_node.push(WbxmlNode::with_text(5, "DstFldId", &archive_id));
+                root.push(move_node);
+                root
+            }),
+        )
+        .await
+        .unwrap();
+    let body = decode_response_body(response).await;
+    assert_eq!(
+        body.child("Response")
+            .unwrap()
+            .child("Status")
+            .unwrap()
+            .text_value(),
+        "3"
+    );
+    assert_eq!(store.emails.lock().unwrap()[0].mailbox_id, archive.id);
+
+    let inbox_delta = handle_sync_node(&service, one_collection_sync(&inbox_id, &inbox_key)).await;
+    assert_eq!(
+        only_sync_collection(&inbox_delta, &inbox_id)
+            .child("Commands")
+            .unwrap()
+            .child("Delete")
+            .unwrap()
+            .child("ServerId")
+            .unwrap()
+            .text_value(),
+        message_id.to_string()
+    );
+    let archive_delta =
+        handle_sync_node(&service, one_collection_sync(&archive_id, &archive_key)).await;
+    assert_eq!(
+        only_sync_collection(&archive_delta, &archive_id)
+            .child("Commands")
+            .unwrap()
+            .child("Add")
+            .unwrap()
+            .child("ServerId")
+            .unwrap()
+            .text_value(),
+        message_id.to_string()
+    );
+}
+
+#[tokio::test]
+async fn sync_delete_moves_message_to_trash_by_default() {
+    let inbox = FakeStore::inbox_mailbox();
+    let trash = FakeStore::mailbox(
+        "77777777-7777-7777-7777-777777777777",
+        "trash",
+        "Trash",
+        30,
+        None,
+    );
+    let message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone(), trash.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "Delete me",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let inbox_id = inbox.id.to_string();
+    let trash_id = trash.id.to_string();
+    let first_inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, "0")).await,
+        &inbox_id,
+    );
+    let inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, &first_inbox_key)).await,
+        &inbox_id,
+    );
+    let trash_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&trash_id, "0")).await,
+        &trash_id,
+    );
+
+    let mut request = one_collection_sync(&inbox_id, &inbox_key);
+    let mut commands = WbxmlNode::new(0, "Commands");
+    let mut delete = WbxmlNode::new(0, "Delete");
+    delete.push(WbxmlNode::with_text(0, "ServerId", message_id.to_string()));
+    commands.push(delete);
+    request.children[0].children[0].push(commands);
+
+    let delete_response = handle_sync_node(&service, request).await;
+    assert_eq!(store.emails.lock().unwrap()[0].mailbox_id, trash.id);
+    assert!(only_sync_collection(&delete_response, &inbox_id)
+        .child("Commands")
+        .unwrap()
+        .child("Delete")
+        .is_some());
+    let trash_delta = handle_sync_node(&service, one_collection_sync(&trash_id, &trash_key)).await;
+    assert!(only_sync_collection(&trash_delta, &trash_id)
+        .child("Commands")
+        .unwrap()
+        .child("Add")
+        .is_some());
+}
+
+#[tokio::test]
+async fn sync_change_updates_read_state_and_round_trips() {
+    let inbox = FakeStore::inbox_mailbox();
+    let message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+            "11111111-1111-1111-1111-111111111111",
+            inbox.id,
+            "inbox",
+            "Read me",
+        )])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let inbox_id = inbox.id.to_string();
+    let first_inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, "0")).await,
+        &inbox_id,
+    );
+    let inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, &first_inbox_key)).await,
+        &inbox_id,
+    );
+
+    let mut request = one_collection_sync(&inbox_id, &inbox_key);
+    let mut commands = WbxmlNode::new(0, "Commands");
+    let mut change = WbxmlNode::new(0, "Change");
+    change.push(WbxmlNode::with_text(0, "ServerId", message_id.to_string()));
+    let mut app_data = WbxmlNode::new(0, "ApplicationData");
+    app_data.push(WbxmlNode::with_text(2, "Read", "1"));
+    change.push(app_data);
+    commands.push(change);
+    request.children[0].children[0].push(commands);
+
+    let response = handle_sync_node(&service, request).await;
+    assert!(!store.emails.lock().unwrap()[0].unread);
+    let app_data = only_sync_collection(&response, &inbox_id)
+        .child("Commands")
+        .unwrap()
+        .child("Change")
+        .unwrap()
+        .child("ApplicationData")
+        .unwrap();
+    assert_eq!(app_data.child("Read").unwrap().text_value(), "1");
+}
+
+#[tokio::test]
+async fn sync_respects_body_preference_for_html_text_and_mime() {
+    let inbox = FakeStore::inbox_mailbox();
+    let message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let mut email = FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "Body",
+    );
+    email.body_text = "plain text body".to_string();
+    email.body_html_sanitized = Some("<p>html body</p>".to_string());
+    let raw = b"Subject: Body\r\n\r\nplain text body".to_vec();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![email])),
+        raw_message_blobs: Arc::new(Mutex::new(HashMap::from([(message_id, raw.clone())]))),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let inbox_id = inbox.id.to_string();
+    let first_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, "0")).await,
+        &inbox_id,
+    );
+
+    let mut html_request = one_collection_sync(&inbox_id, &first_key);
+    let mut options = WbxmlNode::new(0, "Options");
+    let mut body_preference = WbxmlNode::new(17, "BodyPreference");
+    body_preference.push(WbxmlNode::with_text(17, "Type", "2"));
+    options.push(body_preference);
+    html_request.children[0].children[0].push(options);
+    let html_response = handle_sync_node(&service, html_request).await;
+    let body = only_sync_collection(&html_response, &inbox_id)
+        .child("Commands")
+        .unwrap()
+        .child("Add")
+        .unwrap()
+        .child("ApplicationData")
+        .unwrap()
+        .child("Body")
+        .unwrap();
+    assert_eq!(body.child("Type").unwrap().text_value(), "2");
+    assert_eq!(body.child("Data").unwrap().text_value(), "<p>html body</p>");
+
+    let second_key = only_sync_collection(&html_response, &inbox_id)
+        .child("SyncKey")
+        .unwrap()
+        .text_value()
+        .to_string();
+    store.emails.lock().unwrap()[0].subject = "Body text changed".to_string();
+    let mut text_request = one_collection_sync(&inbox_id, &second_key);
+    let mut options = WbxmlNode::new(0, "Options");
+    let mut body_preference = WbxmlNode::new(17, "BodyPreference");
+    body_preference.push(WbxmlNode::with_text(17, "Type", "1"));
+    body_preference.push(WbxmlNode::with_text(17, "TruncationSize", "5"));
+    options.push(body_preference);
+    text_request.children[0].children[0].push(options);
+    let text_response = handle_sync_node(&service, text_request).await;
+    let body = only_sync_collection(&text_response, &inbox_id)
+        .child("Commands")
+        .unwrap()
+        .child("Change")
+        .unwrap()
+        .child("ApplicationData")
+        .unwrap()
+        .child("Body")
+        .unwrap();
+    assert_eq!(body.child("Type").unwrap().text_value(), "1");
+    assert_eq!(body.child("Data").unwrap().text_value(), "plain");
+    assert_eq!(body.child("Truncated").unwrap().text_value(), "1");
+
+    let third_key = only_sync_collection(&text_response, &inbox_id)
+        .child("SyncKey")
+        .unwrap()
+        .text_value()
+        .to_string();
+    store.emails.lock().unwrap()[0].subject = "Body mime changed".to_string();
+    let mut mime_request = one_collection_sync(&inbox_id, &third_key);
+    let mut options = WbxmlNode::new(0, "Options");
+    let mut body_preference = WbxmlNode::new(17, "BodyPreference");
+    body_preference.push(WbxmlNode::with_text(17, "Type", "4"));
+    body_preference.push(WbxmlNode::with_text(17, "TruncationSize", "10"));
+    options.push(body_preference);
+    mime_request.children[0].children[0].push(options);
+    let mime_response = handle_sync_node(&service, mime_request).await;
+    let body = only_sync_collection(&mime_response, &inbox_id)
+        .child("Commands")
+        .unwrap()
+        .child("Change")
+        .unwrap()
+        .child("ApplicationData")
+        .unwrap()
+        .child("Body")
+        .unwrap();
+    assert_eq!(body.child("Type").unwrap().text_value(), "4");
+    assert_eq!(
+        body.child("Data").unwrap().opaque.as_deref(),
+        Some(&raw[..10])
+    );
+    assert_eq!(body.child("Truncated").unwrap().text_value(), "1");
 }
 
 #[tokio::test]

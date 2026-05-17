@@ -35,7 +35,7 @@ use crate::{
         calendar_application_data, collection_window_size, contact_application_data,
         diff_collection_states, diff_snapshots, drafts_collection, email_application_data,
         mail_collection, parse_collection_mailbox_id, require_collection_id,
-        require_sync_collections, snapshot_to_value,
+        require_sync_collections, snapshot_to_value, BodyPreference,
     },
     store::ActiveSyncStore,
     types::{
@@ -148,6 +148,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             "ItemOperations" => {
                 let request = decode_wbxml(body)?;
                 self.handle_item_operations(&principal, &protocol_version, &request)
+                    .await
+            }
+            "MoveItems" => {
+                let request = decode_wbxml(body)?;
+                self.handle_move_items(&principal, &protocol_version, &request)
                     .await
             }
             "Ping" => {
@@ -547,8 +552,12 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             }
         }
 
+        let body_preference = collection_body_preference(collection_node);
         let client_responses = if drafts_collection(&collection) {
             self.apply_draft_sync_commands(principal, &collection, collection_node)
+                .await?
+        } else if mail_collection(&collection) {
+            self.apply_mail_sync_commands(principal, &collection, collection_node)
                 .await?
         } else if collection.class_name == CONTACTS_CLASS {
             self.apply_contact_sync_commands(principal, collection_node)
@@ -622,7 +631,12 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     return Ok(sync_status_node(&collection.id, "3"));
                 }
                 let commands = self
-                    .build_commands(principal.account_id, &collection, &pending_page.0)
+                    .build_commands(
+                        principal.account_id,
+                        &collection,
+                        &pending_page.0,
+                        &body_preference,
+                    )
                     .await?;
                 let more_available = pending_page.1 < previous_state.pending_changes.len();
                 let stored_state = if more_available {
@@ -643,7 +657,12 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     diff_collection_states(&previous_state.collection_state, &final_state);
                 let pending_page = pending_page(&changed_items, 0, window_size);
                 let commands = self
-                    .build_commands(principal.account_id, &collection, &pending_page.0)
+                    .build_commands(
+                        principal.account_id,
+                        &collection,
+                        &pending_page.0,
+                        &body_preference,
+                    )
                     .await?;
                 let more_available = pending_page.1 < changed_items.len();
                 let stored_state = if more_available {
@@ -812,10 +831,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         account_id: Uuid,
         collection: &CollectionDefinition,
         page_changes: &[SnapshotChange],
+        body_preference: &BodyPreference,
     ) -> Result<WbxmlNode> {
         let mut commands = WbxmlNode::new(0, "Commands");
         let item_nodes = self
-            .fetch_collection_nodes(account_id, collection, page_changes)
+            .fetch_collection_nodes(account_id, collection, page_changes, body_preference)
             .await?;
 
         for change in page_changes {
@@ -852,6 +872,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         account_id: Uuid,
         collection: &CollectionDefinition,
         page_changes: &[SnapshotChange],
+        body_preference: &BodyPreference,
     ) -> Result<HashMap<String, WbxmlNode>> {
         let ids = page_changes
             .iter()
@@ -874,9 +895,22 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     .store
                     .fetch_activesync_message_attachments(collection.account_id, email.id)
                     .await?;
+                let mime_blob = if body_preference.body_type == 4 {
+                    self.store
+                        .fetch_jmap_message_blob(collection.account_id, email.id)
+                        .await?
+                } else {
+                    None
+                };
                 nodes.insert(
                     email.id.to_string(),
-                    email_application_data(&email, &attachments).pipe(value_to_wbxml),
+                    email_application_data(
+                        &email,
+                        &attachments,
+                        body_preference,
+                        mime_blob.as_ref(),
+                    )
+                    .pipe(value_to_wbxml),
                 );
             }
         } else if collection.class_name == CONTACTS_CLASS {
@@ -977,6 +1011,136 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    async fn apply_mail_sync_commands(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        collection: &CollectionDefinition,
+        collection_node: &WbxmlNode,
+    ) -> Result<Vec<WbxmlNode>> {
+        let mut responses = Vec::new();
+        let Some(commands) = collection_node.child("Commands") else {
+            return Ok(responses);
+        };
+        let mailbox_id = parse_collection_mailbox_id(collection)?;
+        let deletes_as_moves = collection_deletes_as_moves(collection_node);
+
+        for command in &commands.children {
+            match command.name.as_str() {
+                "Change" => {
+                    let server_id = command
+                        .child("ServerId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .ok_or_else(|| anyhow!("mail change command is missing ServerId"))?;
+                    let message_id = Uuid::parse_str(&server_id)?;
+                    let unread = command
+                        .child("ApplicationData")
+                        .and_then(|application_data| application_data.child("Read"))
+                        .map(|read| read.text_value().trim() != "1");
+                    if let Some(unread) = unread {
+                        self.store
+                            .update_jmap_email_flags(
+                                collection.account_id,
+                                message_id,
+                                Some(unread),
+                                None,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "activesync-update-read-flag".to_string(),
+                                    subject: server_id.clone(),
+                                },
+                            )
+                            .await?;
+                    }
+                    let mut change = WbxmlNode::new(0, "Change");
+                    change.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(change);
+                }
+                "Delete" => {
+                    let server_id = command
+                        .child("ServerId")
+                        .map(|node| node.text_value().trim().to_string())
+                        .ok_or_else(|| anyhow!("mail delete command is missing ServerId"))?;
+                    let message_id = Uuid::parse_str(&server_id)?;
+                    if deletes_as_moves {
+                        if let Some(trash) = self.trash_collection(collection.account_id).await? {
+                            if trash.mailbox_id != Some(mailbox_id) {
+                                self.store
+                                    .move_jmap_email_from_mailbox(
+                                        collection.account_id,
+                                        mailbox_id,
+                                        message_id,
+                                        parse_collection_mailbox_id(&trash)?,
+                                        AuditEntryInput {
+                                            actor: principal.email.clone(),
+                                            action: "activesync-delete-move-to-trash".to_string(),
+                                            subject: format!("message:{server_id}->{}", trash.id),
+                                        },
+                                    )
+                                    .await?;
+                            } else {
+                                self.hard_delete_mail_command(
+                                    principal, collection, mailbox_id, message_id, &server_id,
+                                )
+                                .await?;
+                            }
+                        } else {
+                            self.hard_delete_mail_command(
+                                principal, collection, mailbox_id, message_id, &server_id,
+                            )
+                            .await?;
+                        }
+                    } else {
+                        self.hard_delete_mail_command(
+                            principal, collection, mailbox_id, message_id, &server_id,
+                        )
+                        .await?;
+                    }
+                    let mut delete = WbxmlNode::new(0, "Delete");
+                    delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    responses.push(delete);
+                }
+                "Fetch" => {}
+                _ => {}
+            }
+        }
+
+        Ok(responses)
+    }
+
+    async fn hard_delete_mail_command(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        collection: &CollectionDefinition,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        server_id: &str,
+    ) -> Result<()> {
+        self.store
+            .delete_jmap_email_from_mailbox(
+                collection.account_id,
+                mailbox_id,
+                message_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "activesync-delete-message".to_string(),
+                    subject: server_id.to_string(),
+                },
+            )
+            .await
+    }
+
+    async fn trash_collection(&self, account_id: Uuid) -> Result<Option<CollectionDefinition>> {
+        Ok(self
+            .folder_collections(account_id)
+            .await?
+            .into_iter()
+            .find(|collection| {
+                collection.class_name == MAIL_CLASS && collection.folder_type == "4"
+            }))
     }
 
     async fn apply_draft_sync_commands(
@@ -1456,6 +1620,14 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 .store
                 .fetch_activesync_message_attachments(account_id, email.id)
                 .await?;
+            let body_preference = fetch_body_preference(fetch);
+            let mime_blob = if body_preference.body_type == 4 {
+                self.store
+                    .fetch_jmap_message_blob(account_id, email.id)
+                    .await?
+            } else {
+                None
+            };
             node.push(WbxmlNode::with_text(20, "Status", "1"));
             if let Some(collection_id) = fetch.child("CollectionId") {
                 node.push(WbxmlNode::with_text(
@@ -1466,13 +1638,113 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             }
             node.push(WbxmlNode::with_text(0, "ServerId", email.id.to_string()));
             let mut properties = WbxmlNode::new(20, "Properties");
-            properties.push(email_application_data(&email, &attachments).pipe(value_to_wbxml));
+            properties.push(
+                email_application_data(&email, &attachments, &body_preference, mime_blob.as_ref())
+                    .pipe(value_to_wbxml),
+            );
             node.push(properties);
         } else {
             node.push(WbxmlNode::with_text(20, "Status", "6"));
         }
 
         Ok(node)
+    }
+
+    async fn handle_move_items(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        protocol_version: &str,
+        request: &WbxmlNode,
+    ) -> Result<Response> {
+        if request.name != "MoveItems" {
+            bail!("invalid MoveItems payload");
+        }
+
+        let mut root = WbxmlNode::new(5, "MoveItems");
+        for move_node in request.children_named("Move") {
+            root.push(self.handle_move_item(principal, move_node).await?);
+        }
+        wbxml_response(protocol_version, encode_wbxml(&root))
+    }
+
+    async fn handle_move_item(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        move_node: &WbxmlNode,
+    ) -> Result<WbxmlNode> {
+        let src_msg_id = move_node
+            .child("SrcMsgId")
+            .map(|node| node.text_value().trim().to_string())
+            .unwrap_or_default();
+        let src_fld_id = move_node
+            .child("SrcFldId")
+            .map(|node| node.text_value().trim().to_string())
+            .unwrap_or_default();
+        let dst_fld_id = move_node
+            .child("DstFldId")
+            .map(|node| node.text_value().trim().to_string())
+            .unwrap_or_default();
+        let mut response = WbxmlNode::new(5, "Response");
+        if !src_msg_id.is_empty() {
+            response.push(WbxmlNode::with_text(5, "SrcMsgId", &src_msg_id));
+        }
+
+        let source = self
+            .resolve_collection(principal.account_id, &src_fld_id)
+            .await?;
+        let target = self
+            .resolve_collection(principal.account_id, &dst_fld_id)
+            .await?;
+        let Some(source) = source else {
+            response.push(WbxmlNode::with_text(5, "Status", "1"));
+            return Ok(response);
+        };
+        let Some(target) = target else {
+            response.push(WbxmlNode::with_text(5, "Status", "2"));
+            return Ok(response);
+        };
+        if source.id == target.id {
+            response.push(WbxmlNode::with_text(5, "Status", "4"));
+            return Ok(response);
+        }
+        if !mail_collection(&source)
+            || !mail_collection(&target)
+            || source.account_id != target.account_id
+        {
+            response.push(WbxmlNode::with_text(5, "Status", "1"));
+            return Ok(response);
+        }
+
+        let message_id = match Uuid::parse_str(&src_msg_id) {
+            Ok(message_id) => message_id,
+            Err(_) => {
+                response.push(WbxmlNode::with_text(5, "Status", "1"));
+                return Ok(response);
+            }
+        };
+        let moved = self
+            .store
+            .move_jmap_email_from_mailbox(
+                source.account_id,
+                parse_collection_mailbox_id(&source)?,
+                message_id,
+                parse_collection_mailbox_id(&target)?,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "activesync-move-message".to_string(),
+                    subject: format!("message:{src_msg_id}->{dst_fld_id}"),
+                },
+            )
+            .await;
+
+        match moved {
+            Ok(email) => {
+                response.push(WbxmlNode::with_text(5, "Status", "3"));
+                response.push(WbxmlNode::with_text(5, "DstMsgId", email.id.to_string()));
+            }
+            Err(_) => response.push(WbxmlNode::with_text(5, "Status", "1")),
+        }
+        Ok(response)
     }
 
     async fn handle_ping(
@@ -1636,7 +1908,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 email.mailbox_id.to_string(),
             ));
             properties.push(WbxmlNode::with_text(0, "ServerId", email.id.to_string()));
-            properties.push(email_application_data(&email, &attachments).pipe(value_to_wbxml));
+            properties.push(
+                email_application_data(&email, &attachments, &BodyPreference::default(), None)
+                    .pipe(value_to_wbxml),
+            );
             properties.push(WbxmlNode::with_text(
                 17,
                 "Preview",
@@ -1895,6 +2170,50 @@ fn push_folder_metadata(node: &mut WbxmlNode, collection: &CollectionDefinition)
         &collection.display_name,
     ));
     node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
+}
+
+fn collection_body_preference(collection_node: &WbxmlNode) -> BodyPreference {
+    collection_node
+        .child("Options")
+        .map(options_body_preference)
+        .unwrap_or_default()
+}
+
+fn fetch_body_preference(fetch_node: &WbxmlNode) -> BodyPreference {
+    fetch_node
+        .child("Options")
+        .map(options_body_preference)
+        .unwrap_or_default()
+}
+
+fn options_body_preference(options: &WbxmlNode) -> BodyPreference {
+    options
+        .children_named("BodyPreference")
+        .into_iter()
+        .filter_map(|preference| {
+            let body_type = preference
+                .child("Type")
+                .and_then(|node| node.text_value().trim().parse::<u8>().ok())?;
+            let truncation_size = preference
+                .child("TruncationSize")
+                .and_then(|node| node.text_value().trim().parse::<usize>().ok());
+            Some(BodyPreference {
+                body_type,
+                truncation_size,
+            })
+        })
+        .find(|preference| matches!(preference.body_type, 1 | 2 | 4))
+        .unwrap_or_default()
+}
+
+fn collection_deletes_as_moves(collection_node: &WbxmlNode) -> bool {
+    collection_node
+        .child("DeletesAsMoves")
+        .map(|node| {
+            let value = node.text_value().trim();
+            value.is_empty() || value == "1" || value.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(true)
 }
 
 fn hierarchy_generation(collections: &[CollectionDefinition]) -> String {

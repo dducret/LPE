@@ -2,9 +2,9 @@ use anyhow::Result;
 use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncItemState, ActiveSyncSyncState,
-    AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox, MailboxAccountAccess,
-    SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput,
+    AuditEntryInput, ClientContact, ClientEvent, JmapEmail, JmapMailbox, JmapUploadBlob,
+    MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -54,6 +54,34 @@ pub trait ActiveSyncStore: AccountAuthStore {
         account_id: Uuid,
         id: Uuid,
     ) -> StoreFuture<'a, Option<JmapEmail>>;
+    fn fetch_jmap_message_blob<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Option<JmapUploadBlob>>;
+    fn move_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+    fn delete_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+    fn update_jmap_email_flags<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
     fn fetch_activesync_message_attachments<'a>(
         &'a self,
         account_id: Uuid,
@@ -227,6 +255,61 @@ impl ActiveSyncStore for Storage {
         id: Uuid,
     ) -> StoreFuture<'a, Option<JmapEmail>> {
         Box::pin(async move { self.fetch_jmap_draft(account_id, id).await })
+    }
+
+    fn fetch_jmap_message_blob<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+    ) -> StoreFuture<'a, Option<JmapUploadBlob>> {
+        Box::pin(async move { self.fetch_jmap_message_blob(account_id, message_id).await })
+    }
+
+    fn move_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_mailbox_id: Uuid,
+        message_id: Uuid,
+        target_mailbox_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.move_jmap_email_from_mailbox(
+                account_id,
+                source_mailbox_id,
+                message_id,
+                target_mailbox_id,
+                audit,
+            )
+            .await
+        })
+    }
+
+    fn delete_jmap_email_from_mailbox<'a>(
+        &'a self,
+        account_id: Uuid,
+        mailbox_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_jmap_email_from_mailbox(account_id, mailbox_id, message_id, audit)
+                .await
+        })
+    }
+
+    fn update_jmap_email_flags<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        unread: Option<bool>,
+        flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.update_jmap_email_flags(account_id, message_id, unread, flagged, audit)
+                .await
+        })
     }
 
     fn fetch_activesync_message_attachments<'a>(

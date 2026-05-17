@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
-use lpe_storage::{ActiveSyncAttachment, ClientContact, ClientEvent, JmapEmail};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use lpe_storage::{ActiveSyncAttachment, ClientContact, ClientEvent, JmapEmail, JmapUploadBlob};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -11,9 +12,26 @@ use crate::{
     wbxml::WbxmlNode,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BodyPreference {
+    pub(crate) body_type: u8,
+    pub(crate) truncation_size: Option<usize>,
+}
+
+impl Default for BodyPreference {
+    fn default() -> Self {
+        Self {
+            body_type: 1,
+            truncation_size: None,
+        }
+    }
+}
+
 pub(crate) fn email_application_data(
     email: &JmapEmail,
     attachments: &[ActiveSyncAttachment],
+    body_preference: &BodyPreference,
+    mime_blob: Option<&JmapUploadBlob>,
 ) -> Value {
     let to = email
         .to
@@ -38,16 +56,7 @@ pub(crate) fn email_application_data(
         json!({"page": 2, "name": "Importance", "text": "1"}),
         json!({"page": 2, "name": "MessageClass", "text": "IPM.Note"}),
         json!({"page": 2, "name": "DateReceived", "text": activesync_timestamp(email.sent_at.as_deref().unwrap_or(&email.received_at))}),
-        json!({
-            "page": 17,
-            "name": "Body",
-            "children": [
-                {"page": 17, "name": "Type", "text": "1"},
-                {"page": 17, "name": "EstimatedDataSize", "text": email.body_text.len().to_string()},
-                {"page": 17, "name": "Data", "text": email.body_text},
-                {"page": 17, "name": "Truncated", "text": "0"}
-            ]
-        }),
+        email_body_value(email, body_preference, mime_blob),
     ];
 
     if !attachments.is_empty() {
@@ -74,6 +83,51 @@ pub(crate) fn email_application_data(
         "name": "ApplicationData",
         "children": children,
     })
+}
+
+fn email_body_value(
+    email: &JmapEmail,
+    body_preference: &BodyPreference,
+    mime_blob: Option<&JmapUploadBlob>,
+) -> Value {
+    let (body_type, bytes) = match body_preference.body_type {
+        2 => match email.body_html_sanitized.as_ref() {
+            Some(html) => (2, html.as_bytes().to_vec()),
+            None => (1, email.body_text.as_bytes().to_vec()),
+        },
+        4 => match mime_blob {
+            Some(blob) => (4, blob.blob_bytes.clone()),
+            None => (1, email.body_text.as_bytes().to_vec()),
+        },
+        _ => (1, email.body_text.as_bytes().to_vec()),
+    };
+    let estimated_size = bytes.len();
+    let (data, truncated) = truncate_body_bytes(&bytes, body_preference.truncation_size);
+    let data_node = if body_type == 4 {
+        json!({"page": 17, "name": "Data", "opaque_base64": BASE64.encode(data)})
+    } else {
+        json!({"page": 17, "name": "Data", "text": String::from_utf8_lossy(&data)})
+    };
+    json!({
+        "page": 17,
+        "name": "Body",
+        "children": [
+            {"page": 17, "name": "Type", "text": body_type.to_string()},
+            {"page": 17, "name": "EstimatedDataSize", "text": estimated_size.to_string()},
+            data_node,
+            {"page": 17, "name": "Truncated", "text": if truncated { "1" } else { "0" }}
+        ]
+    })
+}
+
+fn truncate_body_bytes(bytes: &[u8], truncation_size: Option<usize>) -> (Vec<u8>, bool) {
+    let Some(limit) = truncation_size else {
+        return (bytes.to_vec(), false);
+    };
+    if bytes.len() <= limit {
+        return (bytes.to_vec(), false);
+    }
+    (bytes[..limit].to_vec(), true)
 }
 
 pub(crate) fn contact_application_data(contact: &ClientContact) -> Value {
@@ -238,6 +292,10 @@ pub(crate) fn value_to_node(data: &serde_json::Map<String, Value>) -> WbxmlNode 
         .get("text")
         .and_then(Value::as_str)
         .map(ToString::to_string);
+    node.opaque = data
+        .get("opaque_base64")
+        .and_then(Value::as_str)
+        .and_then(|value| BASE64.decode(value).ok());
     if let Some(Value::Array(children)) = data.get("children") {
         for child in children {
             if let Some(object) = child.as_object() {
