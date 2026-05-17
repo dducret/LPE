@@ -3036,7 +3036,7 @@ where
                 }) => {
                     let uploaded_bytes = state_upload_buffer.len();
                     let may_use_incremental = *client_state_uploaded_bytes == 0;
-                    commit_uploaded_sync_state(state, state_upload_buffer);
+                    state_upload_buffer.clear();
                     *client_state_uploaded_bytes =
                         (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
                     let mut selected_checkpoint_delta = false;
@@ -3117,8 +3117,15 @@ where
                 output_handles.push(handle);
             }
             0x82 => {
-                let Some((folder_id, mailbox_id, checkpoint_kind, sync_type, state)) =
-                    synchronization_context_state(input_object(session, &handle_slots, &request))
+                let Some((
+                    folder_id,
+                    mailbox_id,
+                    checkpoint_kind,
+                    checkpoint_change_sequence,
+                    checkpoint_modseq,
+                    sync_type,
+                    state,
+                )) = synchronization_context_state(input_object(session, &handle_slots, &request))
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x82,
@@ -3127,7 +3134,7 @@ where
                     ));
                     continue;
                 };
-                let transfer_buffer = if state.is_empty() {
+                let transfer_buffer = if state.is_empty() && matches!(sync_type, 0x01 | 0x02) {
                     let sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
                     let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                     let sync_attachment_facts =
@@ -3148,8 +3155,8 @@ where
                         folder_id,
                         mailbox_id,
                         checkpoint_kind,
-                        checkpoint_change_sequence: 0,
-                        checkpoint_modseq: 1,
+                        checkpoint_change_sequence,
+                        checkpoint_modseq,
                         sync_type,
                         state: transfer_buffer.clone(),
                         state_upload_buffer: Vec::new(),
