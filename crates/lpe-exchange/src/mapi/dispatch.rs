@@ -88,8 +88,25 @@ where
         );
     }
     let rop_fingerprint = mapi_payload_fingerprint(&execute.rop_buffer);
+    let request_debug = summarize_request_rop_buffer(&execute.rop_buffer);
+    let hierarchy_completed_before_execute = session.hierarchy_sync_completed();
     if let Some(cached) = session.completed_execute_requests.get(request_id).cloned() {
         if cached.rop_fingerprint == rop_fingerprint {
+            if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+                session.record_execute_after_hierarchy_completion(&request_debug.ids);
+            }
+            let cached_rop_buffer = execute_success_rop_buffer(&cached.response_body);
+            log_execute_rop_debug(
+                endpoint,
+                principal,
+                headers,
+                &session_id,
+                request_id,
+                &request_debug,
+                &execute.rop_buffer,
+                cached_rop_buffer.unwrap_or_default(),
+                &session,
+            );
             store_session(session_id.clone(), session);
             return mapi_response_with_cookies(
                 "Execute",
@@ -136,12 +153,19 @@ where
         &execute.rop_buffer,
     )
     .await;
+    if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+        session.record_execute_after_hierarchy_completion(&request_debug.ids);
+    }
     log_execute_rop_debug(
         endpoint,
         principal,
+        headers,
+        &session_id,
         request_id,
+        &request_debug,
         &execute.rop_buffer,
         &rop_buffer,
+        &session,
     );
     let response_body = execute_success_body(rop_buffer, Vec::new());
     cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
@@ -170,6 +194,15 @@ pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteReque
     Ok(ExecuteRequest { rop_buffer })
 }
 
+fn execute_success_rop_buffer(body: &[u8]) -> Option<&[u8]> {
+    let mut cursor = Cursor::new(body);
+    cursor.read_u32().ok()?;
+    cursor.read_u32().ok()?;
+    cursor.read_u32().ok()?;
+    let rop_buffer_size = cursor.read_u32().ok()? as usize;
+    cursor.read_bytes(rop_buffer_size).ok()
+}
+
 const MAX_ROP_DEBUG_ENTRIES: usize = 32;
 
 #[derive(Debug, Default)]
@@ -177,6 +210,7 @@ struct RopRequestDebugSummary {
     ids: Vec<u8>,
     ids_csv: String,
     handle_count: usize,
+    handle_table_summary: String,
     extended: bool,
     parse_error: String,
 }
@@ -187,6 +221,7 @@ struct RopResponseDebugSummary {
     results_csv: String,
     count: usize,
     handle_count: usize,
+    handle_table_summary: String,
     extended: bool,
     parse_error: String,
 }
@@ -208,17 +243,24 @@ struct LogonResponseDebugSummary {
 fn log_execute_rop_debug(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    session_id: &str,
     request_id: &str,
+    request: &RopRequestDebugSummary,
     request_rop_buffer: &[u8],
     response_rop_buffer: &[u8],
+    session: &MapiSession,
 ) {
-    let request = summarize_request_rop_buffer(request_rop_buffer);
     let response = summarize_response_rop_buffer(response_rop_buffer, &request.ids);
     let logon = summarize_logon_response_rop(response_rop_buffer, &request.ids);
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let post_hierarchy = post_hierarchy_action_summary(session, false);
     let message = "rca debug mapi execute rops";
 
     tracing::info!(
@@ -229,18 +271,29 @@ fn log_execute_rop_debug(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
+        session_context_id = %session_id,
         mapi_request_id = request_id,
+        client_request_id = %client_request_id,
+        client_info = %client_info,
+        client_application = %client_application,
         request_rop_ids = %request.ids_csv,
         request_rop_count = request.ids.len(),
         request_handle_count = request.handle_count,
+        input_handle_table_summary = %request.handle_table_summary,
         request_extended_rop_buffer = request.extended,
         request_rop_parse_error = %request.parse_error,
         response_rop_ids = %response.ids_csv,
         response_rop_results_best_effort = %response.results_csv,
         response_rop_count = response.count,
         response_handle_count = response.handle_count,
+        output_handle_table_summary = %response.handle_table_summary,
         response_extended_rop_buffer = response.extended,
         response_rop_parse_error = %response.parse_error,
+        last_completed_hierarchy_sync_root = %post_hierarchy.last_completed_hierarchy_sync_root,
+        content_sync_started_after_hierarchy =
+            post_hierarchy.content_sync_configure_observed,
+        post_hierarchy_execute_count = post_hierarchy.execute_count,
+        post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
         logon_response_present = logon.present,
         logon_output_handle_index = %logon.output_handle_index,
         logon_error_code = %logon.error_code,
@@ -266,7 +319,9 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
         summary.parse_error = "invalid ROP buffer".to_string();
         return summary;
     };
-    summary.handle_count = handle_table_count(handle_table, &mut summary.parse_error);
+    let handle_summary = summarize_handle_table(handle_table, &mut summary.parse_error);
+    summary.handle_count = handle_summary.0;
+    summary.handle_table_summary = handle_summary.1;
 
     let mut cursor = Cursor::new(requests);
     while cursor.remaining() > 0 && summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
@@ -294,7 +349,9 @@ fn summarize_response_rop_buffer(
         summary.parse_error = "invalid ROP buffer".to_string();
         return summary;
     };
-    summary.handle_count = handle_table_count(handle_table, &mut summary.parse_error);
+    let handle_summary = summarize_handle_table(handle_table, &mut summary.parse_error);
+    summary.handle_count = handle_summary.0;
+    summary.handle_table_summary = handle_summary.1;
 
     let mut offset = 0usize;
     let mut ids = Vec::new();
@@ -401,12 +458,29 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         .join("")
 }
 
-fn handle_table_count(handle_table: &[u8], parse_error: &mut String) -> usize {
+fn summarize_handle_table(handle_table: &[u8], parse_error: &mut String) -> (usize, String) {
     match read_handle_table(handle_table) {
-        Ok(handles) => handles.len(),
+        Ok(handles) => {
+            let handles_csv = handles
+                .iter()
+                .map(|handle| format!("0x{handle:08x}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                handles.len(),
+                format!("count={};handles={handles_csv}", handles.len()),
+            )
+        }
         Err(error) => {
             *parse_error = error.to_string();
-            handle_table.len() / 4
+            let count = handle_table.len() / 4;
+            (
+                count,
+                format!(
+                    "invalid;bytes={};best_effort_count={count}",
+                    handle_table.len()
+                ),
+            )
         }
     }
 }
@@ -475,8 +549,18 @@ where
             }
         };
         let typed_request = request.typed();
+        let mut completed_hierarchy_sync_root = None;
+        let mut content_sync_configure_observed = false;
         match typed_request.rop_id() {
-            0x01 => release_handle_slot(session, &mut handle_slots, &request),
+            0x01 => {
+                if matches!(
+                    input_object(session, &handle_slots, &request),
+                    Some(MapiObject::Logon)
+                ) {
+                    session.record_logoff_after_hierarchy_completion();
+                }
+                release_handle_slot(session, &mut handle_slots, &request);
+            }
             0x02 => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
                 let handle = session.allocate_output_handle(
@@ -2732,6 +2816,7 @@ where
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_synchronization_configure_response(&request));
                 output_handles.push(handle);
+                content_sync_configure_observed = sync_type == 0x01;
             }
             0x4B => {
                 let Some(folder_id) =
@@ -2849,6 +2934,9 @@ where
                         transfer_position,
                     );
                     let completed = *transfer_position >= transfer_buffer.len();
+                    if completed && *sync_type == 0x02 {
+                        completed_hierarchy_sync_root = Some(*folder_id);
+                    }
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -3768,6 +3856,12 @@ where
                 rop_id,
                 request.response_handle_index(),
             )),
+        }
+        if let Some(sync_root_folder_id) = completed_hierarchy_sync_root {
+            session.record_completed_hierarchy_sync(sync_root_folder_id);
+        }
+        if content_sync_configure_observed {
+            session.record_content_sync_configure();
         }
         if typed_request.unsupported_is_terminal() {
             break;

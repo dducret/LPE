@@ -7,6 +7,8 @@ use super::sync::*;
 use super::transport::*;
 use super::*;
 
+const MAX_POST_HIERARCHY_ROP_IDS: usize = 64;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) endpoint: MapiEndpoint,
@@ -25,12 +27,23 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) pending_notifications: VecDeque<MapiNotificationEvent>,
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
+    pub(in crate::mapi) post_hierarchy_actions: PostHierarchyActionState,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct CachedExecuteResponse {
     pub(in crate::mapi) rop_fingerprint: u64,
     pub(in crate::mapi) response_body: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::mapi) struct PostHierarchyActionState {
+    pub(in crate::mapi) last_completed_hierarchy_sync_root: Option<u64>,
+    pub(in crate::mapi) execute_count: usize,
+    pub(in crate::mapi) rop_ids_seen: Vec<u8>,
+    pub(in crate::mapi) content_sync_configure_observed: bool,
+    pub(in crate::mapi) release_client_initiated: bool,
+    pub(in crate::mapi) logoff_client_initiated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -296,6 +309,7 @@ pub(in crate::mapi) fn create_session(
         pending_notifications: VecDeque::new(),
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
+        post_hierarchy_actions: PostHierarchyActionState::default(),
     };
     let mut guard = sessions()
         .lock()
@@ -542,6 +556,45 @@ impl MapiSession {
 
     pub(in crate::mapi) fn take_pending_notification(&mut self) -> Option<MapiNotificationEvent> {
         self.pending_notifications.pop_front()
+    }
+
+    pub(in crate::mapi) fn hierarchy_sync_completed(&self) -> bool {
+        self.post_hierarchy_actions
+            .last_completed_hierarchy_sync_root
+            .is_some()
+    }
+
+    pub(in crate::mapi) fn record_completed_hierarchy_sync(&mut self, sync_root_folder_id: u64) {
+        self.post_hierarchy_actions
+            .last_completed_hierarchy_sync_root = Some(sync_root_folder_id);
+    }
+
+    pub(in crate::mapi) fn record_content_sync_configure(&mut self) {
+        self.post_hierarchy_actions.content_sync_configure_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_logoff_after_hierarchy_completion(&mut self) {
+        if self.hierarchy_sync_completed() {
+            self.post_hierarchy_actions.logoff_client_initiated = true;
+        }
+    }
+
+    pub(in crate::mapi) fn record_execute_after_hierarchy_completion(&mut self, rop_ids: &[u8]) {
+        if !self.hierarchy_sync_completed() {
+            return;
+        }
+        self.post_hierarchy_actions.execute_count =
+            self.post_hierarchy_actions.execute_count.saturating_add(1);
+        for rop_id in rop_ids.iter().copied() {
+            if self.post_hierarchy_actions.rop_ids_seen.len() < MAX_POST_HIERARCHY_ROP_IDS
+                && !self.post_hierarchy_actions.rop_ids_seen.contains(&rop_id)
+            {
+                self.post_hierarchy_actions.rop_ids_seen.push(rop_id);
+            }
+        }
+        if rop_ids.contains(&0x01) {
+            self.post_hierarchy_actions.release_client_initiated = true;
+        }
     }
 
     pub(in crate::mapi) fn property_id_for_name(

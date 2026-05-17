@@ -624,6 +624,10 @@ fn log_mapi_session_disconnect(
         .count();
     let outlook_hierarchy_without_content_candidates =
         outlook_hierarchy_without_content_warning_candidates(endpoint, request_type, session);
+    let post_hierarchy_summary = post_hierarchy_action_summary(
+        session,
+        endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect",
+    );
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
 
@@ -653,6 +657,18 @@ fn log_mapi_session_disconnect(
         total_transfer_position_bytes,
         completed_hierarchy_without_content_sync =
             completed_hierarchy_sync_source_count > 0 && content_sync_source_count == 0,
+        post_hierarchy_execute_count = post_hierarchy_summary.execute_count,
+        post_hierarchy_rop_ids_seen = %post_hierarchy_summary.rop_ids_seen,
+        post_hierarchy_content_sync_configure_observed =
+            post_hierarchy_summary.content_sync_configure_observed,
+        post_hierarchy_release_client_initiated =
+            post_hierarchy_summary.release_client_initiated,
+        post_hierarchy_logoff_client_initiated =
+            post_hierarchy_summary.logoff_client_initiated,
+        post_hierarchy_disconnect_client_initiated =
+            post_hierarchy_summary.disconnect_client_initiated,
+        post_hierarchy_last_completed_sync_root =
+            %post_hierarchy_summary.last_completed_hierarchy_sync_root,
         sync_source_summaries = %sync_source_summaries,
         "rca debug mapi session disconnect"
     );
@@ -698,6 +714,45 @@ struct OutlookHierarchyWithoutContentWarningCandidate {
     transfer_buffer_bytes: usize,
     transfer_position_bytes: usize,
     transfer_remaining_bytes: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
+    pub(in crate::mapi) execute_count: usize,
+    pub(in crate::mapi) rop_ids_seen: String,
+    pub(in crate::mapi) content_sync_configure_observed: bool,
+    pub(in crate::mapi) release_client_initiated: bool,
+    pub(in crate::mapi) logoff_client_initiated: bool,
+    pub(in crate::mapi) disconnect_client_initiated: bool,
+    pub(in crate::mapi) last_completed_hierarchy_sync_root: String,
+}
+
+pub(in crate::mapi) fn post_hierarchy_action_summary(
+    session: &MapiSession,
+    disconnect_client_initiated: bool,
+) -> PostHierarchyActionDebugSummary {
+    let actions = &session.post_hierarchy_actions;
+    PostHierarchyActionDebugSummary {
+        execute_count: actions.execute_count,
+        rop_ids_seen: format_rop_ids_for_debug(&actions.rop_ids_seen),
+        content_sync_configure_observed: actions.content_sync_configure_observed,
+        release_client_initiated: actions.release_client_initiated,
+        logoff_client_initiated: actions.logoff_client_initiated,
+        disconnect_client_initiated: disconnect_client_initiated
+            && actions.last_completed_hierarchy_sync_root.is_some(),
+        last_completed_hierarchy_sync_root: actions
+            .last_completed_hierarchy_sync_root
+            .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_default(),
+    }
+}
+
+fn format_rop_ids_for_debug(rop_ids: &[u8]) -> String {
+    rop_ids
+        .iter()
+        .map(|rop_id| format!("0x{rop_id:02x}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn outlook_hierarchy_without_content_warning_candidates(
@@ -1447,6 +1502,7 @@ mod tests {
             pending_notifications: VecDeque::new(),
             completed_execute_requests: HashMap::new(),
             completed_execute_request_order: VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
         }
     }
 
@@ -1581,6 +1637,45 @@ mod tests {
             &session,
         )
         .is_empty());
+    }
+
+    #[test]
+    fn post_hierarchy_action_summary_stays_empty_before_completed_hierarchy() {
+        let mut session = test_session(HashMap::new());
+
+        session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
+        let summary = post_hierarchy_action_summary(&session, true);
+
+        assert_eq!(summary.execute_count, 0);
+        assert_eq!(summary.rop_ids_seen, "");
+        assert!(!summary.content_sync_configure_observed);
+        assert!(!summary.release_client_initiated);
+        assert!(!summary.logoff_client_initiated);
+        assert!(!summary.disconnect_client_initiated);
+        assert_eq!(summary.last_completed_hierarchy_sync_root, "");
+    }
+
+    #[test]
+    fn post_hierarchy_action_summary_records_execute_rops_and_client_actions() {
+        let mut session = test_session(HashMap::new());
+
+        session.record_completed_hierarchy_sync(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+        session.record_execute_after_hierarchy_completion(&[0x02, 0x70, 0x4e]);
+        session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
+        session.record_content_sync_configure();
+        session.record_logoff_after_hierarchy_completion();
+        let summary = post_hierarchy_action_summary(&session, true);
+
+        assert_eq!(summary.execute_count, 2);
+        assert_eq!(summary.rop_ids_seen, "0x02,0x70,0x4e,0x01");
+        assert!(summary.content_sync_configure_observed);
+        assert!(summary.release_client_initiated);
+        assert!(summary.logoff_client_initiated);
+        assert!(summary.disconnect_client_initiated);
+        assert_eq!(
+            summary.last_completed_hierarchy_sync_root,
+            format!("0x{:016x}", crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        );
     }
 }
 
