@@ -153,6 +153,34 @@ render_template() {
   perl -e "${perl_script}" "$@" < "${template_file}" > "${output_file}"
 }
 
+mapi_identity_key_constraint_count() {
+  local database_url="$1"
+
+  psql "${database_url}" -v ON_ERROR_STOP=1 -At <<'SQL'
+SELECT COUNT(*)::int
+FROM pg_constraint c
+JOIN pg_class r ON r.oid = c.conrelid
+JOIN pg_namespace n ON n.oid = r.relnamespace
+WHERE n.nspname = 'public'
+  AND r.relname = 'mapi_object_identities'
+  AND c.contype = 'c'
+  AND (
+    (
+      c.conname = 'mapi_object_identities_source_key_check'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(source_key) = 22%'
+    )
+    OR (
+      c.conname = 'mapi_object_identities_change_key_check'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(change_key) = 22%'
+    )
+    OR (
+      c.conname = 'mapi_object_identities_instance_key_check'
+      AND pg_get_constraintdef(c.oid) LIKE '%octet_length(instance_key) = 22%'
+    )
+  );
+SQL
+}
+
 normalize_yes_no() {
   local value
   value="$(trim "${1-}")"

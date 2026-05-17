@@ -102,6 +102,12 @@ expected_schema_version="$(
 [[ "$schema_version" == "$expected_schema_version" ]] || fail "Unexpected schema version: $schema_version; expected $expected_schema_version"
 pass "Schema version is $expected_schema_version"
 
+mapi_identity_constraint_count="$(mapi_identity_key_constraint_count "$DATABASE_URL")" \
+  || fail "Unable to inspect MAPI identity key constraints"
+[[ "$mapi_identity_constraint_count" == "3" ]] \
+  || fail "MAPI identity key constraints do not match the current 22-byte schema. Run /opt/lpe/src/installation/debian-trixie/repair-mapi-identity-keys.sh or intentionally reset the schema with init-schema.sh."
+pass "MAPI identity key constraints match the current 22-byte schema"
+
 check_http_json_field "$HTTP_BASE/health" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/live" '"status":"ok"'
 check_http_json_field "$HTTP_BASE/health/ready" '"status":"ready"'

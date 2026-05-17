@@ -105,6 +105,21 @@ if ! ensure_database_url; then
   exit 1
 fi
 
+if ! command -v psql >/dev/null 2>&1; then
+  echo "psql executable not found. Install PostgreSQL client tools before updating LPE." >&2
+  exit 1
+fi
+
+MAPI_IDENTITY_CONSTRAINT_COUNT="$(mapi_identity_key_constraint_count "${DATABASE_URL}")" || {
+  echo "Unable to inspect MAPI identity key constraints. Run init-schema.sh for a fresh deployment or repair the database before updating." >&2
+  exit 1
+}
+if [[ "${MAPI_IDENTITY_CONSTRAINT_COUNT}" != "3" ]]; then
+  echo "MAPI identity key constraints do not match the current 22-byte schema." >&2
+  echo "Run ${SRC_DIR}/installation/debian-trixie/repair-mapi-identity-keys.sh before update-lpe.sh, or intentionally reset the schema with init-schema.sh." >&2
+  exit 1
+fi
+
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"
 validate_host_port "${LPE_IMAP_BIND_ADDRESS}" \

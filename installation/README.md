@@ -335,6 +335,7 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, and restarts the service when the installed database already matches the current schema
+- `update-lpe.sh` refuses to continue when the installed MAPI identity key constraints still use an older shape; run `repair-mapi-identity-keys.sh` for that specific 22-byte key repair, or use `init-schema.sh` only for an intentional reset
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
@@ -759,7 +760,7 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` rebuilds and redeploys code and web assets. It does not apply schema migrations; for an intentional fresh schema reset, run `init-schema.sh` explicitly.
+`update-lpe.sh` rebuilds and redeploys code and web assets. It does not apply general schema migrations; for an intentional fresh schema reset, run `init-schema.sh` explicitly. If `check-lpe.sh` reports that `mapi_object_identities` still has older MAPI identity key constraints, run `repair-mapi-identity-keys.sh` once before retrying Outlook MAPI/HTTP profile creation.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
