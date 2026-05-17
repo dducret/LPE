@@ -6,8 +6,9 @@ use lpe_magika::{
 };
 use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
-    ActiveSyncItemState, AuditEntryInput, SubmitMessageInput, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput,
+    calendar_attendee_labels, serialize_calendar_participants_metadata, ActiveSyncItemState,
+    AuditEntryInput, CalendarParticipantMetadata, CalendarParticipantsMetadata, SubmitMessageInput,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -2533,25 +2534,28 @@ fn parse_contact_input(
         .or_else(|| existing.map(|contact| contact.email.clone()))
         .unwrap_or_default();
     let phone = field_text(application_data, "MobilePhoneNumber")
+        .or_else(|| field_text(application_data, "BusinessPhoneNumber"))
         .or_else(|| field_text(application_data, "HomePhoneNumber"))
         .or_else(|| existing.map(|contact| contact.phone.clone()))
+        .unwrap_or_default();
+    let notes = body_text(application_data)
+        .or_else(|| existing.map(|contact| contact.notes.clone()))
         .unwrap_or_default();
 
     Ok(UpsertClientContactInput {
         id,
         account_id,
         name,
-        role: existing
-            .map(|contact| contact.role.clone())
+        role: field_text(application_data, "JobTitle")
+            .or_else(|| field_text(application_data, "Title"))
+            .or_else(|| existing.map(|contact| contact.role.clone()))
             .unwrap_or_default(),
         email,
         phone,
-        team: existing
-            .map(|contact| contact.team.clone())
+        team: field_text(application_data, "CompanyName")
+            .or_else(|| existing.map(|contact| contact.team.clone()))
             .unwrap_or_default(),
-        notes: existing
-            .map(|contact| contact.notes.clone())
-            .unwrap_or_default(),
+        notes,
     })
 }
 
@@ -2580,30 +2584,40 @@ fn parse_event_input(
         .transpose()?
         .or_else(|| existing.map(|event| event.duration_minutes))
         .unwrap_or_default();
-    let attendees = field_text(application_data, "OrganizerName")
-        .or_else(|| attendees_from_nodes(application_data))
+    let attendees_metadata = attendees_from_nodes(application_data);
+    let attendees = attendees_metadata
+        .as_ref()
+        .map(calendar_attendee_labels)
+        .filter(|value| !value.trim().is_empty())
         .or_else(|| existing.map(|event| event.attendees.clone()))
         .unwrap_or_default();
-    let notes = application_data
-        .child("Body")
-        .and_then(|body| body.child("Data"))
-        .map(|node| node.text_value().trim().to_string())
+    let notes = body_text(application_data)
         .or_else(|| existing.map(|event| event.notes.clone()))
         .unwrap_or_default();
 
     Ok(UpsertClientEventInput {
         id,
         account_id,
-        uid: existing.map(|event| event.uid.clone()).unwrap_or_default(),
+        uid: field_text(application_data, "UID")
+            .or_else(|| existing.map(|event| event.uid.clone()))
+            .unwrap_or_default(),
         date,
         time,
         time_zone: field_text(application_data, "TimeZone")
             .or_else(|| existing.map(|event| event.time_zone.clone()))
             .unwrap_or_default(),
         duration_minutes,
-        recurrence_rule: existing
-            .map(|event| event.recurrence_rule.clone())
-            .unwrap_or_default(),
+        recurrence_rule: if let Some(recurrence) = application_data.child("Recurrence") {
+            if recurrence.children.is_empty() {
+                String::new()
+            } else {
+                recurrence_to_rrule(recurrence)?
+            }
+        } else {
+            existing
+                .map(|event| event.recurrence_rule.clone())
+                .unwrap_or_default()
+        },
         title: field_text(application_data, "Subject")
             .or_else(|| existing.map(|event| event.title.clone()))
             .unwrap_or_default(),
@@ -2611,10 +2625,23 @@ fn parse_event_input(
             .or_else(|| existing.map(|event| event.location.clone()))
             .unwrap_or_default(),
         attendees,
-        attendees_json: existing
-            .map(|event| event.attendees_json.clone())
+        attendees_json: attendees_metadata
+            .as_ref()
+            .map(serialize_calendar_participants_metadata)
+            .or_else(|| existing.map(|event| event.attendees_json.clone()))
             .unwrap_or_default(),
         notes,
+    })
+}
+
+fn body_text(application_data: &WbxmlNode) -> Option<String> {
+    application_data.child("Body").and_then(|body| {
+        body.child("Data")
+            .map(|node| node.text_value().trim().to_string())
+            .or_else(|| {
+                let value = body.text_value().trim();
+                (!value.is_empty()).then(|| value.to_string())
+            })
     })
 }
 
@@ -2646,14 +2673,34 @@ fn duration_from_datetimes(start: &str, end: &str) -> Result<i32> {
 }
 
 fn date_time_to_minutes(date: &str, time: &str) -> Result<i64> {
-    let date_value = date.replace('-', "").parse::<i64>()?;
-    let time_value = time.replace(':', "").parse::<i64>()?;
-    Ok(date_value * 1440 + (time_value / 100) * 60 + (time_value % 100))
+    let mut date_parts = date.split('-');
+    let year = date_parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid ActiveSync date"))?
+        .parse::<i64>()?;
+    let month = date_parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid ActiveSync date"))?
+        .parse::<i64>()?;
+    let day = date_parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid ActiveSync date"))?
+        .parse::<i64>()?;
+    let mut time_parts = time.split(':');
+    let hour = time_parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid ActiveSync time"))?
+        .parse::<i64>()?;
+    let minute = time_parts
+        .next()
+        .ok_or_else(|| anyhow!("invalid ActiveSync time"))?
+        .parse::<i64>()?;
+    Ok(days_from_civil(year, month, day) * 1440 + hour * 60 + minute)
 }
 
-fn attendees_from_nodes(application_data: &WbxmlNode) -> Option<String> {
-    let attendees = application_data
-        .child("Attendees")?
+fn attendees_from_nodes(application_data: &WbxmlNode) -> Option<CalendarParticipantsMetadata> {
+    let attendees_node = application_data.child("Attendees")?;
+    let attendees = attendees_node
         .children_named("Attendee")
         .into_iter()
         .filter_map(|attendee| {
@@ -2665,18 +2712,155 @@ fn attendees_from_nodes(application_data: &WbxmlNode) -> Option<String> {
                 .child("Name")
                 .map(|value| value.text_value().trim())
                 .unwrap_or("");
-            if !name.is_empty() && !email.is_empty() {
-                Some(format!("{name} <{email}>"))
-            } else if !name.is_empty() {
-                Some(name.to_string())
-            } else if !email.is_empty() {
-                Some(email.to_string())
-            } else {
-                None
+            if name.is_empty() && email.is_empty() {
+                return None;
             }
+            Some(CalendarParticipantMetadata {
+                email: email.to_ascii_lowercase(),
+                common_name: name.to_string(),
+                role: match attendee
+                    .child("AttendeeType")
+                    .map(|node| node.text_value().trim())
+                {
+                    Some("2") => "OPT-PARTICIPANT".to_string(),
+                    _ => "REQ-PARTICIPANT".to_string(),
+                },
+                partstat: match attendee
+                    .child("AttendeeStatus")
+                    .map(|node| node.text_value().trim())
+                {
+                    Some("2") => "tentative".to_string(),
+                    Some("3") => "accepted".to_string(),
+                    Some("4") => "declined".to_string(),
+                    _ => "needs-action".to_string(),
+                },
+                rsvp: false,
+            })
         })
         .collect::<Vec<_>>();
-    (!attendees.is_empty()).then(|| attendees.join(", "))
+    if attendees.is_empty() {
+        return None;
+    }
+    Some(CalendarParticipantsMetadata {
+        organizer: None,
+        attendees,
+    })
+}
+
+fn recurrence_to_rrule(recurrence: &WbxmlNode) -> Result<String> {
+    let recurrence_type = field_text(recurrence, "Type").unwrap_or_else(|| "0".to_string());
+    let mut parts = Vec::new();
+    match recurrence_type.as_str() {
+        "0" => {
+            if let Some(days) =
+                field_text(recurrence, "DayOfWeek").and_then(|value| day_of_week_to_rrule(&value))
+            {
+                parts.push("FREQ=WEEKLY".to_string());
+                parts.push(format!("BYDAY={days}"));
+            } else {
+                parts.push("FREQ=DAILY".to_string());
+            }
+        }
+        "1" => {
+            parts.push("FREQ=WEEKLY".to_string());
+            if let Some(days) =
+                field_text(recurrence, "DayOfWeek").and_then(|value| day_of_week_to_rrule(&value))
+            {
+                parts.push(format!("BYDAY={days}"));
+            }
+        }
+        "2" => {
+            parts.push("FREQ=MONTHLY".to_string());
+            let day = field_text(recurrence, "DayOfMonth")
+                .ok_or_else(|| anyhow!("monthly recurrence is missing DayOfMonth"))?;
+            parts.push(format!(
+                "BYMONTHDAY={}",
+                parse_positive_number(&day, "DayOfMonth")?
+            ));
+        }
+        "5" => {
+            parts.push("FREQ=YEARLY".to_string());
+            let day = field_text(recurrence, "DayOfMonth")
+                .ok_or_else(|| anyhow!("yearly recurrence is missing DayOfMonth"))?;
+            let month = field_text(recurrence, "MonthOfYear")
+                .ok_or_else(|| anyhow!("yearly recurrence is missing MonthOfYear"))?;
+            parts.push(format!(
+                "BYMONTHDAY={}",
+                parse_positive_number(&day, "DayOfMonth")?
+            ));
+            parts.push(format!(
+                "BYMONTH={}",
+                parse_positive_number(&month, "MonthOfYear")?
+            ));
+        }
+        other => bail!("unsupported ActiveSync recurrence type {other}"),
+    }
+    if let Some(interval) = field_text(recurrence, "Interval")
+        .map(|value| parse_positive_number(&value, "Interval"))
+        .transpose()?
+        .filter(|value| *value > 1)
+    {
+        parts.push(format!("INTERVAL={interval}"));
+    }
+    if let Some(count) = field_text(recurrence, "Occurrences")
+        .map(|value| parse_positive_number(&value, "Occurrences"))
+        .transpose()?
+    {
+        parts.push(format!("COUNT={count}"));
+    }
+    if let Some(until) = field_text(recurrence, "Until") {
+        parts.push(format!("UNTIL={}", compact_datetime_date(&until)?));
+    }
+    Ok(parts.join(";"))
+}
+
+fn day_of_week_to_rrule(value: &str) -> Option<String> {
+    let mask = value.trim().parse::<u32>().ok()?;
+    let mut days = Vec::new();
+    for (bit, day) in [
+        (1, "SU"),
+        (2, "MO"),
+        (4, "TU"),
+        (8, "WE"),
+        (16, "TH"),
+        (32, "FR"),
+        (64, "SA"),
+    ] {
+        if mask & bit != 0 {
+            days.push(day);
+        }
+    }
+    (!days.is_empty()).then(|| days.join(","))
+}
+
+fn parse_positive_number(value: &str, field: &str) -> Result<u32> {
+    let number = value
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| anyhow!("{field} must be a positive integer"))?;
+    if number == 0 {
+        bail!("{field} must be a positive integer");
+    }
+    Ok(number)
+}
+
+fn compact_datetime_date(value: &str) -> Result<String> {
+    let compact = value.trim().trim_end_matches('Z');
+    let date = compact.split('T').next().unwrap_or_default();
+    if date.len() != 8 {
+        bail!("invalid ActiveSync recurrence Until");
+    }
+    Ok(date.to_string())
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - if month <= 2 { 1 } else { 0 };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let doy = (153 * month_prime + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
 }
 
 fn search_query_text(store: &WbxmlNode) -> Option<String> {

@@ -826,12 +826,16 @@ impl ActiveSyncStore for FakeStore {
             .map(|event| ActiveSyncItemState {
                 id: event.id,
                 fingerprint: format!(
-                    "{}|{}|{}|{}|{}|{}",
+                    "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
                     event.date,
                     event.time,
+                    event.time_zone,
+                    event.duration_minutes,
+                    event.recurrence_rule,
                     event.title,
                     event.location,
                     event.attendees,
+                    event.attendees_json,
                     event.notes
                 ),
             })
@@ -853,12 +857,16 @@ impl ActiveSyncStore for FakeStore {
             .map(|event| ActiveSyncItemState {
                 id: event.id,
                 fingerprint: format!(
-                    "{}|{}|{}|{}|{}|{}",
+                    "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
                     event.date,
                     event.time,
+                    event.time_zone,
+                    event.duration_minutes,
+                    event.recurrence_rule,
                     event.title,
                     event.location,
                     event.attendees,
+                    event.attendees_json,
                     event.notes
                 ),
             })
@@ -3897,6 +3905,350 @@ async fn sync_contact_and_calendar_mutations_update_canonical_models() {
 
     assert_eq!(store.contacts.lock().unwrap()[0].email, "bob@example.test");
     assert_eq!(store.events.lock().unwrap()[0].duration_minutes, 30);
+}
+
+#[tokio::test]
+async fn sync_contact_create_update_delete_round_trips_canonical_fields() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contacts: Arc::new(Mutex::new(Vec::new())),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let mut add_app = WbxmlNode::new(0, "ApplicationData");
+    add_app.push(WbxmlNode::with_text(1, "FileAs", "Bob Example"));
+    add_app.push(WbxmlNode::with_text(1, "Email1Address", "bob@example.test"));
+    add_app.push(WbxmlNode::with_text(
+        1,
+        "BusinessPhoneNumber",
+        "+1 555 0100",
+    ));
+    add_app.push(WbxmlNode::with_text(1, "CompanyName", "Example Co"));
+    add_app.push(WbxmlNode::with_text(1, "JobTitle", "Operations Lead"));
+    let mut add_body = WbxmlNode::new(17, "Body");
+    add_body.push(WbxmlNode::with_text(17, "Data", "Met at the mobile lab"));
+    add_app.push(add_body);
+
+    let add_response = handle_sync_node(
+        &service,
+        sync_commands_node("contacts", "0", vec![sync_add("contact-1", add_app)]),
+    )
+    .await;
+    let server_id = only_sync_collection(&add_response, "contacts")
+        .child("Responses")
+        .unwrap()
+        .child("Add")
+        .unwrap()
+        .child("ServerId")
+        .unwrap()
+        .text_value()
+        .to_string();
+
+    {
+        let contacts = store.contacts.lock().unwrap();
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(contacts[0].name, "Bob Example");
+        assert_eq!(contacts[0].email, "bob@example.test");
+        assert_eq!(contacts[0].phone, "+1 555 0100");
+        assert_eq!(contacts[0].team, "Example Co");
+        assert_eq!(contacts[0].role, "Operations Lead");
+        assert_eq!(contacts[0].notes, "Met at the mobile lab");
+    }
+
+    let add_key = collection_sync_key(&add_response, "contacts");
+    let mut change_app = WbxmlNode::new(0, "ApplicationData");
+    change_app.push(WbxmlNode::with_text(1, "FirstName", "Robert"));
+    change_app.push(WbxmlNode::with_text(1, "LastName", "Example"));
+    change_app.push(WbxmlNode::with_text(1, "MobilePhoneNumber", "+1 555 0199"));
+    change_app.push(WbxmlNode::with_text(1, "CompanyName", "LPE"));
+    let change_response = handle_sync_node(
+        &service,
+        sync_commands_node(
+            "contacts",
+            &add_key,
+            vec![sync_change(&server_id, change_app)],
+        ),
+    )
+    .await;
+
+    {
+        let contacts = store.contacts.lock().unwrap();
+        assert_eq!(contacts[0].name, "Robert Example");
+        assert_eq!(contacts[0].email, "bob@example.test");
+        assert_eq!(contacts[0].phone, "+1 555 0199");
+        assert_eq!(contacts[0].team, "LPE");
+        assert_eq!(contacts[0].role, "Operations Lead");
+    }
+
+    let change_key = collection_sync_key(&change_response, "contacts");
+    handle_sync_node(
+        &service,
+        sync_commands_node("contacts", &change_key, vec![sync_delete(&server_id)]),
+    )
+    .await;
+    assert!(store.contacts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn sync_calendar_create_update_delete_maps_time_zone_recurrence_and_attendees() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        events: Arc::new(Mutex::new(Vec::new())),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+
+    let mut add_app = WbxmlNode::new(0, "ApplicationData");
+    add_app.push(WbxmlNode::with_text(4, "UID", "mobile-created-event"));
+    add_app.push(WbxmlNode::with_text(4, "Subject", "Interop review"));
+    add_app.push(WbxmlNode::with_text(4, "StartTime", "20260518T220000Z"));
+    add_app.push(WbxmlNode::with_text(4, "EndTime", "20260518T233000Z"));
+    add_app.push(WbxmlNode::with_text(4, "TimeZone", "UTC"));
+    add_app.push(WbxmlNode::with_text(4, "Location", "Room 7"));
+    let mut recurrence = WbxmlNode::new(4, "Recurrence");
+    recurrence.push(WbxmlNode::with_text(4, "Type", "1"));
+    recurrence.push(WbxmlNode::with_text(4, "Interval", "2"));
+    recurrence.push(WbxmlNode::with_text(4, "DayOfWeek", "20"));
+    recurrence.push(WbxmlNode::with_text(4, "Occurrences", "4"));
+    add_app.push(recurrence);
+    let mut attendees = WbxmlNode::new(4, "Attendees");
+    let mut attendee = WbxmlNode::new(4, "Attendee");
+    attendee.push(WbxmlNode::with_text(4, "Name", "Bob Example"));
+    attendee.push(WbxmlNode::with_text(4, "Email", "bob@example.test"));
+    attendee.push(WbxmlNode::with_text(4, "AttendeeType", "1"));
+    attendee.push(WbxmlNode::with_text(4, "AttendeeStatus", "3"));
+    attendees.push(attendee);
+    add_app.push(attendees);
+    let mut add_body = WbxmlNode::new(17, "Body");
+    add_body.push(WbxmlNode::with_text(17, "Data", "Calendar interop notes"));
+    add_app.push(add_body);
+
+    let add_response = handle_sync_node(
+        &service,
+        sync_commands_node("calendar", "0", vec![sync_add("event-1", add_app)]),
+    )
+    .await;
+    let server_id = only_sync_collection(&add_response, "calendar")
+        .child("Responses")
+        .unwrap()
+        .child("Add")
+        .unwrap()
+        .child("ServerId")
+        .unwrap()
+        .text_value()
+        .to_string();
+
+    {
+        let events = store.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].uid, "mobile-created-event");
+        assert_eq!(events[0].date, "2026-05-18");
+        assert_eq!(events[0].time, "22:00");
+        assert_eq!(events[0].time_zone, "UTC");
+        assert_eq!(events[0].duration_minutes, 90);
+        assert_eq!(
+            events[0].recurrence_rule,
+            "FREQ=WEEKLY;BYDAY=TU,TH;INTERVAL=2;COUNT=4"
+        );
+        assert_eq!(events[0].title, "Interop review");
+        assert_eq!(events[0].location, "Room 7");
+        assert_eq!(events[0].attendees, "Bob Example");
+        assert!(events[0].attendees_json.contains("bob@example.test"));
+        assert!(events[0].attendees_json.contains("accepted"));
+        assert_eq!(events[0].notes, "Calendar interop notes");
+    }
+
+    let add_key = collection_sync_key(&add_response, "calendar");
+    let mut change_app = WbxmlNode::new(0, "ApplicationData");
+    change_app.push(WbxmlNode::with_text(4, "Subject", "Interop review updated"));
+    change_app.push(WbxmlNode::with_text(4, "StartTime", "20260519T003000Z"));
+    change_app.push(WbxmlNode::with_text(4, "EndTime", "20260519T010000Z"));
+    change_app.push(WbxmlNode::new(4, "Recurrence"));
+    let change_response = handle_sync_node(
+        &service,
+        sync_commands_node(
+            "calendar",
+            &add_key,
+            vec![sync_change(&server_id, change_app)],
+        ),
+    )
+    .await;
+
+    {
+        let events = store.events.lock().unwrap();
+        assert_eq!(events[0].date, "2026-05-19");
+        assert_eq!(events[0].time, "00:30");
+        assert_eq!(events[0].duration_minutes, 30);
+        assert_eq!(events[0].recurrence_rule, "");
+        assert_eq!(events[0].title, "Interop review updated");
+        assert_eq!(events[0].attendees, "Bob Example");
+    }
+
+    let change_key = collection_sync_key(&change_response, "calendar");
+    handle_sync_node(
+        &service,
+        sync_commands_node("calendar", &change_key, vec![sync_delete(&server_id)]),
+    )
+    .await;
+    assert!(store.events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn sync_contact_and_calendar_projection_includes_supported_application_data() {
+    let contact_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+    let event_id = Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contacts: Arc::new(Mutex::new(vec![ClientContact {
+            id: contact_id,
+            name: "Carol Example".to_string(),
+            role: "Product Manager".to_string(),
+            email: "carol@example.test".to_string(),
+            phone: "+49 30 1234".to_string(),
+            team: "LPE".to_string(),
+            notes: "Prefers mobile mail".to_string(),
+        }])),
+        events: Arc::new(Mutex::new(vec![ClientEvent {
+            id: event_id,
+            uid: "canonical-event-uid".to_string(),
+            date: "2026-05-20".to_string(),
+            time: "09:15".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 75,
+            recurrence_rule: "FREQ=DAILY;INTERVAL=3;COUNT=2".to_string(),
+            title: "Calendar sync lab".to_string(),
+            location: "Room 9".to_string(),
+            attendees: "Dana Example".to_string(),
+            attendees_json: r#"[{"email":"dana@example.test","common_name":"Dana Example","role":"OPT-PARTICIPANT","partstat":"tentative","rsvp":false}]"#.to_string(),
+            notes: "Bring test devices".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let contact_prime = sync_collection(&service, "contacts", "0", "dev-contacts").await;
+    let contact_page = sync_collection(
+        &service,
+        "contacts",
+        &collection_sync_key(&contact_prime, "contacts"),
+        "dev-contacts",
+    )
+    .await;
+    let contact_add = only_sync_collection(&contact_page, "contacts")
+        .child("Commands")
+        .unwrap()
+        .child("Add")
+        .unwrap();
+    let contact_app = contact_add.child("ApplicationData").unwrap();
+    assert_eq!(
+        contact_app.child("CompanyName").unwrap().text_value(),
+        "LPE"
+    );
+    assert_eq!(
+        contact_app.child("JobTitle").unwrap().text_value(),
+        "Product Manager"
+    );
+    assert_eq!(
+        contact_app
+            .child("Body")
+            .unwrap()
+            .child("Data")
+            .unwrap()
+            .text_value(),
+        "Prefers mobile mail"
+    );
+
+    let calendar_prime = sync_collection(&service, "calendar", "0", "dev-calendar").await;
+    let calendar_page = sync_collection(
+        &service,
+        "calendar",
+        &collection_sync_key(&calendar_prime, "calendar"),
+        "dev-calendar",
+    )
+    .await;
+    let calendar_add = only_sync_collection(&calendar_page, "calendar")
+        .child("Commands")
+        .unwrap()
+        .child("Add")
+        .unwrap();
+    let calendar_app = calendar_add.child("ApplicationData").unwrap();
+    assert_eq!(calendar_app.child("TimeZone").unwrap().text_value(), "UTC");
+    assert_eq!(
+        calendar_app.child("EndTime").unwrap().text_value(),
+        "20260520T103000Z"
+    );
+    assert_eq!(
+        calendar_app
+            .child("Recurrence")
+            .unwrap()
+            .child("Occurrences")
+            .unwrap()
+            .text_value(),
+        "2"
+    );
+    let attendee = calendar_app
+        .child("Attendees")
+        .unwrap()
+        .child("Attendee")
+        .unwrap();
+    assert_eq!(
+        attendee.child("Email").unwrap().text_value(),
+        "dana@example.test"
+    );
+    assert_eq!(attendee.child("AttendeeType").unwrap().text_value(), "2");
+    assert_eq!(attendee.child("AttendeeStatus").unwrap().text_value(), "2");
+
+    let stable = sync_collection(
+        &service,
+        "calendar",
+        &collection_sync_key(&calendar_page, "calendar"),
+        "dev-calendar",
+    )
+    .await;
+    assert_eq!(
+        only_sync_collection(&stable, "calendar")
+            .child("Commands")
+            .map(|commands| commands.children.len())
+            .unwrap_or(0),
+        0
+    );
+}
+
+fn sync_commands_node(collection_id: &str, sync_key: &str, commands: Vec<WbxmlNode>) -> WbxmlNode {
+    let mut sync = WbxmlNode::new(0, "Sync");
+    let mut collections = WbxmlNode::new(0, "Collections");
+    let mut collection = WbxmlNode::new(0, "Collection");
+    collection.push(WbxmlNode::with_text(0, "SyncKey", sync_key));
+    collection.push(WbxmlNode::with_text(0, "CollectionId", collection_id));
+    let mut commands_node = WbxmlNode::new(0, "Commands");
+    for command in commands {
+        commands_node.push(command);
+    }
+    collection.push(commands_node);
+    collections.push(collection);
+    sync.push(collections);
+    sync
+}
+
+fn sync_add(client_id: &str, application_data: WbxmlNode) -> WbxmlNode {
+    let mut add = WbxmlNode::new(0, "Add");
+    add.push(WbxmlNode::with_text(0, "ClientId", client_id));
+    add.push(application_data);
+    add
+}
+
+fn sync_change(server_id: &str, application_data: WbxmlNode) -> WbxmlNode {
+    let mut change = WbxmlNode::new(0, "Change");
+    change.push(WbxmlNode::with_text(0, "ServerId", server_id));
+    change.push(application_data);
+    change
+}
+
+fn sync_delete(server_id: &str) -> WbxmlNode {
+    let mut delete = WbxmlNode::new(0, "Delete");
+    delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
+    delete
 }
 
 #[tokio::test]

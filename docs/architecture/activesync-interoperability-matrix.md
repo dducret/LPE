@@ -26,8 +26,8 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 | `S6` | `SmartReply` and `SmartForward` create canonical `Sent` copy | submission |
 | `S7` | `Ping` detects folder changes | long poll |
 | `S8` | attachment `Fetch` returns canonical blobs | attachments |
-| `S9` | contact create/update/delete through `Sync` | contacts |
-| `S10` | calendar create/update/delete through `Sync` | calendar |
+| `S9` | contact create/update/delete through `Sync` for canonical name, email, phone, organization, title, and notes | contacts |
+| `S10` | calendar create/update/delete through `Sync` for canonical UID, title, start, duration, time-zone string, location, body, attendees, and simple recurrence | calendar |
 | `S11` | folder rename/delete constraints | mailbox safety |
 | `S12` | reconnect after stale or invalid sync state | recovery |
 
@@ -52,4 +52,5 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 | long poll | `ping_no_changes_returns_no_change_status`; `ping_reports_changed_folder_ids_as_folder_values`; `ping_detects_changes_across_multiple_monitored_collections` |
 | long-poll validation | `ping_empty_request_without_cached_parameters_returns_missing_parameters`; `ping_invalid_folder_id_requires_folder_sync`; `ping_rejects_unsynchronized_folders`; `ping_heartbeat_outside_supported_range_returns_limit`; `ping_too_many_monitored_folders_returns_max_folders`; `ping_surfaces_hierarchy_change_as_folder_sync_required` |
 | long-poll reconnect | `ping_reconnects_after_service_restart_using_persisted_sync_state` |
-| contact/calendar mutations | `sync_contact_and_calendar_mutations_update_canonical_models` |
+| contact/calendar mutations | `sync_contact_and_calendar_mutations_update_canonical_models`; `sync_contact_create_update_delete_round_trips_canonical_fields`; `sync_calendar_create_update_delete_maps_time_zone_recurrence_and_attendees` |
+| contact/calendar projection and no-change sync | `sync_contact_and_calendar_projection_includes_supported_application_data` |

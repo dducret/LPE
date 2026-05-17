@@ -1,6 +1,9 @@
 use anyhow::{anyhow, bail, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use lpe_storage::{ActiveSyncAttachment, ClientContact, ClientEvent, JmapEmail, JmapUploadBlob};
+use lpe_storage::{
+    parse_calendar_participants_metadata, ActiveSyncAttachment, CalendarParticipantMetadata,
+    ClientContact, ClientEvent, JmapEmail, JmapUploadBlob,
+};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -132,43 +135,265 @@ fn truncate_body_bytes(bytes: &[u8], truncation_size: Option<usize>) -> (Vec<u8>
 
 pub(crate) fn contact_application_data(contact: &ClientContact) -> Value {
     let (first_name, last_name) = split_name(&contact.name);
+    let mut children = Vec::new();
+    push_text(&mut children, 1, "FileAs", &contact.name);
+    push_text(&mut children, 1, "FirstName", &first_name);
+    push_text(&mut children, 1, "LastName", &last_name);
+    push_text(&mut children, 1, "Email1Address", &contact.email);
+    push_text(&mut children, 1, "MobilePhoneNumber", &contact.phone);
+    push_text(&mut children, 1, "BusinessPhoneNumber", &contact.phone);
+    push_text(&mut children, 1, "CompanyName", &contact.team);
+    push_text(&mut children, 1, "JobTitle", &contact.role);
+    push_body(&mut children, &contact.notes);
+
     json!({
         "page": 0,
         "name": "ApplicationData",
-        "children": [
-            {"page": 1, "name": "FileAs", "text": contact.name},
-            {"page": 1, "name": "FirstName", "text": first_name},
-            {"page": 1, "name": "LastName", "text": last_name},
-            {"page": 1, "name": "Email1Address", "text": contact.email},
-            {"page": 1, "name": "MobilePhoneNumber", "text": contact.phone},
-            {"page": 1, "name": "HomePhoneNumber", "text": contact.phone}
-        ]
+        "children": children
     })
 }
 
 pub(crate) fn calendar_application_data(event: &ClientEvent) -> Value {
+    let mut children = Vec::new();
+    push_text(&mut children, 4, "UID", &event.uid);
+    push_text(&mut children, 4, "TimeZone", &event.time_zone);
+    push_text(&mut children, 4, "Subject", &event.title);
+    push_text(
+        &mut children,
+        4,
+        "StartTime",
+        &compact_datetime(&event.date, &event.time),
+    );
+    push_text(
+        &mut children,
+        4,
+        "EndTime",
+        &add_minutes_to_compact(&event.date, &event.time, event.duration_minutes),
+    );
+    push_text(&mut children, 4, "Location", &event.location);
+
+    let participants = parse_calendar_participants_metadata(&event.attendees_json);
+    if let Some(organizer) = participants.organizer.as_ref() {
+        push_text(&mut children, 4, "OrganizerName", &organizer.common_name);
+        push_text(&mut children, 4, "OrganizerEmail", &organizer.email);
+    }
+    push_attendees(&mut children, &participants.attendees);
+    push_body(&mut children, &event.notes);
+    if let Some(recurrence) = recurrence_application_data(&event.recurrence_rule) {
+        children.push(recurrence);
+    }
+
     json!({
         "page": 0,
         "name": "ApplicationData",
-        "children": [
-            {"page": 4, "name": "Subject", "text": event.title},
-            {"page": 4, "name": "StartTime", "text": format!("{}T{}:00Z", event.date.replace('-', ""), event.time.replace(':', ""))},
-            {"page": 4, "name": "EndTime", "text": format!("{}T{}:00Z", event.date.replace('-', ""), event.time.replace(':', ""))},
-            {"page": 4, "name": "Location", "text": event.location},
-            {"page": 4, "name": "OrganizerName", "text": event.attendees},
-            {"page": 4, "name": "OrganizerEmail", "text": ""},
-            {
-                "page": 17,
-                "name": "Body",
-                "children": [
-                    {"page": 17, "name": "Type", "text": "1"},
-                    {"page": 17, "name": "EstimatedDataSize", "text": event.notes.len().to_string()},
-                    {"page": 17, "name": "Data", "text": event.notes},
-                    {"page": 17, "name": "Truncated", "text": "0"}
-                ]
-            }
-        ]
+        "children": children
     })
+}
+
+fn push_text(children: &mut Vec<Value>, page: u8, name: &str, value: &str) {
+    if !value.trim().is_empty() {
+        children.push(json!({"page": page, "name": name, "text": value}));
+    }
+}
+
+fn push_body(children: &mut Vec<Value>, value: &str) {
+    if value.trim().is_empty() {
+        return;
+    }
+    children.push(json!({
+        "page": 17,
+        "name": "Body",
+        "children": [
+            {"page": 17, "name": "Type", "text": "1"},
+            {"page": 17, "name": "EstimatedDataSize", "text": value.len().to_string()},
+            {"page": 17, "name": "Data", "text": value},
+            {"page": 17, "name": "Truncated", "text": "0"}
+        ]
+    }));
+}
+
+fn push_attendees(children: &mut Vec<Value>, attendees: &[CalendarParticipantMetadata]) {
+    let attendee_nodes = attendees
+        .iter()
+        .map(|attendee| {
+            let mut fields = Vec::new();
+            push_text(&mut fields, 4, "Name", &attendee.common_name);
+            push_text(&mut fields, 4, "Email", &attendee.email);
+            push_text(
+                &mut fields,
+                4,
+                "AttendeeType",
+                if attendee.role.eq_ignore_ascii_case("OPT-PARTICIPANT") {
+                    "2"
+                } else {
+                    "1"
+                },
+            );
+            push_text(
+                &mut fields,
+                4,
+                "AttendeeStatus",
+                attendee_status(&attendee.partstat),
+            );
+            json!({"page": 4, "name": "Attendee", "children": fields})
+        })
+        .collect::<Vec<_>>();
+    if !attendee_nodes.is_empty() {
+        children.push(json!({"page": 4, "name": "Attendees", "children": attendee_nodes}));
+    }
+}
+
+fn attendee_status(partstat: &str) -> &'static str {
+    match partstat.trim().to_ascii_lowercase().as_str() {
+        "tentative" => "2",
+        "accepted" => "3",
+        "declined" => "4",
+        _ => "5",
+    }
+}
+
+fn compact_datetime(date: &str, time: &str) -> String {
+    format!("{}T{}00Z", date.replace('-', ""), time.replace(':', ""))
+}
+
+fn add_minutes_to_compact(date: &str, time: &str, duration_minutes: i32) -> String {
+    let Some((year, month, day)) = parse_date(date) else {
+        return compact_datetime(date, time);
+    };
+    let Some((hour, minute)) = parse_time(time) else {
+        return compact_datetime(date, time);
+    };
+    let total = days_from_civil(year, month, day) * 1440
+        + i64::from(hour) * 60
+        + i64::from(minute)
+        + i64::from(duration_minutes.max(0));
+    let (end_year, end_month, end_day) = civil_from_days(total.div_euclid(1440));
+    let minute_of_day = total.rem_euclid(1440);
+    format!(
+        "{end_year:04}{end_month:02}{end_day:02}T{:02}{:02}00Z",
+        minute_of_day / 60,
+        minute_of_day % 60
+    )
+}
+
+fn parse_date(value: &str) -> Option<(i64, i64, i64)> {
+    let mut parts = value.split('-');
+    let year = parts.next()?.parse().ok()?;
+    let month = parts.next()?.parse().ok()?;
+    let day = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+fn parse_time(value: &str) -> Option<(i64, i64)> {
+    let mut parts = value.split(':');
+    let hour = parts.next()?.parse().ok()?;
+    let minute = parts.next()?.parse().ok()?;
+    Some((hour, minute))
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - if month <= 2 { 1 } else { 0 };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month_prime = month + if month > 2 { -3 } else { 9 };
+    let doy = (153 * month_prime + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
+}
+
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719468;
+    let era = if days >= 0 { days } else { days - 146096 } / 146097;
+    let doe = days - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    (year + if month <= 2 { 1 } else { 0 }, month, day)
+}
+
+fn recurrence_application_data(rrule: &str) -> Option<Value> {
+    let fields = rrule_fields(rrule);
+    let freq = fields.get("FREQ")?;
+    let mut children = Vec::new();
+    match freq.as_str() {
+        "DAILY" => push_text(&mut children, 4, "Type", "0"),
+        "WEEKLY" => {
+            push_text(&mut children, 4, "Type", "1");
+            if let Some(day_of_week) = fields.get("BYDAY").and_then(|value| {
+                let mask = value
+                    .split(',')
+                    .filter_map(rrule_weekday_mask)
+                    .fold(0u32, |acc, value| acc | value);
+                (mask > 0).then_some(mask.to_string())
+            }) {
+                push_text(&mut children, 4, "DayOfWeek", &day_of_week);
+            }
+        }
+        "MONTHLY" => {
+            let day = fields.get("BYMONTHDAY")?;
+            push_text(&mut children, 4, "Type", "2");
+            push_text(&mut children, 4, "DayOfMonth", day);
+        }
+        "YEARLY" => {
+            let day = fields.get("BYMONTHDAY")?;
+            let month = fields.get("BYMONTH")?;
+            push_text(&mut children, 4, "Type", "5");
+            push_text(&mut children, 4, "DayOfMonth", day);
+            push_text(&mut children, 4, "MonthOfYear", month);
+        }
+        _ => return None,
+    }
+    if let Some(interval) = fields.get("INTERVAL") {
+        push_text(&mut children, 4, "Interval", interval);
+    }
+    if let Some(count) = fields.get("COUNT") {
+        push_text(&mut children, 4, "Occurrences", count);
+    }
+    if let Some(until) = fields.get("UNTIL") {
+        push_text(&mut children, 4, "Until", &rrule_until_to_compact(until));
+    }
+    Some(json!({"page": 4, "name": "Recurrence", "children": children}))
+}
+
+fn rrule_fields(rrule: &str) -> HashMap<String, String> {
+    rrule
+        .split(';')
+        .filter_map(|part| part.split_once('='))
+        .map(|(key, value)| {
+            (
+                key.trim().to_ascii_uppercase(),
+                value.trim().to_ascii_uppercase(),
+            )
+        })
+        .collect()
+}
+
+fn rrule_weekday_mask(value: &str) -> Option<u32> {
+    match value.trim().to_ascii_uppercase().as_str() {
+        "SU" => Some(1),
+        "MO" => Some(2),
+        "TU" => Some(4),
+        "WE" => Some(8),
+        "TH" => Some(16),
+        "FR" => Some(32),
+        "SA" => Some(64),
+        _ => None,
+    }
+}
+
+fn rrule_until_to_compact(value: &str) -> String {
+    let date = value.split('T').next().unwrap_or(value);
+    if date.len() == 8 {
+        format!("{date}T000000Z")
+    } else {
+        value.to_string()
+    }
 }
 
 pub(crate) fn snapshot_to_value(entries: &[SnapshotEntry]) -> Value {

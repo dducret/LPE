@@ -97,7 +97,32 @@
     attachment bytes must use `ItemOperations Fetch`
 - Contacts and calendar:
   - use canonical `contacts` and `calendar_events`
-  - support basic client-originated mutations through `Sync`
+  - support client-originated create, update, and delete through `Sync` for
+    fields that round-trip through canonical contact and calendar APIs
+  - contact `ApplicationData` maps `FileAs`, `FirstName`, `LastName`,
+    `Email1Address`, `MobilePhoneNumber`, `BusinessPhoneNumber`,
+    `HomePhoneNumber`, `CompanyName`, `JobTitle`, `Title`, and
+    `AirSyncBase:Body` notes onto canonical display name, email, phone,
+    organization, role, and notes
+  - calendar `ApplicationData` maps `UID`, `Subject`, `StartTime`, `EndTime`,
+    `TimeZone`, `Location`, `AirSyncBase:Body`, `Attendees`, and simple
+    `Recurrence` patterns onto canonical event UID, title, local start,
+    duration, time-zone string, location, body, attendee metadata, and
+    recurrence rule
+  - recurrence support is limited to canonical `RRULE` patterns that can be
+    represented without exceptions: daily, weekly, absolute monthly, and
+    absolute yearly recurrences with optional interval, count, or until date
+  - ActiveSync attendee name, email, required/optional type, and response
+    status map to canonical attendee metadata when present
+  - unsupported contact fields include contact photos, postal addresses,
+    categories, birthdays, anniversaries, children, spouse, assistant, web
+    page, and secondary email/phone slots until the canonical contact API
+    exposes those fields
+  - unsupported calendar fields include binary Windows time-zone conversion,
+    all-day events, reminders, busy/sensitivity status, categories, recurrence
+    exceptions, deleted occurrences, online meeting links, proposed new times,
+    and client-originated organizer changes until canonical event APIs expose
+    matching state
 - Tasks:
   - are not exposed as an ActiveSync class
   - must reuse the canonical `tasks` model when implemented
@@ -108,10 +133,10 @@
 | --- | --- |
 | Commands | `OPTIONS`, `Provision`, `FolderSync`, `Sync`, `MoveItems`, `SendMail`, `SmartReply`, `SmartForward`, `ItemOperations Fetch`, `Search`, `Ping` |
 | Mail folders | canonical mailbox folders |
-| Contacts | canonical contacts projection and basic mutations |
-| Calendar | canonical events projection and basic mutations |
+| Contacts | canonical contacts projection; `Sync` create/update/delete for name, email, phone, organization, title, notes |
+| Calendar | canonical events projection; `Sync` create/update/delete for UID, title, start, duration, time-zone string, location, body, attendees, simple recurrence |
 | Mail lifecycle | canonical folder moves, delete/move-to-trash, read/unread state |
 | Body preferences | text, stored sanitized HTML, canonical MIME blob with truncation |
 | Attachments | common MIME attachment parsing and canonical `FileReference` retrieval |
 | Long poll | lightweight `Ping` delta detection against persisted sync state |
-| Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync` |
+| Unsupported | full Exchange server semantics, client `SMTP`, ActiveSync task class, non-canonical outbound logic, legacy `GetAttachment`, multipart `ItemOperations` responses, non-draft mail edits through `Sync`, contact photos/postal addresses/categories, binary Windows time-zone conversion, calendar recurrence exceptions/all-day/reminders/busy status/client-originated organizer changes |
