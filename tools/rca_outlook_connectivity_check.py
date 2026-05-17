@@ -1020,22 +1020,20 @@ def check_mapi_nspi_address_book(
 ) -> None:
     path = f"/mapi/nspi/?mailboxId={urllib.parse.quote(email, safe='@')}"
     cookie = mapi_nspi_bind_cookie(base_url, email, password, insecure_tls, timeout)
-    probe_bodies: dict[str, bytes] = {
-        "ResolveNames": resolve_names_request(
-            expected_email or email,
-            [0x3003_001F, 0x3001_001F],
-        ),
-        "GetMatches": (expected_email or email).encode("utf-8"),
-        "QueryRows": (expected_email or email).encode("utf-8"),
-        "GetProps": (expected_email or email).encode("utf-8"),
-    }
+    lookup = expected_email or email
+    probe_bodies: list[tuple[str, bytes]] = [
+        ("ResolveNames", resolve_names_request(lookup, [0x3003_001F, 0x3001_001F])),
+        ("GetMatches", lookup.encode("utf-8")),
+        ("QueryRows", lookup.encode("utf-8")),
+    ]
     probe_assertions = {
         "ResolveNames": assert_nspi_resolve_names_payload,
         "GetMatches": assert_nspi_get_matches_payload,
         "QueryRows": assert_nspi_query_rows_payload,
         "GetProps": assert_nspi_get_props_payload,
     }
-    for request_type, body in probe_bodies.items():
+    minimal_id: int | None = None
+    for request_type, body in probe_bodies:
         response = request(
             "POST",
             join_url(base_url, path),
@@ -1060,7 +1058,38 @@ def check_mapi_nspi_address_book(
         probe_assertions[request_type](payload, request_type)
         if expected_name and expected_email:
             assert_nspi_fixture_payload(payload, request_type, expected_name, expected_email)
+        if request_type == "GetMatches":
+            minimal_id = nspi_first_minimal_id(payload, request_type)
         cookie = update_cookie_header(cookie, response)
+    require(minimal_id is not None, "MAPI NSPI GetMatches did not return a MinimalId for GetProps")
+    get_props_body = nspi_get_props_request(
+        minimal_id,
+        [0x3003_001F, 0x3001_001F, 0x39FE_001F, 0x3002_001F],
+    )
+    response = request(
+        "POST",
+        join_url(base_url, path),
+        get_props_body,
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/octet-stream",
+            "Cookie": cookie,
+            "X-RequestType": "GetProps",
+            "X-RequestId": mapi_request_id("GetProps"),
+            "X-ClientInfo": mapi_client_info(),
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(response.status == 200, f"MAPI NSPI GetProps returned HTTP {response.status}: {response.text[:300]}")
+    require("application/mapi-http" in content_type(response.headers), "MAPI NSPI GetProps did not return MAPI content")
+    response_code = header_value(response.headers, "x-responsecode")
+    require(response_code == "0", f"MAPI NSPI GetProps returned X-ResponseCode {response_code!r}: {response.text[:300]}")
+    payload = mapi_http_binary_payload(response.body)
+    assert_nspi_get_props_payload(payload, "GetProps")
+    if expected_name and expected_email:
+        assert_nspi_fixture_payload(payload, "GetProps", expected_name, expected_email)
     if expected_name and expected_email:
         print("ok mapi_nspi_address_book_fixture")
     else:
@@ -1372,6 +1401,21 @@ def le_u32(payload: bytes, offset: int) -> int:
     return struct.unpack_from("<I", payload, offset)[0]
 
 
+def nspi_first_minimal_id(payload: bytes, request_type: str) -> int:
+    assert_nspi_get_matches_payload(payload, request_type)
+    minimal_id = le_u32(payload, 14)
+    require(minimal_id != 0, f"MAPI NSPI {request_type} returned a zero MinimalId")
+    return minimal_id
+
+
+def nspi_get_props_request(minimal_id: int, property_tags: list[int]) -> bytes:
+    body = bytearray(28)
+    struct.pack_into("<I", body, 12, minimal_id)
+    for tag in property_tags:
+        body.extend(struct.pack("<I", tag))
+    return bytes(body)
+
+
 def assert_nspi_common_success(payload: bytes, request_type: str) -> None:
     require(len(payload) >= 12, f"MAPI NSPI {request_type} returned a truncated success payload")
     require(le_u32(payload, 0) == 0, f"MAPI NSPI {request_type} returned nonzero StatusCode")
@@ -1407,7 +1451,8 @@ def assert_nspi_get_props_payload(payload: bytes, request_type: str) -> None:
     assert_nspi_common_success(payload, request_type)
     require(le_u32(payload, 8) == 1200, "GetProps did not return Unicode CodePage 1200")
     require(payload[12] == 1, "GetProps omitted property values")
-    require(le_u32(payload, 13) >= 4, "GetProps returned too few property values")
+    require(le_u32(payload, 13) == 0, "GetProps returned nonzero row status")
+    require(le_u32(payload, 17) >= 4, "GetProps returned too few property values")
 
 
 def assert_nspi_fixture_payload(payload: bytes, request_type: str, expected_name: str, expected_email: str) -> None:
