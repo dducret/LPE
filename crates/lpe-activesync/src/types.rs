@@ -48,6 +48,8 @@ pub(crate) struct CollectionStateEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct StoredSyncState {
+    #[serde(default)]
+    pub(crate) hierarchy_generation: Option<String>,
     pub(crate) collection_state: Vec<CollectionStateEntry>,
     pub(crate) pending_changes: Vec<SnapshotChange>,
     pub(crate) next_offset: usize,

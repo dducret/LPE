@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -47,6 +47,7 @@ struct FakeStore {
     deleted_drafts: Arc<Mutex<Vec<Uuid>>>,
     sync_states: Arc<Mutex<std::collections::HashMap<String, ActiveSyncSyncState>>>,
     sync_state_order: Arc<Mutex<Vec<String>>>,
+    expired_sync_states: Arc<Mutex<HashSet<String>>>,
     full_email_fetches: Arc<Mutex<u32>>,
 }
 
@@ -332,6 +333,7 @@ impl ActiveSyncStore for FakeStore {
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>> {
         let prefix = format!("{account_id}:{device_id}:{collection_id}:");
         let states = self.sync_states.lock().unwrap();
+        let expired = self.expired_sync_states.lock().unwrap();
         let state = self
             .sync_state_order
             .lock()
@@ -339,6 +341,7 @@ impl ActiveSyncStore for FakeStore {
             .iter()
             .rev()
             .find(|key| key.starts_with(&prefix))
+            .filter(|key| !expired.contains(*key))
             .and_then(|key| states.get(key))
             .cloned();
         Box::pin(async move { Ok(state) })
@@ -784,6 +787,7 @@ impl ActiveSyncStore for FakeStore {
         let key = format!("{account_id}:{device_id}:{collection_id}:{sync_key}");
         let mut states = self.sync_states.lock().unwrap();
         let mut order = self.sync_state_order.lock().unwrap();
+        self.expired_sync_states.lock().unwrap().remove(&key);
         if !states.contains_key(&key) {
             order.push(key.clone());
         }
@@ -805,8 +809,26 @@ impl ActiveSyncStore for FakeStore {
         sync_key: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>> {
         let key = format!("{account_id}:{device_id}:{collection_id}:{sync_key}");
-        let state = self.sync_states.lock().unwrap().get(&key).cloned();
+        let state = if self.expired_sync_states.lock().unwrap().contains(&key) {
+            None
+        } else {
+            self.sync_states.lock().unwrap().get(&key).cloned()
+        };
         Box::pin(async move { Ok(state) })
+    }
+
+    fn cleanup_expired_activesync_sync_cursors<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        let prefix = format!("{account_id}:{device_id}:");
+        let mut states = self.sync_states.lock().unwrap();
+        let mut order = self.sync_state_order.lock().unwrap();
+        let expired = self.expired_sync_states.lock().unwrap();
+        states.retain(|key, _| !key.starts_with(&prefix) || !expired.contains(key));
+        order.retain(|key| !key.starts_with(&prefix) || !expired.contains(key));
+        Box::pin(async move { Ok(()) })
     }
 }
 
@@ -1040,6 +1062,53 @@ fn collection_sync_key(sync: &WbxmlNode, collection_id: &str) -> String {
         })
         .and_then(|collection| collection.child("SyncKey"))
         .map(|node| node.text_value().to_string())
+        .unwrap()
+}
+
+async fn sync_collection(
+    service: &ActiveSyncService<FakeStore>,
+    collection_id: &str,
+    sync_key: &str,
+    device_id: &str,
+) -> WbxmlNode {
+    let request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", sync_key));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", collection_id));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some(device_id.to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &request,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    decode_response_body(response).await
+}
+
+fn only_sync_collection<'a>(sync: &'a WbxmlNode, collection_id: &str) -> &'a WbxmlNode {
+    sync.child("Collections")
+        .unwrap()
+        .children_named("Collection")
+        .into_iter()
+        .find(|collection| {
+            collection
+                .child("CollectionId")
+                .map(|node| node.text_value() == collection_id)
+                .unwrap_or(false)
+        })
         .unwrap()
 }
 
@@ -2139,8 +2208,219 @@ async fn stale_sync_key_is_rejected_after_a_completed_round() {
         .unwrap()
         .child("Collection")
         .unwrap();
-    assert_eq!(stale_collection.child("Status").unwrap().text_value(), "9");
+    assert_eq!(stale_collection.child("Status").unwrap().text_value(), "3");
     assert!(stale_collection.child("SyncKey").is_none());
+}
+
+#[tokio::test]
+async fn restart_safe_no_change_sync_keeps_persisted_key_usable() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let first_service = ActiveSyncService::new(store.clone());
+
+    let priming_sync =
+        sync_collection(&first_service, &inbox.id.to_string(), "0", "dev-restart").await;
+    let primed_key = collection_sync_key(&priming_sync, &inbox.id.to_string());
+
+    let restarted_service = ActiveSyncService::new(store);
+    let stable_sync = sync_collection(
+        &restarted_service,
+        &inbox.id.to_string(),
+        &primed_key,
+        "dev-restart",
+    )
+    .await;
+    let collection = only_sync_collection(&stable_sync, &inbox.id.to_string());
+
+    assert_eq!(collection.child("Status").unwrap().text_value(), "1");
+    assert!(collection.child("SyncKey").is_some());
+    assert!(collection.child("Commands").is_none());
+}
+
+#[tokio::test]
+async fn unknown_sync_key_is_rejected_with_invalid_sync_key_status() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+
+    let sync = sync_collection(
+        &service,
+        &inbox.id.to_string(),
+        "unknown-sync-key",
+        "dev-unknown",
+    )
+    .await;
+    let collection = only_sync_collection(&sync, &inbox.id.to_string());
+
+    assert_eq!(collection.child("Status").unwrap().text_value(), "3");
+    assert!(collection.child("SyncKey").is_none());
+}
+
+#[tokio::test]
+async fn expired_sync_key_is_cleaned_up_and_rejected() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let collection_id = inbox.id.to_string();
+
+    let priming_sync = sync_collection(&service, &collection_id, "0", "dev-expired").await;
+    let primed_key = collection_sync_key(&priming_sync, &collection_id);
+    store.expired_sync_states.lock().unwrap().insert(format!(
+        "{}:{}:{}:{}",
+        FakeStore::account().account_id,
+        "dev-expired",
+        collection_id,
+        primed_key
+    ));
+
+    let expired_sync = sync_collection(&service, &collection_id, &primed_key, "dev-expired").await;
+    let collection = only_sync_collection(&expired_sync, &collection_id);
+
+    assert_eq!(collection.child("Status").unwrap().text_value(), "3");
+    assert!(collection.child("SyncKey").is_none());
+    assert!(store.sync_states.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn superseded_incomplete_sync_key_is_rejected() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::inbox_email(
+                "11111111-1111-1111-1111-111111111111",
+                inbox.id,
+                "inbox",
+                "One",
+            ),
+            FakeStore::inbox_email(
+                "22222222-2222-2222-2222-222222222222",
+                inbox.id,
+                "inbox",
+                "Two",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let collection_id = inbox.id.to_string();
+
+    let priming_sync = sync_collection(&service, &collection_id, "0", "dev-superseded").await;
+    let primed_key = collection_sync_key(&priming_sync, &collection_id);
+    let page_request = encode_wbxml(&{
+        let mut sync = WbxmlNode::new(0, "Sync");
+        let mut collections = WbxmlNode::new(0, "Collections");
+        let mut collection = WbxmlNode::new(0, "Collection");
+        collection.push(WbxmlNode::with_text(0, "SyncKey", &primed_key));
+        collection.push(WbxmlNode::with_text(0, "CollectionId", &collection_id));
+        collection.push(WbxmlNode::with_text(0, "WindowSize", "1"));
+        collections.push(collection);
+        sync.push(collections);
+        sync
+    });
+    let page_response = service
+        .handle_request(
+            ActiveSyncQuery {
+                cmd: Some("Sync".to_string()),
+                user: Some("alice@example.test".to_string()),
+                device_id: Some("dev-superseded".to_string()),
+                _device_type: Some("phone".to_string()),
+            },
+            &bearer_headers(),
+            &page_request,
+        )
+        .await
+        .unwrap();
+    let page_sync = decode_response_body(page_response).await;
+    assert!(only_sync_collection(&page_sync, &collection_id)
+        .child("MoreAvailable")
+        .is_some());
+
+    let superseded_sync =
+        sync_collection(&service, &collection_id, &primed_key, "dev-superseded").await;
+    let collection = only_sync_collection(&superseded_sync, &collection_id);
+
+    assert_eq!(collection.child("Status").unwrap().text_value(), "3");
+    assert!(collection.child("SyncKey").is_none());
+}
+
+#[tokio::test]
+async fn hierarchy_change_after_existing_sync_returns_folder_sync_required() {
+    let inbox = FakeStore::inbox_mailbox();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store.clone());
+    let collection_id = inbox.id.to_string();
+
+    let folder_state = folder_sync(&service, "0", "dev-hierarchy").await;
+    let folder_key = folder_state
+        .child("SyncKey")
+        .unwrap()
+        .text_value()
+        .to_string();
+    let content_state = sync_collection(&service, &collection_id, "0", "dev-hierarchy").await;
+    let content_key = collection_sync_key(&content_state, &collection_id);
+
+    let mut changed_store = store.clone();
+    changed_store.mailboxes.push(FakeStore::mailbox(
+        "34343434-3434-4434-9434-343434343434",
+        "custom",
+        "Projects",
+        60,
+        None,
+    ));
+    let changed_service = ActiveSyncService::new(changed_store);
+
+    let stale_hierarchy_sync = sync_collection(
+        &changed_service,
+        &collection_id,
+        &content_key,
+        "dev-hierarchy",
+    )
+    .await;
+    let collection = only_sync_collection(&stale_hierarchy_sync, &collection_id);
+    assert_eq!(collection.child("Status").unwrap().text_value(), "12");
+    assert!(collection.child("SyncKey").is_none());
+
+    let refreshed_folder_state = folder_sync(&changed_service, &folder_key, "dev-hierarchy").await;
+    assert_eq!(
+        refreshed_folder_state
+            .child("Changes")
+            .unwrap()
+            .child("Count")
+            .unwrap()
+            .text_value(),
+        "1"
+    );
+    let advanced_sync = sync_collection(
+        &changed_service,
+        &collection_id,
+        &content_key,
+        "dev-hierarchy",
+    )
+    .await;
+    let advanced_collection = only_sync_collection(&advanced_sync, &collection_id);
+    assert_eq!(
+        advanced_collection.child("Status").unwrap().text_value(),
+        "1"
+    );
+    assert!(advanced_collection.child("SyncKey").is_some());
 }
 
 #[tokio::test]

@@ -120,6 +120,9 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .ok_or_else(|| anyhow!("missing DeviceId"))?;
         let protocol_version = protocol_version(headers);
         let principal = self.authenticate(query.user.as_deref(), headers).await?;
+        self.store
+            .cleanup_expired_activesync_sync_cursors(principal.account_id, device_id)
+            .await?;
 
         match command {
             "Provision" => {
@@ -498,12 +501,15 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .map(|node| node.text_value().trim().to_string())
             .unwrap_or_default();
         let window_size = collection_window_size(request, collection_node);
+        let current_hierarchy_generation = self
+            .current_hierarchy_generation(principal.account_id)
+            .await?;
 
         let Some(collection) = self
             .resolve_collection(principal.account_id, &collection_id)
             .await?
         else {
-            return Ok(sync_status_node(&collection_id, "9"));
+            return Ok(sync_status_node(&collection_id, "8"));
         };
 
         let previous_state = if sync_key == "0" || sync_key.is_empty() {
@@ -521,7 +527,24 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         };
 
         if !sync_key.is_empty() && sync_key != "0" && previous_state.is_none() {
-            return Ok(sync_status_node(&collection.id, "9"));
+            return Ok(sync_status_node(&collection.id, "3"));
+        }
+
+        if let Some(previous_state) = previous_state.as_ref() {
+            if previous_state
+                .hierarchy_generation
+                .as_deref()
+                .is_some_and(|generation| generation != current_hierarchy_generation)
+                && !self
+                    .device_hierarchy_is_current(
+                        principal.account_id,
+                        device_id,
+                        &current_hierarchy_generation,
+                    )
+                    .await?
+            {
+                return Ok(sync_status_node(&collection.id, "12"));
+            }
         }
 
         let client_responses = if drafts_collection(&collection) {
@@ -558,9 +581,10 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         if sync_key == "0" && !has_client_commands(collection_node) {
             let pending_changes = diff_collection_states(&[], &final_state);
             let stored_state = if pending_changes.is_empty() {
-                completed_sync_state(final_state.clone())
+                completed_sync_state(final_state.clone(), Some(current_hierarchy_generation))
             } else {
                 StoredSyncState {
+                    hierarchy_generation: Some(current_hierarchy_generation),
                     collection_state: final_state,
                     pending_changes,
                     next_offset: 0,
@@ -595,7 +619,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     )
                     .await?
                 {
-                    return Ok(sync_status_node(&collection.id, "9"));
+                    return Ok(sync_status_node(&collection.id, "3"));
                 }
                 let commands = self
                     .build_commands(principal.account_id, &collection, &pending_page.0)
@@ -603,11 +627,15 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 let more_available = pending_page.1 < previous_state.pending_changes.len();
                 let stored_state = if more_available {
                     StoredSyncState {
+                        hierarchy_generation: Some(current_hierarchy_generation.clone()),
                         next_offset: pending_page.1,
                         ..previous_state.clone()
                     }
                 } else {
-                    completed_sync_state(previous_state.collection_state.clone())
+                    completed_sync_state(
+                        previous_state.collection_state.clone(),
+                        Some(current_hierarchy_generation),
+                    )
                 };
                 (commands, more_available, stored_state)
             } else {
@@ -620,12 +648,13 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 let more_available = pending_page.1 < changed_items.len();
                 let stored_state = if more_available {
                     StoredSyncState {
+                        hierarchy_generation: Some(current_hierarchy_generation),
                         collection_state: final_state,
                         pending_changes: changed_items,
                         next_offset: pending_page.1,
                     }
                 } else {
-                    completed_sync_state(final_state)
+                    completed_sync_state(final_state, Some(current_hierarchy_generation))
                 };
                 (commands, more_available, stored_state)
             };
@@ -691,12 +720,34 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             return Ok(None);
         };
 
-        let latest_sync_state = decode_sync_state(&latest_state.snapshot_json)?;
-        if sync_state_is_complete(&latest_sync_state) && latest_state.sync_key != requested_key {
+        if latest_state.sync_key != requested_key {
             return Ok(None);
         }
 
         Ok(Some(requested_state))
+    }
+
+    async fn current_hierarchy_generation(&self, account_id: Uuid) -> Result<String> {
+        Ok(hierarchy_generation(
+            &self.folder_collections(account_id).await?,
+        ))
+    }
+
+    async fn device_hierarchy_is_current(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+        current_hierarchy_generation: &str,
+    ) -> Result<bool> {
+        let Some(state) = self
+            .store
+            .fetch_latest_activesync_sync_state(account_id, device_id, FOLDER_SYNC_COLLECTION_ID)
+            .await?
+        else {
+            return Ok(false);
+        };
+        let snapshot: Value = serde_json::from_str(&state.snapshot_json)?;
+        Ok(hierarchy_generation_from_snapshot(&snapshot) == current_hierarchy_generation)
     }
 
     async fn collection_state(
@@ -1846,6 +1897,43 @@ fn push_folder_metadata(node: &mut WbxmlNode, collection: &CollectionDefinition)
     node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
 }
 
+fn hierarchy_generation(collections: &[CollectionDefinition]) -> String {
+    let mut entries = collections
+        .iter()
+        .map(|collection| {
+            format!(
+                "{}|{}:{}:{}:{}",
+                collection.id,
+                collection.class_name,
+                collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
+                collection.display_name,
+                collection.folder_type
+            )
+        })
+        .collect::<Vec<_>>();
+    entries.sort();
+    entries.join("\n")
+}
+
+fn hierarchy_generation_from_snapshot(snapshot: &Value) -> String {
+    let mut entries = match snapshot {
+        Value::Array(entries) => entries
+            .iter()
+            .filter_map(|entry| {
+                let object = entry.as_object()?;
+                Some(format!(
+                    "{}|{}",
+                    object.get("id")?.as_str()?,
+                    object.get("fingerprint")?.as_str()?
+                ))
+            })
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    entries.sort();
+    entries.join("\n")
+}
+
 fn folder_type_for_mailbox_role(role: &str) -> &'static str {
     match role {
         "inbox" => "2",
@@ -1904,19 +1992,19 @@ fn decode_sync_state(snapshot_json: &str) -> Result<StoredSyncState> {
             .collect::<Vec<_>>(),
         _ => Vec::new(),
     };
-    Ok(completed_sync_state(collection_state))
+    Ok(completed_sync_state(collection_state, None))
 }
 
-fn completed_sync_state(collection_state: Vec<CollectionStateEntry>) -> StoredSyncState {
+fn completed_sync_state(
+    collection_state: Vec<CollectionStateEntry>,
+    hierarchy_generation: Option<String>,
+) -> StoredSyncState {
     StoredSyncState {
+        hierarchy_generation,
         collection_state,
         pending_changes: Vec::new(),
         next_offset: 0,
     }
-}
-
-fn sync_state_is_complete(state: &StoredSyncState) -> bool {
-    state.next_offset >= state.pending_changes.len()
 }
 
 fn has_client_commands(collection_node: &WbxmlNode) -> bool {

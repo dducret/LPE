@@ -3243,6 +3243,30 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn cleanup_expired_activesync_sync_cursors(
+        &self,
+        account_id: Uuid,
+        device_id: &str,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        sqlx::query(
+            r#"
+            DELETE FROM activesync_sync_cursors
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND device_id = $3
+              AND expires_at <= NOW()
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(device_id.trim())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn fetch_activesync_sync_state(
         &self,
         account_id: Uuid,

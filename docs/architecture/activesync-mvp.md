@@ -26,6 +26,11 @@
   - supports multiple collections in one request
   - accepts common protocol options that are not fully material to the adapter response
   - uses persisted sync keys and canonical collection state
+  - returns ActiveSync `Sync` status `3` for unknown, expired, stale, or
+    superseded collection sync keys
+  - returns ActiveSync `Sync` status `12` when a collection sync key predates a
+    folder hierarchy change that the device has not yet acknowledged through
+    `FolderSync`
   - supports shared mailbox projection for canonical mail folders
 - `FolderSync` behavior:
   - projects canonical mailbox folders, including `Inbox`, `Sent`, `Drafts`,
@@ -34,6 +39,10 @@
     `ParentId` values instead of flattening mail folders under the root
   - maps unsupported or non-default mail roles to the ActiveSync user-created
     mail folder type instead of inventing ActiveSync-only folder classes
+  - returns ActiveSync `FolderSync` status `9` for unknown, expired, stale, or
+    superseded hierarchy sync keys
+  - advances the device hierarchy generation used to validate later collection
+    `Sync` retries after hierarchy changes
 - `SendMail`, `SmartReply`, and `SmartForward`:
   - parse submitted `MIME`
   - validate attachments through the canonical file-validation path

@@ -1235,10 +1235,23 @@ fn activesync_sync_state_uses_v2_cursor_table() {
     assert!(
         PROTOCOLS_STORAGE.contains("INSERT INTO activesync_sync_cursors")
             && PROTOCOLS_STORAGE.contains("state_json")
+            && PROTOCOLS_STORAGE.contains("DELETE FROM activesync_sync_cursors")
+            && PROTOCOLS_STORAGE.contains("expires_at <= NOW()")
             && !PROTOCOLS_STORAGE.contains("activesync_sync_states")
             && !MESSAGE_OPS_STORAGE.contains("activesync_sync_states"),
         "ActiveSync storage must use v2 cursor rows, not the retired snapshot table"
     );
+    let cleanup_start = PROTOCOLS_STORAGE
+        .find("DELETE FROM activesync_sync_cursors")
+        .expect("ActiveSync cursor cleanup SQL is required");
+    let cleanup_end = (cleanup_start + 260).min(PROTOCOLS_STORAGE.len());
+    let cleanup_sql = &PROTOCOLS_STORAGE[cleanup_start..cleanup_end];
+    for canonical_table in ["messages", "mailboxes", "mailbox_messages"] {
+        assert!(
+            !cleanup_sql.contains(canonical_table),
+            "ActiveSync cursor cleanup must not delete canonical mailbox data"
+        );
+    }
 }
 
 #[test]

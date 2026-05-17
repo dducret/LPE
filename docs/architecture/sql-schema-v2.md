@@ -203,9 +203,11 @@ Protocol adapters store only cursor rows:
 - `activesync_sync_cursors` stores device, collection, last change sequence,
   and compact protocol cursor state needed to validate the current sync key and
   finish paged responses. This cursor state may contain object identifiers,
-  fingerprints, and pending change ids, but not canonical message, contact,
-  calendar, task, attachment, `Sent`, draft, outbox, search, rights, or
-  quarantine data.
+  fingerprints, hierarchy generation metadata, and pending change ids, but not
+  canonical message, contact, calendar, task, attachment, `Sent`, draft,
+  outbox, search, rights, or quarantine data. Expired ActiveSync cursor cleanup
+  is scoped to device cursor rows and must not delete canonical mailbox or
+  collaboration data.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS folder or hierarchy cursor state.
   Hierarchy checkpoints are account-wide and must have `mailbox_id IS NULL`.
   Content and read-state checkpoints are mailbox-scoped and must have a real

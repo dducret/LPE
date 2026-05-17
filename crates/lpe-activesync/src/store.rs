@@ -140,6 +140,11 @@ pub trait ActiveSyncStore: AccountAuthStore {
         collection_id: &'a str,
         sync_key: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>>;
+    fn cleanup_expired_activesync_sync_cursors<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, ()>;
 }
 
 impl ActiveSyncStore for Storage {
@@ -392,6 +397,17 @@ impl ActiveSyncStore for Storage {
     ) -> StoreFuture<'a, Option<ActiveSyncSyncState>> {
         Box::pin(async move {
             self.fetch_activesync_sync_state(account_id, device_id, collection_id, sync_key)
+                .await
+        })
+    }
+
+    fn cleanup_expired_activesync_sync_cursors<'a>(
+        &'a self,
+        account_id: Uuid,
+        device_id: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.cleanup_expired_activesync_sync_cursors(account_id, device_id)
                 .await
         })
     }
