@@ -2222,6 +2222,45 @@ fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
     }
 }
 
+fn assert_content_final_state_includes(bytes: &[u8], message_ids: &[Uuid], change_numbers: &[u64]) {
+    let idset_given = mapi_binary_property_value(bytes, META_TAG_IDSET_GIVEN);
+    for message_id in message_ids {
+        assert!(
+            strict_replguid_globset_contains_counter(
+                idset_given,
+                &globcnt_bytes(mapi_message_global_counter(message_id))
+            )
+            .unwrap(),
+            "final MetaTagIdsetGiven missing message {message_id}"
+        );
+    }
+
+    for tag in [
+        META_TAG_CNSET_SEEN,
+        META_TAG_CNSET_SEEN_FAI,
+        META_TAG_CNSET_READ,
+    ] {
+        let cnset = mapi_binary_property_value(bytes, tag);
+        for change_number in change_numbers {
+            assert!(
+                strict_replguid_globset_contains_counter(cnset, &globcnt_bytes(*change_number))
+                    .unwrap(),
+                "final content CNSET 0x{tag:08x} missing change {change_number}"
+            );
+        }
+    }
+}
+
+fn mapi_binary_property_value(bytes: &[u8], property_tag: u32) -> &[u8] {
+    let tag = property_tag.to_le_bytes();
+    let offset = bytes
+        .windows(tag.len())
+        .position(|window| window == tag)
+        .expect("MAPI binary property is present");
+    let length = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+    &bytes[offset + 8..offset + 8 + length]
+}
+
 const FX_INCR_SYNC_CHG: u32 = 0x4012_0003;
 const FX_INCR_SYNC_END: u32 = 0x4014_0003;
 const FX_INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
@@ -2239,7 +2278,10 @@ const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
+const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
+const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
+const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
 
 #[derive(Debug)]
 struct StrictHierarchySyncStream {
@@ -2723,6 +2765,43 @@ fn strict_test_replguid_globset(counters: &[u64]) -> Vec<u8> {
     value
 }
 
+fn strict_test_replid_globset(counters: &[u64]) -> Vec<u8> {
+    let mut value = 1u16.to_le_bytes().to_vec();
+    for counter in counters {
+        value.push(0x52);
+        value.extend_from_slice(&globcnt_bytes(*counter));
+        value.extend_from_slice(&globcnt_bytes(*counter));
+    }
+    value.push(0);
+    value
+}
+
+fn mapi_binary_property(tag: u32, value: &[u8]) -> Vec<u8> {
+    let mut property = tag.to_le_bytes().to_vec();
+    property.extend_from_slice(&(value.len() as u32).to_le_bytes());
+    property.extend_from_slice(value);
+    property
+}
+
+fn mapi_message_global_counter(id: &Uuid) -> u64 {
+    test_mapi_uuid_id(id) >> 16
+}
+
+fn mapi_message_cnset_property(tag: u32, changes: &[u64]) -> Vec<u8> {
+    mapi_binary_property(tag, &strict_test_replguid_globset(changes))
+}
+
+fn mapi_deleted_message_idset_property(ids: &[Uuid]) -> Vec<u8> {
+    let counters = ids
+        .iter()
+        .map(mapi_message_global_counter)
+        .collect::<Vec<_>>();
+    mapi_binary_property(
+        META_TAG_IDSET_DELETED,
+        &strict_test_replid_globset(&counters),
+    )
+}
+
 fn strict_push_binary_property(bytes: &mut Vec<u8>, tag: u32, value: &[u8]) {
     bytes.extend_from_slice(&tag.to_le_bytes());
     bytes.extend_from_slice(&(value.len() as u32).to_le_bytes());
@@ -3089,6 +3168,45 @@ fn append_rop_sync_manifest_get_buffer_with_state(
         0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&buffer_size.to_le_bytes());
+}
+
+async fn content_sync_response_rops(
+    store: FakeStore,
+    folder_global_counter: u64,
+    client_state: &[u8],
+) -> Vec<u8> {
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(folder_global_counter));
+    append_rop_sync_manifest_get_buffer_with_state(&mut rops, 1, 2, 4096, client_state);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    response_rops_from_execute_response(response).await
 }
 
 fn append_rop_outlook_hierarchy_sync_manifest_get_buffer(
@@ -11517,6 +11635,319 @@ async fn mapi_over_http_sync_checkpoint_resumes_incremental_content_with_tombsto
         &response_rops,
         &0x403A_0003u32.to_le_bytes()
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages() {
+    let inbox_id = Uuid::parse_str("51515151-5151-5151-5151-515151515151").unwrap();
+    let first_id = Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap();
+    let second_id = Uuid::parse_str("62626262-6262-6262-6262-626262626262").unwrap();
+    let removed_id = Uuid::parse_str("63636363-6363-6363-6363-636363636363").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 2;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                &first_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Baseline first",
+            ),
+            FakeStore::email(
+                &second_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Baseline second",
+            ),
+        ])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 55,
+        current_modseq: 41,
+        changed_message_ids: vec![first_id],
+        deleted_message_ids: vec![removed_id],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store, 5, &[]).await;
+
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops).map(|(_, messages)| messages),
+        Some(2)
+    );
+    assert!(contains_bytes(&response_rops, b"Baseline first"));
+    assert!(contains_bytes(&response_rops, b"Baseline second"));
+    assert!(!contains_bytes(
+        &response_rops,
+        &META_TAG_IDSET_DELETED.to_le_bytes()
+    ));
+    assert_content_final_state_includes(&response_rops, &[first_id, second_id], &[41]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delta() {
+    let inbox_id = Uuid::parse_str("52525252-5252-5252-5252-525252525252").unwrap();
+    let unchanged_id = Uuid::parse_str("64646464-6464-6464-6464-646464646464").unwrap();
+    let changed_id = Uuid::parse_str("65656565-6565-6565-6565-656565656565").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 2;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                &unchanged_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Incremental unchanged",
+            ),
+            FakeStore::email(
+                &changed_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Incremental changed",
+            ),
+        ])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+            20,
+            40,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 21,
+        current_modseq: 41,
+        changed_message_ids: vec![changed_id],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
+    assert!(contains_bytes(&response_rops, b"Incremental changed"));
+    assert!(!contains_bytes(&response_rops, b"Incremental unchanged"));
+    assert_content_final_state_includes(&response_rops, &[unchanged_id, changed_id], &[41]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombstone_and_target_change(
+) {
+    let inbox_id = Uuid::parse_str("53535353-5353-5353-5353-535353535353").unwrap();
+    let archive_id = Uuid::parse_str("54545454-5454-5454-5454-545454545454").unwrap();
+    let moved_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    let mut archive = FakeStore::mailbox(&archive_id.to_string(), "archive", "Archive");
+    archive.total_emails = 1;
+    let moved = FakeStore::email(
+        &moved_id.to_string(),
+        &archive_id.to_string(),
+        "archive",
+        "Moved canonical message",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox, archive])),
+        emails: Arc::new(Mutex::new(vec![moved])),
+        ..Default::default()
+    };
+    for mailbox_id in [inbox_id, archive_id] {
+        store
+            .store_mapi_sync_checkpoint(
+                FakeStore::account().account_id,
+                Some(mailbox_id),
+                MapiCheckpointKind::Content,
+                30,
+                40,
+                serde_json::json!({"source": "previous-run"}),
+            )
+            .await
+            .unwrap();
+    }
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 31,
+        current_modseq: 41,
+        changed_message_ids: vec![moved_id],
+        deleted_message_ids: vec![moved_id],
+        ..Default::default()
+    };
+
+    let source_rops = content_sync_response_rops(store.clone(), 5, b"client-content-state").await;
+    let target_rops = content_sync_response_rops(
+        store,
+        test_mapi_uuid_id(&archive_id) >> 16,
+        b"client-content-state",
+    )
+    .await;
+
+    assert_eq!(mapi_sync_manifest_counts(&source_rops), None);
+    assert!(contains_bytes(
+        &source_rops,
+        &mapi_deleted_message_idset_property(&[moved_id])
+    ));
+    assert_content_final_state_includes(&source_rops, &[], &[]);
+    assert_eq!(mapi_sync_manifest_counts(&target_rops), Some((0, 1)));
+    assert!(contains_bytes(&target_rops, b"Moved canonical message"));
+    assert_content_final_state_includes(&target_rops, &[moved_id], &[41]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_hard_delete_exports_tombstone_and_empty_final_state() {
+    let inbox_id = Uuid::parse_str("56565656-5656-5656-5656-565656565656").unwrap();
+    let deleted_id = Uuid::parse_str("67676767-6767-6767-6767-676767676767").unwrap();
+    let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(Vec::new())),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+            40,
+            40,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 41,
+        current_modseq: 41,
+        deleted_message_ids: vec![deleted_id],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_deleted_message_idset_property(&[deleted_id])
+    ));
+    assert_content_final_state_includes(&response_rops, &[], &[]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_read_flag_update_exports_read_state() {
+    let inbox_id = Uuid::parse_str("57575757-5757-5757-5757-575757575757").unwrap();
+    let message_id = Uuid::parse_str("68686868-6868-6868-6868-686868686868").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Read flag canonical update",
+    );
+    email.unread = false;
+    email.mailbox_states[0].unread = false;
+    email.modseq = 47;
+    email.mailbox_states[0].modseq = 47;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+            46,
+            46,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 47,
+        current_modseq: 47,
+        changed_message_ids: vec![message_id],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x402F_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0000_0001i32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        b"Read flag canonical update"
+    ));
+    assert_content_final_state_includes(&response_rops, &[message_id], &[47]);
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_message_cnset_property(META_TAG_CNSET_READ, &[47])
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc() {
+    let inbox_id = Uuid::parse_str("58585858-5858-5858-5858-585858585858").unwrap();
+    let message_id = Uuid::parse_str("69696969-6969-6969-6969-696969696969").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Protected Bcc sync",
+    );
+    email.bcc.push(JmapEmailAddress {
+        address: "hidden@example.test".to_string(),
+        display_name: Some("Hidden Bcc".to_string()),
+    });
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(inbox_id),
+            MapiCheckpointKind::Content,
+            50,
+            40,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 51,
+        current_modseq: 41,
+        changed_message_ids: vec![message_id],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store, 5, b"client-content-state").await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
+    assert!(contains_bytes(&response_rops, b"Protected Bcc sync"));
+    assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
+    assert!(!contains_bytes(&response_rops, b"Hidden Bcc"));
+    assert_content_final_state_includes(&response_rops, &[message_id], &[41]);
 }
 
 #[tokio::test]
