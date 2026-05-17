@@ -178,6 +178,10 @@ pub(in crate::mapi) enum MapiObject {
         state_upload_buffer: Vec<u8>,
         client_state_uploaded_bytes: usize,
         incremental_transfer_buffer: Option<Vec<u8>>,
+        hierarchy_content_candidate:
+            Option<crate::mapi_mailstore::HierarchyContentCountOmissionCandidate>,
+        incremental_hierarchy_content_candidate:
+            Option<crate::mapi_mailstore::HierarchyContentCountOmissionCandidate>,
         transfer_buffer: Vec<u8>,
         transfer_position: usize,
     },

@@ -67,6 +67,15 @@ pub(crate) struct MessageAttachmentSyncFacts {
     pub(crate) attachments: Vec<AttachmentSyncFact>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct HierarchyContentCountOmissionCandidate {
+    pub(crate) sync_root_folder_id: u64,
+    pub(crate) total_computed_content_count: i64,
+    pub(crate) total_computed_unread_count: i64,
+    pub(crate) omitted_count_property_tags: Vec<u32>,
+    pub(crate) omitted_count_row_count: usize,
+}
+
 pub(crate) fn canonical_folder_change_number(mailbox: &JmapMailbox) -> u64 {
     canonical_modseq_change_number(mailbox.modseq)
 }
@@ -556,6 +565,65 @@ pub(crate) fn log_hierarchy_transfer_debug(
             "rca debug mapi hierarchy transfer stream"
         ),
     }
+}
+
+pub(crate) fn hierarchy_content_count_omission_candidate(
+    sync_type: u8,
+    sync_flags: u16,
+    sync_property_tags: &[u32],
+    sync_root_folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    aggregate_emails: &[JmapEmail],
+) -> Option<HierarchyContentCountOmissionCandidate> {
+    if sync_type != 0x02 {
+        return None;
+    }
+
+    let excluded_property_tags = if sync_flags & 0x0080 == 0 {
+        sync_property_tags
+    } else {
+        &[]
+    };
+    let content_count_omitted =
+        property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
+    let unread_count_omitted =
+        property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
+    if !content_count_omitted && !unread_count_omitted {
+        return None;
+    }
+
+    let mut total_computed_content_count = 0i64;
+    let mut total_computed_unread_count = 0i64;
+    let mut omitted_count_property_tags = BTreeSet::new();
+    let mut omitted_count_row_count = 0usize;
+
+    for mailbox in mailboxes {
+        let folder_id = mapi_folder_id_for_mailbox(mailbox, sync_root_folder_id);
+        let (content_count, unread_count, _) =
+            folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
+        total_computed_content_count += i64::from(content_count.max(0));
+        total_computed_unread_count += i64::from(unread_count.max(0));
+        let row_content_count_omitted = content_count > 0 && content_count_omitted;
+        let row_unread_count_omitted = unread_count > 0 && unread_count_omitted;
+        if !row_content_count_omitted && !row_unread_count_omitted {
+            continue;
+        }
+        if row_content_count_omitted {
+            omitted_count_property_tags.insert(PID_TAG_CONTENT_COUNT);
+        }
+        if row_unread_count_omitted {
+            omitted_count_property_tags.insert(PID_TAG_CONTENT_UNREAD_COUNT);
+        }
+        omitted_count_row_count += 1;
+    }
+
+    (omitted_count_row_count > 0).then(|| HierarchyContentCountOmissionCandidate {
+        sync_root_folder_id,
+        total_computed_content_count,
+        total_computed_unread_count,
+        omitted_count_property_tags: omitted_count_property_tags.into_iter().collect(),
+        omitted_count_row_count,
+    })
 }
 
 fn hierarchy_property_filter_mode(
@@ -2087,6 +2155,58 @@ mod tests {
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 0);
         assert!(summary.rows[0].missing_core_property_tags.is_empty());
+    }
+
+    #[test]
+    fn hierarchy_content_count_omission_candidate_requires_positive_omitted_count_row() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let email = test_email();
+
+        let candidate = hierarchy_content_count_omission_candidate(
+            0x02,
+            0,
+            &[PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&email),
+        )
+        .expect("omitted positive count row should be a candidate");
+
+        assert_eq!(
+            candidate.sync_root_folder_id,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
+        );
+        assert_eq!(candidate.total_computed_content_count, 1);
+        assert_eq!(candidate.total_computed_unread_count, 1);
+        assert_eq!(
+            candidate.omitted_count_property_tags,
+            vec![PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT]
+        );
+        assert_eq!(candidate.omitted_count_row_count, 1);
+        assert!(hierarchy_content_count_omission_candidate(
+            0x02,
+            0,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &[mailbox],
+            &[email],
+        )
+        .is_none());
     }
 
     #[test]
