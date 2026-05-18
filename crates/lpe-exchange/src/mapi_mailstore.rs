@@ -517,26 +517,60 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             PID_TAG_PARENT_SOURCE_KEY,
             &source_key_for_store_id(folder_id),
         );
-        write_u32(&mut buffer, PID_TAG_MESSAGE_FLAGS);
-        write_i32(&mut buffer, canonical_message_flags(email) as i32);
-        write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
-        write_i32(&mut buffer, canonical_flag_status(email) as i32);
-        write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
-        write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
-        write_visible_recipient_facts(&mut buffer, email);
-        buffer.extend_from_slice(&(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes());
-        let mut attachments = attachments.iter().collect::<Vec<_>>();
-        attachments.sort_by(|left, right| {
-            left.file_name
-                .cmp(&right.file_name)
-                .then(left.media_type.cmp(&right.media_type))
-                .then(left.id.cmp(&right.id))
-        });
-        for attachment in attachments.into_iter().take(u16::MAX as usize) {
-            write_prefixed_bytes(&mut buffer, attachment.file_name.as_bytes());
-            write_prefixed_bytes(&mut buffer, attachment.media_type.as_bytes());
-            buffer.extend_from_slice(&attachment.size_octets.to_le_bytes());
-            write_prefixed_bytes(&mut buffer, attachment.file_reference.as_bytes());
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_FLAGS,
+        ) {
+            write_u32(&mut buffer, PID_TAG_MESSAGE_FLAGS);
+            write_i32(&mut buffer, canonical_message_flags(email) as i32);
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_FLAG_STATUS,
+        ) {
+            write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
+            write_i32(&mut buffer, canonical_flag_status(email) as i32);
+        }
+        let subject_in_scope =
+            content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W);
+        if subject_in_scope {
+            write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &email.subject);
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_NORMALIZED_SUBJECT_A,
+        ) {
+            write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
+        }
+        if subject_in_scope {
+            if sync_type == SYNC_TYPE_CONTENTS && !sync_property_tags.is_empty() {
+                buffer.extend_from_slice(&0u16.to_le_bytes());
+                buffer.extend_from_slice(&0u16.to_le_bytes());
+            } else {
+                write_visible_recipient_facts(&mut buffer, email);
+                buffer.extend_from_slice(
+                    &(attachments.len().min(u16::MAX as usize) as u16).to_le_bytes(),
+                );
+                let mut attachments = attachments.iter().collect::<Vec<_>>();
+                attachments.sort_by(|left, right| {
+                    left.file_name
+                        .cmp(&right.file_name)
+                        .then(left.media_type.cmp(&right.media_type))
+                        .then(left.id.cmp(&right.id))
+                });
+                for attachment in attachments.into_iter().take(u16::MAX as usize) {
+                    write_prefixed_bytes(&mut buffer, attachment.file_name.as_bytes());
+                    write_prefixed_bytes(&mut buffer, attachment.media_type.as_bytes());
+                    buffer.extend_from_slice(&attachment.size_octets.to_le_bytes());
+                    write_prefixed_bytes(&mut buffer, attachment.file_reference.as_bytes());
+                }
+            }
         }
     }
 
@@ -1589,6 +1623,22 @@ fn virtual_special_folder_metadata(
 
 fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> bool {
     excluded_property_tags.contains(&property_tag)
+}
+
+fn content_property_in_scope(
+    sync_type: u8,
+    sync_flags: u16,
+    sync_property_tags: &[u32],
+    property_tag: u32,
+) -> bool {
+    if sync_type != SYNC_TYPE_CONTENTS || sync_property_tags.is_empty() {
+        return true;
+    }
+    if sync_flags & 0x0080 != 0 {
+        sync_property_tags.contains(&property_tag)
+    } else {
+        !sync_property_tags.contains(&property_tag)
+    }
 }
 
 fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {

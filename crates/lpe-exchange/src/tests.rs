@@ -2353,6 +2353,7 @@ const FX_INCR_SYNC_READ: u32 = 0x402F_0003;
 const FX_INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
 const FX_INCR_SYNC_STATE_END: u32 = 0x403B_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
+const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
@@ -2927,6 +2928,7 @@ struct StrictContentMessageChange {
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
     predecessor_change_list: Vec<u8>,
+    body_tags: Vec<u32>,
     mid: Option<u64>,
     change_number: Option<u64>,
     associated: bool,
@@ -3303,6 +3305,7 @@ fn strict_finish_content_message(
         parent_source_key,
         change_key,
         predecessor_change_list,
+        body_tags: message.body_tags,
         mid: message.mid,
         change_number: message.change_number,
         associated,
@@ -12256,6 +12259,156 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
     assert!(!contains_bytes(&response_rops, b"LPE-MAPI-SYNC\0"));
     assert!(contains_bytes(&response_rops, b"Sync manifest message"));
     assert!(!contains_bytes(&response_rops, b"hidden@example.test"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_only_specified_properties_limits_message_properties() {
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let email = FakeStore::email(
+        "70707070-7070-4070-8070-707070707070",
+        mailbox_id,
+        "inbox",
+        "Only specified subject",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x80, 0x00, // content sync, OnlySpecifiedProperties
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x01, 0x00, // PropertyTagCount
+    ]);
+    rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    let message = &stream.message_changes[0];
+    assert_eq!(message.subject, "Only specified subject");
+    assert!(message.body_tags.contains(&PID_TAG_PARENT_SOURCE_KEY));
+    assert!(message.body_tags.contains(&PID_TAG_SUBJECT_W));
+    assert!(!message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS));
+    assert!(!message.body_tags.contains(&PID_TAG_FLAG_STATUS));
+    assert!(!message.body_tags.contains(&PID_TAG_NORMALIZED_SUBJECT_A));
+}
+
+#[tokio::test]
+async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by_default() {
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let email = FakeStore::email(
+        "71717171-7171-4171-8171-717171717171",
+        mailbox_id,
+        "inbox",
+        "Excluded subject",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x00, 0x00, // content sync
+        0x00, 0x00, // RestrictionDataSize
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x01, 0x00, // PropertyTagCount
+    ]);
+    rops.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    let message = &stream.message_changes[0];
+    assert_eq!(message.subject, "");
+    assert!(message.body_tags.contains(&PID_TAG_PARENT_SOURCE_KEY));
+    assert!(message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS));
+    assert!(message.body_tags.contains(&PID_TAG_FLAG_STATUS));
+    assert!(message.body_tags.contains(&PID_TAG_NORMALIZED_SUBJECT_A));
+    assert!(!message.body_tags.contains(&PID_TAG_SUBJECT_W));
 }
 
 #[tokio::test]
