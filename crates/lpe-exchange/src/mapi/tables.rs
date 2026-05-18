@@ -270,7 +270,7 @@ fn special_folder_property_value(folder_id: u64, property_tag: u32) -> Option<Ma
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ if folder_id == INBOX_FOLDER_ID => {
-            special_folder_identification_property_value(property_tag)
+            special_folder_identification_property_value(Uuid::nil(), property_tag)
         }
         _ => None,
     }
@@ -1534,12 +1534,16 @@ pub(in crate::mapi) fn serialize_special_folder_row(
 ) -> Vec<u8> {
     match folder_id {
         IPM_SUBTREE_FOLDER_ID => serialize_ipm_subtree_folder_row(mailboxes, columns, principal),
-        ROOT_FOLDER_ID => serialize_root_folder_row(mailboxes, columns),
-        _ => serialize_advertised_special_folder_row(folder_id, columns),
+        ROOT_FOLDER_ID => serialize_root_folder_row(mailboxes, columns, principal),
+        _ => serialize_advertised_special_folder_row(folder_id, columns, principal),
     }
 }
 
-fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> Vec<u8> {
+fn serialize_advertised_special_folder_row(
+    folder_id: u64,
+    columns: &[u32],
+    principal: Option<&AccountPrincipal>,
+) -> Vec<u8> {
     let mut row = Vec::new();
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
@@ -1583,7 +1587,12 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
             _ if folder_id == INBOX_FOLDER_ID => {
-                match special_folder_identification_property_value(*column) {
+                match special_folder_identification_property_value(
+                    principal
+                        .map(|principal| principal.account_id)
+                        .unwrap_or_default(),
+                    *column,
+                ) {
                     Some(value) => write_mapi_value(&mut row, *column, &value),
                     None => write_property_default(&mut row, *column),
                 }
@@ -1629,6 +1638,7 @@ fn special_folder_type(folder_id: u64) -> u32 {
 pub(in crate::mapi) fn serialize_root_folder_row(
     mailboxes: &[JmapMailbox],
     columns: &[u32],
+    principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
     let mut row = Vec::new();
     let change_number = mapi_mailstore::change_number_for_store_id(ROOT_FOLDER_ID);
@@ -1667,7 +1677,12 @@ pub(in crate::mapi) fn serialize_root_folder_row(
                 &mapi_mailstore::predecessor_change_list(change_number),
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
-            _ => match special_folder_identification_property_value(*column) {
+            _ => match special_folder_identification_property_value(
+                principal
+                    .map(|principal| principal.account_id)
+                    .unwrap_or_default(),
+                *column,
+            ) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },

@@ -110,6 +110,37 @@ pub(crate) fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
     global_counter_from_globcnt(&long_term_id[16..22]).map(mapi_store_id)
 }
 
+pub(crate) fn folder_entry_id_from_object_id(
+    mailbox_guid: Uuid,
+    object_id: u64,
+) -> Option<Vec<u8>> {
+    let global_counter = global_counter_from_store_id(object_id)?;
+    let mut entry_id = Vec::with_capacity(46);
+    entry_id.extend_from_slice(&0u32.to_le_bytes());
+    entry_id.extend_from_slice(&mailbox_guid.to_bytes_le());
+    entry_id.extend_from_slice(&1u16.to_le_bytes());
+    entry_id.extend_from_slice(&STORE_REPLICA_GUID);
+    entry_id.extend_from_slice(&globcnt_bytes(global_counter));
+    entry_id.extend_from_slice(&0u16.to_le_bytes());
+    Some(entry_id)
+}
+
+pub(crate) fn object_id_from_folder_entry_id(entry_id: &[u8]) -> Option<u64> {
+    if entry_id.len() != 46
+        || entry_id[0..4] != [0, 0, 0, 0]
+        || entry_id[20..22] != 1u16.to_le_bytes()
+        || entry_id[22..38] != STORE_REPLICA_GUID
+        || entry_id[44..46] != [0, 0]
+    {
+        return None;
+    }
+    global_counter_from_globcnt(&entry_id[38..44]).map(mapi_store_id)
+}
+
+pub(crate) fn object_id_from_folder_identifier_bytes(bytes: &[u8]) -> Option<u64> {
+    object_id_from_folder_entry_id(bytes).or_else(|| object_id_from_long_term_id(bytes))
+}
+
 pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
     let global_counter = global_counter_from_store_id(object_id)
@@ -168,6 +199,26 @@ mod tests {
         assert_eq!(long_term_id.len(), 24);
         assert_eq!(&long_term_id[16..22], &[0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc]);
         assert_eq!(object_id_from_long_term_id(&long_term_id), Some(object_id));
+    }
+
+    #[test]
+    fn folder_entry_id_round_trips_object_id() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let object_id = CALENDAR_FOLDER_ID;
+        let entry_id = folder_entry_id_from_object_id(mailbox_guid, object_id).unwrap();
+
+        assert_eq!(entry_id.len(), 46);
+        assert_eq!(&entry_id[..4], &0u32.to_le_bytes());
+        assert_eq!(&entry_id[4..20], &mailbox_guid.to_bytes_le());
+        assert_eq!(&entry_id[20..22], &1u16.to_le_bytes());
+        assert_eq!(&entry_id[22..38], &STORE_REPLICA_GUID);
+        assert_eq!(&entry_id[38..44], &globcnt_bytes(CALENDAR_FOLDER_COUNTER));
+        assert_eq!(&entry_id[44..46], &0u16.to_le_bytes());
+        assert_eq!(object_id_from_folder_entry_id(&entry_id), Some(object_id));
+        assert_eq!(
+            object_id_from_folder_identifier_bytes(&entry_id),
+            Some(object_id)
+        );
     }
 
     #[test]

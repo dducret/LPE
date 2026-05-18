@@ -888,7 +888,7 @@ fn format_root_default_folder_properties_for_debug(
                 ));
             };
             let decoded_folder_id =
-                crate::mapi::identity::object_id_from_long_term_id(bytes).unwrap_or(0);
+                crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes).unwrap_or(0);
             let decoded_name = default_folder_debug_name(decoded_folder_id);
             Some(format!(
                 "{storage_tag:#010x}:{property_name}:bytes={}:decoded_folder_id=0x{decoded_folder_id:016x}:decoded_name={decoded_name}:expected_folder_id=0x{expected_folder_id:016x}:matches_expected={}",

@@ -808,7 +808,7 @@ fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> Stri
                 ));
             };
             let decoded_folder_id =
-                crate::mapi::identity::object_id_from_long_term_id(bytes).unwrap_or(0);
+                crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes).unwrap_or(0);
             let decoded_name = if decoded_folder_id == 0 {
                 "invalid"
             } else {

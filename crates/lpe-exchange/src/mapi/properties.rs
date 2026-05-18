@@ -290,21 +290,22 @@ pub(in crate::mapi) fn logon_property_value(
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
-        _ => special_folder_identification_property_value(property_tag),
+        _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
 }
 
 pub(in crate::mapi) fn special_folder_identification_property_value(
+    mailbox_guid: Uuid,
     property_tag: u32,
 ) -> Option<MapiValue> {
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
-        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(folder_entry_id(CALENDAR_FOLDER_ID)),
-        PID_TAG_IPM_CONTACT_ENTRY_ID => Some(folder_entry_id(CONTACTS_FOLDER_ID)),
-        PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(folder_entry_id(JOURNAL_FOLDER_ID)),
-        PID_TAG_IPM_NOTE_ENTRY_ID => Some(folder_entry_id(NOTES_FOLDER_ID)),
-        PID_TAG_IPM_TASK_ENTRY_ID => Some(folder_entry_id(TASKS_FOLDER_ID)),
-        PID_TAG_REM_ONLINE_ENTRY_ID => Some(folder_entry_id(REMINDERS_FOLDER_ID)),
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(folder_entry_id(mailbox_guid, CALENDAR_FOLDER_ID)),
+        PID_TAG_IPM_CONTACT_ENTRY_ID => Some(folder_entry_id(mailbox_guid, CONTACTS_FOLDER_ID)),
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(folder_entry_id(mailbox_guid, JOURNAL_FOLDER_ID)),
+        PID_TAG_IPM_NOTE_ENTRY_ID => Some(folder_entry_id(mailbox_guid, NOTES_FOLDER_ID)),
+        PID_TAG_IPM_TASK_ENTRY_ID => Some(folder_entry_id(mailbox_guid, TASKS_FOLDER_ID)),
+        PID_TAG_REM_ONLINE_ENTRY_ID => Some(folder_entry_id(mailbox_guid, REMINDERS_FOLDER_ID)),
         _ => None,
     }
 }
@@ -326,11 +327,9 @@ fn valid_folder_mask() -> u32 {
         | FOLDER_COMMON_VIEWS_VALID
 }
 
-fn folder_entry_id(folder_id: u64) -> MapiValue {
+fn folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> MapiValue {
     MapiValue::Binary(
-        crate::mapi::identity::long_term_id_from_object_id(folder_id)
-            .unwrap()
-            .to_vec(),
+        crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id).unwrap(),
     )
 }
 
@@ -538,7 +537,8 @@ pub(in crate::mapi) fn mailbox_property_value(
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
     if mailbox.role == "inbox" {
-        if let Some(value) = special_folder_identification_property_value(property_tag) {
+        if let Some(value) = special_folder_identification_property_value(Uuid::nil(), property_tag)
+        {
             return Some(value);
         }
     }
@@ -2500,10 +2500,11 @@ mod tests {
         assert_eq!(PID_TAG_REM_ONLINE_ENTRY_ID, 0x36D5_0102);
 
         assert_eq!(
-            special_folder_identification_property_value(PID_TAG_VALID_FOLDER_MASK),
+            special_folder_identification_property_value(Uuid::nil(), PID_TAG_VALID_FOLDER_MASK),
             Some(MapiValue::U32(0x7F))
         );
 
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
         for (property_tag, folder_id) in [
             (PID_TAG_IPM_APPOINTMENT_ENTRY_ID, CALENDAR_FOLDER_ID),
             (PID_TAG_IPM_CONTACT_ENTRY_ID, CONTACTS_FOLDER_ID),
@@ -2512,13 +2513,15 @@ mod tests {
             (PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
             (PID_TAG_REM_ONLINE_ENTRY_ID, REMINDERS_FOLDER_ID),
         ] {
-            let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id).unwrap();
+            let entry_id =
+                crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
+                    .unwrap();
             assert_eq!(
-                special_folder_identification_property_value(property_tag),
-                Some(MapiValue::Binary(entry_id.to_vec()))
+                special_folder_identification_property_value(mailbox_guid, property_tag),
+                Some(MapiValue::Binary(entry_id.clone()))
             );
             assert_eq!(
-                crate::mapi::identity::object_id_from_long_term_id(&entry_id),
+                crate::mapi::identity::object_id_from_folder_entry_id(&entry_id),
                 Some(folder_id)
             );
         }

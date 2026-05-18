@@ -867,9 +867,11 @@ fn semantic_property_shape_for_debug(
         Some(MapiObject::Logon) => logon_property_value(principal, tag)
             .as_ref()
             .map(mapi_value_shape_for_debug),
-        Some(MapiObject::Folder { .. }) => special_folder_identification_property_value(tag)
-            .as_ref()
-            .map(mapi_value_shape_for_debug),
+        Some(MapiObject::Folder { .. }) => {
+            special_folder_identification_property_value(principal.account_id, tag)
+                .as_ref()
+                .map(mapi_value_shape_for_debug)
+        }
         _ => None,
     }
 }
@@ -1380,6 +1382,15 @@ fn serialize_session_folder_row(
                 &MapiValue::Binary(ipm_subtree_ost_ostid(principal)),
             );
             continue;
+        }
+
+        if folder_id == INBOX_FOLDER_ID {
+            if let Some(value) =
+                special_folder_identification_property_value(principal.account_id, *column)
+            {
+                write_mapi_value(&mut row, *column, &value);
+                continue;
+            }
         }
 
         if let Some(value) = properties

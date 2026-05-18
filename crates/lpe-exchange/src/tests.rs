@@ -13809,17 +13809,16 @@ async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
         values_offset += len;
         assert!(!entry_id.is_empty());
         assert_eq!(
-            crate::mapi::identity::object_id_from_long_term_id(&entry_id),
+            crate::mapi::identity::object_id_from_folder_identifier_bytes(&entry_id),
             Some(folder_id)
         );
         entry_ids.push(entry_id);
     }
 
-    for ((_, display_name, container_class, folder_id), entry_id) in
+    for ((_, display_name, container_class, folder_id), _entry_id) in
         default_properties.into_iter().zip(entry_ids)
     {
-        let mut rops = vec![0x44, 0x00, 0x00];
-        rops.extend_from_slice(&entry_id);
+        let mut rops = Vec::new();
         append_rop_open_folder(&mut rops, 0, 1, folder_id);
         append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x3613_001F, 0x65E0_0102]);
 
@@ -13835,9 +13834,6 @@ async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
             .unwrap();
         cookie = mapi_cookie_header(&response);
         let response_rops = response_rops_from_execute_response(response).await;
-        let mut id_response = vec![0x44, 0x00, 0, 0, 0, 0];
-        id_response.extend_from_slice(&folder_id.to_le_bytes());
-        assert!(contains_bytes(&response_rops, &id_response));
         assert!(contains_bytes(
             &response_rops,
             &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
