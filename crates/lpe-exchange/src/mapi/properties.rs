@@ -156,6 +156,7 @@ pub(in crate::mapi) const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 pub(in crate::mapi) const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
+pub(in crate::mapi) const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 pub(in crate::mapi) const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 pub(in crate::mapi) const PID_TAG_VALID_FOLDER_MASK: u32 = 0x35DF_0003;
 pub(in crate::mapi) const PID_TAG_IPM_APPOINTMENT_ENTRY_ID: u32 = 0x36D0_0102;
@@ -178,11 +179,34 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
+pub(in crate::mapi) const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 pub(in crate::mapi) const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
 pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 pub(in crate::mapi) const PID_TAG_BODY_STRING8: u32 = 0x1000_001E;
 pub(in crate::mapi) const PID_TAG_BODY_W: u32 = 0x1000_001F;
 pub(in crate::mapi) const PID_TAG_BODY_HTML_W: u32 = 0x1013_001F;
+
+pub(in crate::mapi) const FOLDER_ROOT: u32 = 0;
+pub(in crate::mapi) const FOLDER_GENERIC: u32 = 1;
+pub(in crate::mapi) const FOLDER_SEARCH: u32 = 2;
+pub(in crate::mapi) const MAPI_ACCESS_MODIFY: u32 = 0x0000_0001;
+pub(in crate::mapi) const MAPI_ACCESS_READ: u32 = 0x0000_0002;
+pub(in crate::mapi) const MAPI_ACCESS_DELETE: u32 = 0x0000_0004;
+pub(in crate::mapi) const MAPI_ACCESS_CREATE_HIERARCHY: u32 = 0x0000_0008;
+pub(in crate::mapi) const MAPI_ACCESS_CREATE_CONTENTS: u32 = 0x0000_0010;
+pub(in crate::mapi) const MAPI_ACCESS_CREATE_ASSOCIATED: u32 = 0x0000_0020;
+pub(in crate::mapi) const MAPI_FOLDER_ACCESS: u32 = MAPI_ACCESS_MODIFY
+    | MAPI_ACCESS_READ
+    | MAPI_ACCESS_DELETE
+    | MAPI_ACCESS_CREATE_HIERARCHY
+    | MAPI_ACCESS_CREATE_CONTENTS
+    | MAPI_ACCESS_CREATE_ASSOCIATED;
+pub(in crate::mapi) const MAPI_MESSAGE_ACCESS: u32 =
+    MAPI_ACCESS_MODIFY | MAPI_ACCESS_READ | MAPI_ACCESS_DELETE;
+pub(in crate::mapi) const MSGFLAG_READ: u32 = 0x0000_0001;
+pub(in crate::mapi) const MSGFLAG_UNSENT: u32 = 0x0000_0008;
+pub(in crate::mapi) const FOLLOWUP_COMPLETE: u32 = 0x0000_0001;
+pub(in crate::mapi) const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 pub(in crate::mapi) const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;
 pub(in crate::mapi) const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 pub(in crate::mapi) const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
@@ -211,6 +235,7 @@ pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_FILENAME_W: u32 = 0x3704_001F;
 pub(in crate::mapi) const PID_TAG_ATTACH_METHOD: u32 = 0x3705_0003;
+pub(in crate::mapi) const ATTACH_BY_VALUE: u32 = 1;
 pub(in crate::mapi) const PID_TAG_ATTACH_LONG_FILENAME_W: u32 = 0x3707_001F;
 pub(in crate::mapi) const PID_TAG_RENDERING_POSITION: u32 = 0x370B_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_MIME_TAG_W: u32 = 0x370E_001F;
@@ -522,6 +547,12 @@ pub(in crate::mapi) fn mailbox_property_value(
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(if mailbox.role == "__mapi_search" {
+            FOLDER_SEARCH
+        } else {
+            FOLDER_GENERIC
+        })),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
         PID_TAG_LAST_MODIFICATION_TIME
@@ -567,6 +598,8 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(folder.item_count)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
@@ -616,6 +649,7 @@ pub(in crate::mapi) fn email_property_value(
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
         )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),
@@ -693,7 +727,8 @@ pub(in crate::mapi) fn contact_property_value(
         PID_TAG_TITLE_W => Some(MapiValue::String(contact.role.clone())),
         PID_TAG_BODY_W => Some(MapiValue::String(contact.notes.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Contact".to_string())),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0001)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(contact_size(contact))),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
@@ -736,7 +771,8 @@ pub(in crate::mapi) fn event_property_value(
         PID_TAG_END_DATE => Some(MapiValue::I64(event_end_filetime(event) as i64)),
         PID_TAG_LOCATION_W => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0001)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(event_size(event))),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
@@ -774,7 +810,8 @@ pub(in crate::mapi) fn task_property_value(
         }
         PID_TAG_BODY_W => Some(MapiValue::String(task.description.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Task".to_string())),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0001)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(task_flag_status(task))),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(task_size(task))),
@@ -803,9 +840,9 @@ pub(in crate::mapi) fn task_property_value(
 
 fn task_flag_status(task: &ClientTask) -> u32 {
     if task.status == "completed" {
-        0x0000_0001
+        FOLLOWUP_COMPLETE
     } else {
-        0x0000_0002
+        FOLLOWUP_FLAGGED
     }
 }
 
@@ -821,7 +858,7 @@ pub(in crate::mapi) fn attachment_property_value(
         }
         PID_TAG_ATTACH_MIME_TAG_W => Some(MapiValue::String(attachment.media_type.clone())),
         PID_TAG_ATTACH_SIZE => Some(MapiValue::U64(attachment.size_octets)),
-        PID_TAG_ATTACH_METHOD => Some(MapiValue::U32(1)),
+        PID_TAG_ATTACH_METHOD => Some(MapiValue::U32(ATTACH_BY_VALUE)),
         PID_TAG_RENDERING_POSITION => Some(MapiValue::U32(u32::MAX)),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             attachment.file_reference.as_bytes().to_vec(),
@@ -1532,7 +1569,7 @@ pub(in crate::mapi) fn task_input_from_mapi(
         .get(&PID_TAG_FLAG_STATUS)
         .and_then(MapiValue::as_i64)
         .map(|value| {
-            if value == 0x0000_0001 {
+            if value == FOLLOWUP_COMPLETE as i64 {
                 "completed"
             } else {
                 "needs-action"
@@ -1977,7 +2014,7 @@ where
                 let flags = value
                     .into_u32()
                     .ok_or_else(|| anyhow!("invalid PidTagMessageFlags value"))?;
-                unread = Some(flags & 0x0000_0001 == 0);
+                unread = Some(flags & MSGFLAG_READ == 0);
             }
             PID_TAG_FLAG_STATUS => {
                 flagged = Some(

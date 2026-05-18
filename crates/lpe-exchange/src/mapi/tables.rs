@@ -38,6 +38,8 @@ pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
         PID_TAG_DISPLAY_NAME_W,
         PID_TAG_FOLDER_ID,
         PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_ACCESS,
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
         PID_TAG_SUBFOLDERS,
@@ -81,6 +83,8 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_DISPLAY_NAME_W,
         PID_TAG_FOLDER_ID,
         PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_ACCESS,
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
         PID_TAG_SUBFOLDERS,
@@ -237,6 +241,7 @@ fn special_folder_property_value(folder_id: u64, property_tag: u32) -> Option<Ma
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(display_name.to_string())),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
+        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(special_folder_type(folder_id))),
         PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
@@ -290,6 +295,7 @@ pub(in crate::mapi) fn default_message_property_tags() -> Vec<u32> {
         PID_TAG_NORMALIZED_SUBJECT_W,
         PID_TAG_MESSAGE_CLASS_W,
         PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_FLAG_STATUS,
         PID_TAG_MESSAGE_SIZE,
@@ -324,6 +330,7 @@ pub(in crate::mapi) fn default_contact_property_tags() -> Vec<u32> {
         PID_TAG_TITLE_W,
         PID_TAG_BODY_W,
         PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_SIZE,
         PID_TAG_SOURCE_KEY,
@@ -346,6 +353,7 @@ pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
         PID_TAG_END_DATE,
         PID_TAG_LOCATION_W,
         PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_SIZE,
         PID_TAG_SOURCE_KEY,
@@ -365,6 +373,7 @@ pub(in crate::mapi) fn default_task_property_tags() -> Vec<u32> {
         PID_TAG_NORMALIZED_SUBJECT_W,
         PID_TAG_BODY_W,
         PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_FLAG_STATUS,
         PID_TAG_MESSAGE_SIZE,
@@ -902,7 +911,7 @@ pub(in crate::mapi) fn serialize_attachment_row(
             PID_TAG_ATTACH_SIZE => {
                 write_u32(&mut row, attachment.size_octets.min(u32::MAX as u64) as u32)
             }
-            PID_TAG_ATTACH_METHOD => write_u32(&mut row, 1),
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, ATTACH_BY_VALUE),
             PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
             PID_TAG_ENTRY_ID => {
                 write_u16_prefixed_bytes(&mut row, attachment.canonical_id.as_bytes())
@@ -1540,6 +1549,8 @@ fn serialize_advertised_special_folder_row(folder_id: u64, columns: &[u32]) -> V
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, display_name),
             PID_TAG_FOLDER_ID => write_u64(&mut row, folder_id),
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, parent_folder_id),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, special_folder_type(folder_id)),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, message_class),
@@ -1607,6 +1618,14 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
     }
 }
 
+fn special_folder_type(folder_id: u64) -> u32 {
+    match folder_id {
+        ROOT_FOLDER_ID => FOLDER_ROOT,
+        SEARCH_FOLDER_ID => FOLDER_SEARCH,
+        _ => FOLDER_GENERIC,
+    }
+}
+
 pub(in crate::mapi) fn serialize_root_folder_row(
     mailboxes: &[JmapMailbox],
     columns: &[u32],
@@ -1618,6 +1637,8 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Root"),
             PID_TAG_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, 0),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
@@ -1667,6 +1688,8 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Top of Information Store"),
             PID_TAG_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
@@ -1759,6 +1782,90 @@ mod tests {
         assert_eq!(&row[2..18], principal.account_id.as_bytes());
         assert_eq!(u32::from_le_bytes(row[18..22].try_into().unwrap()), 1);
     }
+
+    #[test]
+    fn folder_type_rows_follow_microsoft_values() {
+        let mailbox = JmapMailbox {
+            id: Uuid::nil(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        let mailbox_row = serialize_folder_row(&mailbox, &[PID_TAG_FOLDER_TYPE]);
+        assert_eq!(
+            u32::from_le_bytes(mailbox_row.try_into().unwrap()),
+            FOLDER_GENERIC
+        );
+
+        let root_row =
+            serialize_special_folder_row(ROOT_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
+        assert_eq!(
+            u32::from_le_bytes(root_row.try_into().unwrap()),
+            FOLDER_ROOT
+        );
+
+        let ipm_row =
+            serialize_special_folder_row(IPM_SUBTREE_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
+        assert_eq!(
+            u32::from_le_bytes(ipm_row.try_into().unwrap()),
+            FOLDER_GENERIC
+        );
+
+        let search_row =
+            serialize_special_folder_row(SEARCH_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
+        assert_eq!(
+            u32::from_le_bytes(search_row.try_into().unwrap()),
+            FOLDER_SEARCH
+        );
+    }
+
+    #[test]
+    fn access_rows_follow_microsoft_flags() {
+        let mailbox = JmapMailbox {
+            id: Uuid::nil(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        let mailbox_row = serialize_folder_row(&mailbox, &[PID_TAG_ACCESS]);
+        assert_eq!(
+            u32::from_le_bytes(mailbox_row.try_into().unwrap()),
+            MAPI_FOLDER_ACCESS
+        );
+
+        let root_row = serialize_special_folder_row(ROOT_FOLDER_ID, &[], &[PID_TAG_ACCESS], None);
+        assert_eq!(
+            u32::from_le_bytes(root_row.try_into().unwrap()),
+            MAPI_FOLDER_ACCESS
+        );
+    }
+
+    #[test]
+    fn attachment_rows_use_by_value_method() {
+        let attachment = MapiAttachment {
+            attach_num: 0,
+            canonical_id: Uuid::nil(),
+            file_reference: "file-ref".to_string(),
+            file_name: "report.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            size_octets: 16,
+        };
+
+        let row = serialize_attachment_row(&attachment, &[PID_TAG_ATTACH_METHOD]);
+        assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), ATTACH_BY_VALUE);
+    }
 }
 
 pub(in crate::mapi) fn write_logon_property_row(
@@ -1832,7 +1939,7 @@ pub(in crate::mapi) fn serialize_pending_attachment_row(
             }
             PID_TAG_ATTACH_MIME_TAG_W => write_utf16z(&mut row, &media_type),
             PID_TAG_ATTACH_SIZE => write_u32(&mut row, size),
-            PID_TAG_ATTACH_METHOD => write_u32(&mut row, 1),
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, ATTACH_BY_VALUE),
             PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
             PID_TAG_ATTACH_DATA_BINARY => write_u16_prefixed_bytes(&mut row, data),
             _ => write_property_default(&mut row, *column),
@@ -1858,7 +1965,7 @@ pub(in crate::mapi) fn serialize_saved_attachment_row(
             }
             PID_TAG_ATTACH_MIME_TAG_W => write_utf16z(&mut row, media_type),
             PID_TAG_ATTACH_SIZE => write_u32(&mut row, size_octets.min(u32::MAX as u64) as u32),
-            PID_TAG_ATTACH_METHOD => write_u32(&mut row, 1),
+            PID_TAG_ATTACH_METHOD => write_u32(&mut row, ATTACH_BY_VALUE),
             PID_TAG_RENDERING_POSITION => write_u32(&mut row, u32::MAX),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
                 write_u16_prefixed_bytes(&mut row, file_reference.as_bytes())
@@ -1879,6 +1986,8 @@ pub(in crate::mapi) fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u3
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             _ => match mailbox_property_value(mailbox, *column) {
@@ -1903,6 +2012,8 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row(
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTAINER_CLASS_W => {
                 write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
             }
@@ -1933,6 +2044,7 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                 &mut row,
                 mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
             ),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
             PID_TAG_MESSAGE_SIZE => {
                 write_u32(&mut row, email.size_octets.clamp(0, u32::MAX as i64) as u32)
@@ -2038,7 +2150,8 @@ pub(in crate::mapi) fn pending_message_property_value(
             PID_TAG_NORMALIZED_SUBJECT_W => properties.get(&PID_TAG_SUBJECT_W).cloned(),
             PID_TAG_SUBJECT_W => properties.get(&PID_TAG_NORMALIZED_SUBJECT_W).cloned(),
             PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),
-            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0008)),
+            PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_UNSENT)),
             PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
             PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(pending_message_size(properties))),
             PID_TAG_SENDER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),

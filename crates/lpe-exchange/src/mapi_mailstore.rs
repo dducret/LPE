@@ -28,6 +28,21 @@ const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+const MAPI_ACCESS_MODIFY: u32 = 0x0000_0001;
+const MAPI_ACCESS_READ: u32 = 0x0000_0002;
+const MAPI_ACCESS_DELETE: u32 = 0x0000_0004;
+const MAPI_ACCESS_CREATE_HIERARCHY: u32 = 0x0000_0008;
+const MAPI_ACCESS_CREATE_CONTENTS: u32 = 0x0000_0010;
+const MAPI_ACCESS_CREATE_ASSOCIATED: u32 = 0x0000_0020;
+const MAPI_FOLDER_ACCESS: u32 = MAPI_ACCESS_MODIFY
+    | MAPI_ACCESS_READ
+    | MAPI_ACCESS_DELETE
+    | MAPI_ACCESS_CREATE_HIERARCHY
+    | MAPI_ACCESS_CREATE_CONTENTS
+    | MAPI_ACCESS_CREATE_ASSOCIATED;
+const MSGFLAG_READ: u32 = 0x0000_0001;
+const MSGFLAG_HASATTACH: u32 = 0x0000_0010;
+const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
@@ -428,7 +443,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) {
-                write_i32_property(&mut buffer, PID_TAG_ACCESS, 0x0000_0002);
+                write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
             write_bool_property(
                 &mut buffer,
@@ -1723,17 +1738,17 @@ pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
     let mut flags = 0u32;
     if !email.unread {
-        flags |= 0x0000_0001;
+        flags |= MSGFLAG_READ;
     }
     if email.has_attachments {
-        flags |= 0x0000_0010;
+        flags |= MSGFLAG_HASATTACH;
     }
     flags
 }
 
 pub(crate) fn canonical_flag_status(email: &JmapEmail) -> u32 {
     if email.flagged {
-        2
+        FOLLOWUP_FLAGGED
     } else {
         0
     }
@@ -2198,7 +2213,7 @@ mod tests {
         assert_variable_property(&buffer, PID_TAG_DISPLAY_NAME_W, &utf16z("Inbox"));
         assert_variable_property(&buffer, PID_TAG_SUBJECT_W, &utf16z("Hello"));
         assert_variable_property(&buffer, PID_TAG_NORMALIZED_SUBJECT_A, b"Hello\0");
-        assert_i32_property(&buffer, PID_TAG_ACCESS, 0x0000_0002);
+        assert_i32_property(&buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
         assert_absent_property(&buffer, 0x3FE0_0102);
         assert_absent_property(&buffer, 0x3FE1_0102);
         assert_absent_property(&buffer, 0x0E27_0102);
