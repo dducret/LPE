@@ -60,6 +60,7 @@ const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
 const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
+const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_END_COMMAND: u8 = 0x00;
 const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
@@ -402,9 +403,13 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 &predecessor_change_list(change_number),
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
-            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-            write_i64(&mut buffer, folder_id as i64);
-            if sync_type != 0x02 || sync_flags & 0x0100 != 0 || sync_extra_flags & 0x0000_0001 != 0
+            if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
+                write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+                write_i64(&mut buffer, folder_id as i64);
+            }
+            if sync_type != 0x02
+                || sync_flags & 0x0100 != 0
+                || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
             {
                 write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
                 write_i64(&mut buffer, parent_folder_id as i64);
@@ -483,7 +488,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             &predecessor_change_list(change_number),
         );
         write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, false);
-        if sync_extra_flags & 0x0000_0001 != 0 {
+        if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
             write_u32(&mut buffer, PID_TAG_MID);
             write_i64(
                 &mut buffer,
@@ -2364,13 +2369,51 @@ mod tests {
         assert_eq!(summary.rows.len(), 1);
         assert_eq!(summary.rows[0].display_name, "Inbox");
         assert_eq!(summary.rows[0].container_class, "IPF.Note");
+        assert_eq!(summary.rows[0].folder_id, None);
+        assert_eq!(summary.rows[0].source_key_len, 22);
+        assert_eq!(summary.rows[0].parent_source_key_len, 22);
+        assert!(summary.rows[0].missing_core_property_tags.is_empty());
+    }
+
+    #[test]
+    fn hierarchy_transfer_includes_folder_id_only_when_eid_requested() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x02,
+            0x0100,
+            SYNC_EXTRA_FLAG_EID,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &[mailbox],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+        assert_eq!(summary.rows.len(), 1);
         assert_eq!(
             summary.rows[0].folder_id,
             Some(crate::mapi::identity::INBOX_FOLDER_ID)
         );
-        assert_eq!(summary.rows[0].source_key_len, 22);
-        assert_eq!(summary.rows[0].parent_source_key_len, 22);
-        assert!(summary.rows[0].missing_core_property_tags.is_empty());
+        assert!(summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
     }
 
     #[test]
