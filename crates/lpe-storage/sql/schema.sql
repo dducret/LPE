@@ -1620,6 +1620,21 @@ CREATE UNIQUE INDEX mapi_sync_checkpoints_hierarchy_idx
     ON mapi_sync_checkpoints (tenant_id, account_id, checkpoint_kind, mapi_replica_guid)
     WHERE mailbox_id IS NULL;
 
+CREATE TABLE mapi_folder_properties (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    folder_id BIGINT NOT NULL CHECK (folder_id > 0),
+    property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295),
+    property_value BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id, folder_id, property_tag),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_folder_properties_folder_idx
+    ON mapi_folder_properties (tenant_id, account_id, folder_id);
+
 CREATE TABLE mapi_mailbox_replicas (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,

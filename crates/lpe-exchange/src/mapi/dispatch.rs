@@ -8,7 +8,7 @@ use super::sync::*;
 use super::tables::*;
 use super::transport::*;
 use super::*;
-use crate::store::MapiSyncCheckpoint;
+use crate::store::{MapiFolderPropertyValue, MapiSyncCheckpoint};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -360,6 +360,40 @@ fn log_execute_rop_debug(
             "rca debug mapi post hierarchy execute probe"
         );
     }
+
+    if endpoint == "emsmdb" && session.post_hierarchy_actions.set_properties_probe_observed {
+        let probe = summarize_first_post_hierarchy_probe(request_rop_buffer, response_rop_buffer);
+        let root_logon_requests =
+            summarize_root_logon_default_folder_getprops_requests(request_rop_buffer, session);
+        if !root_logon_requests.is_empty() {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = endpoint,
+                tenant_id = %principal.tenant_id,
+                account_id = %principal.account_id,
+                mailbox = %principal.email,
+                request_type = "Execute",
+                session_context_id = %session_id,
+                mapi_request_id = request_id,
+                client_request_id = %client_request_id,
+                client_info = %client_info,
+                client_application = %client_application,
+                last_completed_hierarchy_sync_root =
+                    %post_hierarchy.last_completed_hierarchy_sync_root,
+                post_hierarchy_execute_count = post_hierarchy.execute_count,
+                request_rop_ids = %request.ids_csv,
+                response_rop_results_best_effort = %response.results_csv,
+                get_properties_specific_request_count = probe.get_properties_specific_request_count,
+                get_properties_specific_requests = %probe.get_properties_specific_requests,
+                get_properties_specific_root_logon_requests = %root_logon_requests,
+                get_properties_specific_response_shapes =
+                    %probe.get_properties_specific_response_shapes,
+                probe_parse_error = %probe.parse_error,
+                "rca debug mapi post setprops default folder get props"
+            );
+        }
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -539,6 +573,174 @@ fn summarize_first_post_hierarchy_probe(
     summary
 }
 
+fn summarize_root_logon_default_folder_getprops_requests(
+    rop_buffer: &[u8],
+    session: &MapiSession,
+) -> String {
+    let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
+        return String::new();
+    };
+    let Ok(input_handles) = read_handle_table(handle_table) else {
+        return String::new();
+    };
+    let mut cursor = Cursor::new(requests);
+    let mut opened_root_output_indexes = HashSet::new();
+    let mut getprops = Vec::new();
+    while cursor.remaining() > 0 {
+        let Ok(request) = read_rop_request(&mut cursor) else {
+            break;
+        };
+        match request.typed().rop_id() {
+            0x02 if request.folder_id() == Some(ROOT_FOLDER_ID) => {
+                if let Some(output_handle_index) = request.output_handle_index {
+                    opened_root_output_indexes.insert(output_handle_index);
+                }
+            }
+            0x07 if request
+                .property_tags()
+                .iter()
+                .any(is_default_folder_entry_id_property) =>
+            {
+                let input_handle_index = request.input_handle_index().unwrap_or(0);
+                let target = if opened_root_output_indexes.contains(&input_handle_index) {
+                    Some("root")
+                } else {
+                    match input_object(session, &input_handles, &request) {
+                        Some(MapiObject::Logon) => Some("logon"),
+                        Some(MapiObject::Folder { folder_id, .. })
+                            if *folder_id == ROOT_FOLDER_ID =>
+                        {
+                            Some("root")
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(target) = target {
+                    getprops.push(format!(
+                        "in={input_handle_index};target={target};tags={}",
+                        format_debug_property_tags(&request.property_tags())
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    getprops.join("|")
+}
+
+async fn folder_properties_for_open<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    session: &MapiSession,
+    folder_id: u64,
+) -> Result<HashMap<u32, MapiValue>>
+where
+    S: ExchangeStore,
+{
+    let mut properties = HashMap::new();
+    for record in store
+        .fetch_mapi_folder_properties(principal.account_id, &[folder_id])
+        .await?
+    {
+        if record.folder_id == folder_id {
+            let mut cursor = Cursor::new(&record.value_bytes);
+            let value = parse_mapi_property_value(&mut cursor, record.property_tag)?;
+            properties.insert(record.property_tag, value);
+        }
+    }
+    if folder_id == ROOT_FOLDER_ID {
+        properties.extend(session.root_default_folder_properties.clone());
+    }
+    Ok(properties)
+}
+
+fn mapi_folder_property_values(
+    folder_id: u64,
+    values: &[(u32, MapiValue)],
+) -> Vec<MapiFolderPropertyValue> {
+    values
+        .iter()
+        .filter_map(|(tag, value)| {
+            let property_tag = canonical_property_storage_tag(*tag);
+            if folder_id == IPM_SUBTREE_FOLDER_ID && property_tag == PID_TAG_OST_OSTID {
+                return None;
+            }
+            let mut value_bytes = Vec::new();
+            write_mapi_value(&mut value_bytes, property_tag, value);
+            Some(MapiFolderPropertyValue {
+                folder_id,
+                property_tag,
+                value_bytes,
+            })
+        })
+        .collect()
+}
+
+fn mapi_folder_property_tags(property_tags: &[u32]) -> Vec<u32> {
+    property_tags
+        .iter()
+        .flat_map(|tag| [*tag, canonical_property_storage_tag(*tag)])
+        .collect()
+}
+
+fn remember_root_default_folder_properties(
+    session: &mut MapiSession,
+    object: Option<&MapiObject>,
+    values: &[(u32, MapiValue)],
+) {
+    if !matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        })
+    ) {
+        return;
+    }
+    for (tag, value) in values {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        if is_default_folder_entry_id_property(&storage_tag) {
+            session
+                .root_default_folder_properties
+                .insert(storage_tag, value.clone());
+        }
+    }
+}
+
+fn forget_root_default_folder_properties(
+    session: &mut MapiSession,
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+) {
+    if !matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        })
+    ) {
+        return;
+    }
+    for tag in property_tags {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        if is_default_folder_entry_id_property(&storage_tag) {
+            session.root_default_folder_properties.remove(&storage_tag);
+        }
+    }
+}
+
+fn is_default_folder_entry_id_property(tag: &u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(*tag),
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID
+            | PID_TAG_IPM_CONTACT_ENTRY_ID
+            | PID_TAG_IPM_JOURNAL_ENTRY_ID
+            | PID_TAG_IPM_NOTE_ENTRY_ID
+            | PID_TAG_IPM_TASK_ENTRY_ID
+            | PID_TAG_REM_ONLINE_ENTRY_ID
+    )
+}
+
 fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeRequest {
     match request.property_values() {
         Ok(values) => SetPropertiesProbeRequest {
@@ -598,11 +800,34 @@ fn summarize_get_properties_probe_response(
         Some(_) => "unknown",
         None => "truncated",
     };
+    let values = summarize_get_properties_probe_response_values(responses, offset, request);
     format!(
-        "in={};result={result};row={row_shape};tags={}",
+        "in={};result={result};row={row_shape};tags={};values={values}",
         request.input_handle_index,
         format_debug_property_tags(&request.property_tags)
     )
+}
+
+fn summarize_get_properties_probe_response_values(
+    responses: &[u8],
+    offset: usize,
+    request: &GetPropertiesSpecificProbeRequest,
+) -> String {
+    if responses.get(offset + 6).copied() != Some(0) {
+        return "not-standard-row".to_string();
+    }
+    let mut cursor = Cursor::new(responses.get(offset + 7..).unwrap_or_default());
+    let mut values = Vec::new();
+    for tag in &request.property_tags {
+        match parse_property_value_for_tag(&mut cursor, *tag) {
+            Ok(value) => values.push(format!("{tag:#010x}:{}", mapi_value_debug_shape(&value))),
+            Err(error) => {
+                values.push(format!("{tag:#010x}:parse_error={error}"));
+                break;
+            }
+        }
+    }
+    values.join(",")
 }
 
 fn summarize_set_properties_probe_response(
@@ -937,11 +1162,23 @@ where
                     ));
                     continue;
                 }
+                let properties =
+                    match folder_properties_for_open(store, principal, session, folder_id).await {
+                        Ok(properties) => properties,
+                        Err(_) => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x02,
+                                request.output_handle_index.unwrap_or(0),
+                                0x8004_0102,
+                            ));
+                            continue;
+                        }
+                    };
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::Folder {
                         folder_id,
-                        properties: HashMap::new(),
+                        properties,
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -1211,10 +1448,39 @@ where
                             )
                             .await
                         }
-                        _ => apply_mapi_property_values(
-                            input_object_mut(session, &handle_slots, &request),
-                            values,
-                        ),
+                        Some(MapiObject::Folder { folder_id, .. }) => {
+                            let stored_values = mapi_folder_property_values(folder_id, &values);
+                            match store
+                                .store_mapi_folder_properties(principal.account_id, &stored_values)
+                                .await
+                            {
+                                Ok(()) => {
+                                    let object =
+                                        input_object(session, &handle_slots, &request).cloned();
+                                    remember_root_default_folder_properties(
+                                        session,
+                                        object.as_ref(),
+                                        &values,
+                                    );
+                                    apply_mapi_property_values(
+                                        input_object_mut(session, &handle_slots, &request),
+                                        values,
+                                    )
+                                }
+                                Err(error) => Err(error),
+                            }
+                        }
+                        object => {
+                            remember_root_default_folder_properties(
+                                session,
+                                object.as_ref(),
+                                &values,
+                            );
+                            apply_mapi_property_values(
+                                input_object_mut(session, &handle_slots, &request),
+                                values,
+                            )
+                        }
                     },
                     Err(error) => Err(error),
                 };
@@ -1228,11 +1494,37 @@ where
                 }
             }
             0x0B | 0x7A => {
-                let deleted = delete_mapi_properties(
-                    input_object_mut(session, &handle_slots, &request),
-                    &request.property_tags(),
-                );
-                match deleted {
+                let property_tags = request.property_tags();
+                let delete_result = match input_object(session, &handle_slots, &request).cloned() {
+                    Some(MapiObject::Folder { folder_id, .. }) => {
+                        let stored_tags = mapi_folder_property_tags(&property_tags);
+                        store
+                            .delete_mapi_folder_properties(
+                                principal.account_id,
+                                folder_id,
+                                &stored_tags,
+                            )
+                            .await
+                            .and_then(|_| {
+                                let object =
+                                    input_object(session, &handle_slots, &request).cloned();
+                                forget_root_default_folder_properties(
+                                    session,
+                                    object.as_ref(),
+                                    &property_tags,
+                                );
+                                delete_mapi_properties(
+                                    input_object_mut(session, &handle_slots, &request),
+                                    &property_tags,
+                                )
+                            })
+                    }
+                    _ => delete_mapi_properties(
+                        input_object_mut(session, &handle_slots, &request),
+                        &property_tags,
+                    ),
+                };
+                match delete_result {
                     Ok(()) => {
                         responses.extend_from_slice(&rop_delete_properties_response(&request))
                     }
@@ -1843,11 +2135,25 @@ where
                         .find(|mailbox| mailbox.name.eq_ignore_ascii_case(display_name))
                     {
                         let folder_id = mapi_folder_id(existing);
+                        let properties =
+                            match folder_properties_for_open(store, principal, session, folder_id)
+                                .await
+                            {
+                                Ok(properties) => properties,
+                                Err(_) => {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x1C,
+                                        request.output_handle_index.unwrap_or(0),
+                                        0x8004_0102,
+                                    ));
+                                    continue;
+                                }
+                            };
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::Folder {
                                 folder_id,
-                                properties: HashMap::new(),
+                                properties,
                             },
                         );
                         set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -4523,6 +4829,74 @@ mod tests {
     }
 
     #[test]
+    fn post_hierarchy_probe_summary_marks_default_folder_entry_id_getprops() {
+        let mut request_bytes = vec![0x07, 0x00, 0x01];
+        request_bytes.extend_from_slice(&4096u16.to_le_bytes());
+        request_bytes.extend_from_slice(&1u16.to_le_bytes());
+        request_bytes.extend_from_slice(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID.to_le_bytes());
+        let request_buffer = rop_buffer_with_response(request_bytes, &[1]);
+
+        let mut responses = vec![0x07, 0x01];
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+        responses.extend_from_slice(&24u16.to_le_bytes());
+        responses.extend_from_slice(&[0xAA; 24]);
+        let response_buffer = rop_buffer_with_response(responses, &[1]);
+
+        let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
+
+        assert!(summary
+            .get_properties_specific_response_shapes
+            .contains("values=0x36d00102:binary:bytes=24"));
+        assert!(summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn root_default_folder_setprops_are_reused_by_next_root_getprops() {
+        let mut session = test_emsmdb_session();
+        let root = MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+        let stored_value = vec![0xAA; 24];
+        let values = vec![
+            (
+                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+                MapiValue::Binary(stored_value.clone()),
+            ),
+            (
+                PID_TAG_DISPLAY_NAME_W,
+                MapiValue::String("not-a-root-default-folder-prop".to_string()),
+            ),
+        ];
+
+        remember_root_default_folder_properties(&mut session, Some(&root), &values);
+        let reopened_root = MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: session.root_default_folder_properties.clone(),
+        };
+        let request = get_properties_specific_request(&[PID_TAG_IPM_APPOINTMENT_ENTRY_ID]);
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&reopened_root),
+            &test_principal(),
+            &[],
+            &[],
+            &empty_snapshot(),
+        );
+
+        let mut cursor = Cursor::new(&response[7..]);
+        assert_eq!(
+            parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
+            MapiValue::Binary(stored_value)
+        );
+        let MapiObject::Folder { properties, .. } = &reopened_root else {
+            panic!("expected reopened root folder object");
+        };
+        assert!(!properties.contains_key(&canonical_property_storage_tag(PID_TAG_DISPLAY_NAME_W)));
+    }
+
+    #[test]
     fn first_post_hierarchy_probe_summary_identifies_set_properties_shapes() {
         let mut property_value = Vec::new();
         property_value.extend_from_slice(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID.to_le_bytes());
@@ -4561,5 +4935,67 @@ mod tests {
             .chain(std::iter::once(0))
             .flat_map(u16::to_le_bytes)
             .collect()
+    }
+
+    fn test_emsmdb_session() -> MapiSession {
+        MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "alice@example.test".to_string(),
+            last_seen_at: SystemTime::UNIX_EPOCH,
+            next_handle: 1,
+            handles: HashMap::new(),
+            message_statuses: HashMap::new(),
+            root_default_folder_properties: HashMap::new(),
+            named_properties: HashMap::new(),
+            named_property_ids: HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: VecDeque::new(),
+            completed_execute_requests: HashMap::new(),
+            completed_execute_request_order: VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+        }
+    }
+
+    fn get_properties_specific_request(property_tags: &[u32]) -> RopRequest {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&(property_tags.len() as u16).to_le_bytes());
+        for tag in property_tags {
+            payload.extend_from_slice(&tag.to_le_bytes());
+        }
+        RopRequest {
+            rop_id: 0x07,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        }
+    }
+
+    fn test_principal() -> AccountPrincipal {
+        AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        }
+    }
+
+    fn empty_snapshot() -> MapiMailStoreSnapshot {
+        MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 }

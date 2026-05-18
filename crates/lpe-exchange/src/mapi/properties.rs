@@ -2173,6 +2173,12 @@ pub(in crate::mapi) fn delete_mapi_properties(
             }
             Ok(())
         }
+        Some(MapiObject::Folder { properties, .. }) => {
+            for tag in &property_tags {
+                properties.remove(tag);
+            }
+            Ok(())
+        }
         _ => Err(anyhow!("MAPI object does not support property deletion")),
     }
 }

@@ -85,6 +85,13 @@ pub(crate) struct MapiSyncCheckpoint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiFolderPropertyValue {
+    pub(crate) folder_id: u64,
+    pub(crate) property_tag: u32,
+    pub(crate) value_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiNotificationPoll {
     pub(crate) event_pending: bool,
     pub(crate) cursor: Option<i64>,
@@ -203,6 +210,25 @@ pub trait ExchangeStore: AccountAuthStore {
         last_modseq: u64,
         cursor_json: serde_json::Value,
     ) -> StoreFuture<'a, MapiSyncCheckpoint>;
+
+    fn fetch_mapi_folder_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_ids: &'a [u64],
+    ) -> StoreFuture<'a, Vec<MapiFolderPropertyValue>>;
+
+    fn store_mapi_folder_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiFolderPropertyValue],
+    ) -> StoreFuture<'a, ()>;
+
+    fn delete_mapi_folder_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, ()>;
 
     fn fetch_mapi_sync_changes<'a>(
         &'a self,
@@ -827,6 +853,117 @@ impl ExchangeStore for Storage {
             tx.commit().await?;
 
             mapi_sync_checkpoint_from_row(row)
+        })
+    }
+
+    fn fetch_mapi_folder_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_ids: &'a [u64],
+    ) -> StoreFuture<'a, Vec<MapiFolderPropertyValue>> {
+        Box::pin(async move {
+            if folder_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let folder_ids = folder_ids
+                .iter()
+                .map(|value| *value as i64)
+                .collect::<Vec<_>>();
+            let rows = sqlx::query(
+                r#"
+                SELECT folder_id, property_tag, property_value
+                FROM mapi_folder_properties
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND folder_id = ANY($3)
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(&folder_ids)
+            .fetch_all(self.pool())
+            .await?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| MapiFolderPropertyValue {
+                    folder_id: row.get::<i64, _>("folder_id") as u64,
+                    property_tag: row.get::<i64, _>("property_tag") as u32,
+                    value_bytes: row.get("property_value"),
+                })
+                .collect())
+        })
+    }
+
+    fn store_mapi_folder_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        values: &'a [MapiFolderPropertyValue],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if values.is_empty() {
+                return Ok(());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            for value in values {
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_folder_properties (
+                        tenant_id, account_id, folder_id, property_tag, property_value
+                    )
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (tenant_id, account_id, folder_id, property_tag)
+                    DO UPDATE SET
+                        property_value = EXCLUDED.property_value,
+                        updated_at = NOW()
+                    "#,
+                )
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(value.folder_id as i64)
+                .bind(value.property_tag as i64)
+                .bind(&value.value_bytes)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+
+    fn delete_mapi_folder_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        folder_id: u64,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if property_tags.is_empty() {
+                return Ok(());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let property_tags = property_tags
+                .iter()
+                .map(|value| *value as i64)
+                .collect::<Vec<_>>();
+            sqlx::query(
+                r#"
+                DELETE FROM mapi_folder_properties
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND folder_id = $3
+                  AND property_tag = ANY($4)
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(folder_id as i64)
+            .bind(&property_tags)
+            .execute(self.pool())
+            .await?;
+            Ok(())
         })
     }
 
