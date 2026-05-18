@@ -142,6 +142,11 @@ pub(in crate::mapi) enum RopId {
     CopyFolder = 0x36,
     QueryColumnsAll = 0x37,
     AbortSearch = 0x38,
+    GetPermissionsTable = 0x3E,
+    GetRulesTable = 0x3F,
+    ModifyPermissions = 0x40,
+    ModifyRules = 0x41,
+    GetOwningServers = 0x42,
     GetAddressTypes = 0x49,
     TransportSend = 0x4A,
     FastTransferSourceCopyMessages = 0x4B,
@@ -192,9 +197,12 @@ pub(in crate::mapi) enum RopId {
     SynchronizationOpenCollector = 0x7E,
     GetLocalReplicaIds = 0x7F,
     SetLocalReplicaMidsetDeletedNoReplicate = 0x80,
-    PublicFolderIsGhosted = 0x81,
+    ResetTable = 0x81,
     LongTermIdFromId = 0x43,
     IdFromLongTermId = 0x44,
+    PublicFolderIsGhosted = 0x45,
+    TransportDeliverMessage = 0x47,
+    TransportDoneWithMessage = 0x48,
     GetPerUserGuidLongTermIds = 0x82,
     ReadPerUserInformationByLongTermId = 0x83,
     WritePerUserInformationByLongTermId = 0x84,
@@ -204,6 +212,10 @@ pub(in crate::mapi) enum RopId {
     CopyToStream = 0x3A,
     CloneStream = 0x3B,
     GetAttachmentTableExtended = 0x89,
+    WriteStreamExtended2 = 0x90,
+    HardDeleteMessagesExtended = 0x91,
+    EmptyFolderExtended = 0x92,
+    SetLocalReplicaMidsetDeletedExtended = 0x93,
     WriteStreamExtended = 0xA3,
     Logon = 0xFE,
 }
@@ -273,10 +285,18 @@ impl RopId {
             0x36 => Some(Self::CopyFolder),
             0x37 => Some(Self::QueryColumnsAll),
             0x38 => Some(Self::AbortSearch),
+            0x3E => Some(Self::GetPermissionsTable),
+            0x3F => Some(Self::GetRulesTable),
+            0x40 => Some(Self::ModifyPermissions),
+            0x41 => Some(Self::ModifyRules),
+            0x42 => Some(Self::GetOwningServers),
             0x3A => Some(Self::CopyToStream),
             0x3B => Some(Self::CloneStream),
             0x43 => Some(Self::LongTermIdFromId),
             0x44 => Some(Self::IdFromLongTermId),
+            0x45 => Some(Self::PublicFolderIsGhosted),
+            0x47 => Some(Self::TransportDeliverMessage),
+            0x48 => Some(Self::TransportDoneWithMessage),
             0x49 => Some(Self::GetAddressTypes),
             0x4A => Some(Self::TransportSend),
             0x4B => Some(Self::FastTransferSourceCopyMessages),
@@ -327,7 +347,7 @@ impl RopId {
             0x7E => Some(Self::SynchronizationOpenCollector),
             0x7F => Some(Self::GetLocalReplicaIds),
             0x80 => Some(Self::SetLocalReplicaMidsetDeletedNoReplicate),
-            0x81 => Some(Self::PublicFolderIsGhosted),
+            0x81 => Some(Self::ResetTable),
             0x82 => Some(Self::GetPerUserGuidLongTermIds),
             0x83 => Some(Self::ReadPerUserInformationByLongTermId),
             0x84 => Some(Self::WritePerUserInformationByLongTermId),
@@ -335,6 +355,10 @@ impl RopId {
             0x86 => Some(Self::SynchronizationImportReadStateChanges),
             0x87 => Some(Self::SetMessageFlags),
             0x89 => Some(Self::GetAttachmentTableExtended),
+            0x90 => Some(Self::WriteStreamExtended2),
+            0x91 => Some(Self::HardDeleteMessagesExtended),
+            0x92 => Some(Self::EmptyFolderExtended),
+            0x93 => Some(Self::SetLocalReplicaMidsetDeletedExtended),
             0xA3 => Some(Self::WriteStreamExtended),
             0xFE => Some(Self::Logon),
             _ => None,
@@ -344,6 +368,136 @@ impl RopId {
     #[allow(dead_code)]
     pub(in crate::mapi) fn is_reserved(value: u8) -> bool {
         matches!(value, 0x00 | 0x28 | 0x3C | 0x3D | 0x62 | 0x65 | 0x6A | 0x71)
+    }
+
+    pub(in crate::mapi) fn is_supported_by_dispatch(self) -> bool {
+        matches!(
+            self,
+            Self::Release
+                | Self::OpenFolder
+                | Self::OpenMessage
+                | Self::GetHierarchyTable
+                | Self::GetContentsTable
+                | Self::CreateMessage
+                | Self::GetPropertiesSpecific
+                | Self::GetPropertiesAll
+                | Self::GetPropertiesList
+                | Self::SetProperties
+                | Self::DeleteProperties
+                | Self::SaveChangesMessage
+                | Self::RemoveAllRecipients
+                | Self::ModifyRecipients
+                | Self::ReadRecipients
+                | Self::ReloadCachedInformation
+                | Self::SetMessageReadFlag
+                | Self::SetColumns
+                | Self::SortTable
+                | Self::Restrict
+                | Self::QueryRows
+                | Self::Abort
+                | Self::GetStatus
+                | Self::QueryPosition
+                | Self::SeekRow
+                | Self::SeekRowBookmark
+                | Self::SeekRowFractional
+                | Self::CreateFolder
+                | Self::DeleteFolder
+                | Self::DeleteMessages
+                | Self::GetMessageStatus
+                | Self::SetMessageStatus
+                | Self::GetAttachmentTable
+                | Self::OpenAttachment
+                | Self::CreateAttachment
+                | Self::DeleteAttachment
+                | Self::SaveChangesAttachment
+                | Self::SetReceiveFolder
+                | Self::GetReceiveFolder
+                | Self::RegisterNotification
+                | Self::OpenStream
+                | Self::ReadStream
+                | Self::WriteStream
+                | Self::SeekStream
+                | Self::SetStreamSize
+                | Self::SetSearchCriteria
+                | Self::GetSearchCriteria
+                | Self::SubmitMessage
+                | Self::MoveCopyMessages
+                | Self::AbortSubmit
+                | Self::MoveFolder
+                | Self::CopyFolder
+                | Self::QueryColumnsAll
+                | Self::AbortSearch
+                | Self::CopyToStream
+                | Self::CloneStream
+                | Self::GetPermissionsTable
+                | Self::GetRulesTable
+                | Self::ModifyPermissions
+                | Self::ModifyRules
+                | Self::GetOwningServers
+                | Self::LongTermIdFromId
+                | Self::IdFromLongTermId
+                | Self::PublicFolderIsGhosted
+                | Self::ResetTable
+                | Self::TransportDeliverMessage
+                | Self::TransportDoneWithMessage
+                | Self::GetAddressTypes
+                | Self::TransportSend
+                | Self::FastTransferSourceCopyMessages
+                | Self::FastTransferSourceCopyFolder
+                | Self::FastTransferSourceCopyTo
+                | Self::FastTransferSourceGetBuffer
+                | Self::FindRow
+                | Self::Progress
+                | Self::TransportNewMail
+                | Self::GetValidAttachments
+                | Self::FastTransferDestinationConfigure
+                | Self::FastTransferDestinationPutBuffer
+                | Self::GetNamesFromPropertyIds
+                | Self::GetPropertyIdsFromNames
+                | Self::UpdateDeferredActionMessages
+                | Self::EmptyFolder
+                | Self::HardDeleteMessages
+                | Self::HardDeleteMessagesAndSubfolders
+                | Self::SetLocalReplicaMidsetDeleted
+                | Self::SetLocalReplicaMidsetExpired
+                | Self::GetDeletedMessages
+                | Self::GetStreamSize
+                | Self::QueryNamedProperties
+                | Self::GetPerUserLongTermIds
+                | Self::GetPerUserGuid
+                | Self::ReadPerUserInformation
+                | Self::WritePerUserInformation
+                | Self::SetReadFlags
+                | Self::GetReceiveFolderTable
+                | Self::FastTransferSourceCopyProperties
+                | Self::GetCollapseState
+                | Self::SetCollapseState
+                | Self::GetTransportFolder
+                | Self::OptionsData
+                | Self::SynchronizationConfigure
+                | Self::SynchronizationImportMessageChange
+                | Self::SynchronizationImportHierarchyChange
+                | Self::SynchronizationImportDeletes
+                | Self::SynchronizationUploadStateStreamBegin
+                | Self::SynchronizationUploadStateStreamContinue
+                | Self::SynchronizationUploadStateStreamEnd
+                | Self::SynchronizationImportMessageMove
+                | Self::SetPropertiesNoReplicate
+                | Self::DeletePropertiesNoReplicate
+                | Self::GetStoreState
+                | Self::SynchronizationOpenCollector
+                | Self::GetLocalReplicaIds
+                | Self::SetLocalReplicaMidsetDeletedNoReplicate
+                | Self::GetPerUserGuidLongTermIds
+                | Self::SynchronizationImportReadStateChanges
+                | Self::GetAttachmentTableExtended
+                | Self::WriteStreamExtended2
+                | Self::HardDeleteMessagesExtended
+                | Self::EmptyFolderExtended
+                | Self::SetLocalReplicaMidsetDeletedExtended
+                | Self::WriteStreamExtended
+                | Self::Logon
+        )
     }
 }
 

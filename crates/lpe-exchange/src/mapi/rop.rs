@@ -2,7 +2,7 @@ use super::properties::*;
 use super::session::*;
 use super::sync::*;
 use super::tables::*;
-use super::wire::{MapiError, MapiRestrictionType};
+use super::wire::{MapiError, MapiRestrictionType, RopId};
 use super::*;
 
 pub(in crate::mapi) fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -1385,6 +1385,14 @@ fn serialize_session_folder_row(
             continue;
         }
 
+        if let Some(value) = properties
+            .get(&storage_tag)
+            .or_else(|| properties.get(column))
+        {
+            write_mapi_value(&mut row, *column, value);
+            continue;
+        }
+
         if folder_id == INBOX_FOLDER_ID {
             if let Some(value) =
                 special_folder_identification_property_value(principal.account_id, *column)
@@ -1392,14 +1400,6 @@ fn serialize_session_folder_row(
                 write_mapi_value(&mut row, *column, &value);
                 continue;
             }
-        }
-
-        if let Some(value) = properties
-            .get(&storage_tag)
-            .or_else(|| properties.get(column))
-        {
-            write_mapi_value(&mut row, *column, value);
-            continue;
         }
 
         let value = folder_row_for_id(folder_id, mailboxes)
@@ -1834,47 +1834,51 @@ impl TypedRopRequest {
 
 impl RopRequest {
     pub(in crate::mapi) fn typed(&self) -> TypedRopRequest {
-        match self.rop_id {
-            0x01 => TypedRopRequest::Release(RopInputOnlyRequest {
+        match RopId::from_u8(self.rop_id) {
+            Some(RopId::Release) => TypedRopRequest::Release(RopInputOnlyRequest {
                 rop_id: self.rop_id,
                 input_handle_index: self.input_handle_index.unwrap_or(0),
             }),
-            0x02 => TypedRopRequest::OpenFolder(RopOpenFolderRequest {
+            Some(RopId::OpenFolder) => TypedRopRequest::OpenFolder(RopOpenFolderRequest {
                 input_handle_index: self.input_handle_index.unwrap_or(0),
                 output_handle_index: self.output_handle_index.unwrap_or(0),
                 folder_id: self.folder_id().unwrap_or(0),
                 open_mode_flags: self.payload.get(8).copied().unwrap_or(0),
             }),
-            0x03 => TypedRopRequest::OpenMessage(RopOpenMessageRequest {
+            Some(RopId::OpenMessage) => TypedRopRequest::OpenMessage(RopOpenMessageRequest {
                 input_handle_index: self.input_handle_index.unwrap_or(0),
                 output_handle_index: self.output_handle_index.unwrap_or(0),
                 folder_id: self.folder_id().unwrap_or(0),
                 open_mode_flags: self.payload.get(8).copied().unwrap_or(0),
                 message_id: self.message_id().unwrap_or(0),
             }),
-            0x04 | 0x05 | 0x21 => TypedRopRequest::OpenTable(RopOpenTableRequest {
+            Some(
+                RopId::GetHierarchyTable | RopId::GetContentsTable | RopId::GetAttachmentTable,
+            ) => TypedRopRequest::OpenTable(RopOpenTableRequest {
                 rop_id: self.rop_id,
                 input_handle_index: self.input_handle_index.unwrap_or(0),
                 output_handle_index: self.output_handle_index.unwrap_or(0),
                 table_flags: self.payload.first().copied().unwrap_or(0),
             }),
-            0x06 => TypedRopRequest::CreateMessage(RopCreateMessageRequest {
+            Some(RopId::CreateMessage) => TypedRopRequest::CreateMessage(RopCreateMessageRequest {
                 input_handle_index: self.input_handle_index.unwrap_or(0),
                 output_handle_index: self.output_handle_index.unwrap_or(0),
                 folder_id: self.folder_id().unwrap_or(0),
                 associated_flag: self.payload.get(8).copied().unwrap_or(0),
             }),
-            0x0C => TypedRopRequest::SaveChangesMessage(RopSaveChangesMessageRequest {
-                response_handle_index: self.output_handle_index.unwrap_or(0),
-                input_handle_index: self.input_handle_index.unwrap_or(0),
-                save_flags: self.payload.first().copied().unwrap_or(0),
-            }),
-            0x12 => TypedRopRequest::SetColumns(RopSetColumnsRequest {
+            Some(RopId::SaveChangesMessage) => {
+                TypedRopRequest::SaveChangesMessage(RopSaveChangesMessageRequest {
+                    response_handle_index: self.output_handle_index.unwrap_or(0),
+                    input_handle_index: self.input_handle_index.unwrap_or(0),
+                    save_flags: self.payload.first().copied().unwrap_or(0),
+                })
+            }
+            Some(RopId::SetColumns) => TypedRopRequest::SetColumns(RopSetColumnsRequest {
                 input_handle_index: self.input_handle_index.unwrap_or(0),
                 flags: self.payload.first().copied().unwrap_or(0),
                 property_tags: self.property_tags(),
             }),
-            0x14 | 0x4F => {
+            Some(RopId::Restrict | RopId::FindRow) => {
                 let size = self
                     .payload
                     .get(1..3)
@@ -1889,13 +1893,13 @@ impl RopRequest {
                     restriction: self.payload.get(3..3 + size).unwrap_or_default().to_vec(),
                 })
             }
-            0x15 => TypedRopRequest::QueryRows(RopQueryRowsRequest {
+            Some(RopId::QueryRows) => TypedRopRequest::QueryRows(RopQueryRowsRequest {
                 input_handle_index: self.input_handle_index.unwrap_or(0),
                 flags: self.payload.first().copied().unwrap_or(0),
                 forward_read: self.query_forward_read(),
                 row_count: self.query_row_count().unwrap_or(0).min(u16::MAX as usize) as u16,
             }),
-            0xFE => {
+            Some(RopId::Logon) => {
                 let essdn_size = self
                     .payload
                     .get(9..11)
@@ -1914,24 +1918,24 @@ impl RopRequest {
                         .to_vec(),
                 })
             }
-            0x41 if self.modify_rules_count().unwrap_or(0) != 0 => {
+            Some(RopId::ModifyRules) if self.modify_rules_count().unwrap_or(0) != 0 => {
                 TypedRopRequest::Unsupported(RopUnsupportedRequest {
                     rop_id: self.rop_id,
                     input_handle_index: self.input_handle_index,
                     reserved: false,
                 })
             }
-            rop_id if rop_id_is_supported_by_dispatch(rop_id) => {
+            Some(rop_id) if rop_id.is_supported_by_dispatch() => {
                 TypedRopRequest::SupportedRaw(RopSupportedRawRequest {
-                    rop_id,
+                    rop_id: self.rop_id,
                     input_handle_index: self.input_handle_index,
                     output_handle_index: self.output_handle_index,
                 })
             }
-            rop_id => TypedRopRequest::Unsupported(RopUnsupportedRequest {
-                rop_id,
+            _ => TypedRopRequest::Unsupported(RopUnsupportedRequest {
+                rop_id: self.rop_id,
                 input_handle_index: self.input_handle_index,
-                reserved: rop_id_is_reserved(rop_id),
+                reserved: rop_id_is_reserved(self.rop_id),
             }),
         }
     }
@@ -2790,146 +2794,14 @@ pub(in crate::mapi) fn parse_property_value_for_tag(
 }
 
 pub(in crate::mapi) fn rop_id_is_reserved(rop_id: u8) -> bool {
-    matches!(
-        rop_id,
-        0x00 | 0x28 | 0x3C | 0x3D | 0x62 | 0x65 | 0x6A | 0x71
-    )
-}
-
-pub(in crate::mapi) fn rop_id_is_supported_by_dispatch(rop_id: u8) -> bool {
-    matches!(
-        rop_id,
-        0x01 | 0x02
-            | 0x03
-            | 0x04
-            | 0x05
-            | 0x06
-            | 0x07
-            | 0x08
-            | 0x09
-            | 0x0A
-            | 0x0B
-            | 0x0C
-            | 0x0D
-            | 0x0E
-            | 0x0F
-            | 0x10
-            | 0x11
-            | 0x12
-            | 0x13
-            | 0x14
-            | 0x15
-            | 0x16
-            | 0x17
-            | 0x18
-            | 0x19
-            | 0x1A
-            | 0x1B
-            | 0x1C
-            | 0x1D
-            | 0x1E
-            | 0x1F
-            | 0x20
-            | 0x21
-            | 0x22
-            | 0x23
-            | 0x24
-            | 0x25
-            | 0x26
-            | 0x27
-            | 0x29
-            | 0x2B
-            | 0x2C
-            | 0x2D
-            | 0x2E
-            | 0x2F
-            | 0x30
-            | 0x31
-            | 0x32
-            | 0x33
-            | 0x34
-            | 0x35
-            | 0x36
-            | 0x37
-            | 0x38
-            | 0x3A
-            | 0x3B
-            | 0x3E
-            | 0x3F
-            | 0x40
-            | 0x41
-            | 0x42
-            | 0x43
-            | 0x44
-            | 0x45
-            | 0x47
-            | 0x48
-            | 0x49
-            | 0x4A
-            | 0x4B
-            | 0x4C
-            | 0x4D
-            | 0x4E
-            | 0x4F
-            | 0x50
-            | 0x51
-            | 0x52
-            | 0x53
-            | 0x54
-            | 0x55
-            | 0x56
-            | 0x57
-            | 0x58
-            | 0x59
-            | 0x5A
-            | 0x5B
-            | 0x5C
-            | 0x5D
-            | 0x5E
-            | 0x5F
-            | 0x60
-            | 0x61
-            | 0x63
-            | 0x64
-            | 0x66
-            | 0x68
-            | 0x69
-            | 0x6B
-            | 0x6C
-            | 0x6D
-            | 0x6F
-            | 0x70
-            | 0x72
-            | 0x73
-            | 0x74
-            | 0x75
-            | 0x76
-            | 0x77
-            | 0x78
-            | 0x79
-            | 0x7A
-            | 0x7B
-            | 0x7E
-            | 0x7F
-            | 0x80
-            | 0x81
-            | 0x82
-            | 0x86
-            | 0x89
-            | 0x90
-            | 0x91
-            | 0x92
-            | 0x93
-            | 0xA3
-            | 0xFE
-    )
+    RopId::is_reserved(rop_id)
 }
 
 pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRequest> {
     let rop_id = cursor.read_u8()?;
     let _logon_id = cursor.read_u8()?;
-    match rop_id {
-        0x01 => {
+    match RopId::from_u8(rop_id) {
+        Some(RopId::Release) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -2938,7 +2810,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x02 => {
+        Some(RopId::OpenFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -2951,7 +2823,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x03 => {
+        Some(RopId::OpenMessage) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let _code_page_id = cursor.read_u16()?;
@@ -2966,7 +2838,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x04 | 0x05 | 0x21 => {
+        Some(RopId::GetHierarchyTable | RopId::GetContentsTable | RopId::GetAttachmentTable) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
@@ -2977,7 +2849,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x06 => {
+        Some(RopId::CreateMessage) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let _code_page_id = cursor.read_u16()?;
@@ -2991,7 +2863,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x22 => {
+        Some(RopId::OpenAttachment) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -3004,7 +2876,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x23 => {
+        Some(RopId::CreateAttachment) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -3014,7 +2886,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x24 => {
+        Some(RopId::DeleteAttachment) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
@@ -3025,7 +2897,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x25 => {
+        Some(RopId::SaveChangesAttachment) => {
             let response_handle_index = cursor.read_u8()?;
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
@@ -3036,7 +2908,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x08 => {
+        Some(RopId::GetPropertiesAll) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
@@ -3048,7 +2920,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x2B => {
+        Some(RopId::OpenStream) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -3061,7 +2933,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x2C => {
+        Some(RopId::ReadStream) => {
             let input_handle_index = cursor.read_u8()?;
             let byte_count = cursor.read_u16()?;
             let mut payload = Vec::new();
@@ -3076,7 +2948,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x2D | 0x90 | 0xA3 => {
+        Some(RopId::WriteStream | RopId::WriteStreamExtended2 | RopId::WriteStreamExtended) => {
             let input_handle_index = cursor.read_u8()?;
             let size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3089,7 +2961,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x2E => {
+        Some(RopId::SeekStream) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.push(cursor.read_u8()?);
@@ -3101,7 +2973,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x2F => {
+        Some(RopId::SetStreamSize) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3110,7 +2982,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(8)?.to_vec(),
             })
         }
-        0x3A => {
+        Some(RopId::CopyToStream) => {
             let source_handle_index = cursor.read_u8()?;
             let dest_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -3120,7 +2992,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(8)?.to_vec(),
             })
         }
-        0x3B => {
+        Some(RopId::CloneStream) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -3130,7 +3002,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x29 => {
+        Some(RopId::RegisterNotification) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let notification_types = cursor.read_u16()?;
@@ -3151,7 +3023,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x30 => {
+        Some(RopId::SetSearchCriteria) => {
             let input_handle_index = cursor.read_u8()?;
             let restriction_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3168,7 +3040,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x31 => {
+        Some(RopId::GetSearchCriteria) => {
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?, cursor.read_u8()?, cursor.read_u8()?];
             Ok(RopRequest {
@@ -3178,7 +3050,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x38 => {
+        Some(RopId::AbortSearch) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3187,7 +3059,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x3E | 0x3F => {
+        Some(RopId::GetPermissionsTable | RopId::GetRulesTable) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
@@ -3198,7 +3070,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x40 => {
+        Some(RopId::ModifyPermissions) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = vec![cursor.read_u8()?];
             let permissions_count = cursor.read_u16()? as usize;
@@ -3220,7 +3092,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x41 => {
+        Some(RopId::ModifyRules) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = vec![cursor.read_u8()?];
             let rules_count = cursor.read_u16()? as usize;
@@ -3232,7 +3104,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x42 | 0x43 | 0x45 => {
+        Some(RopId::GetOwningServers | RopId::LongTermIdFromId | RopId::PublicFolderIsGhosted) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3241,7 +3113,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(8)?.to_vec(),
             })
         }
-        0x44 => {
+        Some(RopId::IdFromLongTermId) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3250,7 +3122,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(24)?.to_vec(),
             })
         }
-        0x50 => {
+        Some(RopId::Progress) => {
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
             Ok(RopRequest {
@@ -3260,7 +3132,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x58 | 0x92 => {
+        Some(RopId::EmptyFolder | RopId::EmptyFolderExtended) => {
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?, cursor.read_u8()?];
             Ok(RopRequest {
@@ -3270,7 +3142,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x59 => {
+        Some(RopId::HardDeleteMessages) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
@@ -3282,7 +3154,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x5A => {
+        Some(RopId::HardDeleteMessagesAndSubfolders) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3291,7 +3163,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(8)?.to_vec(),
             })
         }
-        0x5B | 0x5C => {
+        Some(RopId::SetLocalReplicaMidsetDeleted | RopId::SetLocalReplicaMidsetExpired) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -3304,7 +3176,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x5D | 0x5E => {
+        Some(RopId::GetDeletedMessages | RopId::GetStreamSize) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3313,7 +3185,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x26 => {
+        Some(RopId::SetReceiveFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -3327,7 +3199,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x60 => {
+        Some(RopId::GetPerUserLongTermIds) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3336,7 +3208,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(16)?.to_vec(),
             })
         }
-        0x61 => {
+        Some(RopId::GetPerUserGuid) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3345,7 +3217,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(24)?.to_vec(),
             })
         }
-        0x63 => {
+        Some(RopId::ReadPerUserInformation) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(24)?);
@@ -3359,7 +3231,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x64 => {
+        Some(RopId::WritePerUserInformation) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(24)?);
@@ -3379,7 +3251,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x66 => {
+        Some(RopId::SetReadFlags) => {
             let input_handle_index = cursor.read_u8()?;
             let want_asynchronous = cursor.read_u8()?;
             let read_flags = cursor.read_u8()?;
@@ -3394,7 +3266,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x6B => {
+        Some(RopId::GetCollapseState) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -3406,7 +3278,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x6C => {
+        Some(RopId::SetCollapseState) => {
             let input_handle_index = cursor.read_u8()?;
             let collapse_state_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3419,7 +3291,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x70 => {
+        Some(RopId::SynchronizationConfigure) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let sync_type = cursor.read_u8()?;
@@ -3443,7 +3315,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x4E => {
+        Some(RopId::FastTransferSourceGetBuffer) => {
             let input_handle_index = cursor.read_u8()?;
             let buffer_size = cursor.read_u16()?;
             let mut payload = Vec::new();
@@ -3458,7 +3330,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x4B => {
+        Some(RopId::FastTransferSourceCopyMessages) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let message_id_count = cursor.read_u16()? as usize;
@@ -3474,7 +3346,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x4C => {
+        Some(RopId::FastTransferSourceCopyFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -3487,12 +3359,15 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x4D | 0x69 => {
+        Some(RopId::FastTransferSourceCopyTo | RopId::FastTransferSourceCopyProperties) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.push(cursor.read_u8()?);
-            if rop_id == 0x4D {
+            if matches!(
+                RopId::from_u8(rop_id),
+                Some(RopId::FastTransferSourceCopyTo)
+            ) {
                 payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
             } else {
                 payload.push(cursor.read_u8()?);
@@ -3508,7 +3383,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x53 => {
+        Some(RopId::FastTransferDestinationConfigure) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?, cursor.read_u8()?];
@@ -3519,7 +3394,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x54 => {
+        Some(RopId::FastTransferDestinationPutBuffer) => {
             let input_handle_index = cursor.read_u8()?;
             let transfer_data_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3532,7 +3407,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x75 => {
+        Some(RopId::SynchronizationUploadStateStreamBegin) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
@@ -3544,7 +3419,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x76 => {
+        Some(RopId::SynchronizationUploadStateStreamContinue) => {
             let input_handle_index = cursor.read_u8()?;
             let stream_size = cursor.read_u32()? as usize;
             let mut payload = Vec::new();
@@ -3557,7 +3432,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x77 => {
+        Some(RopId::SynchronizationUploadStateStreamEnd) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3566,7 +3441,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x7E | 0x82 => {
+        Some(RopId::SynchronizationOpenCollector | RopId::GetPerUserGuidLongTermIds) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -3576,7 +3451,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x72 => {
+        Some(RopId::SynchronizationImportMessageChange) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -3596,7 +3471,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x73 => {
+        Some(RopId::SynchronizationImportHierarchyChange) => {
             let input_handle_index = cursor.read_u8()?;
             let start = cursor.position;
             let hierarchy_count = cursor.read_u16()? as usize;
@@ -3615,7 +3490,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.bytes[start..end].to_vec(),
             })
         }
-        0x74 => {
+        Some(RopId::SynchronizationImportDeletes) => {
             let input_handle_index = cursor.read_u8()?;
             let delete_flags = cursor.read_u8()?;
             let message_id_count = cursor.read_u16()? as usize;
@@ -3629,7 +3504,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x78 => {
+        Some(RopId::SynchronizationImportMessageMove) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -3641,7 +3516,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x80 => {
+        Some(RopId::SetLocalReplicaMidsetDeletedNoReplicate) => {
             let input_handle_index = cursor.read_u8()?;
             let change_count = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3657,7 +3532,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x93 => {
+        Some(RopId::SetLocalReplicaMidsetDeletedExtended) => {
             let input_handle_index = cursor.read_u8()?;
             let size = cursor.read_u16()? as usize;
             Ok(RopRequest {
@@ -3667,7 +3542,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(size)?.to_vec(),
             })
         }
-        0x86 => {
+        Some(RopId::SynchronizationImportReadStateChanges) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3676,7 +3551,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(6)?.to_vec(),
             })
         }
-        0x7F => {
+        Some(RopId::GetLocalReplicaIds) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
@@ -3687,7 +3562,19 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x09 | 0x16 | 0x17 | 0x37 | 0x47 | 0x4A | 0x52 | 0x68 | 0x6D | 0x7B | 0x81 => {
+        Some(
+            RopId::GetPropertiesList
+            | RopId::Abort
+            | RopId::GetStatus
+            | RopId::QueryColumnsAll
+            | RopId::TransportDeliverMessage
+            | RopId::TransportSend
+            | RopId::GetValidAttachments
+            | RopId::GetReceiveFolderTable
+            | RopId::GetTransportFolder
+            | RopId::GetStoreState
+            | RopId::ResetTable,
+        ) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3696,7 +3583,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x6F => {
+        Some(RopId::OptionsData) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             let address_type = cursor.read_ascii_z()?;
@@ -3710,7 +3597,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x10 => {
+        Some(RopId::ReloadCachedInformation) => {
             let input_handle_index = cursor.read_u8()?;
             let _reserved = cursor.read_u16()?;
             Ok(RopRequest {
@@ -3720,7 +3607,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x18 => {
+        Some(RopId::QueryPosition) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.push(cursor.read_u8()?);
@@ -3733,7 +3620,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x19 => {
+        Some(RopId::SeekRow) => {
             let input_handle_index = cursor.read_u8()?;
             let bookmark_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3748,7 +3635,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x1A => {
+        Some(RopId::SeekRowBookmark) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
@@ -3760,21 +3647,21 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x1F => {
-            let input_handle_index = cursor.read_u8()?;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(input_handle_index),
-                output_handle_index: None,
-                payload,
-            })
-        }
-        0x20 => {
+        Some(RopId::GetMessageStatus) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        Some(RopId::SetMessageStatus) => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(cursor.read_bytes(8)?);
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
             Ok(RopRequest {
@@ -3784,7 +3671,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x1B => {
+        Some(RopId::SeekRowFractional) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3793,7 +3680,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x1C => {
+        Some(RopId::CreateFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             let folder_type = cursor.read_u8()?;
@@ -3820,7 +3707,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x1D => {
+        Some(RopId::DeleteFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = vec![cursor.read_u8()?];
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -3831,7 +3718,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x1E | 0x91 => {
+        Some(RopId::DeleteMessages | RopId::HardDeleteMessagesExtended) => {
             let input_handle_index = cursor.read_u8()?;
             let want_asynchronous = cursor.read_u8()?;
             let notify_non_read = cursor.read_u8()?;
@@ -3846,7 +3733,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x0A | 0x79 => {
+        Some(RopId::SetProperties | RopId::SetPropertiesNoReplicate) => {
             let input_handle_index = cursor.read_u8()?;
             let property_value_size = cursor.read_u16()? as usize;
             let property_value_count = cursor.read_u16()?;
@@ -3864,7 +3751,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x0B | 0x7A => {
+        Some(RopId::DeleteProperties | RopId::DeletePropertiesNoReplicate) => {
             let input_handle_index = cursor.read_u8()?;
             let property_tag_count = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3877,7 +3764,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x0F => {
+        Some(RopId::ReadRecipients) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
@@ -3889,7 +3776,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x0C => {
+        Some(RopId::SaveChangesMessage) => {
             let response_handle_index = cursor.read_u8()?;
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
@@ -3900,7 +3787,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x0D => {
+        Some(RopId::RemoveAllRecipients) => {
             let input_handle_index = cursor.read_u8()?;
             let _reserved = cursor.read_u32()?;
             Ok(RopRequest {
@@ -3910,7 +3797,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        0x0E => {
+        Some(RopId::ModifyRecipients) => {
             let input_handle_index = cursor.read_u8()?;
             let column_count = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3932,7 +3819,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x11 => {
+        Some(RopId::SetMessageReadFlag) => {
             let response_handle_index = cursor.read_u8()?;
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
@@ -3943,7 +3830,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x12 => {
+        Some(RopId::SetColumns) => {
             let input_handle_index = cursor.read_u8()?;
             let set_columns_flags = cursor.read_u8()?;
             let property_tag_count = cursor.read_u16()? as usize;
@@ -3957,7 +3844,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x13 => {
+        Some(RopId::SortTable) => {
             let input_handle_index = cursor.read_u8()?;
             let sort_table_flags = cursor.read_u8()?;
             let sort_order_count = cursor.read_u16()? as usize;
@@ -3975,7 +3862,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x14 => {
+        Some(RopId::Restrict) => {
             let input_handle_index = cursor.read_u8()?;
             let restrict_flags = cursor.read_u8()?;
             let restriction_size = cursor.read_u16()? as usize;
@@ -3989,7 +3876,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x07 => {
+        Some(RopId::GetPropertiesSpecific) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
@@ -4016,7 +3903,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x15 => {
+        Some(RopId::QueryRows) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.push(cursor.read_u8()?);
@@ -4029,7 +3916,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x27 => {
+        Some(RopId::GetReceiveFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             while cursor.remaining() > 0 {
@@ -4046,7 +3933,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x32 => {
+        Some(RopId::SubmitMessage) => {
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?];
             Ok(RopRequest {
@@ -4056,7 +3943,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x34 => {
+        Some(RopId::AbortSubmit) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -4068,7 +3955,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x33 => {
+        Some(RopId::MoveCopyMessages) => {
             let source_handle_index = cursor.read_u8()?;
             let dest_handle_index = cursor.read_u8()?;
             let message_id_count = cursor.read_u16()? as usize;
@@ -4084,12 +3971,12 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x35 | 0x36 => {
+        Some(RopId::MoveFolder | RopId::CopyFolder) => {
             let source_handle_index = cursor.read_u8()?;
             let dest_handle_index = cursor.read_u8()?;
             let want_asynchronous = cursor.read_u8()?;
             let mut payload = vec![want_asynchronous];
-            if rop_id == 0x36 {
+            if matches!(RopId::from_u8(rop_id), Some(RopId::CopyFolder)) {
                 payload.push(cursor.read_u8()?);
             }
             let use_unicode = cursor.read_u8()?;
@@ -4110,7 +3997,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x48 => {
+        Some(RopId::TransportDoneWithMessage) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -4122,7 +4009,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x51 => {
+        Some(RopId::TransportNewMail) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -4138,7 +4025,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x4F => {
+        Some(RopId::FindRow) => {
             let input_handle_index = cursor.read_u8()?;
             let find_row_flags = cursor.read_u8()?;
             let restriction_size = cursor.read_u16()? as usize;
@@ -4156,7 +4043,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x55 => {
+        Some(RopId::GetNamesFromPropertyIds) => {
             let input_handle_index = cursor.read_u8()?;
             let property_id_count = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -4169,7 +4056,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x57 => {
+        Some(RopId::UpdateDeferredActionMessages) => {
             let input_handle_index = cursor.read_u8()?;
             let server_entry_id_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -4185,7 +4072,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x56 => {
+        Some(RopId::GetPropertyIdsFromNames) => {
             let input_handle_index = cursor.read_u8()?;
             let flags = cursor.read_u8()?;
             let property_name_count = cursor.read_u16()? as usize;
@@ -4212,7 +4099,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x5F => {
+        Some(RopId::QueryNamedProperties) => {
             let input_handle_index = cursor.read_u8()?;
             let query_flags = cursor.read_u8()?;
             let has_guid = cursor.read_u8()?;
@@ -4227,7 +4114,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0x89 => {
+        Some(RopId::GetAttachmentTableExtended) => {
             let input_handle_index = cursor.read_u8()?;
             let bookmark_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -4240,7 +4127,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        0xFE => {
+        Some(RopId::Logon) => {
             let output_handle_index = cursor.read_u8()?;
             let logon_flags = cursor.read_u8()?;
             let mut payload = Vec::new();
@@ -4477,6 +4364,38 @@ mod tests {
         let mut cursor = Cursor::new(&[0x02, 0x00, 0x00, 0x01, 0x88, 0x77]);
 
         assert!(read_rop_request(&mut cursor).is_err());
+    }
+
+    #[test]
+    pub(in crate::mapi) fn supported_rop_uses_enum_classification_without_terminal_stop() {
+        let mut cursor = Cursor::new(&[0x04, 0x00, 0x01, 0x02, 0x04]);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(request.rop_id),
+            Some(RopId::GetHierarchyTable)
+        );
+        assert_eq!(request.typed().rop_id(), RopId::GetHierarchyTable.as_u8());
+        assert!(!request.typed().unsupported_is_terminal());
+        assert_eq!(request.input_handle_index(), Some(1));
+        assert_eq!(request.output_handle_index, Some(2));
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn unsupported_rop_is_terminal_without_consuming_later_rop_bytes() {
+        let mut cursor = Cursor::new(&[0xAA, 0x00, 0x03, 0x01, 0x00, 0x00]);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(request.rop_id), None);
+        assert!(request.typed().unsupported_is_terminal());
+        assert_eq!(request.input_handle_index(), Some(3));
+        assert_eq!(cursor.remaining(), 3);
+        assert!(serialize_rop_request(&request).is_err());
+        assert_eq!(
+            unsupported_rop_response(0xAA, request.response_handle_index()),
+            vec![0xAA, 0x03, 0x02, 0x01, 0x04, 0x80]
+        );
     }
 
     #[test]
