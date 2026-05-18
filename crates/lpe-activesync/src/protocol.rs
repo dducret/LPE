@@ -73,7 +73,15 @@ impl ActiveSyncCommand {
             "ResolveRecipients" => Ok(Self::ResolveRecipients),
             "ValidateCert" => Ok(Self::ValidateCert),
             "Find" => Ok(Self::Find),
-            _ => bail!("unsupported ActiveSync command: {value}"),
+            _ => {
+                tracing::warn!(
+                    adapter = "activesync",
+                    enum_name = "ActiveSyncCommand",
+                    raw_value = value,
+                    "unsupported ActiveSync command"
+                );
+                bail!("unsupported ActiveSync command: {value}")
+            }
         }
     }
 
@@ -99,7 +107,15 @@ impl ActiveSyncCommand {
             21 => Ok(Self::ResolveRecipients),
             22 => Ok(Self::ValidateCert),
             23 => Ok(Self::Find),
-            _ => bail!("unsupported ActiveSync command code"),
+            _ => {
+                tracing::warn!(
+                    adapter = "activesync",
+                    enum_name = "ActiveSyncCommand",
+                    raw_value = value,
+                    "unsupported ActiveSync command code"
+                );
+                bail!("unsupported ActiveSync command code")
+            }
         }
     }
 }
@@ -228,7 +244,15 @@ impl BodyPreferenceType {
             1 => Some(Self::PlainText),
             2 => Some(Self::Html),
             4 => Some(Self::Mime),
-            _ => None,
+            _ => {
+                tracing::warn!(
+                    adapter = "activesync",
+                    enum_name = "BodyPreferenceType",
+                    raw_value = value,
+                    "unsupported ActiveSync body preference type"
+                );
+                None
+            }
         }
     }
 }
@@ -276,7 +300,15 @@ impl TryFrom<u8> for WbxmlCodePage {
             18 => Ok(Self::Settings),
             20 => Ok(Self::ItemOperations),
             21 => Ok(Self::ComposeMail),
-            _ => bail!("unsupported WBXML code page"),
+            _ => {
+                tracing::warn!(
+                    adapter = "activesync",
+                    enum_name = "WbxmlCodePage",
+                    raw_value = value,
+                    "unsupported WBXML code page"
+                );
+                bail!("unsupported WBXML code page")
+            }
         }
     }
 }

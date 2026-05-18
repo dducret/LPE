@@ -130,7 +130,14 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
         *current_page = *bytes
             .get(*cursor)
             .ok_or_else(|| anyhow!("missing WBXML code page"))?;
-        WbxmlCodePage::try_from(*current_page)?;
+        if WbxmlCodePage::try_from(*current_page).is_err() {
+            tracing::warn!(
+                adapter = "activesync",
+                enum_name = "WbxmlCodePage",
+                raw_value = *current_page,
+                "unsupported WBXML code page; preserving raw node boundary"
+            );
+        }
         *cursor += 1;
     }
 
@@ -146,8 +153,23 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
         bail!("WBXML attributes are not supported");
     }
     let has_content = token & 0x40 != 0;
-    let code_page = WbxmlCodePage::try_from(*current_page)?;
-    let name = name_for(code_page, token & 0x3F).ok_or_else(|| anyhow!("unknown WBXML token"))?;
+    let token_value = token & 0x3F;
+    let name = match WbxmlCodePage::try_from(*current_page)
+        .ok()
+        .and_then(|code_page| name_for(code_page, token_value))
+    {
+        Some(name) => name.to_string(),
+        None => {
+            tracing::warn!(
+                adapter = "activesync",
+                enum_name = "WbxmlToken",
+                code_page = *current_page,
+                raw_value = token_value,
+                "unsupported WBXML token; preserving raw node boundary"
+            );
+            format!("UnsupportedWbxmlToken{current_page:02X}{token_value:02X}")
+        }
+    };
     let mut node = WbxmlNode::new(*current_page, name);
 
     if has_content {
@@ -160,7 +182,14 @@ fn parse_node(bytes: &[u8], cursor: &mut usize, current_page: &mut u8) -> Result
                     *current_page = *bytes
                         .get(*cursor)
                         .ok_or_else(|| anyhow!("missing WBXML code page"))?;
-                    WbxmlCodePage::try_from(*current_page)?;
+                    if WbxmlCodePage::try_from(*current_page).is_err() {
+                        tracing::warn!(
+                            adapter = "activesync",
+                            enum_name = "WbxmlCodePage",
+                            raw_value = *current_page,
+                            "unsupported WBXML code page; preserving raw node boundary"
+                        );
+                    }
                     *cursor += 1;
                 }
                 0x01 => {

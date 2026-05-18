@@ -2510,6 +2510,17 @@ fn wbxml_roundtrip_preserves_tokens_and_text() {
 }
 
 #[test]
+fn wbxml_decode_preserves_unsupported_enum_boundaries() {
+    let unknown_token = decode_wbxml(&[0x03, 0x01, 0x6A, 0x00, 0x3F]).unwrap();
+    assert_eq!(unknown_token.page, 0);
+    assert_eq!(unknown_token.name, "UnsupportedWbxmlToken003F");
+
+    let unknown_page = decode_wbxml(&[0x03, 0x01, 0x6A, 0x00, 0x00, 0x7F, 0x05]).unwrap();
+    assert_eq!(unknown_page.page, 0x7F);
+    assert_eq!(unknown_page.name, "UnsupportedWbxmlToken7F05");
+}
+
+#[test]
 fn wbxml_roundtrip_preserves_get_item_estimate_tokens() {
     let mut root = WbxmlNode::new(6, "GetItemEstimate");
     let mut collections = WbxmlNode::new(6, "Collections");

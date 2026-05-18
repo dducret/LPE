@@ -2679,7 +2679,8 @@ pub(in crate::mapi) fn parse_mapi_restriction(bytes: &[u8]) -> Result<MapiRestri
 pub(in crate::mapi) fn parse_mapi_restriction_from(
     cursor: &mut Cursor<'_>,
 ) -> Result<MapiRestriction> {
-    match MapiRestrictionType::from_u8(cursor.read_u8()?) {
+    let restriction_type = cursor.read_u8()?;
+    match MapiRestrictionType::from_u8(restriction_type) {
         Some(MapiRestrictionType::And) => {
             let count = cursor.read_u16()? as usize;
             let mut children = Vec::with_capacity(count);
@@ -2744,7 +2745,15 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
             let property_tag = cursor.read_u32()?;
             Ok(MapiRestriction::Exist { property_tag })
         }
-        _ => Err(anyhow!("unsupported MAPI restriction type")),
+        _ => {
+            tracing::warn!(
+                adapter = "mapi",
+                enum_name = "MapiRestrictionType",
+                raw_value = restriction_type,
+                "unsupported MAPI restriction type rejected at parser boundary"
+            );
+            Err(anyhow!("unsupported MAPI restriction type"))
+        }
     }
 }
 

@@ -77,10 +77,10 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 
 | MAPI ROP parser / dispatch boundary | Current support |
 | --- | --- |
-| ROP ID handling | `rop.rs` maps parsed ROP buffers to typed request views for the currently supported dispatch surface and keeps unknown or reserved `RopId` values on the unsupported path described by [MS-OXCROPS 2.2.2](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/6c623489-576d-45ef-9288-5b62b73c6961). Unsupported or reserved ROPs return a single common ROP error response instead of letting trailing bytes be interpreted as more ROPs. |
+| ROP ID handling | `rop.rs` maps parsed ROP buffers to typed request views for the currently supported dispatch surface and keeps unknown or reserved `RopId` values on the unsupported path described by [MS-OXCROPS 2.2.2](https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcrops/6c623489-576d-45ef-9288-5b62b73c6961). Unsupported or reserved ROPs are logged with the raw numeric value and return a single common ROP error response instead of letting trailing bytes be interpreted as more ROPs. |
 | Request / response buffers | `rop.rs` owns request parsing, selected typed request serialization for golden fixtures, and common ROP error serialization. `dispatch.rs` consumes parsed request boundaries and must not walk raw request bytes for supported ROPs. |
 | Handle table contract | Execute request handle tables are parsed as 32-bit slots. Malformed handle-table byte counts fail the ROP batch predictably, and hierarchy/content table opens now return ROP handle-index errors when the input handle slot is missing or invalid. |
-| Rows and restrictions | Table rows continue to use the MS-OXCDATA property-row and restriction codecs, including `StandardPropertyRow`, `FlaggedPropertyRow` for requested values that are missing or unsupported, and bounded restriction parsing for table filters. Unsupported restriction forms fail through the ROP property/table error path rather than being coerced. |
+| Rows and restrictions | Table rows continue to use the MS-OXCDATA property-row and restriction codecs, including `StandardPropertyRow`, `FlaggedPropertyRow` for requested values that are missing or unsupported, and bounded restriction parsing for table filters. Unsupported restriction enum values are logged with the raw numeric value and fail through the ROP property/table error path rather than being coerced. |
 | Deferred / unsupported parsed ROPs | Deferred ROPs listed in the unsupported matrix remain parseable only to the documented bounded request length and return ROP-specific protocol errors without canonical mailbox side effects. |
 
 | MAPI property area | Current support |
@@ -90,7 +90,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 | Multivalued values | The bounded initial codec supports `PtypMultipleInteger16`, `PtypMultipleInteger32`, `PtypMultipleInteger64`, `PtypMultipleString8`, `PtypMultipleString`, `PtypMultipleGuid`, and `PtypMultipleBinary` using ROP-buffer counts. |
 | Binary and large values | Inline `PtypBinary` uses the ROP 16-bit byte count. Large body, HTML, and attachment data use the existing stream ROP path instead of inventing a protocol-local blob store. |
 | Named properties | `RopGetPropertyIdsFromNames`, `RopGetNamesFromPropertyIds`, and `RopQueryNamedProperties` use the session-local registry. Durable named-property mapping is deferred until a canonical persistent custom-property surface is documented. |
-| Unsupported property types | Unsupported inline property types fail at decode time and surface through the existing ROP property error path instead of being silently coerced. |
+| Unsupported property types | Unsupported inline property-type enum values are logged with the raw numeric type and property id, then fail at decode time through the existing ROP property error path instead of being silently coerced or causing an untyped runtime failure. |
 
 | MAPI gate | Required behavior |
 | --- | --- |

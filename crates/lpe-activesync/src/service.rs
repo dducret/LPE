@@ -3192,7 +3192,18 @@ fn options_body_preference(options: &WbxmlNode) -> BodyPreference {
         .filter_map(|preference| {
             let body_type = preference
                 .child("Type")
-                .and_then(|node| node.text_value().trim().parse::<u8>().ok())
+                .and_then(|node| match node.text_value().trim().parse::<u8>() {
+                    Ok(value) => Some(value),
+                    Err(_) => {
+                        tracing::warn!(
+                            adapter = "activesync",
+                            enum_name = "BodyPreferenceType",
+                            raw_value = node.text_value().trim(),
+                            "unsupported ActiveSync body preference type"
+                        );
+                        None
+                    }
+                })
                 .and_then(BodyPreferenceType::from_u8)?;
             let truncation_size = preference
                 .child("TruncationSize")

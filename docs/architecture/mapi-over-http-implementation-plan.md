@@ -26,6 +26,8 @@ Successful EMSMDB `Execute` responses refresh both the `MapiContext` session coo
 
 Reserved or otherwise unsupported ROPs are terminal within the current ROP request buffer: the server returns one parseable unsupported ROP error and does not execute later ROP bytes from that batch.
 
+Typed protocol enum boundaries are strict. Unknown `RopId`, MAPI property type, restriction type, synchronization type, and FastTransfer marker values remain outside the typed enum variants, are logged with their raw numeric value, and then follow the documented unsupported or parseable error path. They must not be coerced into a nearest supported value, must not panic, and must not create canonical mailbox, contact, calendar, task, rights, submission, or sync-state side effects.
+
 `RopLogon` creates a store handle only for private mailbox logons. Public-folder logons, identified by the request `Private` flag not being set, remain deferred with a parseable unsupported ROP response and no protocol-local public-folder store state.
 
 ## Outlook Lab Test Progress Log
@@ -252,6 +254,7 @@ The MAPI table engine uses MS-OXCTABL cursor semantics and MS-OXCDATA `StandardP
 
 - Every implemented MAPI behavior in this document maps to one or more Microsoft specification sections.
 - New MAPI behavior must add tests for the request type, ROP group, identity/property/sync/session behavior, or deferred parseability it changes.
+- Unsupported typed enum values must be logged with their raw value and verified through the existing parseable unsupported/error paths rather than through panics or generic runtime failures.
 - New MAPI behavior must preserve canonical `LPE` submission, `Sent`, mailbox, contact, calendar, task, rights, and protected `Bcc` boundaries.
 - MAPI mutation changes for send, draft, move, copy, delete, flags, attachments, or protected recipients must pass the cross-protocol storage gate proving IMAP and JMAP observe the same canonical state, including no MAPI-only `Sent`, `Outbox`, search, or sync state.
 - Public `mapiHttp` and MAPI-backed `EXCH` publication remains gated by the existing architecture and client-autoconfiguration rules, including `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED`.

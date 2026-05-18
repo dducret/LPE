@@ -361,7 +361,15 @@ impl RopId {
             0x93 => Some(Self::SetLocalReplicaMidsetDeletedExtended),
             0xA3 => Some(Self::WriteStreamExtended),
             0xFE => Some(Self::Logon),
-            _ => None,
+            _ => {
+                tracing::warn!(
+                    adapter = "mapi",
+                    enum_name = "RopId",
+                    raw_value = value,
+                    "unsupported MAPI ROP id"
+                );
+                None
+            }
         }
     }
 
@@ -548,7 +556,15 @@ impl MapiPropertyType {
             0x101F => Some(Self::MultipleString),
             0x1048 => Some(Self::MultipleGuid),
             0x1102 => Some(Self::MultipleBinary),
-            _ => None,
+            _ => {
+                tracing::warn!(
+                    adapter = "mapi",
+                    enum_name = "MapiPropertyType",
+                    raw_value = value,
+                    "unsupported MAPI property type"
+                );
+                None
+            }
         }
     }
 }
@@ -585,7 +601,15 @@ impl MapiRestrictionType {
             0x09 => Some(Self::SubObject),
             0x0A => Some(Self::Comment),
             0x0B => Some(Self::Count),
-            _ => None,
+            _ => {
+                tracing::warn!(
+                    adapter = "mapi",
+                    enum_name = "MapiRestrictionType",
+                    raw_value = value,
+                    "unsupported MAPI restriction type"
+                );
+                None
+            }
         }
     }
 }
@@ -610,7 +634,15 @@ impl MapiSyncType {
             0x01 => Some(Self::Contents),
             0x02 => Some(Self::Hierarchy),
             0x03 => Some(Self::ReadState),
-            _ => None,
+            _ => {
+                tracing::warn!(
+                    adapter = "mapi",
+                    enum_name = "MapiSyncType",
+                    raw_value = value,
+                    "unsupported MAPI synchronization type"
+                );
+                None
+            }
         }
     }
 }
@@ -642,7 +674,15 @@ impl FastTransferMarker {
             0x402F_0003 => Some(Self::IncrSyncRead),
             0x403A_0003 => Some(Self::IncrSyncStateBegin),
             0x403B_0003 => Some(Self::IncrSyncStateEnd),
-            _ => None,
+            _ => {
+                tracing::warn!(
+                    adapter = "mapi",
+                    enum_name = "FastTransferMarker",
+                    raw_value = value,
+                    "unsupported MAPI FastTransfer marker"
+                );
+                None
+            }
         }
     }
 }

@@ -23,7 +23,7 @@
     predictable `400 Bad Request` response that still advertises the supported
     version set
   - supports both plain ASHTTP query parameters and base64-encoded ASHTTP query values for implemented commands
-  - parses only the `WBXML` code pages required by the supported command set
+  - parses only the typed `WBXML` code pages and tokens required by the supported command set; unsupported code-page, token, command, and body-preference enum values are logged with their raw value and kept outside the typed enum surface, so they are ignored, rejected with the documented command status, or handled by the existing predictable request-error path instead of causing an untyped runtime failure
   - uses canonical mailbox, contact, and calendar data
   - stores durable protocol-local device/provisioning records with account id,
     device id, device type, pending and active policy key, provision status,
@@ -64,7 +64,7 @@
     canonical mailbox edit semantics are documented
   - honors `BodyPreference` for plain text, sanitized HTML when stored, and
     MIME when the canonical raw-message blob is available; unsupported body
-    types fall back to plain text
+    types are logged and fall back to plain text
   - supports shared mailbox projection for canonical mail folders
 - `FolderSync` behavior:
   - projects canonical mailbox folders, including `Inbox`, `Sent`, `Drafts`,
