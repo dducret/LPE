@@ -387,10 +387,8 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 &predecessor_change_list(change_number),
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
-            if sync_type != 0x02 || sync_extra_flags & 0x0000_0001 != 0 {
-                write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-                write_i64(&mut buffer, folder_id as i64);
-            }
+            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+            write_i64(&mut buffer, folder_id as i64);
             if sync_type != 0x02 || sync_flags & 0x0100 != 0 || sync_extra_flags & 0x0000_0001 != 0
             {
                 write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
@@ -2351,6 +2349,10 @@ mod tests {
         assert_eq!(summary.rows.len(), 1);
         assert_eq!(summary.rows[0].display_name, "Inbox");
         assert_eq!(summary.rows[0].container_class, "IPF.Note");
+        assert_eq!(
+            summary.rows[0].folder_id,
+            Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        );
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 22);
         assert!(summary.rows[0].missing_core_property_tags.is_empty());

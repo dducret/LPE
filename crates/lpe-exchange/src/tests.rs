@@ -13411,7 +13411,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &test_mapi_folder_id(4).to_le_bytes()
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &0x6748_0014u32.to_le_bytes()
     ));
