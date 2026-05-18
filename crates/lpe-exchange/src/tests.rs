@@ -2294,9 +2294,13 @@ fn mapi_binary_property_value(bytes: &[u8], property_tag: u32) -> &[u8] {
 }
 
 const FX_INCR_SYNC_CHG: u32 = 0x4012_0003;
+const FX_INCR_SYNC_DEL: u32 = 0x4013_0003;
 const FX_INCR_SYNC_END: u32 = 0x4014_0003;
+const FX_INCR_SYNC_MESSAGE: u32 = 0x4015_0003;
+const FX_INCR_SYNC_READ: u32 = 0x402F_0003;
 const FX_INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
 const FX_INCR_SYNC_STATE_END: u32 = 0x403B_0003;
+const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
@@ -2304,13 +2308,19 @@ const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
+const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
+const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 const PID_TAG_MID: u32 = 0x674A_0014;
+const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
+const META_TAG_IDSET_READ: u32 = 0x402D_0102;
+const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
 const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
@@ -2774,6 +2784,11 @@ fn read_strict_u32(bytes: &[u8], offset: usize) -> Result<u32, String> {
     Ok(u32::from_le_bytes(slice.try_into().unwrap()))
 }
 
+fn read_strict_u16(bytes: &[u8], offset: usize) -> Result<u16, String> {
+    let slice = read_strict_slice(bytes, offset, 2)?;
+    Ok(u16::from_le_bytes(slice.try_into().unwrap()))
+}
+
 fn read_strict_slice(bytes: &[u8], offset: usize, len: usize) -> Result<&[u8], String> {
     bytes
         .get(offset..offset.saturating_add(len))
@@ -2832,6 +2847,497 @@ fn mapi_deleted_message_idset_property(ids: &[Uuid]) -> Vec<u8> {
         META_TAG_IDSET_DELETED,
         &strict_test_replid_globset(&counters),
     )
+}
+
+fn mapi_read_message_idset_property(ids: &[Uuid]) -> Vec<u8> {
+    let counters = ids
+        .iter()
+        .map(mapi_message_global_counter)
+        .collect::<Vec<_>>();
+    mapi_binary_property(META_TAG_IDSET_READ, &strict_test_replid_globset(&counters))
+}
+
+#[derive(Debug)]
+struct StrictContentSyncStream {
+    message_changes: Vec<StrictContentMessageChange>,
+    deleted_idset: Option<Vec<u8>>,
+    read_idset: Option<Vec<u8>>,
+    unread_idset: Option<Vec<u8>>,
+    idset_given: Vec<u8>,
+    cnset_seen: Vec<u8>,
+    cnset_seen_fai: Vec<u8>,
+    cnset_read: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct StrictContentMessageChange {
+    source_key: Vec<u8>,
+    parent_source_key: Vec<u8>,
+    change_key: Vec<u8>,
+    predecessor_change_list: Vec<u8>,
+    mid: Option<u64>,
+    change_number: Option<u64>,
+    associated: bool,
+    subject: String,
+}
+
+#[derive(Default)]
+struct StrictContentMessageBuilder {
+    header_tags: Vec<u32>,
+    body_tags: Vec<u32>,
+    source_key: Option<Vec<u8>>,
+    parent_source_key: Option<Vec<u8>>,
+    change_key: Option<Vec<u8>>,
+    predecessor_change_list: Option<Vec<u8>>,
+    mid: Option<u64>,
+    change_number: Option<u64>,
+    associated: Option<bool>,
+    subject: Option<String>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum StrictContentSection {
+    None,
+    MessageHeader,
+    MessageBody,
+    Deletions,
+    ReadState,
+    State,
+}
+
+fn strict_content_sync_transfer_from_response(
+    response_rops: &[u8],
+) -> Result<StrictContentSyncStream, String> {
+    let chunks = mapi_fast_transfer_chunks(response_rops);
+    if chunks.len() != 1 {
+        return Err(format!(
+            "expected one completed FastTransfer chunk, got {}",
+            chunks.len()
+        ));
+    }
+    if chunks[0].0 != 0x0003 {
+        return Err(format!(
+            "expected completed FastTransfer status 0x0003, got 0x{:04x}",
+            chunks[0].0
+        ));
+    }
+    strict_decode_content_sync_stream(&chunks[0].1)
+}
+
+fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncStream, String> {
+    let mut offset = 0;
+    let mut section = StrictContentSection::None;
+    let mut current_message: Option<StrictContentMessageBuilder> = None;
+    let mut message_changes = Vec::new();
+    let mut deleted_idset = None;
+    let mut read_idset = None;
+    let mut unread_idset = None;
+    let mut idset_given = None;
+    let mut cnset_seen = None;
+    let mut cnset_seen_fai = None;
+    let mut cnset_read = None;
+    let mut state_closed = false;
+
+    while offset < bytes.len() {
+        let tag = read_strict_u32(bytes, offset)?;
+        if strict_content_marker(tag) {
+            match tag {
+                FX_INCR_SYNC_CHG => {
+                    if state_closed {
+                        return Err("messageChange appears after final ICS state".into());
+                    }
+                    if let Some(message) = current_message.take() {
+                        strict_finish_content_message(message, &mut message_changes)?;
+                    }
+                    current_message = Some(StrictContentMessageBuilder::default());
+                    section = StrictContentSection::MessageHeader;
+                }
+                FX_INCR_SYNC_MESSAGE => {
+                    if section != StrictContentSection::MessageHeader {
+                        return Err("IncrSyncMessage without an open messageChange header".into());
+                    }
+                    section = StrictContentSection::MessageBody;
+                }
+                FX_INCR_SYNC_DEL => {
+                    if let Some(message) = current_message.take() {
+                        strict_finish_content_message(message, &mut message_changes)?;
+                    }
+                    section = StrictContentSection::Deletions;
+                }
+                FX_INCR_SYNC_READ => {
+                    if let Some(message) = current_message.take() {
+                        strict_finish_content_message(message, &mut message_changes)?;
+                    }
+                    section = StrictContentSection::ReadState;
+                }
+                FX_INCR_SYNC_STATE_BEGIN => {
+                    if let Some(message) = current_message.take() {
+                        strict_finish_content_message(message, &mut message_changes)?;
+                    }
+                    if state_closed {
+                        return Err("duplicate final ICS state boundary".into());
+                    }
+                    section = StrictContentSection::State;
+                }
+                FX_INCR_SYNC_STATE_END => {
+                    if section != StrictContentSection::State {
+                        return Err("IncrSyncStateEnd without IncrSyncStateBegin".into());
+                    }
+                    state_closed = true;
+                    section = StrictContentSection::None;
+                }
+                FX_INCR_SYNC_END => {
+                    if !state_closed {
+                        return Err("IncrSyncEnd appears before final ICS state is complete".into());
+                    }
+                    offset += 4;
+                    if offset != bytes.len() {
+                        return Err("trailing bytes after IncrSyncEnd".into());
+                    }
+                    break;
+                }
+                _ => unreachable!(),
+            }
+            offset += 4;
+            continue;
+        }
+
+        if section == StrictContentSection::MessageBody
+            && current_message
+                .as_ref()
+                .and_then(|message| message.subject.as_ref())
+                .is_some()
+            && !strict_supported_property_type(tag)
+        {
+            offset = strict_skip_content_message_tail(bytes, offset)?;
+            continue;
+        }
+
+        let property = strict_parse_fast_transfer_property(bytes, offset)?;
+        offset = property.next_offset;
+        match section {
+            StrictContentSection::MessageHeader => {
+                let message = current_message
+                    .as_mut()
+                    .ok_or("message header property without current message")?;
+                strict_record_content_header_property(message, property)?;
+            }
+            StrictContentSection::MessageBody => {
+                let message = current_message
+                    .as_mut()
+                    .ok_or("message body property without current message")?;
+                strict_record_content_body_property(message, property)?;
+            }
+            StrictContentSection::Deletions => match property.tag {
+                META_TAG_IDSET_DELETED => {
+                    if deleted_idset.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagIdsetDeleted in deletions".into());
+                    }
+                }
+                tag => return Err(format!("unexpected deletion property 0x{tag:08x}")),
+            },
+            StrictContentSection::ReadState => match property.tag {
+                META_TAG_IDSET_READ => {
+                    if read_idset.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagIdsetRead in read-state changes".into());
+                    }
+                }
+                META_TAG_IDSET_UNREAD => {
+                    if unread_idset.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagIdsetUnread in read-state changes".into());
+                    }
+                }
+                tag => return Err(format!("unexpected read-state property 0x{tag:08x}")),
+            },
+            StrictContentSection::State => match property.tag {
+                META_TAG_IDSET_GIVEN => {
+                    if idset_given.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagIdsetGiven in final ICS state".into());
+                    }
+                }
+                META_TAG_CNSET_SEEN => {
+                    if cnset_seen.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagCnsetSeen in final ICS state".into());
+                    }
+                }
+                META_TAG_CNSET_SEEN_FAI => {
+                    if cnset_seen_fai.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagCnsetSeenFAI in final ICS state".into());
+                    }
+                }
+                META_TAG_CNSET_READ => {
+                    if cnset_read.replace(property.value).is_some() {
+                        return Err("duplicate MetaTagCnsetRead in final ICS state".into());
+                    }
+                }
+                tag => return Err(format!("unexpected content state property 0x{tag:08x}")),
+            },
+            StrictContentSection::None => {
+                return Err(format!(
+                    "property 0x{:08x} appears outside content section",
+                    property.tag
+                ));
+            }
+        }
+    }
+
+    let idset_given = idset_given.ok_or("missing content MetaTagIdsetGiven")?;
+    let cnset_seen = cnset_seen.ok_or("missing content MetaTagCnsetSeen")?;
+    let cnset_seen_fai = cnset_seen_fai.ok_or("missing content MetaTagCnsetSeenFAI")?;
+    let cnset_read = cnset_read.ok_or("missing content MetaTagCnsetRead")?;
+    strict_validate_replguid_globset(&idset_given)?;
+    strict_validate_replguid_globset(&cnset_seen)?;
+    strict_validate_replguid_globset(&cnset_seen_fai)?;
+    strict_validate_replguid_globset(&cnset_read)?;
+    if let Some(value) = deleted_idset.as_deref() {
+        strict_validate_replid_globset(value)?;
+    }
+    if let Some(value) = read_idset.as_deref() {
+        strict_validate_replid_globset(value)?;
+    }
+    if let Some(value) = unread_idset.as_deref() {
+        strict_validate_replid_globset(value)?;
+    }
+    for message in &message_changes {
+        strict_validate_source_or_change_key(&message.source_key)?;
+        strict_validate_source_or_change_key(&message.parent_source_key)?;
+        strict_validate_source_or_change_key(&message.change_key)?;
+        if !strict_replguid_globset_contains_counter(&idset_given, &message.source_key[16..22])? {
+            return Err(format!(
+                "final MetaTagIdsetGiven does not include message {}",
+                message.subject
+            ));
+        }
+        if !strict_replguid_globset_contains_counter(&cnset_seen, &message.change_key[16..22])? {
+            return Err(format!(
+                "final MetaTagCnsetSeen does not include message {} change key",
+                message.subject
+            ));
+        }
+    }
+
+    Ok(StrictContentSyncStream {
+        message_changes,
+        deleted_idset,
+        read_idset,
+        unread_idset,
+        idset_given,
+        cnset_seen,
+        cnset_seen_fai,
+        cnset_read,
+    })
+}
+
+fn strict_content_marker(tag: u32) -> bool {
+    matches!(
+        tag,
+        FX_INCR_SYNC_CHG
+            | FX_INCR_SYNC_MESSAGE
+            | FX_INCR_SYNC_DEL
+            | FX_INCR_SYNC_READ
+            | FX_INCR_SYNC_STATE_BEGIN
+            | FX_INCR_SYNC_STATE_END
+            | FX_INCR_SYNC_END
+    )
+}
+
+fn strict_supported_property_type(tag: u32) -> bool {
+    matches!(
+        tag & 0x0000_FFFF,
+        0x0002 | 0x0003 | 0x000B | 0x0014 | 0x001E | 0x001F | 0x0040 | 0x0102
+    )
+}
+
+fn strict_record_content_header_property(
+    message: &mut StrictContentMessageBuilder,
+    property: StrictFastTransferProperty,
+) -> Result<(), String> {
+    if message.header_tags.contains(&property.tag) {
+        return Err(format!(
+            "duplicate property 0x{:08x} inside messageChangeHeader",
+            property.tag
+        ));
+    }
+    message.header_tags.push(property.tag);
+    match property.tag {
+        PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
+        PID_TAG_SOURCE_KEY => message.source_key = Some(property.value),
+        PID_TAG_CHANGE_KEY => message.change_key = Some(property.value),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => message.predecessor_change_list = Some(property.value),
+        PID_TAG_MID => message.mid = Some(strict_decode_u64_property(&property)?),
+        PID_TAG_CHANGE_NUMBER => {
+            message.change_number = Some(strict_decode_u64_property(&property)?)
+        }
+        PID_TAG_ASSOCIATED => {
+            if property.value.len() != 2 {
+                return Err("PidTagAssociated was not encoded as a two-byte PtypBoolean".into());
+            }
+            message.associated = Some(u16::from_le_bytes(property.value.try_into().unwrap()) != 0);
+        }
+        PID_TAG_LAST_MODIFICATION_TIME => {
+            let _ = strict_decode_u64_property(&property)?;
+        }
+        tag => {
+            return Err(format!(
+                "unexpected messageChangeHeader property 0x{tag:08x}"
+            ))
+        }
+    }
+    Ok(())
+}
+
+fn strict_record_content_body_property(
+    message: &mut StrictContentMessageBuilder,
+    property: StrictFastTransferProperty,
+) -> Result<(), String> {
+    if message.body_tags.contains(&property.tag) {
+        return Err(format!(
+            "duplicate property 0x{:08x} inside message content",
+            property.tag
+        ));
+    }
+    message.body_tags.push(property.tag);
+    match property.tag {
+        PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
+        PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
+        PID_TAG_MESSAGE_FLAGS | PID_TAG_FLAG_STATUS => {
+            let _ = strict_decode_u32_property(&property)?;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn strict_finish_content_message(
+    message: StrictContentMessageBuilder,
+    message_changes: &mut Vec<StrictContentMessageChange>,
+) -> Result<(), String> {
+    let required_prefix = [
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_ASSOCIATED,
+    ];
+    if message.header_tags.len() < required_prefix.len()
+        || message.header_tags[..required_prefix.len()] != required_prefix
+    {
+        return Err(format!(
+            "messageChangeHeader required property prefix was not in documented order: {:x?}",
+            message.header_tags
+        ));
+    }
+    let source_key = message
+        .source_key
+        .ok_or("messageChange missing PidTagSourceKey")?;
+    let parent_source_key = message
+        .parent_source_key
+        .ok_or("message content missing PidTagParentSourceKey")?;
+    let change_key = message
+        .change_key
+        .ok_or("messageChange missing PidTagChangeKey")?;
+    let predecessor_change_list = message
+        .predecessor_change_list
+        .ok_or("messageChange missing PidTagPredecessorChangeList")?;
+    let associated = message
+        .associated
+        .ok_or("messageChange missing PidTagAssociated")?;
+    if associated {
+        return Err("first content-sync gate does not expect FAI message changes".into());
+    }
+    let subject = message.subject.unwrap_or_default();
+    message_changes.push(StrictContentMessageChange {
+        source_key,
+        parent_source_key,
+        change_key,
+        predecessor_change_list,
+        mid: message.mid,
+        change_number: message.change_number,
+        associated,
+        subject,
+    });
+    Ok(())
+}
+
+fn strict_skip_content_message_tail(bytes: &[u8], offset: usize) -> Result<usize, String> {
+    let mut offset = offset;
+    let recipient_count = read_strict_u16(bytes, offset)? as usize;
+    offset += 2;
+    for _ in 0..recipient_count {
+        let _recipient_type = *read_strict_slice(bytes, offset, 1)?
+            .first()
+            .ok_or("recipient type missing")?;
+        offset += 1;
+        offset = strict_skip_prefixed_bytes(bytes, offset)?;
+        offset = strict_skip_prefixed_bytes(bytes, offset)?;
+    }
+    let attachment_count = read_strict_u16(bytes, offset)? as usize;
+    offset += 2;
+    for _ in 0..attachment_count {
+        offset = strict_skip_prefixed_bytes(bytes, offset)?;
+        offset = strict_skip_prefixed_bytes(bytes, offset)?;
+        let _size = read_strict_slice(bytes, offset, 8)?;
+        offset += 8;
+        offset = strict_skip_prefixed_bytes(bytes, offset)?;
+    }
+    Ok(offset)
+}
+
+fn strict_skip_prefixed_bytes(bytes: &[u8], offset: usize) -> Result<usize, String> {
+    let len = read_strict_u16(bytes, offset)? as usize;
+    let start = offset + 2;
+    let end = start.saturating_add(len);
+    let _ = read_strict_slice(bytes, start, len)?;
+    Ok(end)
+}
+
+fn strict_validate_replid_globset(value: &[u8]) -> Result<(), String> {
+    let _ = strict_replid_globset_ranges(value)?;
+    Ok(())
+}
+
+fn strict_replid_globset_contains_counter(value: &[u8], counter: &[u8]) -> Result<bool, String> {
+    let counter = strict_globcnt_to_u64(counter)?;
+    Ok(strict_replid_globset_ranges(value)?
+        .into_iter()
+        .any(|(low, high)| low <= counter && counter <= high))
+}
+
+fn strict_replid_globset_ranges(value: &[u8]) -> Result<Vec<(u64, u64)>, String> {
+    if value.len() < 3 || value[0..2] != 1u16.to_le_bytes() {
+        return Err("REPLID-based IDSET is missing the store REPLID".into());
+    }
+    let mut ranges = Vec::new();
+    let mut offset = 2;
+    loop {
+        let command = *value
+            .get(offset)
+            .ok_or("REPLID-based IDSET missing end command")?;
+        offset += 1;
+        match command {
+            0x00 => {
+                if offset != value.len() {
+                    return Err("trailing bytes after REPLID GLOBSET end command".into());
+                }
+                return Ok(ranges);
+            }
+            0x52 => {
+                let low = strict_globcnt_to_u64(read_strict_slice(value, offset, 6)?)?;
+                offset += 6;
+                let high = strict_globcnt_to_u64(read_strict_slice(value, offset, 6)?)?;
+                offset += 6;
+                if low == 0 || high < low {
+                    return Err("invalid REPLID GLOBSET range".into());
+                }
+                ranges.push((low, high));
+            }
+            _ => {
+                return Err(format!(
+                    "unsupported REPLID GLOBSET command 0x{command:02x}"
+                ))
+            }
+        }
+    }
 }
 
 fn strict_push_binary_property(bytes: &mut Vec<u8>, tag: u32, value: &[u8]) {
@@ -3180,9 +3686,12 @@ fn append_rop_sync_manifest_get_buffer_with_state(
     state: &[u8],
 ) {
     rops.extend_from_slice(&[
-        0x70, 0x00, input, output, 0x01, 0x00, 0x00, 0x00, // RopSynchronizationConfigure
+        0x70, 0x00, input, output, // RopSynchronizationConfigure
+        0x01,   // content sync
+        0x00,   // SendOptions
+        0x28, 0x00, // SynchronizationFlags: ReadState | Normal
         0x00, 0x00, // RestrictionDataSize
-        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x05, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN
         0x00, 0x00, // PropertyTagCount
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
     ]);
@@ -4107,7 +4616,7 @@ async fn mapi_over_http_connect_reestablishes_session_context_with_open_sync_han
 
     assert_eq!(get_buffer_response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(get_buffer_response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert!(contains_bytes(
         &response_rops,
         b"Reconnect sync context message"
@@ -11853,7 +12362,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let content_rops = response_rops_from_execute_response(content_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&content_rops), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&content_rops), Some((0, 1)));
     assert!(contains_bytes(&content_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&content_rops, b"Sent scoped sync"));
 
@@ -12074,6 +12583,83 @@ async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages
 }
 
 #[tokio::test]
+async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes() {
+    let inbox_id = Uuid::parse_str("51515151-5151-5151-5151-515151515152").unwrap();
+    let first_id = Uuid::parse_str("61616161-6161-6161-6161-616161616162").unwrap();
+    let second_id = Uuid::parse_str("62626262-6262-6262-6262-626262626263").unwrap();
+    let mut inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
+    inbox.total_emails = 2;
+    inbox.unread_emails = 1;
+    let mut first = FakeStore::email(
+        &first_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Outlook first folder read",
+    );
+    first.unread = false;
+    first.mailbox_states[0].unread = false;
+    first.modseq = 48;
+    first.mailbox_states[0].modseq = 48;
+    let mut second = FakeStore::email(
+        &second_id.to_string(),
+        &inbox_id.to_string(),
+        "inbox",
+        "Outlook first folder unread",
+    );
+    second.unread = true;
+    second.mailbox_states[0].unread = true;
+    second.modseq = 49;
+    second.mailbox_states[0].modseq = 49;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![first, second])),
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store, 5, &[]).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(stream.deleted_idset.is_none());
+    assert!(stream.read_idset.is_some());
+    assert!(stream.unread_idset.is_some());
+    assert!(!stream.idset_given.is_empty());
+    assert!(!stream.cnset_seen.is_empty());
+    assert!(!stream.cnset_seen_fai.is_empty());
+    assert!(!stream.cnset_read.is_empty());
+    assert!(strict_replid_globset_contains_counter(
+        stream.read_idset.as_deref().unwrap(),
+        &globcnt_bytes(mapi_message_global_counter(&first_id))
+    )
+    .unwrap());
+    assert!(strict_replid_globset_contains_counter(
+        stream.unread_idset.as_deref().unwrap(),
+        &globcnt_bytes(mapi_message_global_counter(&second_id))
+    )
+    .unwrap());
+    let inbox_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(5));
+    for message in &stream.message_changes {
+        assert_eq!(message.parent_source_key, inbox_source_key);
+        assert!(message.mid.is_some());
+        assert!(message.change_number.is_some());
+        assert!(!message.associated);
+        assert_eq!(
+            message.predecessor_change_list,
+            mapi_mailstore::predecessor_change_list(message.change_number.unwrap())
+        );
+    }
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Outlook first folder read"));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Outlook first folder unread"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_content_sync_incremental_after_client_state_exports_delta() {
     let inbox_id = Uuid::parse_str("52525252-5252-5252-5252-525252525252").unwrap();
     let unchanged_id = Uuid::parse_str("64646464-6464-6464-6464-646464646464").unwrap();
@@ -12223,6 +12809,14 @@ async fn mapi_over_http_content_sync_hard_delete_exports_tombstone_and_empty_fin
         &mapi_deleted_message_idset_property(&[deleted_id])
     ));
     assert_content_final_state_includes(&response_rops, &[], &[]);
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(stream.deleted_idset.is_some());
+    assert!(strict_replid_globset_contains_counter(
+        stream.deleted_idset.as_deref().unwrap(),
+        &globcnt_bytes(mapi_message_global_counter(&deleted_id))
+    )
+    .unwrap());
 }
 
 #[tokio::test]
@@ -12274,7 +12868,7 @@ async fn mapi_over_http_content_sync_read_flag_update_exports_read_state() {
     ));
     assert!(contains_bytes(
         &response_rops,
-        &0x0000_0001i32.to_le_bytes()
+        &mapi_read_message_idset_property(&[message_id])
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -12401,7 +12995,7 @@ async fn mapi_over_http_sync_manifest_includes_attachment_change_facts_without_b
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert!(contains_bytes(&response_rops, b"Attachment sync message"));
     assert!(contains_bytes(&response_rops, b"brief.pdf"));
     assert!(contains_bytes(&response_rops, b"application/pdf"));
@@ -12468,7 +13062,7 @@ async fn mapi_over_http_sync_manifest_includes_visible_recipient_facts_without_b
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert!(contains_bytes(&response_rops, b"Recipient sync message"));
     assert!(contains_bytes(&response_rops, b"to@example.test"));
     assert!(contains_bytes(&response_rops, b"Visible To"));
@@ -12529,7 +13123,7 @@ async fn mapi_over_http_sync_manifest_includes_canonical_read_flag_state() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert_eq!(
         mapi_sync_manifest_message_state(&response_rops, "Read flag sync message"),
         Some((0x0000_0011, 2))
@@ -12590,7 +13184,7 @@ async fn mapi_over_http_sync_manifest_includes_stable_change_key_facts_without_b
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 1)));
     assert!(contains_bytes(&response_rops, b"Change key sync message"));
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
@@ -14877,7 +15471,7 @@ async fn mapi_over_http_fast_transfer_get_buffer_resumes_across_execute_requests
     let mut transfer = Vec::new();
     transfer.extend_from_slice(&first_chunks[0].1);
     transfer.extend_from_slice(&second_chunks[0].1);
-    assert_eq!(mapi_sync_manifest_counts(&transfer), Some((1, 1)));
+    assert_eq!(mapi_sync_manifest_counts(&transfer), Some((0, 1)));
     assert!(contains_bytes(
         &transfer,
         b"Chunked FastTransfer sync message"

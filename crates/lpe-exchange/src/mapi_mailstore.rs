@@ -40,6 +40,8 @@ const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
+const META_TAG_IDSET_READ: u32 = 0x402D_0102;
+const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
 const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
@@ -299,139 +301,144 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     } else {
         &[]
     };
-    let mut folders = mailboxes.iter().collect::<Vec<_>>();
-    folders.sort_by(|left, right| {
-        hierarchy_sort_depth(
-            sync_type,
-            sync_root_folder_id,
-            left,
-            parent_context_mailboxes,
-        )
-        .cmp(&hierarchy_sort_depth(
-            sync_type,
-            sync_root_folder_id,
-            right,
-            parent_context_mailboxes,
-        ))
-        .then(hierarchy_folder_sort_order(left).cmp(&hierarchy_folder_sort_order(right)))
-        .then(left.name.cmp(&right.name))
-        .then(left.id.cmp(&right.id))
-    });
-    for mailbox in folders {
-        let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-        let parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
-        let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
-        let source_key = source_key_for_store_id(folder_id);
-        let parent_source_key = if sync_type == 0x02 && parent_folder_id == sync_root_folder_id {
-            Vec::new()
-        } else {
-            source_key_for_store_id(parent_folder_id)
-        };
-        let container_class = mapi_folder_message_class(mailbox);
-        let (content_count, content_unread_count, content_count_source) =
-            folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
-        let content_count_excluded =
-            property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
-        let unread_count_excluded =
-            property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
-        let force_count_properties = force_excluded_hierarchy_count_properties
-            && sync_type == 0x02
-            && content_count_source == "snapshot";
-        let content_count_forced = force_count_properties && content_count_excluded;
-        let unread_count_forced = force_count_properties && unread_count_excluded;
-        tracing::info!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            request_rop_id = "0x70",
-            sync_type = format_args!("0x{sync_type:02x}"),
-            folder_id = format_args!("0x{folder_id:016x}"),
-            parent_folder_id = format_args!("0x{parent_folder_id:016x}"),
-            source_key_len = source_key.len(),
-            parent_source_key_len = parent_source_key.len(),
-            display_name = %mailbox.name,
-            container_class,
-            change_number,
-            mailbox_content_count = mailbox.total_emails,
-            mailbox_unread_count = mailbox.unread_emails,
-            computed_content_count = content_count,
-            computed_unread_count = content_unread_count,
-            content_count_source,
-            hierarchy_count_experiment_enabled = force_excluded_hierarchy_count_properties,
-            content_count_forced_by_experiment = content_count_forced,
-            content_unread_count_forced_by_experiment = unread_count_forced,
-            aggregate_email_count = aggregate_emails.len(),
-            "rca debug mapi hierarchy row"
-        );
-        write_u32(&mut buffer, INCR_SYNC_CHG);
-        write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
-        write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
-        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
-        write_i64(
-            &mut buffer,
-            filetime_from_change_number(change_number) as i64,
-        );
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_CHANGE_KEY,
-            &change_key_for_change_number(change_number),
-        );
-        write_binary_property(
-            &mut buffer,
-            PID_TAG_PREDECESSOR_CHANGE_LIST,
-            &predecessor_change_list(change_number),
-        );
-        write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
-        if sync_type != 0x02 || sync_extra_flags & 0x0000_0001 != 0 {
-            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-            write_i64(&mut buffer, folder_id as i64);
-        }
-        if sync_type != 0x02 || sync_flags & 0x0100 != 0 || sync_extra_flags & 0x0000_0001 != 0 {
-            write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
-            write_i64(&mut buffer, parent_folder_id as i64);
-        }
-        write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
-        write_i64(&mut buffer, change_number as i64);
-        if !content_count_excluded || content_count_forced {
-            write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
-        }
-        if !unread_count_excluded || unread_count_forced {
-            write_i32_property(
-                &mut buffer,
-                PID_TAG_CONTENT_UNREAD_COUNT,
-                content_unread_count,
+    if sync_type == 0x02 {
+        let mut folders = mailboxes.iter().collect::<Vec<_>>();
+        folders.sort_by(|left, right| {
+            hierarchy_sort_depth(
+                sync_type,
+                sync_root_folder_id,
+                left,
+                parent_context_mailboxes,
+            )
+            .cmp(&hierarchy_sort_depth(
+                sync_type,
+                sync_root_folder_id,
+                right,
+                parent_context_mailboxes,
+            ))
+            .then(hierarchy_folder_sort_order(left).cmp(&hierarchy_folder_sort_order(right)))
+            .then(left.name.cmp(&right.name))
+            .then(left.id.cmp(&right.id))
+        });
+        for mailbox in folders {
+            let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+            let parent_folder_id =
+                mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
+            let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
+            let source_key = source_key_for_store_id(folder_id);
+            let parent_source_key = if sync_type == 0x02 && parent_folder_id == sync_root_folder_id
+            {
+                Vec::new()
+            } else {
+                source_key_for_store_id(parent_folder_id)
+            };
+            let container_class = mapi_folder_message_class(mailbox);
+            let (content_count, content_unread_count, content_count_source) =
+                folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
+            let content_count_excluded =
+                property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
+            let unread_count_excluded =
+                property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
+            let force_count_properties = force_excluded_hierarchy_count_properties
+                && sync_type == 0x02
+                && content_count_source == "snapshot";
+            let content_count_forced = force_count_properties && content_count_excluded;
+            let unread_count_forced = force_count_properties && unread_count_excluded;
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                request_rop_id = "0x70",
+                sync_type = format_args!("0x{sync_type:02x}"),
+                folder_id = format_args!("0x{folder_id:016x}"),
+                parent_folder_id = format_args!("0x{parent_folder_id:016x}"),
+                source_key_len = source_key.len(),
+                parent_source_key_len = parent_source_key.len(),
+                display_name = %mailbox.name,
+                container_class,
+                change_number,
+                mailbox_content_count = mailbox.total_emails,
+                mailbox_unread_count = mailbox.unread_emails,
+                computed_content_count = content_count,
+                computed_unread_count = content_unread_count,
+                content_count_source,
+                hierarchy_count_experiment_enabled = force_excluded_hierarchy_count_properties,
+                content_count_forced_by_experiment = content_count_forced,
+                content_unread_count_forced_by_experiment = unread_count_forced,
+                aggregate_email_count = aggregate_emails.len(),
+                "rca debug mapi hierarchy row"
             );
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE) {
-            write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX) {
-            write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
+            write_u32(&mut buffer, INCR_SYNC_CHG);
+            write_binary_property(&mut buffer, PID_TAG_PARENT_SOURCE_KEY, &parent_source_key);
+            write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
+            write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
             write_i64(
                 &mut buffer,
-                local_commit_time_max(
-                    folder_id,
-                    mailboxes,
-                    aggregate_emails,
-                    aggregate_attachment_facts,
-                ) as i64,
+                filetime_from_change_number(change_number) as i64,
             );
+            write_binary_property(
+                &mut buffer,
+                PID_TAG_CHANGE_KEY,
+                &change_key_for_change_number(change_number),
+            );
+            write_binary_property(
+                &mut buffer,
+                PID_TAG_PREDECESSOR_CHANGE_LIST,
+                &predecessor_change_list(change_number),
+            );
+            write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
+            if sync_type != 0x02 || sync_extra_flags & 0x0000_0001 != 0 {
+                write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+                write_i64(&mut buffer, folder_id as i64);
+            }
+            if sync_type != 0x02 || sync_flags & 0x0100 != 0 || sync_extra_flags & 0x0000_0001 != 0
+            {
+                write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
+                write_i64(&mut buffer, parent_folder_id as i64);
+            }
+            write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
+            write_i64(&mut buffer, change_number as i64);
+            if !content_count_excluded || content_count_forced {
+                write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
+            }
+            if !unread_count_excluded || unread_count_forced {
+                write_i32_property(
+                    &mut buffer,
+                    PID_TAG_CONTENT_UNREAD_COUNT,
+                    content_unread_count,
+                );
+            }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE) {
+                write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
+            }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX) {
+                write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
+                write_i64(
+                    &mut buffer,
+                    local_commit_time_max(
+                        folder_id,
+                        mailboxes,
+                        aggregate_emails,
+                        aggregate_attachment_facts,
+                    ) as i64,
+                );
+            }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL) {
+                write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
+            }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
+                write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
+            }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) {
+                write_i32_property(&mut buffer, PID_TAG_ACCESS, 0x0000_0002);
+            }
+            write_bool_property(
+                &mut buffer,
+                PID_TAG_SUBFOLDERS,
+                mapi_folder_has_subfolders(mailbox, parent_context_mailboxes),
+            );
+            write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
         }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL) {
-            write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
-            write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
-        }
-        if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) {
-            write_i32_property(&mut buffer, PID_TAG_ACCESS, 0x0000_0002);
-        }
-        write_bool_property(
-            &mut buffer,
-            PID_TAG_SUBFOLDERS,
-            mapi_folder_has_subfolders(mailbox, parent_context_mailboxes),
-        );
-        write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
     }
 
     let mut messages = emails.iter().collect::<Vec<_>>();
@@ -478,6 +485,11 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             write_i64(&mut buffer, change_number as i64);
         }
         write_u32(&mut buffer, INCR_SYNC_MESSAGE);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PARENT_SOURCE_KEY,
+            &source_key_for_store_id(folder_id),
+        );
         write_u32(&mut buffer, PID_TAG_MESSAGE_FLAGS);
         write_i32(&mut buffer, canonical_message_flags(email) as i32);
         write_u32(&mut buffer, PID_TAG_FLAG_STATUS);
@@ -510,14 +522,33 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         );
     }
 
-    if sync_type != 0x02 {
-        for email in emails.iter().filter(|email| !email.unread) {
+    if sync_type == 0x01 && sync_flags & 0x0008 != 0 {
+        let read_message_ids = emails
+            .iter()
+            .filter(|email| !email.unread)
+            .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
+            .collect::<Vec<_>>();
+        let unread_message_ids = emails
+            .iter()
+            .filter(|email| email.unread)
+            .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
+            .collect::<Vec<_>>();
+        if !read_message_ids.is_empty() || !unread_message_ids.is_empty() {
             write_u32(&mut buffer, INCR_SYNC_READ);
-            write_u32(&mut buffer, PID_TAG_MID);
-            write_i64(
-                &mut buffer,
-                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0) as i64,
-            );
+            if !read_message_ids.is_empty() {
+                write_binary_property(
+                    &mut buffer,
+                    META_TAG_IDSET_READ,
+                    &replid_idset_from_object_ids(&read_message_ids),
+                );
+            }
+            if !unread_message_ids.is_empty() {
+                write_binary_property(
+                    &mut buffer,
+                    META_TAG_IDSET_UNREAD,
+                    &replid_idset_from_object_ids(&unread_message_ids),
+                );
+            }
         }
     }
 
@@ -1009,6 +1040,8 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_CHANGE_NUMBER => "PidTagChangeNumber",
         META_TAG_IDSET_GIVEN => "MetaTagIdsetGiven",
+        META_TAG_IDSET_READ => "MetaTagIdsetRead",
+        META_TAG_IDSET_UNREAD => "MetaTagIdsetUnread",
         META_TAG_CNSET_SEEN => "MetaTagCnsetSeen",
         _ => "unknown",
     }
