@@ -633,25 +633,53 @@ async fn folder_properties_for_open<S>(
     principal: &AccountPrincipal,
     session: &MapiSession,
     folder_id: u64,
-) -> Result<HashMap<u32, MapiValue>>
+) -> HashMap<u32, MapiValue>
 where
     S: ExchangeStore,
 {
     let mut properties = HashMap::new();
-    for record in store
+    match store
         .fetch_mapi_folder_properties(principal.account_id, &[folder_id])
-        .await?
+        .await
     {
-        if record.folder_id == folder_id {
-            let mut cursor = Cursor::new(&record.value_bytes);
-            let value = parse_mapi_property_value(&mut cursor, record.property_tag)?;
-            properties.insert(record.property_tag, value);
+        Ok(records) => {
+            for record in records {
+                if record.folder_id == folder_id {
+                    let mut cursor = Cursor::new(&record.value_bytes);
+                    match parse_mapi_property_value(&mut cursor, record.property_tag) {
+                        Ok(value) => {
+                            properties.insert(record.property_tag, value);
+                        }
+                        Err(error) => tracing::warn!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            folder_id = %format!("{folder_id:#018x}"),
+                            property_tag = %format!("{:#010x}", record.property_tag),
+                            error = %error,
+                            "rca debug mapi folder property hydrate parse failed"
+                        ),
+                    }
+                }
+            }
         }
+        Err(error) => tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            folder_id = %format!("{folder_id:#018x}"),
+            error = %error,
+            "rca debug mapi folder property hydrate failed"
+        ),
     }
     if folder_id == ROOT_FOLDER_ID {
         properties.extend(session.root_default_folder_properties.clone());
     }
-    Ok(properties)
+    properties
 }
 
 fn mapi_folder_property_values(
@@ -1163,17 +1191,7 @@ where
                     continue;
                 }
                 let properties =
-                    match folder_properties_for_open(store, principal, session, folder_id).await {
-                        Ok(properties) => properties,
-                        Err(_) => {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x02,
-                                request.output_handle_index.unwrap_or(0),
-                                0x8004_0102,
-                            ));
-                            continue;
-                        }
-                    };
+                    folder_properties_for_open(store, principal, session, folder_id).await;
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::Folder {
@@ -1450,25 +1468,37 @@ where
                         }
                         Some(MapiObject::Folder { folder_id, .. }) => {
                             let stored_values = mapi_folder_property_values(folder_id, &values);
-                            match store
+                            if let Err(error) = store
                                 .store_mapi_folder_properties(principal.account_id, &stored_values)
                                 .await
                             {
-                                Ok(()) => {
-                                    let object =
-                                        input_object(session, &handle_slots, &request).cloned();
-                                    remember_root_default_folder_properties(
-                                        session,
-                                        object.as_ref(),
-                                        &values,
-                                    );
-                                    apply_mapi_property_values(
-                                        input_object_mut(session, &handle_slots, &request),
-                                        values,
-                                    )
-                                }
-                                Err(error) => Err(error),
+                                tracing::warn!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    account_id = %principal.account_id,
+                                    mailbox = %principal.email,
+                                    folder_id = %format!("{folder_id:#018x}"),
+                                    property_tags = %format_debug_property_tags(
+                                        &stored_values
+                                            .iter()
+                                            .map(|value| value.property_tag)
+                                            .collect::<Vec<_>>()
+                                    ),
+                                    error = %error,
+                                    "rca debug mapi folder property persist failed"
+                                );
                             }
+                            let object = input_object(session, &handle_slots, &request).cloned();
+                            remember_root_default_folder_properties(
+                                session,
+                                object.as_ref(),
+                                &values,
+                            );
+                            apply_mapi_property_values(
+                                input_object_mut(session, &handle_slots, &request),
+                                values,
+                            )
                         }
                         object => {
                             remember_root_default_folder_properties(
@@ -1498,26 +1528,36 @@ where
                 let delete_result = match input_object(session, &handle_slots, &request).cloned() {
                     Some(MapiObject::Folder { folder_id, .. }) => {
                         let stored_tags = mapi_folder_property_tags(&property_tags);
-                        store
+                        if let Err(error) = store
                             .delete_mapi_folder_properties(
                                 principal.account_id,
                                 folder_id,
                                 &stored_tags,
                             )
                             .await
-                            .and_then(|_| {
-                                let object =
-                                    input_object(session, &handle_slots, &request).cloned();
-                                forget_root_default_folder_properties(
-                                    session,
-                                    object.as_ref(),
-                                    &property_tags,
-                                );
-                                delete_mapi_properties(
-                                    input_object_mut(session, &handle_slots, &request),
-                                    &property_tags,
-                                )
-                            })
+                        {
+                            tracing::warn!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                account_id = %principal.account_id,
+                                mailbox = %principal.email,
+                                folder_id = %format!("{folder_id:#018x}"),
+                                property_tags = %format_debug_property_tags(&stored_tags),
+                                error = %error,
+                                "rca debug mapi folder property delete failed"
+                            );
+                        }
+                        let object = input_object(session, &handle_slots, &request).cloned();
+                        forget_root_default_folder_properties(
+                            session,
+                            object.as_ref(),
+                            &property_tags,
+                        );
+                        delete_mapi_properties(
+                            input_object_mut(session, &handle_slots, &request),
+                            &property_tags,
+                        )
                     }
                     _ => delete_mapi_properties(
                         input_object_mut(session, &handle_slots, &request),
@@ -2136,19 +2176,7 @@ where
                     {
                         let folder_id = mapi_folder_id(existing);
                         let properties =
-                            match folder_properties_for_open(store, principal, session, folder_id)
-                                .await
-                            {
-                                Ok(properties) => properties,
-                                Err(_) => {
-                                    responses.extend_from_slice(&rop_error_response(
-                                        0x1C,
-                                        request.output_handle_index.unwrap_or(0),
-                                        0x8004_0102,
-                                    ));
-                                    continue;
-                                }
-                            };
+                            folder_properties_for_open(store, principal, session, folder_id).await;
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::Folder {
