@@ -17593,6 +17593,47 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_get_receive_folder_empty_class_returns_default_message_class() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let rops = vec![0x27, 0x00, 0x00, 0x00];
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops[0], 0x27);
+    assert_eq!(
+        u64::from_le_bytes(response_rops[6..14].try_into().unwrap()),
+        test_mapi_folder_id(5)
+    );
+    assert!(contains_bytes(&response_rops, b"IPM.Note\0"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox_state() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

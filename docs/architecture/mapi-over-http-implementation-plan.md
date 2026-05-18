@@ -83,6 +83,8 @@ The six root default-folder properties accepted through that `RopSetProperties` 
 
 The 2026-05-18 20:32 trace confirmed those client echoes no longer persist as root-folder state (`root_default_folder_property_count=0`) but still disconnected before content sync. The same trace showed the post-hierarchy batches releasing handles and opening new objects into sparse output handle slots. Server object handle IDs now remain monotonic within the session; `OutputHandleIndex` is only the response handle-table slot, not a preferred object handle ID. This avoids immediately reusing a released small handle ID during Outlook's post-hierarchy bootstrap sequence.
 
+The 2026-05-18 21:36 trace confirmed monotonic handle allocation but still stopped after the same first post-hierarchy `RopGetReceiveFolder`, default-folder probe, and root `RopSetProperties` sequence. `RopGetReceiveFolder` now returns `IPM.Note` as the explicit message class when Outlook asks for the default empty message class, while unmatched non-mail classes still return an empty explicit class. This keeps the returned Inbox receive folder tied to the actual mail receive-folder class before Outlook continues its bootstrap.
+
 Rationale: current Outlook 16 traces show a valid hierarchy ICS stream followed by disconnect before content sync. The affected mailbox has snapshot-computed `Inbox` content and unread counts, but Outlook excluded the count properties. This experiment tests whether Outlook's cached-mode bootstrap expects those folder aggregate properties despite sending them as exclusions. This is not a protocol MUST and must not become the default without real Outlook evidence.
 
 RCA evidence requirements:

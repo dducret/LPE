@@ -1441,7 +1441,8 @@ pub(in crate::mapi) fn valid_receive_folder_message_class(message_class: &str) -
 }
 
 pub(in crate::mapi) fn explicit_receive_folder_message_class(message_class: &str) -> &'static str {
-    if message_class.eq_ignore_ascii_case("IPM.Note")
+    if message_class.is_empty()
+        || message_class.eq_ignore_ascii_case("IPM.Note")
         || message_class
             .get(..9)
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Note."))
