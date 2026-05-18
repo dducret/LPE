@@ -320,7 +320,8 @@ fn log_execute_rop_debug(
 
     if endpoint == "emsmdb"
         && (post_hierarchy_observation.first_execute
-            || post_hierarchy_observation.first_bootstrap_probe)
+            || post_hierarchy_observation.first_bootstrap_probe
+            || post_hierarchy_observation.first_set_properties_probe)
     {
         let probe = summarize_first_post_hierarchy_probe(request_rop_buffer, response_rop_buffer);
         tracing::info!(
@@ -341,6 +342,8 @@ fn log_execute_rop_debug(
             first_post_hierarchy_execute = post_hierarchy_observation.first_execute,
             first_post_hierarchy_bootstrap_probe =
                 post_hierarchy_observation.first_bootstrap_probe,
+            first_post_hierarchy_set_properties_probe =
+                post_hierarchy_observation.first_set_properties_probe,
             request_rop_ids = %request.ids_csv,
             response_rop_results_best_effort = %response.results_csv,
             open_folder_request_count = probe.open_folder_request_count,
@@ -350,6 +353,9 @@ fn log_execute_rop_debug(
             get_properties_specific_requests = %probe.get_properties_specific_requests,
             get_properties_specific_response_shapes =
                 %probe.get_properties_specific_response_shapes,
+            set_properties_request_count = probe.set_properties_request_count,
+            set_properties_requests = %probe.set_properties_requests,
+            set_properties_response_shapes = %probe.set_properties_response_shapes,
             probe_parse_error = %probe.parse_error,
             "rca debug mapi post hierarchy execute probe"
         );
@@ -364,6 +370,9 @@ struct FirstPostHierarchyProbeDebugSummary {
     get_properties_specific_request_count: usize,
     get_properties_specific_requests: String,
     get_properties_specific_response_shapes: String,
+    set_properties_request_count: usize,
+    set_properties_requests: String,
+    set_properties_response_shapes: String,
     parse_error: String,
 }
 
@@ -379,6 +388,14 @@ struct GetPropertiesSpecificProbeRequest {
     property_tags: Vec<u32>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct SetPropertiesProbeRequest {
+    input_handle_index: u8,
+    property_tags: Vec<u32>,
+    property_value_shapes: String,
+    parse_error: String,
+}
+
 fn summarize_first_post_hierarchy_probe(
     request_rop_buffer: &[u8],
     response_rop_buffer: &[u8],
@@ -392,6 +409,7 @@ fn summarize_first_post_hierarchy_probe(
     let mut request_rop_ids = Vec::new();
     let mut open_folder_requests = Vec::new();
     let mut get_properties_requests = Vec::new();
+    let mut set_properties_requests = Vec::new();
     while request_cursor.remaining() > 0 {
         let request = match read_rop_request(&mut request_cursor) {
             Ok(request) => request,
@@ -411,6 +429,7 @@ fn summarize_first_post_hierarchy_probe(
                 input_handle_index: request.input_handle_index().unwrap_or(0),
                 property_tags: request.property_tags(),
             }),
+            0x0A | 0x79 => set_properties_requests.push(set_properties_probe_request(&request)),
             _ => {}
         }
     }
@@ -440,6 +459,20 @@ fn summarize_first_post_hierarchy_probe(
         })
         .collect::<Vec<_>>()
         .join("|");
+    summary.set_properties_request_count = set_properties_requests.len();
+    summary.set_properties_requests = set_properties_requests
+        .iter()
+        .map(|request| {
+            format!(
+                "in={};tags={};values={};parse_error={}",
+                request.input_handle_index,
+                format_debug_property_tags(&request.property_tags),
+                request.property_value_shapes,
+                request.parse_error
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
 
     let Some((responses, _response_handle_table)) = split_rop_buffer(response_rop_buffer) else {
         if summary.parse_error.is_empty() {
@@ -450,8 +483,10 @@ fn summarize_first_post_hierarchy_probe(
     let mut response_offset = 0usize;
     let mut open_folder_index = 0usize;
     let mut get_properties_index = 0usize;
+    let mut set_properties_index = 0usize;
     let mut open_folder_responses = Vec::new();
     let mut get_properties_responses = Vec::new();
+    let mut set_properties_responses = Vec::new();
     for rop_id in request_rop_ids {
         if rop_has_no_response(rop_id) {
             continue;
@@ -484,13 +519,45 @@ fn summarize_first_post_hierarchy_probe(
                 }
                 get_properties_index = get_properties_index.saturating_add(1);
             }
+            0x0A | 0x79 => {
+                if let Some(request) = set_properties_requests.get(set_properties_index) {
+                    set_properties_responses.push(summarize_set_properties_probe_response(
+                        responses,
+                        response_offset,
+                        request,
+                    ));
+                }
+                set_properties_index = set_properties_index.saturating_add(1);
+            }
             _ => {}
         }
         response_offset = response_offset.saturating_add(6);
     }
     summary.open_folder_response_shapes = open_folder_responses.join("|");
     summary.get_properties_specific_response_shapes = get_properties_responses.join("|");
+    summary.set_properties_response_shapes = set_properties_responses.join("|");
     summary
+}
+
+fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeRequest {
+    match request.property_values() {
+        Ok(values) => SetPropertiesProbeRequest {
+            input_handle_index: request.input_handle_index().unwrap_or(0),
+            property_tags: values.iter().map(|(tag, _value)| *tag).collect(),
+            property_value_shapes: values
+                .iter()
+                .map(|(tag, value)| format!("{tag:#010x}:{}", mapi_value_debug_shape(value)))
+                .collect::<Vec<_>>()
+                .join(","),
+            parse_error: String::new(),
+        },
+        Err(error) => SetPropertiesProbeRequest {
+            input_handle_index: request.input_handle_index().unwrap_or(0),
+            property_tags: Vec::new(),
+            property_value_shapes: String::new(),
+            parse_error: error.to_string(),
+        },
+    }
 }
 
 fn summarize_open_folder_probe_response(
@@ -536,6 +603,48 @@ fn summarize_get_properties_probe_response(
         request.input_handle_index,
         format_debug_property_tags(&request.property_tags)
     )
+}
+
+fn summarize_set_properties_probe_response(
+    responses: &[u8],
+    offset: usize,
+    request: &SetPropertiesProbeRequest,
+) -> String {
+    let result = read_response_error_code(responses, offset)
+        .map(|code| format!("{code:#010x}"))
+        .unwrap_or_else(|| "truncated".to_string());
+    let property_problem_count = responses
+        .get(offset + 6..offset + 8)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u16::from_le_bytes)
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "truncated".to_string());
+    format!(
+        "in={};result={result};property_problem_count={property_problem_count};tags={}",
+        request.input_handle_index,
+        format_debug_property_tags(&request.property_tags)
+    )
+}
+
+fn mapi_value_debug_shape(value: &MapiValue) -> String {
+    match value {
+        MapiValue::Bool(_) => "bool".to_string(),
+        MapiValue::I16(_) => "i16".to_string(),
+        MapiValue::I32(_) => "i32".to_string(),
+        MapiValue::I64(_) => "i64".to_string(),
+        MapiValue::U32(_) => "u32".to_string(),
+        MapiValue::U64(_) => "u64".to_string(),
+        MapiValue::String(value) => format!("string:chars={}", value.chars().count()),
+        MapiValue::Binary(value) => format!("binary:bytes={}", value.len()),
+        MapiValue::Guid(_) => "guid".to_string(),
+        MapiValue::Error(error) => format!("error:{error:#010x}"),
+        MapiValue::MultiI16(value) => format!("multi_i16:count={}", value.len()),
+        MapiValue::MultiI32(value) => format!("multi_i32:count={}", value.len()),
+        MapiValue::MultiI64(value) => format!("multi_i64:count={}", value.len()),
+        MapiValue::MultiString(value) => format!("multi_string:count={}", value.len()),
+        MapiValue::MultiBinary(value) => format!("multi_binary:count={}", value.len()),
+        MapiValue::MultiGuid(value) => format!("multi_guid:count={}", value.len()),
+    }
 }
 
 fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'static str {
@@ -4410,6 +4519,39 @@ mod tests {
         assert!(summary
             .get_properties_specific_response_shapes
             .contains("result=0x00000000;row=standard"));
+        assert!(summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn first_post_hierarchy_probe_summary_identifies_set_properties_shapes() {
+        let mut property_value = Vec::new();
+        property_value.extend_from_slice(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID.to_le_bytes());
+        property_value.extend_from_slice(&3u16.to_le_bytes());
+        property_value.extend_from_slice(&[0xAA, 0xBB, 0xCC]);
+        let property_value_size = property_value.len() + 2;
+        let mut request_bytes = vec![0x0A, 0x00, 0x01];
+        request_bytes.extend_from_slice(&(property_value_size as u16).to_le_bytes());
+        request_bytes.extend_from_slice(&1u16.to_le_bytes());
+        request_bytes.extend_from_slice(&property_value);
+        let request_buffer = rop_buffer_with_response(request_bytes, &[1]);
+
+        let request = RopRequest {
+            rop_id: 0x0A,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let response_buffer = rop_buffer_with_response(rop_set_properties_response(&request), &[1]);
+
+        let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
+
+        assert_eq!(summary.set_properties_request_count, 1);
+        assert!(summary
+            .set_properties_requests
+            .contains("tags=0x36d00102;values=0x36d00102:binary:bytes=3"));
+        assert!(summary
+            .set_properties_response_shapes
+            .contains("result=0x00000000;property_problem_count=0"));
         assert!(summary.parse_error.is_empty());
     }
 

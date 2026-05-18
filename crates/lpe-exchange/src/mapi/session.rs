@@ -42,6 +42,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: Vec<u8>,
     pub(in crate::mapi) bootstrap_probe_observed: bool,
+    pub(in crate::mapi) set_properties_probe_observed: bool,
     pub(in crate::mapi) content_sync_configure_observed: bool,
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
@@ -51,6 +52,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
 pub(in crate::mapi) struct PostHierarchyExecuteObservation {
     pub(in crate::mapi) first_execute: bool,
     pub(in crate::mapi) first_bootstrap_probe: bool,
+    pub(in crate::mapi) first_set_properties_probe: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -600,6 +602,13 @@ impl MapiSession {
         if contains_bootstrap_probe {
             self.post_hierarchy_actions.bootstrap_probe_observed = true;
         }
+        let contains_set_properties_probe =
+            rop_ids.iter().any(|rop_id| matches!(rop_id, 0x0A | 0x79));
+        let first_set_properties_probe = contains_set_properties_probe
+            && !self.post_hierarchy_actions.set_properties_probe_observed;
+        if contains_set_properties_probe {
+            self.post_hierarchy_actions.set_properties_probe_observed = true;
+        }
         self.post_hierarchy_actions.execute_count =
             self.post_hierarchy_actions.execute_count.saturating_add(1);
         for rop_id in rop_ids.iter().copied() {
@@ -615,6 +624,7 @@ impl MapiSession {
         PostHierarchyExecuteObservation {
             first_execute,
             first_bootstrap_probe,
+            first_set_properties_probe,
         }
     }
 

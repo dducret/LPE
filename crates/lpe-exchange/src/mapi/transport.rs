@@ -1668,8 +1668,10 @@ mod tests {
 
         assert!(first.first_execute);
         assert!(first.first_bootstrap_probe);
+        assert!(!first.first_set_properties_probe);
         assert!(!second.first_execute);
         assert!(!second.first_bootstrap_probe);
+        assert!(!second.first_set_properties_probe);
         assert_eq!(summary.execute_count, 2);
         assert_eq!(summary.rop_ids_seen, "0x02,0x70,0x4e,0x01");
         assert!(summary.content_sync_configure_observed);
@@ -1691,13 +1693,21 @@ mod tests {
         let default_folder_probe = session.record_execute_after_hierarchy_completion(&[0x02, 0x07]);
         let later_default_folder_probe =
             session.record_execute_after_hierarchy_completion(&[0x02, 0x0a]);
+        let second_set_properties_probe =
+            session.record_execute_after_hierarchy_completion(&[0x02, 0x0a]);
 
         assert!(receive_folder_probe.first_execute);
         assert!(!receive_folder_probe.first_bootstrap_probe);
+        assert!(!receive_folder_probe.first_set_properties_probe);
         assert!(!default_folder_probe.first_execute);
         assert!(default_folder_probe.first_bootstrap_probe);
+        assert!(!default_folder_probe.first_set_properties_probe);
         assert!(!later_default_folder_probe.first_execute);
         assert!(!later_default_folder_probe.first_bootstrap_probe);
+        assert!(later_default_folder_probe.first_set_properties_probe);
+        assert!(!second_set_properties_probe.first_execute);
+        assert!(!second_set_properties_probe.first_bootstrap_probe);
+        assert!(!second_set_properties_probe.first_set_properties_probe);
     }
 }
 
