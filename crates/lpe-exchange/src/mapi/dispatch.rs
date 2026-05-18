@@ -601,7 +601,8 @@ fn summarize_root_logon_default_folder_getprops_requests(
             0x07 if request
                 .property_tags()
                 .iter()
-                .any(is_default_folder_entry_id_property) =>
+                .copied()
+                .any(is_default_folder_identification_property_tag) =>
             {
                 let input_handle_index = request.input_handle_index().unwrap_or(0);
                 let target = if opened_root_output_indexes.contains(&input_handle_index) {
@@ -650,6 +651,13 @@ where
                     let mut cursor = Cursor::new(&record.value_bytes);
                     match parse_mapi_property_value(&mut cursor, record.property_tag) {
                         Ok(value) => {
+                            if folder_id == ROOT_FOLDER_ID
+                                && is_default_folder_identification_property_tag(
+                                    record.property_tag,
+                                )
+                            {
+                                continue;
+                            }
                             properties.insert(record.property_tag, value);
                         }
                         Err(error) => tracing::warn!(
@@ -695,6 +703,11 @@ fn mapi_folder_property_values(
             if folder_id == IPM_SUBTREE_FOLDER_ID && property_tag == PID_TAG_OST_OSTID {
                 return None;
             }
+            if folder_id == ROOT_FOLDER_ID
+                && is_default_folder_identification_property_tag(property_tag)
+            {
+                return None;
+            }
             let mut value_bytes = Vec::new();
             write_mapi_value(&mut value_bytes, property_tag, value);
             Some(MapiFolderPropertyValue {
@@ -714,9 +727,9 @@ fn mapi_folder_property_tags(property_tags: &[u32]) -> Vec<u32> {
 }
 
 fn remember_root_default_folder_properties(
-    session: &mut MapiSession,
+    _session: &mut MapiSession,
     object: Option<&MapiObject>,
-    values: &[(u32, MapiValue)],
+    _values: &[(u32, MapiValue)],
 ) {
     if !matches!(
         object,
@@ -726,14 +739,6 @@ fn remember_root_default_folder_properties(
         })
     ) {
         return;
-    }
-    for (tag, value) in values {
-        let storage_tag = canonical_property_storage_tag(*tag);
-        if is_default_folder_entry_id_property(&storage_tag) {
-            session
-                .root_default_folder_properties
-                .insert(storage_tag, value.clone());
-        }
     }
 }
 
@@ -753,22 +758,10 @@ fn forget_root_default_folder_properties(
     }
     for tag in property_tags {
         let storage_tag = canonical_property_storage_tag(*tag);
-        if is_default_folder_entry_id_property(&storage_tag) {
+        if is_default_folder_identification_property_tag(storage_tag) {
             session.root_default_folder_properties.remove(&storage_tag);
         }
     }
-}
-
-fn is_default_folder_entry_id_property(tag: &u32) -> bool {
-    matches!(
-        canonical_property_storage_tag(*tag),
-        PID_TAG_IPM_APPOINTMENT_ENTRY_ID
-            | PID_TAG_IPM_CONTACT_ENTRY_ID
-            | PID_TAG_IPM_JOURNAL_ENTRY_ID
-            | PID_TAG_IPM_NOTE_ENTRY_ID
-            | PID_TAG_IPM_TASK_ENTRY_ID
-            | PID_TAG_REM_ONLINE_ENTRY_ID
-    )
 }
 
 fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeRequest {
@@ -4944,11 +4937,11 @@ mod tests {
             folder_id: ROOT_FOLDER_ID,
             properties: HashMap::new(),
         };
-        let stored_value = vec![0xAA; 24];
+        let client_value = vec![0xAA; 24];
         let values = vec![
             (
                 PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
-                MapiValue::Binary(stored_value.clone()),
+                MapiValue::Binary(client_value),
             ),
             (
                 PID_TAG_DISPLAY_NAME_W,
@@ -4972,13 +4965,17 @@ mod tests {
         );
 
         let mut cursor = Cursor::new(&response[7..]);
+        let expected_value = crate::mapi::identity::long_term_id_from_object_id(CALENDAR_FOLDER_ID)
+            .unwrap()
+            .to_vec();
         assert_eq!(
             parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
-            MapiValue::Binary(stored_value)
+            MapiValue::Binary(expected_value)
         );
         let MapiObject::Folder { properties, .. } = &reopened_root else {
             panic!("expected reopened root folder object");
         };
+        assert!(!properties.contains_key(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID));
         assert!(!properties.contains_key(&canonical_property_storage_tag(PID_TAG_DISPLAY_NAME_W)));
     }
 

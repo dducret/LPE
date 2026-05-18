@@ -16961,7 +16961,7 @@ async fn mapi_over_http_folder_set_properties_survive_new_session() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_root_default_folder_set_properties_survive_new_session() {
+async fn mapi_over_http_root_default_folder_set_properties_do_not_override_computed_defaults() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -17046,7 +17046,13 @@ async fn mapi_over_http_root_default_folder_set_properties_survive_new_session()
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &default_calendar_eid));
+    let expected_calendar_eid = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap()
+    .to_vec();
+    assert!(contains_bytes(&response_rops, &expected_calendar_eid));
+    assert!(!contains_bytes(&response_rops, &default_calendar_eid));
 }
 
 #[tokio::test]
