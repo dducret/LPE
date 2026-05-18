@@ -563,6 +563,17 @@ where
             }
             0x02 => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
+                if folder_row_for_id(folder_id, mailboxes).is_none()
+                    && snapshot.collaboration_folder_for_id(folder_id).is_none()
+                    && !is_advertised_special_folder(folder_id)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x02,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
                 let handle = session.allocate_output_handle(
                     request.output_handle_index,
                     MapiObject::Folder {

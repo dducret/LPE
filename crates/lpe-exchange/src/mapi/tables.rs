@@ -11,9 +11,8 @@ pub(in crate::mapi) fn hierarchy_row_count(
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
     if is_root_hierarchy_folder(folder_id) {
-        mailboxes
+        hierarchy_rows(folder_id, mailboxes, snapshot, None, &[])
             .len()
-            .saturating_add(snapshot.collaboration_folders().len())
             .min(u32::MAX as usize) as u32
     } else {
         0
@@ -104,9 +103,11 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
 enum HierarchyRow<'a> {
     Mailbox(&'a JmapMailbox),
     Collaboration(&'a MapiCollaborationFolder),
+    Special(u64),
 }
 
 fn hierarchy_rows<'a>(
+    folder_id: u64,
     mailboxes: &'a [JmapMailbox],
     snapshot: &'a MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
@@ -124,9 +125,33 @@ fn hierarchy_rows<'a>(
                 .map(HierarchyRow::Collaboration),
         )
         .collect::<Vec<_>>();
+    let mut folder_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
+    if folder_id == IPM_SUBTREE_FOLDER_ID {
+        for special_folder_id in IPM_SUBTREE_HIERARCHY_FOLDER_IDS {
+            if folder_ids.insert(*special_folder_id)
+                && special_hierarchy_row_matches(*special_folder_id, restriction)
+            {
+                rows.push(HierarchyRow::Special(*special_folder_id));
+            }
+        }
+    }
     sort_hierarchy_rows(&mut rows, sort_orders);
     rows
 }
+
+const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
+    INBOX_FOLDER_ID,
+    DRAFTS_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    SENT_FOLDER_ID,
+    TRASH_FOLDER_ID,
+    CONTACTS_FOLDER_ID,
+    CALENDAR_FOLDER_ID,
+    JOURNAL_FOLDER_ID,
+    NOTES_FOLDER_ID,
+    TASKS_FOLDER_ID,
+    REMINDERS_FOLDER_ID,
+];
 
 fn sort_hierarchy_rows(rows: &mut [HierarchyRow<'_>], sort_orders: &[MapiSortOrder]) {
     if sort_orders.is_empty() {
@@ -161,6 +186,7 @@ fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
     match row {
         HierarchyRow::Mailbox(mailbox) => &mailbox.name,
         HierarchyRow::Collaboration(folder) => &folder.collection.display_name,
+        HierarchyRow::Special(folder_id) => special_folder_metadata(*folder_id).0,
     }
 }
 
@@ -168,13 +194,14 @@ fn hierarchy_row_content_count(row: &HierarchyRow<'_>) -> u32 {
     match row {
         HierarchyRow::Mailbox(mailbox) => mailbox.total_emails,
         HierarchyRow::Collaboration(folder) => folder.item_count,
+        HierarchyRow::Special(_) => 0,
     }
 }
 
 fn hierarchy_row_unread_count(row: &HierarchyRow<'_>) -> u32 {
     match row {
         HierarchyRow::Mailbox(mailbox) => mailbox.unread_emails,
-        HierarchyRow::Collaboration(_) => 0,
+        HierarchyRow::Collaboration(_) | HierarchyRow::Special(_) => 0,
     }
 }
 
@@ -182,6 +209,7 @@ fn hierarchy_row_id(row: &HierarchyRow<'_>) -> u64 {
     match row {
         HierarchyRow::Mailbox(mailbox) => mapi_folder_id(mailbox),
         HierarchyRow::Collaboration(folder) => folder.id,
+        HierarchyRow::Special(folder_id) => *folder_id,
     }
 }
 
@@ -191,6 +219,55 @@ fn hierarchy_row_matches(row: &HierarchyRow<'_>, restriction: Option<&MapiRestri
         HierarchyRow::Collaboration(folder) => {
             restriction_matches_collaboration_folder(restriction, folder)
         }
+        HierarchyRow::Special(folder_id) => special_hierarchy_row_matches(*folder_id, restriction),
+    }
+}
+
+fn special_hierarchy_row_matches(folder_id: u64, restriction: Option<&MapiRestriction>) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        special_folder_property_value(folder_id, property_tag)
+    })
+}
+
+fn special_folder_property_value(folder_id: u64, property_tag: u32) -> Option<MapiValue> {
+    let (display_name, parent_folder_id, message_class, has_subfolders) =
+        special_folder_metadata(folder_id);
+    let change_number = mapi_mailstore::change_number_for_store_id(folder_id);
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(display_name.to_string())),
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
+        PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
+        PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
+            Some(MapiValue::String(message_class.to_string()))
+        }
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME_MAX
+        | PID_TAG_HIER_REV => Some(MapiValue::I64(mapi_mailstore::filetime_from_change_number(
+            change_number,
+        ) as i64)),
+        PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+            Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
+        }
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            folder_id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(parent_folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ if folder_id == INBOX_FOLDER_ID => {
+            special_folder_identification_property_value(property_tag)
+        }
+        _ => None,
     }
 }
 
@@ -198,6 +275,9 @@ fn serialize_hierarchy_row(row: HierarchyRow<'_>, columns: &[u32]) -> Vec<u8> {
     match row {
         HierarchyRow::Mailbox(mailbox) => serialize_folder_row(mailbox, columns),
         HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
+        HierarchyRow::Special(folder_id) => {
+            serialize_special_folder_row(folder_id, &[], columns, None)
+        }
     }
 }
 
@@ -327,10 +407,16 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            hierarchy_rows(mailboxes, snapshot, restriction.as_ref(), sort_orders)
-                .into_iter()
-                .map(|row| serialize_hierarchy_row(row, &columns))
-                .collect::<Vec<_>>()
+            hierarchy_rows(
+                *folder_id,
+                mailboxes,
+                snapshot,
+                restriction.as_ref(),
+                sort_orders,
+            )
+            .into_iter()
+            .map(|row| serialize_hierarchy_row(row, &columns))
+            .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
             folder_id,
@@ -1075,7 +1161,13 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else {
                 columns.clone()
             };
-            let rows = hierarchy_rows(mailboxes, snapshot, table_restriction.as_ref(), sort_orders);
+            let rows = hierarchy_rows(
+                *folder_id,
+                mailboxes,
+                snapshot,
+                table_restriction.as_ref(),
+                sort_orders,
+            );
             if let Some((index, row)) =
                 find_hierarchy_row(rows.as_slice(), *position, request, Some(&restriction))
             {
@@ -1226,8 +1318,14 @@ pub(in crate::mapi) fn table_position_and_count(
             sort_orders,
             ..
         }) if is_root_hierarchy_folder(*folder_id) => {
-            let total =
-                hierarchy_rows(mailboxes, snapshot, restriction.as_ref(), sort_orders).len();
+            let total = hierarchy_rows(
+                *folder_id,
+                mailboxes,
+                snapshot,
+                restriction.as_ref(),
+                sort_orders,
+            )
+            .len();
             (*position, total)
         }
         Some(MapiObject::ContentsTable {
@@ -1328,12 +1426,16 @@ pub(in crate::mapi) fn table_row_keys(
             sort_orders,
             restriction,
             ..
-        } if is_root_hierarchy_folder(*folder_id) => {
-            hierarchy_rows(mailboxes, snapshot, restriction.as_ref(), sort_orders)
-                .into_iter()
-                .map(|row| hierarchy_row_id(&row))
-                .collect()
-        }
+        } if is_root_hierarchy_folder(*folder_id) => hierarchy_rows(
+            *folder_id,
+            mailboxes,
+            snapshot,
+            restriction.as_ref(),
+            sort_orders,
+        )
+        .into_iter()
+        .map(|row| hierarchy_row_id(&row))
+        .collect(),
         MapiObject::ContentsTable {
             folder_id,
             sort_orders,
@@ -1381,6 +1483,21 @@ pub(in crate::mapi) fn table_row_keys(
 
 pub(in crate::mapi) fn is_root_hierarchy_folder(folder_id: u64) -> bool {
     matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID)
+}
+
+pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        ROOT_FOLDER_ID
+            | IPM_SUBTREE_FOLDER_ID
+            | DEFERRED_ACTION_FOLDER_ID
+            | SPOOLER_QUEUE_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | SCHEDULE_FOLDER_ID
+            | SEARCH_FOLDER_ID
+            | VIEWS_FOLDER_ID
+            | SHORTCUTS_FOLDER_ID
+    ) || role_for_folder_id(folder_id).is_some()
 }
 
 pub(in crate::mapi) fn role_for_folder_id(folder_id: u64) -> Option<&'static str> {

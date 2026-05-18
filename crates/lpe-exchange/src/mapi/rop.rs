@@ -747,6 +747,7 @@ fn log_get_properties_specific_debug(
         }
     }
     let (object_kind, folder_id, item_id) = mapi_object_debug_fields(object);
+    let default_folder_mappings = default_folder_property_mappings_for_debug(columns);
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -773,6 +774,8 @@ fn log_get_properties_specific_debug(
         fallback_default_property_tags = %format_property_tags_for_debug(&fallback_default_tags),
         unsupported_property_tag_count = unsupported_tags.len(),
         unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
+        default_ipm_folder_mapping_count = default_folder_mappings.len(),
+        default_ipm_folder_mappings = %default_folder_mappings.join(","),
         message = message,
     );
 }
@@ -959,6 +962,12 @@ fn format_property_names_for_debug(tags: &[u32]) -> String {
 fn property_tag_debug_name(tag: u32) -> &'static str {
     match tag {
         PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
+        PID_TAG_IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
+        PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
+        PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
+        PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
@@ -973,6 +982,36 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_OST_OSTID => "PR_OST_OSTID",
         _ => "unknown",
     }
+}
+
+fn default_folder_property_mappings_for_debug(tags: &[u32]) -> Vec<String> {
+    tags.iter()
+        .filter_map(|tag| default_folder_property_mapping_for_debug(*tag))
+        .collect()
+}
+
+fn default_folder_property_mapping_for_debug(tag: u32) -> Option<String> {
+    let (name, folder_id) = match canonical_property_storage_tag(tag) {
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => ("Calendar", CALENDAR_FOLDER_ID),
+        PID_TAG_IPM_CONTACT_ENTRY_ID => ("Contacts", CONTACTS_FOLDER_ID),
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => ("Journal", JOURNAL_FOLDER_ID),
+        PID_TAG_IPM_NOTE_ENTRY_ID => ("Notes", NOTES_FOLDER_ID),
+        PID_TAG_IPM_TASK_ENTRY_ID => ("Tasks", TASKS_FOLDER_ID),
+        PID_TAG_REM_ONLINE_ENTRY_ID => ("Reminders", REMINDERS_FOLDER_ID),
+        _ => return None,
+    };
+    Some(format!(
+        "{tag:#010x}:{name}:folder_id={folder_id:#018x}:source_key={}",
+        format_bytes_hex(&mapi_mailstore::source_key_for_store_id(folder_id))
+    ))
+}
+
+fn format_bytes_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 pub(in crate::mapi) fn rop_get_properties_all_response(

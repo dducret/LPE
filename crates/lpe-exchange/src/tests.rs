@@ -13555,6 +13555,326 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
+    rops.extend_from_slice(&[
+        0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x3613_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x65E0_0102u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&50u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops[8], 0x04);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[14..18].try_into().unwrap()),
+        11
+    );
+    let query_offset = 8 + 10 + 7;
+    assert_eq!(response_rops[query_offset], 0x15);
+    assert_eq!(
+        u16::from_le_bytes(
+            response_rops[query_offset + 7..query_offset + 9]
+                .try_into()
+                .unwrap()
+        ),
+        11
+    );
+
+    for (name, class, folder_id) in [
+        (
+            "Calendar",
+            "IPF.Appointment",
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        ),
+        (
+            "Contacts",
+            "IPF.Contact",
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+        ),
+        (
+            "Journal",
+            "IPF.Journal",
+            crate::mapi::identity::JOURNAL_FOLDER_ID,
+        ),
+        (
+            "Notes",
+            "IPF.StickyNote",
+            crate::mapi::identity::NOTES_FOLDER_ID,
+        ),
+        ("Tasks", "IPF.Task", crate::mapi::identity::TASKS_FOLDER_ID),
+        (
+            "Reminders",
+            "IPF.Note",
+            crate::mapi::identity::REMINDERS_FOLDER_ID,
+        ),
+    ] {
+        assert!(contains_bytes(&response_rops, &utf16z(name)));
+        assert!(contains_bytes(&response_rops, &utf16z(class)));
+        assert!(contains_bytes(
+            &response_rops,
+            &mapi_mailstore::source_key_for_store_id(folder_id)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let default_properties = [
+        (
+            0x36D0_0102,
+            "Calendar",
+            "IPF.Appointment",
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        ),
+        (
+            0x36D1_0102,
+            "Contacts",
+            "IPF.Contact",
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+        ),
+        (
+            0x36D2_0102,
+            "Journal",
+            "IPF.Journal",
+            crate::mapi::identity::JOURNAL_FOLDER_ID,
+        ),
+        (
+            0x36D3_0102,
+            "Notes",
+            "IPF.StickyNote",
+            crate::mapi::identity::NOTES_FOLDER_ID,
+        ),
+        (
+            0x36D4_0102,
+            "Tasks",
+            "IPF.Task",
+            crate::mapi::identity::TASKS_FOLDER_ID,
+        ),
+        (
+            0x36D5_0102,
+            "Reminders",
+            "IPF.Note",
+            crate::mapi::identity::REMINDERS_FOLDER_ID,
+        ),
+    ];
+
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01];
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_rop_get_properties_specific(
+        &mut rops,
+        0,
+        &default_properties
+            .iter()
+            .map(|(property_tag, _, _, _)| *property_tag)
+            .collect::<Vec<_>>(),
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut cookie = mapi_cookie_header(&response);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let get_props_offset = response_rops
+        .windows(6)
+        .rposition(|window| window == [0x07, 0x00, 0, 0, 0, 0].as_slice())
+        .unwrap();
+    let mut values_offset = get_props_offset + 7;
+    let mut entry_ids = Vec::new();
+    for (_, _, _, folder_id) in default_properties {
+        let len = u16::from_le_bytes(
+            response_rops[values_offset..values_offset + 2]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        values_offset += 2;
+        let entry_id = response_rops[values_offset..values_offset + len].to_vec();
+        values_offset += len;
+        assert!(!entry_id.is_empty());
+        assert_eq!(
+            crate::mapi::identity::object_id_from_long_term_id(&entry_id),
+            Some(folder_id)
+        );
+        entry_ids.push(entry_id);
+    }
+
+    for ((_, display_name, container_class, folder_id), entry_id) in
+        default_properties.into_iter().zip(entry_ids)
+    {
+        let mut rops = vec![0x44, 0x00, 0x00];
+        rops.extend_from_slice(&entry_id);
+        append_rop_open_folder(&mut rops, 0, 1, folder_id);
+        append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x3613_001F, 0x65E0_0102]);
+
+        let mut execute_headers = mapi_headers("Execute");
+        execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            )
+            .await
+            .unwrap();
+        cookie = mapi_cookie_header(&response);
+        let response_rops = response_rops_from_execute_response(response).await;
+        let mut id_response = vec![0x44, 0x00, 0, 0, 0, 0];
+        id_response.extend_from_slice(&folder_id.to_le_bytes());
+        assert!(contains_bytes(&response_rops, &id_response));
+        assert!(contains_bytes(
+            &response_rops,
+            &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+        ));
+        assert!(contains_bytes(&response_rops, &utf16z(display_name)));
+        assert!(contains_bytes(&response_rops, &utf16z(container_class)));
+        assert!(contains_bytes(
+            &response_rops,
+            &mapi_mailstore::source_key_for_store_id(folder_id)
+        ));
+    }
+}
+
+#[tokio::test]
+async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(&mut hierarchy_rops, 0, 1, test_mapi_folder_id(4));
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut hierarchy_rops, 1, 2, 4096);
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&hierarchy_response);
+    let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((11, 0)));
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+
+    let mut probe_rops = vec![0xFE, 0x00, 0x00, 0x01];
+    probe_rops.extend_from_slice(&0u32.to_le_bytes());
+    probe_rops.extend_from_slice(&0u32.to_le_bytes());
+    probe_rops.extend_from_slice(&0u16.to_le_bytes());
+    append_rop_get_properties_specific(
+        &mut probe_rops,
+        0,
+        &[0x36D0_0102, 0x36D1_0102, 0x36D4_0102],
+    );
+    append_rop_open_folder(
+        &mut probe_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    append_rop_get_properties_specific(&mut probe_rops, 1, &[0x3001_001F, 0x3613_001F]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&probe_rops, &[u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x07, 0x00, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
