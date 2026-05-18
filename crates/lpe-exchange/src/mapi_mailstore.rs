@@ -358,6 +358,10 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 && content_count_source == "snapshot";
             let content_count_forced = force_count_properties && content_count_excluded;
             let unread_count_forced = force_count_properties && unread_count_excluded;
+            let folder_type_forced = force_excluded_hierarchy_count_properties
+                && property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE);
+            let access_forced = force_excluded_hierarchy_count_properties
+                && property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS);
             tracing::info!(
                 rca_debug = true,
                 adapter = "mapi",
@@ -379,6 +383,8 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 hierarchy_count_experiment_enabled = force_excluded_hierarchy_count_properties,
                 content_count_forced_by_experiment = content_count_forced,
                 content_unread_count_forced_by_experiment = unread_count_forced,
+                folder_type_forced_by_experiment = folder_type_forced,
+                access_forced_by_experiment = access_forced,
                 aggregate_email_count = aggregate_emails.len(),
                 "rca debug mapi hierarchy row"
             );
@@ -424,7 +430,9 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                     content_unread_count,
                 );
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE) {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE)
+                || folder_type_forced
+            {
                 write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX) {
@@ -445,7 +453,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
                 write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) || access_forced {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
             write_bool_property(
@@ -2489,7 +2497,12 @@ mod tests {
             0x02,
             0x0100,
             0,
-            &[PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT],
+            &[
+                PID_TAG_FOLDER_TYPE,
+                PID_TAG_CONTENT_COUNT,
+                PID_TAG_CONTENT_UNREAD_COUNT,
+                PID_TAG_ACCESS,
+            ],
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             std::slice::from_ref(&mailbox),
             &[],
@@ -2550,6 +2563,8 @@ mod tests {
 
         assert_i32_property(&buffer, PID_TAG_CONTENT_COUNT, 1);
         assert_i32_property(&buffer, PID_TAG_CONTENT_UNREAD_COUNT, 1);
+        assert_i32_property(&buffer, PID_TAG_FOLDER_TYPE, 1);
+        assert_i32_property(&buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
     }
 
     #[test]

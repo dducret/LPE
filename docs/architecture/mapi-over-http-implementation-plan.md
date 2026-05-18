@@ -42,7 +42,7 @@ This list is updated after each Outlook/RCA lab run. Use it to keep new Outlook 
 | 6. Private mailbox logon | `RopLogon` returned success with mailbox GUID, REPLID, replica GUID, and private mailbox special folder IDs. | Passed | Preserve private mailbox-only support until public folders are deliberately added. |
 | 7. Store bootstrap ROPs | Outlook store bootstrap ROPs, including folder/property/name-id probes, returned MAPI success in the May 16 traces. | Passed | Use this as the baseline before sync debugging. |
 | 8. Hierarchy sync setup | On 2026-05-16 at 13:11, the hierarchy sync batch `0x02,0x70,0x75,0x77,0x75,0x77,0x4e` returned HTTP `200`, MAPI response code `0`, response handle count `3`, and ROP results `0x00000000` for all seven ROPs. `RopFastTransferSourceGetBuffer` completed with transfer status `0x0003` and a 2946-byte transfer stream. The 13:20 Outlook safe-mode run repeated the same server-side success pattern. | Passed server-side | Keep watching for Outlook-side parse failures, but do not reopen the previous handle-table or `PtypBoolean` fix unless ETL or server logs show a new concrete failure. |
-| 9. Content sync and profile completion | Not yet proven from supplied logs. The 13:11 and 13:20 safe-mode traces disconnect after successful hierarchy sync and do not show a subsequent content sync request. Outlook 16.0.19929.20172 now reaches the post-hierarchy default-folder bootstrap probes, so Calendar, Contacts, Journal, Notes, Tasks, and Reminders are mandatory MAPI/HTTP default folders rather than secondary or future work. Local harness coverage now decodes a first-folder `contentsSync` FastTransfer stream with normal `messageChange` rows, message and parent source keys, `PidTagMid` when `Eid` is requested, `PidTagChangeNumber` when `CN` is requested, read-state IDSETs, deletion IDSETs, and final content ICS state. | Pending Outlook evidence | Record the first real Outlook `sync_type` `0x01` content sync request, close/reopen behavior, and canonical `Sent` visibility. |
+| 9. Content sync and profile completion | Not yet proven from supplied logs. The 13:11 and 13:20 safe-mode traces disconnect after successful hierarchy sync and do not show a subsequent content sync request. The 2026-05-18 17:36 trace, after the `PidTagFolderId` and direct-child `PidTagParentSourceKey` hierarchy fixes, also disconnects immediately after a clean hierarchy transfer and does not reach a post-hierarchy Execute. Earlier traces proved Outlook 16.0.19929.20172 can reach the post-hierarchy default-folder bootstrap probes, so Calendar, Contacts, Journal, Notes, Tasks, and Reminders remain mandatory MAPI/HTTP default folders rather than secondary or future work. Local harness coverage now decodes a first-folder `contentsSync` FastTransfer stream with normal `messageChange` rows, message and parent source keys, `PidTagMid` when `Eid` is requested, `PidTagChangeNumber` when `CN` is requested, read-state IDSETs, deletion IDSETs, and final content ICS state. | Pending Outlook evidence | Record the first real Outlook `sync_type` `0x01` content sync request, close/reopen behavior, and canonical `Sent` visibility. |
 
 Current 2026-05-16 corrections validated by the 13:11 and 13:20 server traces:
 
@@ -60,7 +60,7 @@ Current investigation focus:
 
 ## Outlook Hierarchy Count Interoperability Experiment
 
-`LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES` is an opt-in MAPI/HTTP experiment and is disabled by default. When set to `true`, `1`, `yes`, or `on`, authenticated EMSMDB hierarchy sync emits `PidTagContentCount` and `PidTagContentUnreadCount` from snapshot-computed folder counts even when Outlook supplied those tags in the `RopSynchronizationConfigure` `PropertyTags` exclusion list. The default path still treats `PropertyTags` without `OnlySpecifiedProperties` as exclusions.
+`LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES` is an opt-in MAPI/HTTP experiment and is disabled by default. When set to `true`, `1`, `yes`, or `on`, authenticated EMSMDB hierarchy sync emits `PidTagContentCount` and `PidTagContentUnreadCount` from snapshot-computed folder counts even when Outlook supplied those tags in the `RopSynchronizationConfigure` `PropertyTags` exclusion list. The same experiment also keeps `PidTagFolderType` and `PidTagAccess` in the hierarchy row because the 2026-05-18 trace reached the default-folder bootstrap but still disconnected before content sync with both of those bootstrap properties absent. The default path still treats `PropertyTags` without `OnlySpecifiedProperties` as exclusions.
 
 The sync-root `PidTagParentSourceKey` experiment is no longer active. Direct children of the configured hierarchy sync root keep a zero-length `PidTagParentSourceKey`; only deeper descendants carry the real parent folder source key.
 
@@ -68,7 +68,8 @@ Current Outlook lab matrix:
 
 | ParentSourceKey mode | Hierarchy count mode | Outlook evidence |
 | --- | --- | --- |
-| Empty for direct sync-root children | `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true` | Reaches post-hierarchy default-folder/bootstrap probes, then disconnects. |
+| Empty for direct sync-root children; `PidTagFolderId` omitted unless `Eid` is requested | `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true` | 2026-05-18 17:36 trace: clean hierarchy FastTransfer, then client `Disconnect` before any post-hierarchy Execute. Outlook ETL records provider `{aa8fa310-0939-4ce3-b9bb-ae05b2695110}` error events carrying `0x80040102` after the preceding EMSMDB `Execute` and `0x80004005` after the hierarchy `Execute`, without decoded ROP names. |
+| Empty for direct sync-root children; pre-conditional `PidTagFolderId` stream | `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true` | Reached post-hierarchy default-folder/bootstrap probes, then disconnected. |
 | Non-empty for direct sync-root children | `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true` | Immediate disconnect. |
 | Empty for direct sync-root children | Forced counts disabled | Immediate disconnect. |
 
@@ -81,8 +82,8 @@ Rationale: current Outlook 16 traces show a valid hierarchy ICS stream followed 
 RCA evidence requirements:
 
 - `rca debug mapi sync configure` records `force_hierarchy_count_properties_experiment`.
-- `rca debug mapi hierarchy row` records `hierarchy_count_experiment_enabled`, `content_count_forced_by_experiment`, and `content_unread_count_forced_by_experiment`.
-- `rca debug mapi hierarchy transfer row semantics` must show count-property presence when the experiment forces them.
+- `rca debug mapi hierarchy row` records `hierarchy_count_experiment_enabled`, `content_count_forced_by_experiment`, `content_unread_count_forced_by_experiment`, `folder_type_forced_by_experiment`, and `access_forced_by_experiment`.
+- `rca debug mapi hierarchy transfer row semantics` must show count, folder-type, and access property presence when the experiment forces them.
 
 Rollback condition: remove or keep disabled by default if Outlook still disconnects after hierarchy sync, if Microsoft RCA regresses, if real Outlook profile creation does not proceed to content synchronization, or if any client/parser rejects the hierarchy FastTransfer stream with the forced properties present.
 
