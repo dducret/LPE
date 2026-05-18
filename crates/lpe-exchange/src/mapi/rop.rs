@@ -748,6 +748,15 @@ fn log_get_properties_specific_debug(
     }
     let (object_kind, folder_id, item_id) = mapi_object_debug_fields(object);
     let default_folder_mappings = default_folder_property_mappings_for_debug(columns);
+    let returned_property_value_shapes = format_property_value_shapes_for_debug(
+        object,
+        principal,
+        columns,
+        mailboxes,
+        emails,
+        snapshot,
+        &unsupported_tags,
+    );
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -776,6 +785,7 @@ fn log_get_properties_specific_debug(
         unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
         default_ipm_folder_mapping_count = default_folder_mappings.len(),
         default_ipm_folder_mappings = %default_folder_mappings.join(","),
+        returned_property_value_shapes = %returned_property_value_shapes,
         message = message,
     );
 }
@@ -802,6 +812,120 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
         ),
         _ => false,
     }
+}
+
+fn format_property_value_shapes_for_debug(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    unsupported_tags: &[u32],
+) -> String {
+    columns
+        .iter()
+        .map(|tag| {
+            let name = property_tag_debug_name(*tag);
+            if unsupported_tags.contains(tag) {
+                return format!("{tag:#010x}:{name}:unsupported");
+            }
+            let encoded =
+                serialize_object_property(object, principal, mailboxes, emails, snapshot, *tag);
+            let mut default_value = Vec::new();
+            write_property_default(&mut default_value, *tag);
+            let default_kind = if encoded == default_value {
+                if modeled_zero_or_default_property(object, *tag) {
+                    ":default=intentional"
+                } else {
+                    ":default=fallback"
+                }
+            } else {
+                ""
+            };
+            let semantic_shape = semantic_property_shape_for_debug(object, principal, *tag)
+                .map(|shape| format!(":{shape}"))
+                .unwrap_or_default();
+            format!(
+                "{tag:#010x}:{name}:row_bytes={}{}:row_hex={}{}",
+                encoded.len(),
+                semantic_shape,
+                hex_preview_for_debug(&encoded, 16),
+                default_kind
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn semantic_property_shape_for_debug(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    tag: u32,
+) -> Option<String> {
+    match object {
+        Some(MapiObject::Logon) => logon_property_value(principal, tag)
+            .as_ref()
+            .map(mapi_value_shape_for_debug),
+        Some(MapiObject::Folder { .. }) => special_folder_identification_property_value(tag)
+            .as_ref()
+            .map(mapi_value_shape_for_debug),
+        _ => None,
+    }
+}
+
+fn mapi_value_shape_for_debug(value: &MapiValue) -> String {
+    match value {
+        MapiValue::Bool(value) => format!("bool={value}"),
+        MapiValue::I16(value) => format!("i16={value}"),
+        MapiValue::I32(value) => format!("i32={value}"),
+        MapiValue::I64(value) => format!("i64={value}"),
+        MapiValue::U32(value) => format!("u32={value}"),
+        MapiValue::U64(value) => format!("u64={value}"),
+        MapiValue::String(value) => format!(
+            "string:chars={}:preview={}",
+            value.chars().count(),
+            text_preview_for_debug(value, 32)
+        ),
+        MapiValue::Binary(value) => {
+            format!(
+                "binary:bytes={}:preview={}",
+                value.len(),
+                hex_preview_for_debug(value, 16)
+            )
+        }
+        MapiValue::Guid(value) => format!("guid={}", hex_preview_for_debug(value, value.len())),
+        MapiValue::Error(value) => format!("error={value:#010x}"),
+        MapiValue::MultiI16(values) => format!("multi_i16:count={}", values.len()),
+        MapiValue::MultiI32(values) => format!("multi_i32:count={}", values.len()),
+        MapiValue::MultiI64(values) => format!("multi_i64:count={}", values.len()),
+        MapiValue::MultiString(values) => format!("multi_string:count={}", values.len()),
+        MapiValue::MultiBinary(values) => format!("multi_binary:count={}", values.len()),
+        MapiValue::MultiGuid(values) => format!("multi_guid:count={}", values.len()),
+    }
+}
+
+fn text_preview_for_debug(value: &str, max_chars: usize) -> String {
+    value
+        .chars()
+        .take(max_chars)
+        .map(|ch| match ch {
+            ',' | ';' | '\n' | '\r' | '\t' => ' ',
+            _ => ch,
+        })
+        .collect()
+}
+
+fn hex_preview_for_debug(bytes: &[u8], max_bytes: usize) -> String {
+    let mut preview = bytes
+        .iter()
+        .take(max_bytes)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if bytes.len() > max_bytes {
+        preview.push_str("...");
+    }
+    preview
 }
 
 fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, String, String) {
