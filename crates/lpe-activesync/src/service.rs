@@ -61,6 +61,7 @@ use crate::{
         default_sender, draft_input_from_application_data, field_text, merged_draft_input,
         parse_mime_message,
     },
+    protocol::{ActiveSyncCommand, ActiveSyncFolderType, ActiveSyncStatus, BodyPreferenceType},
     response::{empty_response, is_message_rfc822, policy_key, sync_status_node, wbxml_response},
     snapshot::{
         calendar_application_data, collection_window_size, contact_application_data,
@@ -195,6 +196,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
+            .map(ActiveSyncCommand::from_name)
+            .transpose()?
             .ok_or_else(|| anyhow!("missing ActiveSync command"))?;
         let device_id = query
             .device_id
@@ -214,7 +217,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .map(|value| value.to_string())
             .or_else(|| header_policy_key(headers));
 
-        if command != "Provision" && command != "Ping" {
+        if command != ActiveSyncCommand::Provision && command != ActiveSyncCommand::Ping {
             if self.policy_mode == PolicyMode::Enforced
                 && !self
                     .policy_key_is_current(
@@ -232,7 +235,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
 
         match command {
-            "Provision" => {
+            ActiveSyncCommand::Provision => {
                 let request = decode_wbxml(body)?;
                 self.handle_provision(
                     &principal,
@@ -243,47 +246,47 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 )
                 .await
             }
-            "FolderSync" => {
+            ActiveSyncCommand::FolderSync => {
                 let request = decode_wbxml(body)?;
                 self.handle_folder_sync(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "FolderCreate" => {
+            ActiveSyncCommand::FolderCreate => {
                 let request = decode_wbxml(body)?;
                 self.handle_folder_create(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "FolderDelete" => {
+            ActiveSyncCommand::FolderDelete => {
                 let request = decode_wbxml(body)?;
                 self.handle_folder_delete(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "FolderUpdate" => {
+            ActiveSyncCommand::FolderUpdate => {
                 let request = decode_wbxml(body)?;
                 self.handle_folder_update(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "GetItemEstimate" => {
+            ActiveSyncCommand::GetItemEstimate => {
                 let request = decode_wbxml(body)?;
                 self.handle_get_item_estimate(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "Sync" => {
+            ActiveSyncCommand::Sync => {
                 let request = decode_wbxml(body)?;
                 self.handle_sync(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "ItemOperations" => {
+            ActiveSyncCommand::ItemOperations => {
                 let request = decode_wbxml(body)?;
                 self.handle_item_operations(&principal, &protocol_version, &request)
                     .await
             }
-            "MoveItems" => {
+            ActiveSyncCommand::MoveItems => {
                 let request = decode_wbxml(body)?;
                 self.handle_move_items(&principal, &protocol_version, &request)
                     .await
             }
-            "Ping" => {
+            ActiveSyncCommand::Ping => {
                 let request = if body.is_empty() {
                     WbxmlNode::new(13, "Ping")
                 } else {
@@ -292,24 +295,34 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 self.handle_ping(&principal, device_id, &protocol_version, &request)
                     .await
             }
-            "Search" => {
+            ActiveSyncCommand::Search => {
                 let request = decode_wbxml(body)?;
                 self.handle_search(&principal, &protocol_version, &request)
                     .await
             }
-            "SendMail" => {
+            ActiveSyncCommand::SendMail => {
                 self.handle_send_mail(&principal, &protocol_version, headers, body)
                     .await
             }
-            "SmartReply" => {
+            ActiveSyncCommand::SmartReply => {
                 let request = decode_wbxml(body)?;
-                self.handle_smart_compose(&principal, &protocol_version, &request, "SmartReply")
-                    .await
+                self.handle_smart_compose(
+                    &principal,
+                    &protocol_version,
+                    &request,
+                    ActiveSyncCommand::SmartReply,
+                )
+                .await
             }
-            "SmartForward" => {
+            ActiveSyncCommand::SmartForward => {
                 let request = decode_wbxml(body)?;
-                self.handle_smart_compose(&principal, &protocol_version, &request, "SmartForward")
-                    .await
+                self.handle_smart_compose(
+                    &principal,
+                    &protocol_version,
+                    &request,
+                    ActiveSyncCommand::SmartForward,
+                )
+                .await
             }
             other => bail!("unsupported ActiveSync command: {other}"),
         }
@@ -380,11 +393,19 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .is_some()
         {
             let mut device_information = WbxmlNode::new(18, "DeviceInformation");
-            device_information.push(WbxmlNode::with_text(18, "Status", "1"));
+            device_information.push(WbxmlNode::with_text(
+                18,
+                "Status",
+                ActiveSyncStatus::Success.as_str(),
+            ));
             response.push(device_information);
         }
 
-        response.push(WbxmlNode::with_text(14, "Status", "1"));
+        response.push(WbxmlNode::with_text(
+            14,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         let mut policies = WbxmlNode::new(14, "Policies");
         let mut policy = WbxmlNode::new(14, "Policy");
         policy.push(WbxmlNode::with_text(
@@ -392,7 +413,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             "PolicyType",
             "MS-EAS-Provisioning-WBXML",
         ));
-        policy.push(WbxmlNode::with_text(14, "Status", "1"));
+        policy.push(WbxmlNode::with_text(
+            14,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         policy.push(WbxmlNode::with_text(14, "PolicyKey", &current_policy_key));
 
         if client_status.as_deref() != Some("1") || requested_key != current_policy_key {
@@ -506,7 +531,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .await?;
 
         let mut response = WbxmlNode::new(7, "FolderSync");
-        response.push(WbxmlNode::with_text(7, "Status", "1"));
+        response.push(WbxmlNode::with_text(
+            7,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         response.push(WbxmlNode::with_text(7, "SyncKey", new_key));
 
         let changes = diff_snapshots(old_snapshot.as_ref(), &snapshot);
@@ -582,7 +611,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .child("Type")
             .map(|node| node.text_value().trim())
             .unwrap_or_default();
-        if folder_type != "12"
+        if folder_type != ActiveSyncFolderType::UserCreatedMail.as_str()
             || MailboxNamePolicy::system_role_for_display_name(display_name).is_some()
         {
             return folder_mutation_response(protocol_version, "FolderCreate", "10", None, None);
@@ -702,7 +731,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         else {
             return folder_mutation_response(protocol_version, "FolderDelete", "4", None, None);
         };
-        if folder.folder_type != "12" {
+        if folder.folder_type != ActiveSyncFolderType::UserCreatedMail {
             return folder_mutation_response(protocol_version, "FolderDelete", "3", None, None);
         }
         let Some(mailbox_id) = folder.mailbox_id else {
@@ -790,7 +819,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         else {
             return folder_mutation_response(protocol_version, "FolderUpdate", "4", None, None);
         };
-        if folder.folder_type != "12" {
+        if folder.folder_type != ActiveSyncFolderType::UserCreatedMail {
             return folder_mutation_response(protocol_version, "FolderUpdate", "2", None, None);
         }
         let Some(mailbox_id) = folder.mailbox_id else {
@@ -856,7 +885,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             return wbxml_response(protocol_version, encode_wbxml(&response));
         };
 
-        response.push(WbxmlNode::with_text(6, "Status", "1"));
+        response.push(WbxmlNode::with_text(
+            6,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         for collection_request in collections.children_named("Collection") {
             response.push(
                 self.get_item_estimate_response(principal, device_id, collection_request)
@@ -915,7 +948,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             diff_collection_states(&previous_state.collection_state, &current_state).len()
         };
 
-        response.push(WbxmlNode::with_text(6, "Status", "1"));
+        response.push(WbxmlNode::with_text(
+            6,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         let mut response_collection = WbxmlNode::new(6, "Collection");
         response_collection.push(WbxmlNode::with_text(6, "CollectionId", collection.id));
         response_collection.push(WbxmlNode::with_text(6, "Estimate", estimate.to_string()));
@@ -1042,7 +1079,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         response_collection.push(WbxmlNode::with_text(0, "Class", &collection.class_name));
         response_collection.push(WbxmlNode::with_text(0, "SyncKey", &next_key));
         response_collection.push(WbxmlNode::with_text(0, "CollectionId", &collection.id));
-        response_collection.push(WbxmlNode::with_text(0, "Status", "1"));
+        response_collection.push(WbxmlNode::with_text(
+            0,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
 
         if !client_responses.is_empty() {
             let mut responses = WbxmlNode::new(0, "Responses");
@@ -1380,7 +1421,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     .store
                     .fetch_activesync_message_attachments(collection.account_id, email.id)
                     .await?;
-                let mime_blob = if body_preference.body_type == 4 {
+                let mime_blob = if body_preference.body_type == BodyPreferenceType::Mime {
                     self.store
                         .fetch_jmap_message_blob(collection.account_id, email.id)
                         .await?
@@ -1540,7 +1581,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     }
                     let mut change = WbxmlNode::new(0, "Change");
                     change.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    change.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(change);
                 }
                 "Delete" => {
@@ -1585,7 +1630,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     }
                     let mut delete = WbxmlNode::new(0, "Delete");
                     delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    delete.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(delete);
                 }
                 _ => {}
@@ -1623,7 +1672,8 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .await?
             .into_iter()
             .find(|collection| {
-                collection.class_name == MAIL_CLASS && collection.folder_type == "4"
+                collection.class_name == MAIL_CLASS
+                    && collection.folder_type == ActiveSyncFolderType::DeletedItems
             }))
     }
 
@@ -1676,7 +1726,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         "ServerId",
                         saved.message_id.to_string(),
                     ));
-                    add.push(WbxmlNode::with_text(0, "Status", "1"));
+                    add.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(add);
                 }
                 "Change" => {
@@ -1712,7 +1766,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .await?;
                     let mut change = WbxmlNode::new(0, "Change");
                     change.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    change.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(change);
                 }
                 "Delete" => {
@@ -1734,7 +1792,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .await?;
                     let mut delete = WbxmlNode::new(0, "Delete");
                     delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    delete.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(delete);
                 }
                 _ => {}
@@ -1776,7 +1838,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     let mut add = WbxmlNode::new(0, "Add");
                     add.push(WbxmlNode::with_text(0, "ClientId", client_id));
                     add.push(WbxmlNode::with_text(0, "ServerId", created.id.to_string()));
-                    add.push(WbxmlNode::with_text(0, "Status", "1"));
+                    add.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(add);
                 }
                 "Change" => {
@@ -1804,7 +1870,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .await?;
                     let mut change = WbxmlNode::new(0, "Change");
                     change.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    change.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(change);
                 }
                 "Delete" => {
@@ -1817,7 +1887,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .await?;
                     let mut delete = WbxmlNode::new(0, "Delete");
                     delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    delete.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(delete);
                 }
                 _ => {}
@@ -1859,7 +1933,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     let mut add = WbxmlNode::new(0, "Add");
                     add.push(WbxmlNode::with_text(0, "ClientId", client_id));
                     add.push(WbxmlNode::with_text(0, "ServerId", created.id.to_string()));
-                    add.push(WbxmlNode::with_text(0, "Status", "1"));
+                    add.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(add);
                 }
                 "Change" => {
@@ -1887,7 +1965,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .await?;
                     let mut change = WbxmlNode::new(0, "Change");
                     change.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    change.push(WbxmlNode::with_text(0, "Status", "1"));
+                    change.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(change);
                 }
                 "Delete" => {
@@ -1900,7 +1982,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .await?;
                     let mut delete = WbxmlNode::new(0, "Delete");
                     delete.push(WbxmlNode::with_text(0, "ServerId", server_id));
-                    delete.push(WbxmlNode::with_text(0, "Status", "1"));
+                    delete.push(WbxmlNode::with_text(
+                        0,
+                        "Status",
+                        ActiveSyncStatus::Success.as_str(),
+                    ));
                     responses.push(delete);
                 }
                 _ => {}
@@ -2027,7 +2113,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         if unsupported_child || response.children.is_empty() {
             root.push(WbxmlNode::with_text(20, "Status", "2"));
         } else {
-            root.push(WbxmlNode::with_text(20, "Status", "1"));
+            root.push(WbxmlNode::with_text(
+                20,
+                "Status",
+                ActiveSyncStatus::Success.as_str(),
+            ));
         }
 
         if !response.children.is_empty() {
@@ -2059,7 +2149,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 }
             }
             if let Some(attachment) = attachment {
-                node.push(WbxmlNode::with_text(20, "Status", "1"));
+                node.push(WbxmlNode::with_text(
+                    20,
+                    "Status",
+                    ActiveSyncStatus::Success.as_str(),
+                ));
                 node.push(WbxmlNode::with_text(
                     17,
                     "FileReference",
@@ -2137,14 +2231,18 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 .fetch_activesync_message_attachments(account_id, email.id)
                 .await?;
             let body_preference = fetch_body_preference(fetch);
-            let mime_blob = if body_preference.body_type == 4 {
+            let mime_blob = if body_preference.body_type == BodyPreferenceType::Mime {
                 self.store
                     .fetch_jmap_message_blob(account_id, email.id)
                     .await?
             } else {
                 None
             };
-            node.push(WbxmlNode::with_text(20, "Status", "1"));
+            node.push(WbxmlNode::with_text(
+                20,
+                "Status",
+                ActiveSyncStatus::Success.as_str(),
+            ));
             if let Some(collection_id) = fetch.child("CollectionId") {
                 node.push(WbxmlNode::with_text(
                     0,
@@ -2220,7 +2318,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .resolve_collection(principal.account_id, &dst_fld_id)
             .await?;
         let Some(source) = source else {
-            response.push(WbxmlNode::with_text(5, "Status", "1"));
+            response.push(WbxmlNode::with_text(
+                5,
+                "Status",
+                ActiveSyncStatus::Success.as_str(),
+            ));
             return Ok(response);
         };
         let Some(target) = target else {
@@ -2235,14 +2337,22 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             || !mail_collection(&target)
             || source.account_id != target.account_id
         {
-            response.push(WbxmlNode::with_text(5, "Status", "1"));
+            response.push(WbxmlNode::with_text(
+                5,
+                "Status",
+                ActiveSyncStatus::Success.as_str(),
+            ));
             return Ok(response);
         }
 
         let message_id = match Uuid::parse_str(&src_msg_id) {
             Ok(message_id) => message_id,
             Err(_) => {
-                response.push(WbxmlNode::with_text(5, "Status", "1"));
+                response.push(WbxmlNode::with_text(
+                    5,
+                    "Status",
+                    ActiveSyncStatus::Success.as_str(),
+                ));
                 return Ok(response);
             }
         };
@@ -2266,7 +2376,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 response.push(WbxmlNode::with_text(5, "Status", "3"));
                 response.push(WbxmlNode::with_text(5, "DstMsgId", email.id.to_string()));
             }
-            Err(_) => response.push(WbxmlNode::with_text(5, "Status", "1")),
+            Err(_) => response.push(WbxmlNode::with_text(
+                5,
+                "Status",
+                ActiveSyncStatus::Success.as_str(),
+            )),
         }
         Ok(response)
     }
@@ -2604,9 +2718,17 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             .await?;
 
         let mut response = WbxmlNode::new(15, "Search");
-        response.push(WbxmlNode::with_text(15, "Status", "1"));
+        response.push(WbxmlNode::with_text(
+            15,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         let mut response_store = WbxmlNode::new(15, "Store");
-        response_store.push(WbxmlNode::with_text(15, "Status", "1"));
+        response_store.push(WbxmlNode::with_text(
+            15,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         response_store.push(WbxmlNode::with_text(15, "Name", "Mailbox"));
         response_store.push(WbxmlNode::with_text(15, "Total", query.total.to_string()));
         if !emails.is_empty() {
@@ -2654,8 +2776,9 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         principal: &AuthenticatedPrincipal,
         protocol_version: &str,
         request: &WbxmlNode,
-        command_name: &str,
+        command: ActiveSyncCommand,
     ) -> Result<Response> {
+        let command_name = command.as_str();
         if request.name != command_name {
             return command_status_response(protocol_version, 21, command_name, "103");
         }
@@ -2764,7 +2887,11 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
         }
 
         let mut response = WbxmlNode::new(21, command_name);
-        response.push(WbxmlNode::with_text(21, "Status", "1"));
+        response.push(WbxmlNode::with_text(
+            21,
+            "Status",
+            ActiveSyncStatus::Success.as_str(),
+        ));
         wbxml_response(protocol_version, encode_wbxml(&response))
     }
 
@@ -2853,7 +2980,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                     account_id: access.account_id,
                     class_name: MAIL_CLASS.to_string(),
                     display_name,
-                    folder_type: folder_type_for_mailbox_role(&mailbox.role).to_string(),
+                    folder_type: ActiveSyncFolderType::from_mailbox_role(&mailbox.role),
                     mailbox_id: Some(mailbox.id),
                 });
             }
@@ -2865,7 +2992,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             account_id,
             class_name: CONTACTS_CLASS.to_string(),
             display_name: "Contacts".to_string(),
-            folder_type: "9".to_string(),
+            folder_type: ActiveSyncFolderType::Contacts,
             mailbox_id: None,
         });
         collections.push(CollectionDefinition {
@@ -2874,7 +3001,7 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
             account_id,
             class_name: CALENDAR_CLASS.to_string(),
             display_name: "Calendar".to_string(),
-            folder_type: "8".to_string(),
+            folder_type: ActiveSyncFolderType::Calendar,
             mailbox_id: None,
         });
         Ok(collections)
@@ -2917,7 +3044,7 @@ fn folder_hierarchy_snapshot(collections: &[CollectionDefinition]) -> Value {
                     collection.class_name,
                     collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
                     collection.display_name,
-                    collection.folder_type
+                    collection.folder_type.as_str()
                 ),
                 data: json!({
                     "page": 7,
@@ -2941,7 +3068,11 @@ fn push_folder_metadata(node: &mut WbxmlNode, collection: &CollectionDefinition)
         "DisplayName",
         &collection.display_name,
     ));
-    node.push(WbxmlNode::with_text(7, "Type", &collection.folder_type));
+    node.push(WbxmlNode::with_text(
+        7,
+        "Type",
+        collection.folder_type.as_str(),
+    ));
 }
 
 fn folder_mutation_response(
@@ -3061,7 +3192,8 @@ fn options_body_preference(options: &WbxmlNode) -> BodyPreference {
         .filter_map(|preference| {
             let body_type = preference
                 .child("Type")
-                .and_then(|node| node.text_value().trim().parse::<u8>().ok())?;
+                .and_then(|node| node.text_value().trim().parse::<u8>().ok())
+                .and_then(BodyPreferenceType::from_u8)?;
             let truncation_size = preference
                 .child("TruncationSize")
                 .and_then(|node| node.text_value().trim().parse::<usize>().ok());
@@ -3070,7 +3202,7 @@ fn options_body_preference(options: &WbxmlNode) -> BodyPreference {
                 truncation_size,
             })
         })
-        .find(|preference| matches!(preference.body_type, 1 | 2 | 4))
+        .next()
         .unwrap_or_default()
 }
 
@@ -3094,7 +3226,7 @@ fn hierarchy_generation(collections: &[CollectionDefinition]) -> String {
                 collection.class_name,
                 collection.parent_id.as_deref().unwrap_or(ROOT_FOLDER_ID),
                 collection.display_name,
-                collection.folder_type
+                collection.folder_type.as_str()
             )
         })
         .collect::<Vec<_>>();
@@ -3119,16 +3251,6 @@ fn hierarchy_generation_from_snapshot(snapshot: &Value) -> String {
     };
     entries.sort();
     entries.join("\n")
-}
-
-fn folder_type_for_mailbox_role(role: &str) -> &'static str {
-    match role {
-        "inbox" => "2",
-        "drafts" => "3",
-        "trash" => "4",
-        "sent" => "5",
-        _ => "12",
-    }
 }
 
 fn validate_mime_attachments(bytes: &[u8]) -> Result<()> {
@@ -3744,21 +3866,28 @@ fn header_policy_key(headers: &HeaderMap) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn policy_required_response(command: &str, protocol_version: &str) -> Result<Response> {
+fn policy_required_response(
+    command: ActiveSyncCommand,
+    protocol_version: &str,
+) -> Result<Response> {
     let (page, root) = match command {
-        "FolderSync" => (7, "FolderSync"),
-        "GetItemEstimate" => (6, "GetItemEstimate"),
-        "ItemOperations" => (20, "ItemOperations"),
-        "MoveItems" => (5, "MoveItems"),
-        "Search" => (15, "Search"),
-        "SendMail" => (21, "SendMail"),
-        "SmartForward" => (21, "SmartForward"),
-        "SmartReply" => (21, "SmartReply"),
-        "Sync" => (0, "Sync"),
+        ActiveSyncCommand::FolderSync => (7, "FolderSync"),
+        ActiveSyncCommand::GetItemEstimate => (6, "GetItemEstimate"),
+        ActiveSyncCommand::ItemOperations => (20, "ItemOperations"),
+        ActiveSyncCommand::MoveItems => (5, "MoveItems"),
+        ActiveSyncCommand::Search => (15, "Search"),
+        ActiveSyncCommand::SendMail => (21, "SendMail"),
+        ActiveSyncCommand::SmartForward => (21, "SmartForward"),
+        ActiveSyncCommand::SmartReply => (21, "SmartReply"),
+        ActiveSyncCommand::Sync => (0, "Sync"),
         _ => (0, "Sync"),
     };
     let mut response = WbxmlNode::new(page, root);
-    response.push(WbxmlNode::with_text(page, "Status", "142"));
+    response.push(WbxmlNode::with_text(
+        page,
+        "Status",
+        ActiveSyncStatus::PolicyRequired.as_str(),
+    ));
     wbxml_response(protocol_version, encode_wbxml(&response))
 }
 

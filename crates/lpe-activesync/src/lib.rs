@@ -2,6 +2,7 @@ mod app;
 mod auth;
 mod constants;
 mod message;
+mod protocol;
 mod response;
 mod service;
 mod snapshot;

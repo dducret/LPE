@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::constants::ACTIVE_SYNC_VERSION;
+use crate::{constants::ACTIVE_SYNC_VERSION, protocol::ActiveSyncCommand};
 
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct ActiveSyncQuery {
@@ -96,7 +96,7 @@ fn parse_base64_query(raw_query: &str) -> Result<ParsedActiveSyncQuery> {
         .map_err(|_| anyhow!("malformed ActiveSync base64 query"))?;
     let mut cursor = ByteCursor::new(&bytes);
     let protocol_version = decode_protocol_version(cursor.take_u8()?)?;
-    let command = decode_command(cursor.take_u8()?)?.to_string();
+    let command = ActiveSyncCommand::from_code(cursor.take_u8()?)?.to_string();
     cursor.take_exact(2)?;
     let device_id_len = cursor.take_u8()? as usize;
     let device_id = cursor.take_string(device_id_len)?;
@@ -158,32 +158,6 @@ fn decode_protocol_version(value: u8) -> Result<&'static str> {
     match value {
         161 => Ok(ACTIVE_SYNC_VERSION),
         _ => bail!("unsupported ActiveSync protocol version"),
-    }
-}
-
-fn decode_command(value: u8) -> Result<&'static str> {
-    match value {
-        0 => Ok("Sync"),
-        1 => Ok("SendMail"),
-        2 => Ok("SmartForward"),
-        3 => Ok("SmartReply"),
-        4 => Ok("GetAttachment"),
-        9 => Ok("FolderSync"),
-        10 => Ok("FolderCreate"),
-        11 => Ok("FolderDelete"),
-        12 => Ok("FolderUpdate"),
-        13 => Ok("MoveItems"),
-        14 => Ok("GetItemEstimate"),
-        15 => Ok("MeetingResponse"),
-        16 => Ok("Search"),
-        17 => Ok("Settings"),
-        18 => Ok("Ping"),
-        19 => Ok("ItemOperations"),
-        20 => Ok("Provision"),
-        21 => Ok("ResolveRecipients"),
-        22 => Ok("ValidateCert"),
-        23 => Ok("Find"),
-        _ => bail!("unsupported ActiveSync command code"),
     }
 }
 
@@ -279,7 +253,7 @@ pub(crate) struct CollectionDefinition {
     pub(crate) account_id: Uuid,
     pub(crate) class_name: String,
     pub(crate) display_name: String,
-    pub(crate) folder_type: String,
+    pub(crate) folder_type: crate::protocol::ActiveSyncFolderType,
     pub(crate) mailbox_id: Option<Uuid>,
 }
 

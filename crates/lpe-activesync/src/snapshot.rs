@@ -11,20 +11,21 @@ use uuid::Uuid;
 use crate::{
     constants::MAIL_CLASS,
     message::{activesync_timestamp, format_email_address, split_name},
+    protocol::BodyPreferenceType,
     types::{CollectionDefinition, CollectionStateEntry, SnapshotChange, SnapshotEntry},
     wbxml::WbxmlNode,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BodyPreference {
-    pub(crate) body_type: u8,
+    pub(crate) body_type: BodyPreferenceType,
     pub(crate) truncation_size: Option<usize>,
 }
 
 impl Default for BodyPreference {
     fn default() -> Self {
         Self {
-            body_type: 1,
+            body_type: BodyPreferenceType::PlainText,
             truncation_size: None,
         }
     }
@@ -94,19 +95,28 @@ fn email_body_value(
     mime_blob: Option<&JmapUploadBlob>,
 ) -> Value {
     let (body_type, bytes) = match body_preference.body_type {
-        2 => match email.body_html_sanitized.as_ref() {
-            Some(html) => (2, html.as_bytes().to_vec()),
-            None => (1, email.body_text.as_bytes().to_vec()),
+        BodyPreferenceType::Html => match email.body_html_sanitized.as_ref() {
+            Some(html) => (BodyPreferenceType::Html, html.as_bytes().to_vec()),
+            None => (
+                BodyPreferenceType::PlainText,
+                email.body_text.as_bytes().to_vec(),
+            ),
         },
-        4 => match mime_blob {
-            Some(blob) => (4, blob.blob_bytes.clone()),
-            None => (1, email.body_text.as_bytes().to_vec()),
+        BodyPreferenceType::Mime => match mime_blob {
+            Some(blob) => (BodyPreferenceType::Mime, blob.blob_bytes.clone()),
+            None => (
+                BodyPreferenceType::PlainText,
+                email.body_text.as_bytes().to_vec(),
+            ),
         },
-        _ => (1, email.body_text.as_bytes().to_vec()),
+        BodyPreferenceType::PlainText => (
+            BodyPreferenceType::PlainText,
+            email.body_text.as_bytes().to_vec(),
+        ),
     };
     let estimated_size = bytes.len();
     let (data, truncated) = truncate_body_bytes(&bytes, body_preference.truncation_size);
-    let data_node = if body_type == 4 {
+    let data_node = if body_type == BodyPreferenceType::Mime {
         json!({"page": 17, "name": "Data", "opaque_base64": BASE64.encode(data)})
     } else {
         json!({"page": 17, "name": "Data", "text": String::from_utf8_lossy(&data)})
@@ -115,7 +125,7 @@ fn email_body_value(
         "page": 17,
         "name": "Body",
         "children": [
-            {"page": 17, "name": "Type", "text": body_type.to_string()},
+            {"page": 17, "name": "Type", "text": body_type.as_str()},
             {"page": 17, "name": "EstimatedDataSize", "text": estimated_size.to_string()},
             data_node,
             {"page": 17, "name": "Truncated", "text": if truncated { "1" } else { "0" }}
@@ -204,7 +214,7 @@ fn push_body(children: &mut Vec<Value>, value: &str) {
         "page": 17,
         "name": "Body",
         "children": [
-            {"page": 17, "name": "Type", "text": "1"},
+            {"page": 17, "name": "Type", "text": BodyPreferenceType::PlainText.as_str()},
             {"page": 17, "name": "EstimatedDataSize", "text": value.len().to_string()},
             {"page": 17, "name": "Data", "text": value},
             {"page": 17, "name": "Truncated", "text": "0"}
