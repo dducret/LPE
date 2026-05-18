@@ -52,7 +52,6 @@ const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
 const FILETIME_2026_01_01: u64 =
     (WINDOWS_UNIX_EPOCH_OFFSET_SECONDS as u64 + 1_767_225_600) * FILETIME_TICKS_PER_SECOND;
 const VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX: u128 = 0x4c50455f_4d415049_0000_0000_0000_0000;
-const VIRTUAL_SPECIAL_MAILBOX_UUID_MASK: u128 = 0xffff_ffff_ffff_ffff_0000_0000_0000_0000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AttachmentSyncFact {
@@ -1419,10 +1418,6 @@ fn virtual_special_mailbox_id(folder_id: u64) -> Uuid {
     Uuid::from_u128(VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX | u128::from(folder_id))
 }
 
-fn is_virtual_special_mailbox(mailbox: &JmapMailbox) -> bool {
-    mailbox.id.as_u128() & VIRTUAL_SPECIAL_MAILBOX_UUID_MASK == VIRTUAL_SPECIAL_MAILBOX_UUID_PREFIX
-}
-
 fn virtual_special_folder_metadata(
     folder_id: u64,
 ) -> Option<(&'static str, &'static str, i32, u64, &'static str)> {
@@ -1642,11 +1637,7 @@ fn sync_state_change_numbers(
 
 fn canonical_hierarchy_change_number(sync_root_folder_id: u64, mailbox: &JmapMailbox) -> u64 {
     let folder_id = mapi_folder_id_for_mailbox(mailbox, sync_root_folder_id);
-    if is_virtual_special_mailbox(mailbox) {
-        change_number_for_store_id(folder_id)
-    } else {
-        canonical_folder_change_number(mailbox)
-    }
+    canonical_folder_change_number(mailbox).max(change_number_for_store_id(folder_id))
 }
 
 pub(crate) fn final_sync_state_stream(
@@ -2048,6 +2039,44 @@ mod tests {
         assert_eq!(
             &source_key_for_store_id(store_id)[16..22],
             &change_key[16..22]
+        );
+    }
+
+    #[test]
+    fn hierarchy_change_numbers_do_not_collapse_low_modseq_special_folders() {
+        let drafts = JmapMailbox {
+            id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+            parent_id: None,
+            role: "drafts".to_string(),
+            name: "Drafts".to_string(),
+            sort_order: 30,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let trash = JmapMailbox {
+            id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+            parent_id: None,
+            role: "trash".to_string(),
+            name: "Trash".to_string(),
+            sort_order: 50,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        assert_eq!(
+            canonical_hierarchy_change_number(
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                &drafts
+            ),
+            crate::mapi::identity::DRAFTS_FOLDER_COUNTER
+        );
+        assert_eq!(
+            canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &trash),
+            crate::mapi::identity::TRASH_FOLDER_COUNTER
         );
     }
 
