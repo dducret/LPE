@@ -590,6 +590,11 @@ pub(crate) fn log_hierarchy_transfer_debug(
             zero_length_parent_source_key_count = summary.zero_length_parent_source_key_count,
             source_key_lengths = %format_usize_list(&summary.source_key_lengths),
             change_key_lengths = %format_usize_list(&summary.change_key_lengths),
+            final_state_property_tags = %format_property_tags(&summary.final_state_property_tags),
+            final_state_property_names = %format_property_tag_names(&summary.final_state_property_tags),
+            final_state_property_lengths = %format_usize_list(&summary.final_state_property_lengths),
+            final_state_idset_given = %summary.final_state_idset_given_summary.as_deref().unwrap_or_default(),
+            final_state_cnset_seen = %summary.final_state_cnset_seen_summary.as_deref().unwrap_or_default(),
             emitted_property_tags = %format_property_tags(&summary.emitted_property_tags),
             requested_property_tags = %format_property_tags(requested_property_tags),
             property_tags_filter_mode = hierarchy_property_filter_mode(sync_flags, requested_property_tags),
@@ -692,6 +697,10 @@ struct HierarchyTransferDebugSummary {
     zero_length_parent_source_key_count: usize,
     source_key_lengths: Vec<usize>,
     change_key_lengths: Vec<usize>,
+    final_state_property_tags: Vec<u32>,
+    final_state_property_lengths: Vec<usize>,
+    final_state_idset_given_summary: Option<String>,
+    final_state_cnset_seen_summary: Option<String>,
     emitted_property_tags: Vec<u32>,
     rows: Vec<HierarchyTransferRowDebug>,
 }
@@ -803,6 +812,10 @@ fn decode_hierarchy_transfer_debug_summary(
         offset = property.next_offset;
         emitted_property_tags.insert(property.tag);
 
+        if in_final_state && current_folder.is_none() {
+            collect_final_state_debug_property(&property, &mut summary);
+        }
+
         if let Some(folder) = current_folder.as_mut() {
             folder.property_tags.push(property.tag);
             match property.tag {
@@ -855,6 +868,27 @@ fn decode_hierarchy_transfer_debug_summary(
     }
     summary.emitted_property_tags = emitted_property_tags.into_iter().collect();
     Ok(summary)
+}
+
+fn collect_final_state_debug_property(
+    property: &FastTransferDebugProperty,
+    summary: &mut HierarchyTransferDebugSummary,
+) {
+    summary.final_state_property_tags.push(property.tag);
+    summary
+        .final_state_property_lengths
+        .push(property.value.len());
+    match property.tag {
+        META_TAG_IDSET_GIVEN => {
+            summary.final_state_idset_given_summary =
+                Some(format_replguid_globset_debug(&property.value));
+        }
+        META_TAG_CNSET_SEEN => {
+            summary.final_state_cnset_seen_summary =
+                Some(format_replguid_globset_debug(&property.value));
+        }
+        _ => {}
+    }
 }
 
 fn finish_hierarchy_debug_folder(
@@ -1043,6 +1077,8 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         META_TAG_IDSET_READ => "MetaTagIdsetRead",
         META_TAG_IDSET_UNREAD => "MetaTagIdsetUnread",
         META_TAG_CNSET_SEEN => "MetaTagCnsetSeen",
+        META_TAG_CNSET_SEEN_FAI => "MetaTagCnsetSeenFAI",
+        META_TAG_CNSET_READ => "MetaTagCnsetRead",
         _ => "unknown",
     }
 }
@@ -1114,6 +1150,77 @@ fn format_property_tags(tags: &[u32]) -> String {
         .map(|tag| format!("0x{tag:08x}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn format_replguid_globset_debug(value: &[u8]) -> String {
+    let preview = format_debug_hex(&value[..value.len().min(32)]);
+    let Some(replica_guid) = value.get(..16) else {
+        return format!(
+            "bytes={};preview={preview};parse_error=missing_replica_guid",
+            value.len()
+        );
+    };
+
+    let mut offset = 16;
+    let mut ranges = Vec::new();
+    let mut parse_error = "";
+    let mut saw_end = false;
+    while offset < value.len() {
+        let command = value[offset];
+        offset += 1;
+        match command {
+            GLOBSET_END_COMMAND => {
+                saw_end = true;
+                if offset != value.len() {
+                    parse_error = "trailing_bytes_after_end";
+                }
+                break;
+            }
+            GLOBSET_RANGE_COMMAND => {
+                let Some(low) = value.get(offset..offset + 6) else {
+                    parse_error = "truncated_range_low";
+                    break;
+                };
+                let Some(high) = value.get(offset + 6..offset + 12) else {
+                    parse_error = "truncated_range_high";
+                    break;
+                };
+                let low =
+                    crate::mapi::identity::global_counter_from_globcnt(low).unwrap_or_default();
+                let high =
+                    crate::mapi::identity::global_counter_from_globcnt(high).unwrap_or_default();
+                ranges.push((low, high));
+                offset += 12;
+            }
+            _ => {
+                parse_error = "unsupported_command";
+                break;
+            }
+        }
+    }
+    if !saw_end && parse_error.is_empty() {
+        parse_error = "missing_end_command";
+    }
+
+    let range_summary = ranges
+        .iter()
+        .take(8)
+        .map(|(low, high)| {
+            if low == high {
+                low.to_string()
+            } else {
+                format!("{low}-{high}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!(
+        "bytes={};replica_guid={};range_count={};ranges={range_summary};preview={preview};parse_error={parse_error}",
+        value.len(),
+        format_debug_hex(replica_guid),
+        ranges.len()
+    )
 }
 
 fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
@@ -2191,6 +2298,21 @@ mod tests {
         assert_eq!(summary.zero_length_parent_source_key_count, 1);
         assert_eq!(summary.source_key_lengths, vec![22]);
         assert_eq!(summary.change_key_lengths, vec![22]);
+        assert_eq!(
+            summary.final_state_property_tags,
+            vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
+        );
+        assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
+        assert!(summary
+            .final_state_idset_given_summary
+            .as_deref()
+            .unwrap()
+            .contains("ranges=5"));
+        assert!(summary
+            .final_state_cnset_seen_summary
+            .as_deref()
+            .unwrap()
+            .contains("ranges=42"));
         assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
         assert!(summary
             .emitted_property_tags
