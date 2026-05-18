@@ -1660,12 +1660,16 @@ mod tests {
         let mut session = test_session(HashMap::new());
 
         session.record_completed_hierarchy_sync(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
-        session.record_execute_after_hierarchy_completion(&[0x02, 0x70, 0x4e]);
-        session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
+        let first = session.record_execute_after_hierarchy_completion(&[0x02, 0x70, 0x4e]);
+        let second = session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
         session.record_content_sync_configure();
         session.record_logoff_after_hierarchy_completion();
         let summary = post_hierarchy_action_summary(&session, true);
 
+        assert!(first.first_execute);
+        assert!(first.first_bootstrap_probe);
+        assert!(!second.first_execute);
+        assert!(!second.first_bootstrap_probe);
         assert_eq!(summary.execute_count, 2);
         assert_eq!(summary.rop_ids_seen, "0x02,0x70,0x4e,0x01");
         assert!(summary.content_sync_configure_observed);
@@ -1676,6 +1680,24 @@ mod tests {
             summary.last_completed_hierarchy_sync_root,
             format!("0x{:016x}", crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         );
+    }
+
+    #[test]
+    fn post_hierarchy_observation_logs_first_execute_and_later_first_bootstrap_probe() {
+        let mut session = test_session(HashMap::new());
+
+        session.record_completed_hierarchy_sync(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+        let receive_folder_probe = session.record_execute_after_hierarchy_completion(&[0x01, 0x27]);
+        let default_folder_probe = session.record_execute_after_hierarchy_completion(&[0x02, 0x07]);
+        let later_default_folder_probe =
+            session.record_execute_after_hierarchy_completion(&[0x02, 0x0a]);
+
+        assert!(receive_folder_probe.first_execute);
+        assert!(!receive_folder_probe.first_bootstrap_probe);
+        assert!(!default_folder_probe.first_execute);
+        assert!(default_folder_probe.first_bootstrap_probe);
+        assert!(!later_default_folder_probe.first_execute);
+        assert!(!later_default_folder_probe.first_bootstrap_probe);
     }
 }
 

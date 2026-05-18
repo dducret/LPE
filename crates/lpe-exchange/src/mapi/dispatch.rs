@@ -92,9 +92,12 @@ where
     let hierarchy_completed_before_execute = session.hierarchy_sync_completed();
     if let Some(cached) = session.completed_execute_requests.get(request_id).cloned() {
         if cached.rop_fingerprint == rop_fingerprint {
-            if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
-                session.record_execute_after_hierarchy_completion(&request_debug.ids);
-            }
+            let post_hierarchy_observation =
+                if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+                    session.record_execute_after_hierarchy_completion(&request_debug.ids)
+                } else {
+                    PostHierarchyExecuteObservation::default()
+                };
             let cached_rop_buffer = execute_success_rop_buffer(&cached.response_body);
             log_execute_rop_debug(
                 endpoint,
@@ -106,6 +109,7 @@ where
                 &execute.rop_buffer,
                 cached_rop_buffer.unwrap_or_default(),
                 &session,
+                post_hierarchy_observation,
             );
             store_session(session_id.clone(), session);
             return mapi_response_with_cookies(
@@ -153,9 +157,12 @@ where
         &execute.rop_buffer,
     )
     .await;
-    if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
-        session.record_execute_after_hierarchy_completion(&request_debug.ids);
-    }
+    let post_hierarchy_observation =
+        if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+            session.record_execute_after_hierarchy_completion(&request_debug.ids)
+        } else {
+            PostHierarchyExecuteObservation::default()
+        };
     log_execute_rop_debug(
         endpoint,
         principal,
@@ -166,6 +173,7 @@ where
         &execute.rop_buffer,
         &rop_buffer,
         &session,
+        post_hierarchy_observation,
     );
     let response_body = execute_success_body(rop_buffer, Vec::new());
     cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
@@ -250,6 +258,7 @@ fn log_execute_rop_debug(
     request_rop_buffer: &[u8],
     response_rop_buffer: &[u8],
     session: &MapiSession,
+    post_hierarchy_observation: PostHierarchyExecuteObservation,
 ) {
     let response = summarize_response_rop_buffer(response_rop_buffer, &request.ids);
     let logon = summarize_logon_response_rop(response_rop_buffer, &request.ids);
@@ -309,7 +318,10 @@ fn log_execute_rop_debug(
         message = message,
     );
 
-    if endpoint == "emsmdb" && post_hierarchy.execute_count == 1 {
+    if endpoint == "emsmdb"
+        && (post_hierarchy_observation.first_execute
+            || post_hierarchy_observation.first_bootstrap_probe)
+    {
         let probe = summarize_first_post_hierarchy_probe(request_rop_buffer, response_rop_buffer);
         tracing::info!(
             rca_debug = true,
@@ -326,7 +338,9 @@ fn log_execute_rop_debug(
             client_application = %client_application,
             last_completed_hierarchy_sync_root =
                 %post_hierarchy.last_completed_hierarchy_sync_root,
-            first_post_hierarchy_execute = true,
+            first_post_hierarchy_execute = post_hierarchy_observation.first_execute,
+            first_post_hierarchy_bootstrap_probe =
+                post_hierarchy_observation.first_bootstrap_probe,
             request_rop_ids = %request.ids_csv,
             response_rop_results_best_effort = %response.results_csv,
             open_folder_request_count = probe.open_folder_request_count,
@@ -337,7 +351,7 @@ fn log_execute_rop_debug(
             get_properties_specific_response_shapes =
                 %probe.get_properties_specific_response_shapes,
             probe_parse_error = %probe.parse_error,
-            "rca debug mapi first post hierarchy execute"
+            "rca debug mapi post hierarchy execute probe"
         );
     }
 }

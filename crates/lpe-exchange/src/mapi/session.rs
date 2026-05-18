@@ -41,9 +41,16 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_completed_hierarchy_sync_root: Option<u64>,
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: Vec<u8>,
+    pub(in crate::mapi) bootstrap_probe_observed: bool,
     pub(in crate::mapi) content_sync_configure_observed: bool,
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::mapi) struct PostHierarchyExecuteObservation {
+    pub(in crate::mapi) first_execute: bool,
+    pub(in crate::mapi) first_bootstrap_probe: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -579,9 +586,19 @@ impl MapiSession {
         }
     }
 
-    pub(in crate::mapi) fn record_execute_after_hierarchy_completion(&mut self, rop_ids: &[u8]) {
+    pub(in crate::mapi) fn record_execute_after_hierarchy_completion(
+        &mut self,
+        rop_ids: &[u8],
+    ) -> PostHierarchyExecuteObservation {
         if !self.hierarchy_sync_completed() {
-            return;
+            return PostHierarchyExecuteObservation::default();
+        }
+        let first_execute = self.post_hierarchy_actions.execute_count == 0;
+        let contains_bootstrap_probe = rop_ids.iter().any(|rop_id| matches!(rop_id, 0x02 | 0x07));
+        let first_bootstrap_probe =
+            contains_bootstrap_probe && !self.post_hierarchy_actions.bootstrap_probe_observed;
+        if contains_bootstrap_probe {
+            self.post_hierarchy_actions.bootstrap_probe_observed = true;
         }
         self.post_hierarchy_actions.execute_count =
             self.post_hierarchy_actions.execute_count.saturating_add(1);
@@ -594,6 +611,10 @@ impl MapiSession {
         }
         if rop_ids.contains(&0x01) {
             self.post_hierarchy_actions.release_client_initiated = true;
+        }
+        PostHierarchyExecuteObservation {
+            first_execute,
+            first_bootstrap_probe,
         }
     }
 
