@@ -628,6 +628,8 @@ fn log_mapi_session_disconnect(
         session,
         endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect",
     );
+    let root_default_folder_properties =
+        format_root_default_folder_properties_for_debug(&session.root_default_folder_properties);
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
 
@@ -669,6 +671,8 @@ fn log_mapi_session_disconnect(
             post_hierarchy_summary.disconnect_client_initiated,
         post_hierarchy_last_completed_sync_root =
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
+        root_default_folder_property_count = session.root_default_folder_properties.len(),
+        root_default_folder_properties = %root_default_folder_properties,
         sync_source_summaries = %sync_source_summaries,
         "rca debug mapi session disconnect"
     );
@@ -699,6 +703,48 @@ fn log_mapi_session_disconnect(
             transfer_position_bytes = candidate.transfer_position_bytes,
             transfer_remaining_bytes = candidate.transfer_remaining_bytes,
             "outlook_hierarchy_without_content_candidate"
+        );
+    }
+
+    if endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && session
+            .post_hierarchy_actions
+            .last_completed_hierarchy_sync_root
+            .is_some()
+        && !session
+            .post_hierarchy_actions
+            .content_sync_configure_observed
+    {
+        tracing::warn!(
+            rca_debug = true,
+            rca_warning = "outlook_disconnect_before_content_sync",
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            client_application = %client_application,
+            trace_id = %trace_id,
+            post_hierarchy_execute_count = session.post_hierarchy_actions.execute_count,
+            post_hierarchy_rop_ids_seen =
+                %format_rop_ids_for_debug(&session.post_hierarchy_actions.rop_ids_seen),
+            post_hierarchy_bootstrap_probe_observed =
+                session.post_hierarchy_actions.bootstrap_probe_observed,
+            post_hierarchy_set_properties_probe_observed =
+                session.post_hierarchy_actions.set_properties_probe_observed,
+            post_hierarchy_release_client_initiated =
+                session.post_hierarchy_actions.release_client_initiated,
+            post_hierarchy_logoff_client_initiated =
+                session.post_hierarchy_actions.logoff_client_initiated,
+            post_hierarchy_last_completed_sync_root =
+                %post_hierarchy_summary.last_completed_hierarchy_sync_root,
+            root_default_folder_property_count = session.root_default_folder_properties.len(),
+            root_default_folder_properties = %root_default_folder_properties,
+            sync_source_summaries = %sync_source_summaries,
+            "rca debug mapi post hierarchy disconnect before content sync"
         );
     }
 }
@@ -825,6 +871,85 @@ fn format_count_property_names_for_debug(tags: &[u32]) -> String {
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn format_root_default_folder_properties_for_debug(
+    properties: &HashMap<u32, crate::mapi::properties::MapiValue>,
+) -> String {
+    properties
+        .iter()
+        .filter_map(|(tag, value)| {
+            let storage_tag = crate::mapi::properties::canonical_property_storage_tag(*tag);
+            let expected_folder_id = default_folder_entry_id_expected_folder_id(storage_tag)?;
+            let property_name = default_folder_entry_id_property_name(storage_tag);
+            let crate::mapi::properties::MapiValue::Binary(bytes) = value else {
+                return Some(format!(
+                    "{storage_tag:#010x}:{property_name}:value_type=non_binary"
+                ));
+            };
+            let decoded_folder_id =
+                crate::mapi::identity::object_id_from_long_term_id(bytes).unwrap_or(0);
+            let decoded_name = default_folder_debug_name(decoded_folder_id);
+            Some(format!(
+                "{storage_tag:#010x}:{property_name}:bytes={}:decoded_folder_id=0x{decoded_folder_id:016x}:decoded_name={decoded_name}:expected_folder_id=0x{expected_folder_id:016x}:matches_expected={}",
+                bytes.len(),
+                decoded_folder_id == expected_folder_id
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
+    match tag {
+        crate::mapi::properties::PID_TAG_IPM_APPOINTMENT_ENTRY_ID => {
+            Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+        }
+        crate::mapi::properties::PID_TAG_IPM_CONTACT_ENTRY_ID => {
+            Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
+        }
+        crate::mapi::properties::PID_TAG_IPM_JOURNAL_ENTRY_ID => {
+            Some(crate::mapi::identity::JOURNAL_FOLDER_ID)
+        }
+        crate::mapi::properties::PID_TAG_IPM_NOTE_ENTRY_ID => {
+            Some(crate::mapi::identity::NOTES_FOLDER_ID)
+        }
+        crate::mapi::properties::PID_TAG_IPM_TASK_ENTRY_ID => {
+            Some(crate::mapi::identity::TASKS_FOLDER_ID)
+        }
+        crate::mapi::properties::PID_TAG_REM_ONLINE_ENTRY_ID => {
+            Some(crate::mapi::identity::REMINDERS_FOLDER_ID)
+        }
+        _ => None,
+    }
+}
+
+fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
+    match tag {
+        crate::mapi::properties::PID_TAG_IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
+        crate::mapi::properties::PID_TAG_IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
+        crate::mapi::properties::PID_TAG_IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
+        crate::mapi::properties::PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
+        crate::mapi::properties::PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
+        crate::mapi::properties::PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
+        _ => "unknown",
+    }
+}
+
+fn default_folder_debug_name(folder_id: u64) -> &'static str {
+    match folder_id {
+        crate::mapi::identity::CALENDAR_FOLDER_ID => "calendar",
+        crate::mapi::identity::CONTACTS_FOLDER_ID => "contacts",
+        crate::mapi::identity::JOURNAL_FOLDER_ID => "journal",
+        crate::mapi::identity::NOTES_FOLDER_ID => "notes",
+        crate::mapi::identity::TASKS_FOLDER_ID => "tasks",
+        crate::mapi::identity::REMINDERS_FOLDER_ID => "reminders",
+        crate::mapi::identity::ROOT_FOLDER_ID => "root",
+        crate::mapi::identity::INBOX_FOLDER_ID => "inbox",
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID => "ipm_subtree",
+        0 => "invalid",
+        _ => "unknown",
+    }
 }
 
 pub(in crate::mapi) async fn notification_wait_response<S>(

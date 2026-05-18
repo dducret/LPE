@@ -427,6 +427,7 @@ struct SetPropertiesProbeRequest {
     input_handle_index: u8,
     property_tags: Vec<u32>,
     property_value_shapes: String,
+    default_folder_entry_id_values: String,
     parse_error: String,
 }
 
@@ -498,10 +499,11 @@ fn summarize_first_post_hierarchy_probe(
         .iter()
         .map(|request| {
             format!(
-                "in={};tags={};values={};parse_error={}",
+                "in={};tags={};values={};default_folder_entry_ids={};parse_error={}",
                 request.input_handle_index,
                 format_debug_property_tags(&request.property_tags),
                 request.property_value_shapes,
+                request.default_folder_entry_id_values,
                 request.parse_error
             )
         })
@@ -779,14 +781,70 @@ fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeReque
                 .map(|(tag, value)| format!("{tag:#010x}:{}", mapi_value_debug_shape(value)))
                 .collect::<Vec<_>>()
                 .join(","),
+            default_folder_entry_id_values: default_folder_entry_id_values_for_debug(&values),
             parse_error: String::new(),
         },
         Err(error) => SetPropertiesProbeRequest {
             input_handle_index: request.input_handle_index().unwrap_or(0),
             property_tags: Vec::new(),
             property_value_shapes: String::new(),
+            default_folder_entry_id_values: String::new(),
             parse_error: error.to_string(),
         },
+    }
+}
+
+fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> String {
+    values
+        .iter()
+        .filter_map(|(tag, value)| {
+            let storage_tag = canonical_property_storage_tag(*tag);
+            let expected_folder_id = default_folder_entry_id_expected_folder_id(storage_tag)?;
+            let property_name = default_folder_entry_id_property_name(storage_tag);
+            let MapiValue::Binary(bytes) = value else {
+                return Some(format!(
+                    "{storage_tag:#010x}:{property_name}:value_type={}",
+                    mapi_value_debug_shape(value)
+                ));
+            };
+            let decoded_folder_id =
+                crate::mapi::identity::object_id_from_long_term_id(bytes).unwrap_or(0);
+            let decoded_name = if decoded_folder_id == 0 {
+                "invalid"
+            } else {
+                post_hierarchy_probe_folder_name(decoded_folder_id)
+            };
+            Some(format!(
+                "{storage_tag:#010x}:{property_name}:bytes={}:decoded_folder_id=0x{decoded_folder_id:016x}:decoded_name={decoded_name}:expected_folder_id=0x{expected_folder_id:016x}:matches_expected={}",
+                bytes.len(),
+                decoded_folder_id == expected_folder_id
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
+    match canonical_property_storage_tag(tag) {
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(CALENDAR_FOLDER_ID),
+        PID_TAG_IPM_CONTACT_ENTRY_ID => Some(CONTACTS_FOLDER_ID),
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(JOURNAL_FOLDER_ID),
+        PID_TAG_IPM_NOTE_ENTRY_ID => Some(NOTES_FOLDER_ID),
+        PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
+        PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
+        _ => None,
+    }
+}
+
+fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
+    match canonical_property_storage_tag(tag) {
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
+        PID_TAG_IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
+        PID_TAG_IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
+        PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
+        PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
+        PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
+        _ => "unknown",
     }
 }
 
