@@ -62,6 +62,16 @@ Current investigation focus:
 
 `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES` is an opt-in MAPI/HTTP experiment and is disabled by default. When set to `true`, `1`, `yes`, or `on`, authenticated EMSMDB hierarchy sync emits `PidTagContentCount` and `PidTagContentUnreadCount` from snapshot-computed folder counts even when Outlook supplied those tags in the `RopSynchronizationConfigure` `PropertyTags` exclusion list. The default path still treats `PropertyTags` without `OnlySpecifiedProperties` as exclusions.
 
+The sync-root `PidTagParentSourceKey` experiment is no longer active. Direct children of the configured hierarchy sync root keep a zero-length `PidTagParentSourceKey`; only deeper descendants carry the real parent folder source key.
+
+Current Outlook lab matrix:
+
+| ParentSourceKey mode | Hierarchy count mode | Outlook evidence |
+| --- | --- | --- |
+| Empty for direct sync-root children | `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true` | Reaches post-hierarchy default-folder/bootstrap probes, then disconnects. |
+| Non-empty for direct sync-root children | `LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES=true` | Immediate disconnect. |
+| Empty for direct sync-root children | Forced counts disabled | Immediate disconnect. |
+
 Rationale: current Outlook 16 traces show a valid hierarchy ICS stream followed by disconnect before content sync. The affected mailbox has snapshot-computed `Inbox` content and unread counts, but Outlook excluded the count properties. This experiment tests whether Outlook's cached-mode bootstrap expects those folder aggregate properties despite sending them as exclusions. This is not a protocol MUST and must not become the default without real Outlook evidence.
 
 RCA evidence requirements:

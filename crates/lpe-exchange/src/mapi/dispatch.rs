@@ -308,6 +308,246 @@ fn log_execute_rop_debug(
         response_rop_buffer_bytes = response_rop_buffer.len(),
         message = message,
     );
+
+    if endpoint == "emsmdb" && post_hierarchy.execute_count == 1 {
+        let probe = summarize_first_post_hierarchy_probe(request_rop_buffer, response_rop_buffer);
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            session_context_id = %session_id,
+            mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_info = %client_info,
+            client_application = %client_application,
+            last_completed_hierarchy_sync_root =
+                %post_hierarchy.last_completed_hierarchy_sync_root,
+            first_post_hierarchy_execute = true,
+            request_rop_ids = %request.ids_csv,
+            response_rop_results_best_effort = %response.results_csv,
+            open_folder_request_count = probe.open_folder_request_count,
+            open_folder_requests = %probe.open_folder_requests,
+            open_folder_response_shapes = %probe.open_folder_response_shapes,
+            get_properties_specific_request_count = probe.get_properties_specific_request_count,
+            get_properties_specific_requests = %probe.get_properties_specific_requests,
+            get_properties_specific_response_shapes =
+                %probe.get_properties_specific_response_shapes,
+            probe_parse_error = %probe.parse_error,
+            "rca debug mapi first post hierarchy execute"
+        );
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct FirstPostHierarchyProbeDebugSummary {
+    open_folder_request_count: usize,
+    open_folder_requests: String,
+    open_folder_response_shapes: String,
+    get_properties_specific_request_count: usize,
+    get_properties_specific_requests: String,
+    get_properties_specific_response_shapes: String,
+    parse_error: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct OpenFolderProbeRequest {
+    output_handle_index: u8,
+    folder_id: u64,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct GetPropertiesSpecificProbeRequest {
+    input_handle_index: u8,
+    property_tags: Vec<u32>,
+}
+
+fn summarize_first_post_hierarchy_probe(
+    request_rop_buffer: &[u8],
+    response_rop_buffer: &[u8],
+) -> FirstPostHierarchyProbeDebugSummary {
+    let mut summary = FirstPostHierarchyProbeDebugSummary::default();
+    let Some((requests, _request_handle_table)) = split_rop_buffer(request_rop_buffer) else {
+        summary.parse_error = "invalid request ROP buffer".to_string();
+        return summary;
+    };
+    let mut request_cursor = Cursor::new(requests);
+    let mut request_rop_ids = Vec::new();
+    let mut open_folder_requests = Vec::new();
+    let mut get_properties_requests = Vec::new();
+    while request_cursor.remaining() > 0 {
+        let request = match read_rop_request(&mut request_cursor) {
+            Ok(request) => request,
+            Err(error) => {
+                summary.parse_error = error.to_string();
+                break;
+            }
+        };
+        let rop_id = request.typed().rop_id();
+        request_rop_ids.push(rop_id);
+        match rop_id {
+            0x02 => open_folder_requests.push(OpenFolderProbeRequest {
+                output_handle_index: request.output_handle_index.unwrap_or(0),
+                folder_id: request.folder_id().unwrap_or(ROOT_FOLDER_ID),
+            }),
+            0x07 => get_properties_requests.push(GetPropertiesSpecificProbeRequest {
+                input_handle_index: request.input_handle_index().unwrap_or(0),
+                property_tags: request.property_tags(),
+            }),
+            _ => {}
+        }
+    }
+
+    summary.open_folder_request_count = open_folder_requests.len();
+    summary.open_folder_requests = open_folder_requests
+        .iter()
+        .map(|request| {
+            format!(
+                "out={};folder=0x{:016x};name={}",
+                request.output_handle_index,
+                request.folder_id,
+                post_hierarchy_probe_folder_name(request.folder_id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    summary.get_properties_specific_request_count = get_properties_requests.len();
+    summary.get_properties_specific_requests = get_properties_requests
+        .iter()
+        .map(|request| {
+            format!(
+                "in={};tags={}",
+                request.input_handle_index,
+                format_debug_property_tags(&request.property_tags)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    let Some((responses, _response_handle_table)) = split_rop_buffer(response_rop_buffer) else {
+        if summary.parse_error.is_empty() {
+            summary.parse_error = "invalid response ROP buffer".to_string();
+        }
+        return summary;
+    };
+    let mut response_offset = 0usize;
+    let mut open_folder_index = 0usize;
+    let mut get_properties_index = 0usize;
+    let mut open_folder_responses = Vec::new();
+    let mut get_properties_responses = Vec::new();
+    for rop_id in request_rop_ids {
+        if rop_has_no_response(rop_id) {
+            continue;
+        }
+        let Some(found) = responses
+            .get(response_offset..)
+            .and_then(|remaining| remaining.iter().position(|candidate| *candidate == rop_id))
+        else {
+            break;
+        };
+        response_offset += found;
+        match rop_id {
+            0x02 => {
+                if let Some(request) = open_folder_requests.get(open_folder_index) {
+                    open_folder_responses.push(summarize_open_folder_probe_response(
+                        responses,
+                        response_offset,
+                        request,
+                    ));
+                }
+                open_folder_index = open_folder_index.saturating_add(1);
+            }
+            0x07 => {
+                if let Some(request) = get_properties_requests.get(get_properties_index) {
+                    get_properties_responses.push(summarize_get_properties_probe_response(
+                        responses,
+                        response_offset,
+                        request,
+                    ));
+                }
+                get_properties_index = get_properties_index.saturating_add(1);
+            }
+            _ => {}
+        }
+        response_offset = response_offset.saturating_add(6);
+    }
+    summary.open_folder_response_shapes = open_folder_responses.join("|");
+    summary.get_properties_specific_response_shapes = get_properties_responses.join("|");
+    summary
+}
+
+fn summarize_open_folder_probe_response(
+    responses: &[u8],
+    offset: usize,
+    request: &OpenFolderProbeRequest,
+) -> String {
+    let result = read_response_error_code(responses, offset)
+        .map(|code| format!("{code:#010x}"))
+        .unwrap_or_else(|| "truncated".to_string());
+    let has_rules = responses
+        .get(offset + 6)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "truncated".to_string());
+    let is_ghosted = responses
+        .get(offset + 7)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "truncated".to_string());
+    format!(
+        "out={};folder=0x{:016x};name={};result={result};has_rules={has_rules};is_ghosted={is_ghosted}",
+        request.output_handle_index,
+        request.folder_id,
+        post_hierarchy_probe_folder_name(request.folder_id)
+    )
+}
+
+fn summarize_get_properties_probe_response(
+    responses: &[u8],
+    offset: usize,
+    request: &GetPropertiesSpecificProbeRequest,
+) -> String {
+    let result = read_response_error_code(responses, offset)
+        .map(|code| format!("{code:#010x}"))
+        .unwrap_or_else(|| "truncated".to_string());
+    let row_shape = match responses.get(offset + 6).copied() {
+        Some(0) => "standard",
+        Some(1) => "flagged",
+        Some(_) => "unknown",
+        None => "truncated",
+    };
+    format!(
+        "in={};result={result};row={row_shape};tags={}",
+        request.input_handle_index,
+        format_debug_property_tags(&request.property_tags)
+    )
+}
+
+fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'static str {
+    match folder_id {
+        ROOT_FOLDER_ID => "root",
+        IPM_SUBTREE_FOLDER_ID => "ipm_subtree",
+        INBOX_FOLDER_ID => "inbox",
+        DRAFTS_FOLDER_ID => "drafts",
+        SENT_FOLDER_ID => "sent",
+        TRASH_FOLDER_ID => "trash",
+        OUTBOX_FOLDER_ID => "outbox",
+        CALENDAR_FOLDER_ID => "calendar",
+        CONTACTS_FOLDER_ID => "contacts",
+        JOURNAL_FOLDER_ID => "journal",
+        NOTES_FOLDER_ID => "notes",
+        TASKS_FOLDER_ID => "tasks",
+        REMINDERS_FOLDER_ID => "reminders",
+        _ => "other",
+    }
+}
+
+fn format_debug_property_tags(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("{tag:#010x}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
@@ -4112,5 +4352,58 @@ mod tests {
         assert_eq!(summary.replid, "1");
         assert_eq!(summary.replica_guid.len(), 32);
         assert!(summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn first_post_hierarchy_probe_summary_identifies_open_folder_and_getprops_shapes() {
+        let mut request_bytes = vec![0x02, 0x00, 0x00, 0x01];
+        request_bytes.extend_from_slice(&CALENDAR_FOLDER_ID.to_le_bytes());
+        request_bytes.push(0);
+        request_bytes.extend_from_slice(&[0x07, 0x00, 0x01]);
+        request_bytes.extend_from_slice(&4096u16.to_le_bytes());
+        request_bytes.extend_from_slice(&2u16.to_le_bytes());
+        request_bytes.extend_from_slice(&PID_TAG_DISPLAY_NAME_W.to_le_bytes());
+        request_bytes.extend_from_slice(&PID_TAG_CONTENT_COUNT.to_le_bytes());
+        let request_buffer = rop_buffer_with_response(request_bytes, &[1, u32::MAX]);
+
+        let open_folder_request = RopRequest {
+            rop_id: 0x02,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: Vec::new(),
+        };
+        let mut responses = rop_open_folder_response(&open_folder_request);
+        responses.extend_from_slice(&[0x07, 0x01]);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+        responses.extend_from_slice(&utf16z_bytes("Calendar"));
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        let response_buffer = rop_buffer_with_response(responses, &[1]);
+
+        let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
+
+        assert_eq!(summary.open_folder_request_count, 1);
+        assert!(summary
+            .open_folder_requests
+            .contains(&format!("folder=0x{CALENDAR_FOLDER_ID:016x};name=calendar")));
+        assert!(summary
+            .open_folder_response_shapes
+            .contains("result=0x00000000;has_rules=0;is_ghosted=0"));
+        assert_eq!(summary.get_properties_specific_request_count, 1);
+        assert!(summary
+            .get_properties_specific_requests
+            .contains("tags=0x3001001f,0x36020003"));
+        assert!(summary
+            .get_properties_specific_response_shapes
+            .contains("result=0x00000000;row=standard"));
+        assert!(summary.parse_error.is_empty());
+    }
+
+    fn utf16z_bytes(value: &str) -> Vec<u8> {
+        value
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .flat_map(u16::to_le_bytes)
+            .collect()
     }
 }
