@@ -1,13 +1,8 @@
 use super::rop::*;
-
-pub(in crate::mapi) const NOTIFY_CRITICAL_ERROR: u16 = 0x0001;
-pub(in crate::mapi) const NOTIFY_NEW_MAIL: u16 = 0x0002;
-pub(in crate::mapi) const NOTIFY_OBJECT_CREATED: u16 = 0x0004;
-pub(in crate::mapi) const NOTIFY_OBJECT_DELETED: u16 = 0x0008;
-pub(in crate::mapi) const NOTIFY_OBJECT_MODIFIED: u16 = 0x0010;
-pub(in crate::mapi) const NOTIFY_OBJECT_MOVED: u16 = 0x0020;
-pub(in crate::mapi) const NOTIFY_TABLE_MODIFIED: u16 = 0x0100;
-pub(in crate::mapi) const NOTIFY_EXTENDED: u16 = 0x0400;
+use super::wire::{
+    MAPI_CONTENT_NOTIFICATION_MASK, MAPI_HIERARCHY_NOTIFICATION_MASK,
+    MAPI_SUPPORTED_NOTIFICATION_MASK,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiNotificationRegistration {
@@ -54,23 +49,10 @@ pub(in crate::mapi) fn registration_matches_event(
 
     match event.kind {
         MapiNotificationKind::Content => {
-            registration.notification_types
-                & (NOTIFY_NEW_MAIL
-                    | NOTIFY_OBJECT_CREATED
-                    | NOTIFY_OBJECT_DELETED
-                    | NOTIFY_OBJECT_MODIFIED
-                    | NOTIFY_OBJECT_MOVED
-                    | NOTIFY_TABLE_MODIFIED)
-                != 0
+            registration.notification_types & MAPI_CONTENT_NOTIFICATION_MASK != 0
         }
         MapiNotificationKind::Hierarchy => {
-            registration.notification_types
-                & (NOTIFY_OBJECT_CREATED
-                    | NOTIFY_OBJECT_DELETED
-                    | NOTIFY_OBJECT_MODIFIED
-                    | NOTIFY_OBJECT_MOVED
-                    | NOTIFY_TABLE_MODIFIED)
-                != 0
+            registration.notification_types & MAPI_HIERARCHY_NOTIFICATION_MASK != 0
         }
     }
 }
@@ -91,14 +73,5 @@ pub(in crate::mapi) fn notification_registration_from_request(
 }
 
 pub(in crate::mapi) fn supported_notification_types(notification_types: u16) -> bool {
-    notification_types
-        & !(NOTIFY_NEW_MAIL
-            | NOTIFY_CRITICAL_ERROR
-            | NOTIFY_OBJECT_CREATED
-            | NOTIFY_OBJECT_DELETED
-            | NOTIFY_OBJECT_MODIFIED
-            | NOTIFY_OBJECT_MOVED
-            | NOTIFY_TABLE_MODIFIED
-            | NOTIFY_EXTENDED)
-        == 0
+    notification_types & !MAPI_SUPPORTED_NOTIFICATION_MASK == 0
 }

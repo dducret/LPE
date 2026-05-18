@@ -2,6 +2,7 @@ use super::properties::*;
 use super::session::*;
 use super::sync::*;
 use super::tables::*;
+use super::wire::{MapiError, MapiRestrictionType};
 use super::*;
 
 pub(in crate::mapi) fn split_rop_buffer(buffer: &[u8]) -> Option<(&[u8], &[u8])> {
@@ -1499,8 +1500,8 @@ pub(in crate::mapi) fn folder_row_for_id(
     })
 }
 
-pub(in crate::mapi) const ROP_ERROR_NOT_SUPPORTED: u32 = 0x8004_0102;
-pub(in crate::mapi) const ROP_ERROR_NOT_FOUND: u32 = 0x8004_010F;
+pub(in crate::mapi) const ROP_ERROR_NOT_SUPPORTED: u32 = MapiError::InvalidParameter.as_u32();
+pub(in crate::mapi) const ROP_ERROR_NOT_FOUND: u32 = MapiError::NotFound.as_u32();
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct RopResponseError {
@@ -2674,8 +2675,8 @@ pub(in crate::mapi) fn parse_mapi_restriction(bytes: &[u8]) -> Result<MapiRestri
 pub(in crate::mapi) fn parse_mapi_restriction_from(
     cursor: &mut Cursor<'_>,
 ) -> Result<MapiRestriction> {
-    match cursor.read_u8()? {
-        0x00 => {
+    match MapiRestrictionType::from_u8(cursor.read_u8()?) {
+        Some(MapiRestrictionType::And) => {
             let count = cursor.read_u16()? as usize;
             let mut children = Vec::with_capacity(count);
             for _ in 0..count {
@@ -2683,7 +2684,7 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
             }
             Ok(MapiRestriction::And(children))
         }
-        0x01 => {
+        Some(MapiRestrictionType::Or) => {
             let count = cursor.read_u16()? as usize;
             let mut children = Vec::with_capacity(count);
             for _ in 0..count {
@@ -2691,10 +2692,10 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
             }
             Ok(MapiRestriction::Or(children))
         }
-        0x02 => Ok(MapiRestriction::Not(Box::new(parse_mapi_restriction_from(
-            cursor,
-        )?))),
-        0x03 => {
+        Some(MapiRestrictionType::Not) => Ok(MapiRestriction::Not(Box::new(
+            parse_mapi_restriction_from(cursor)?,
+        ))),
+        Some(MapiRestrictionType::Content) => {
             let _fuzzy_level = cursor.read_u32()?;
             let property_tag = cursor.read_u32()?;
             let value = parse_tagged_property_value(cursor)?
@@ -2705,7 +2706,7 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
                 value,
             })
         }
-        0x04 => {
+        Some(MapiRestrictionType::Property) => {
             let relop = cursor.read_u8()?;
             let property_tag = cursor.read_u32()?;
             let value = parse_tagged_property_value(cursor)?;
@@ -2715,7 +2716,7 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
                 value,
             })
         }
-        0x06 => {
+        Some(MapiRestrictionType::Bitmask) => {
             let rel_bmr = cursor.read_u8()?;
             let property_tag = cursor.read_u32()?;
             let mask = cursor.read_u32()?;
@@ -2725,7 +2726,7 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
                 must_be_nonzero: rel_bmr != 0,
             })
         }
-        0x07 => {
+        Some(MapiRestrictionType::Size) => {
             let relop = cursor.read_u8()?;
             let property_tag = cursor.read_u32()?;
             let size = cursor.read_u32()?;
@@ -2735,7 +2736,7 @@ pub(in crate::mapi) fn parse_mapi_restriction_from(
                 size,
             })
         }
-        0x08 => {
+        Some(MapiRestrictionType::Exist) => {
             let property_tag = cursor.read_u32()?;
             Ok(MapiRestriction::Exist { property_tag })
         }

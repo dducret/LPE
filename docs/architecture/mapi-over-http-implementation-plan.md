@@ -79,6 +79,8 @@ The 2026-05-18 19:45 trace tail repeated the same post-hierarchy stop after the 
 
 The six root default-folder properties accepted through that `RopSetProperties` path are not retained as mutable root-folder state. They are computed compatibility projections over LPE's fixed Outlook special-folder IDs, so accepting a client echo must not poison later sessions with the last client-provided binary shape. RCA logs still decode the client-provided values from the `RopSetProperties` request so traces can compare Outlook's echo with LPE's computed defaults.
 
+The 2026-05-18 20:32 trace confirmed those client echoes no longer persist as root-folder state (`root_default_folder_property_count=0`) but still disconnected before content sync. The same trace showed the post-hierarchy batches releasing handles and opening new objects into sparse output handle slots. Server object handle IDs now remain monotonic within the session; `OutputHandleIndex` is only the response handle-table slot, not a preferred object handle ID. This avoids immediately reusing a released small handle ID during Outlook's post-hierarchy bootstrap sequence.
+
 Rationale: current Outlook 16 traces show a valid hierarchy ICS stream followed by disconnect before content sync. The affected mailbox has snapshot-computed `Inbox` content and unread counts, but Outlook excluded the count properties. This experiment tests whether Outlook's cached-mode bootstrap expects those folder aggregate properties despite sending them as exclusions. This is not a protocol MUST and must not become the default without real Outlook evidence.
 
 RCA evidence requirements:

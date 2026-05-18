@@ -51,6 +51,7 @@ mod store_adapter;
 mod sync;
 mod tables;
 mod transport;
+pub(crate) mod wire;
 
 pub(crate) use crate::mapi::{
     session::{create_rpc_emsmdb_context, execute_rpc_emsmdb_rops},

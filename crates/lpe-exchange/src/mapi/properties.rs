@@ -2,6 +2,7 @@ use super::rop::*;
 use super::session::*;
 use super::sync::*;
 use super::tables::*;
+use super::wire::MapiPropertyType;
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -76,27 +77,6 @@ pub(in crate::mapi) struct MapiPropertyTag {
     raw: u32,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::mapi) enum MapiPropertyType {
-    Integer16,
-    Integer32,
-    Boolean,
-    Integer64,
-    String8,
-    String,
-    Time,
-    Guid,
-    Binary,
-    Error,
-    MultipleInteger16,
-    MultipleInteger32,
-    MultipleInteger64,
-    MultipleString8,
-    MultipleString,
-    MultipleGuid,
-    MultipleBinary,
-}
-
 impl MapiPropertyTag {
     pub(in crate::mapi) fn new(raw: u32) -> Self {
         Self { raw }
@@ -112,31 +92,6 @@ impl MapiPropertyTag {
 
     pub(in crate::mapi) fn property_type(self) -> Option<MapiPropertyType> {
         MapiPropertyType::from_code(self.property_type_code())
-    }
-}
-
-impl MapiPropertyType {
-    pub(in crate::mapi) fn from_code(value: u16) -> Option<Self> {
-        match value {
-            0x0002 => Some(Self::Integer16),
-            0x0003 => Some(Self::Integer32),
-            0x000A => Some(Self::Error),
-            0x000B => Some(Self::Boolean),
-            0x0014 => Some(Self::Integer64),
-            0x001E => Some(Self::String8),
-            0x001F => Some(Self::String),
-            0x0040 => Some(Self::Time),
-            0x0048 => Some(Self::Guid),
-            0x0102 => Some(Self::Binary),
-            0x1002 => Some(Self::MultipleInteger16),
-            0x1003 => Some(Self::MultipleInteger32),
-            0x1014 => Some(Self::MultipleInteger64),
-            0x101E => Some(Self::MultipleString8),
-            0x101F => Some(Self::MultipleString),
-            0x1048 => Some(Self::MultipleGuid),
-            0x1102 => Some(Self::MultipleBinary),
-            _ => None,
-        }
     }
 }
 

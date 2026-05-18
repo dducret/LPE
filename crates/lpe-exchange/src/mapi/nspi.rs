@@ -2,6 +2,7 @@ use super::properties::{write_ascii_z, write_multi_string, write_multi_string8};
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
+use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

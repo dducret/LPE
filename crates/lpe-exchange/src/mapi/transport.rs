@@ -3,6 +3,7 @@ use super::notifications::*;
 use super::nspi::*;
 use super::rop::*;
 use super::session::*;
+use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
 
 pub(in crate::mapi) const MAPI_CONTENT_TYPE: &str = "application/mapi-http";
@@ -27,35 +28,6 @@ pub(in crate::mapi) const NSPI_SERVER_GUID: [u8; 16] = [
 pub(crate) enum MapiEndpoint {
     Emsmdb,
     Nspi,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(in crate::mapi) enum MapiRequestType {
-    Connect,
-    Disconnect,
-    Execute,
-    NotificationWait,
-    Bind,
-    Unbind,
-    CompareMids,
-    DnToMid,
-    GetMatches,
-    GetPropList,
-    GetProps,
-    GetSpecialTable,
-    GetTemplateInfo,
-    ModLinkAtt,
-    ModProps,
-    GetAddressBookUrl,
-    GetMailboxUrl,
-    QueryColumns,
-    QueryRows,
-    ResolveNames,
-    ResortRestriction,
-    SeekEntries,
-    UpdateStat,
-    Ping,
-    Unsupported(String),
 }
 
 pub(crate) async fn handle_mapi<S, V>(
@@ -1834,60 +1806,5 @@ mod tests {
         assert!(!second_set_properties_probe.first_execute);
         assert!(!second_set_properties_probe.first_bootstrap_probe);
         assert!(!second_set_properties_probe.first_set_properties_probe);
-    }
-}
-
-impl MapiRequestType {
-    pub(in crate::mapi) fn header_value(&self) -> &str {
-        match self {
-            MapiRequestType::Connect => "Connect",
-            MapiRequestType::Disconnect => "Disconnect",
-            MapiRequestType::Execute => "Execute",
-            MapiRequestType::NotificationWait => "NotificationWait",
-            MapiRequestType::Bind => "Bind",
-            MapiRequestType::Unbind => "Unbind",
-            MapiRequestType::CompareMids => "CompareMIds",
-            MapiRequestType::DnToMid => "DNToMId",
-            MapiRequestType::GetMatches => "GetMatches",
-            MapiRequestType::GetPropList => "GetPropList",
-            MapiRequestType::GetProps => "GetProps",
-            MapiRequestType::GetSpecialTable => "GetSpecialTable",
-            MapiRequestType::GetTemplateInfo => "GetTemplateInfo",
-            MapiRequestType::ModLinkAtt => "ModLinkAtt",
-            MapiRequestType::ModProps => "ModProps",
-            MapiRequestType::GetAddressBookUrl => "GetAddressBookUrl",
-            MapiRequestType::GetMailboxUrl => "GetMailboxUrl",
-            MapiRequestType::QueryColumns => "QueryColumns",
-            MapiRequestType::QueryRows => "QueryRows",
-            MapiRequestType::ResolveNames => "ResolveNames",
-            MapiRequestType::ResortRestriction => "ResortRestriction",
-            MapiRequestType::SeekEntries => "SeekEntries",
-            MapiRequestType::UpdateStat => "UpdateStat",
-            MapiRequestType::Ping => "PING",
-            MapiRequestType::Unsupported(value) => value,
-        }
-    }
-
-    pub(in crate::mapi) fn requires_nspi_session(&self) -> bool {
-        matches!(
-            self,
-            MapiRequestType::CompareMids
-                | MapiRequestType::DnToMid
-                | MapiRequestType::GetMatches
-                | MapiRequestType::GetPropList
-                | MapiRequestType::GetProps
-                | MapiRequestType::GetSpecialTable
-                | MapiRequestType::GetTemplateInfo
-                | MapiRequestType::ModLinkAtt
-                | MapiRequestType::ModProps
-                | MapiRequestType::GetAddressBookUrl
-                | MapiRequestType::GetMailboxUrl
-                | MapiRequestType::QueryColumns
-                | MapiRequestType::QueryRows
-                | MapiRequestType::ResolveNames
-                | MapiRequestType::ResortRestriction
-                | MapiRequestType::SeekEntries
-                | MapiRequestType::UpdateStat
-        )
     }
 }

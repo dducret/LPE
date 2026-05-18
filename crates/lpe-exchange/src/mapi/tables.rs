@@ -3,6 +3,7 @@ use super::properties::*;
 use super::rop::*;
 use super::session::*;
 use super::sync::*;
+use super::wire::MapiPropertyType;
 use super::*;
 
 pub(in crate::mapi) fn hierarchy_row_count(

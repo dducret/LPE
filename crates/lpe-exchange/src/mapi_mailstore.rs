@@ -4,16 +4,17 @@ use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
 pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
+use crate::mapi::wire::{FastTransferMarker, MapiSyncType};
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
-const INCR_SYNC_CHG: u32 = 0x4012_0003;
-const INCR_SYNC_DEL: u32 = 0x4013_0003;
-const INCR_SYNC_END: u32 = 0x4014_0003;
-const INCR_SYNC_MESSAGE: u32 = 0x4015_0003;
-const INCR_SYNC_READ: u32 = 0x402F_0003;
-const INCR_SYNC_STATE_BEGIN: u32 = 0x403A_0003;
-const INCR_SYNC_STATE_END: u32 = 0x403B_0003;
+const INCR_SYNC_CHG: u32 = FastTransferMarker::IncrSyncChg.as_u32();
+const INCR_SYNC_DEL: u32 = FastTransferMarker::IncrSyncDel.as_u32();
+const INCR_SYNC_END: u32 = FastTransferMarker::IncrSyncEnd.as_u32();
+const INCR_SYNC_MESSAGE: u32 = FastTransferMarker::IncrSyncMessage.as_u32();
+const INCR_SYNC_READ: u32 = FastTransferMarker::IncrSyncRead.as_u32();
+const INCR_SYNC_STATE_BEGIN: u32 = FastTransferMarker::IncrSyncStateBegin.as_u32();
+const INCR_SYNC_STATE_END: u32 = FastTransferMarker::IncrSyncStateEnd.as_u32();
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
@@ -60,6 +61,8 @@ const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
 const META_TAG_CNSET_SEEN: u32 = 0x6796_0102;
 const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
+const SYNC_TYPE_CONTENTS: u8 = MapiSyncType::Contents.as_u8();
+const SYNC_TYPE_HIERARCHY: u8 = MapiSyncType::Hierarchy.as_u8();
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_END_COMMAND: u8 = 0x00;
@@ -316,7 +319,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     } else {
         &[]
     };
-    if sync_type == 0x02 {
+    if sync_type == SYNC_TYPE_HIERARCHY {
         let mut folders = mailboxes.iter().collect::<Vec<_>>();
         folders.sort_by(|left, right| {
             hierarchy_sort_depth(
@@ -354,7 +357,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             let unread_count_excluded =
                 property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
             let force_count_properties = force_excluded_hierarchy_count_properties
-                && sync_type == 0x02
+                && sync_type == SYNC_TYPE_HIERARCHY
                 && content_count_source == "snapshot";
             let content_count_forced = force_count_properties && content_count_excluded;
             let unread_count_forced = force_count_properties && unread_count_excluded;
@@ -411,7 +414,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 write_u32(&mut buffer, PID_TAG_FOLDER_ID);
                 write_i64(&mut buffer, folder_id as i64);
             }
-            if sync_type != 0x02
+            if sync_type != SYNC_TYPE_HIERARCHY
                 || sync_flags & 0x0100 != 0
                 || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
             {
@@ -546,7 +549,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         );
     }
 
-    if sync_type == 0x01 && sync_flags & 0x0008 != 0 {
+    if sync_type == SYNC_TYPE_CONTENTS && sync_flags & 0x0008 != 0 {
         let read_message_ids = emails
             .iter()
             .filter(|email| !email.unread)
@@ -594,7 +597,7 @@ pub(crate) fn log_hierarchy_transfer_debug(
     requested_property_tags: &[u32],
     transfer_buffer: &[u8],
 ) {
-    if sync_type != 0x02 || !tracing::enabled!(tracing::Level::INFO) {
+    if sync_type != SYNC_TYPE_HIERARCHY || !tracing::enabled!(tracing::Level::INFO) {
         return;
     }
 
@@ -649,7 +652,7 @@ pub(crate) fn hierarchy_content_count_omission_candidate(
     mailboxes: &[JmapMailbox],
     aggregate_emails: &[JmapEmail],
 ) -> Option<HierarchyContentCountOmissionCandidate> {
-    if sync_type != 0x02 {
+    if sync_type != SYNC_TYPE_HIERARCHY {
         return None;
     }
 
@@ -1391,7 +1394,7 @@ fn hierarchy_sort_depth(
     mailbox: &JmapMailbox,
     mailboxes: &[JmapMailbox],
 ) -> u8 {
-    if sync_type != 0x02 {
+    if sync_type != SYNC_TYPE_HIERARCHY {
         return 0;
     }
     let mut parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, mailboxes);
@@ -1622,7 +1625,7 @@ fn sync_state_object_ids(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
 ) -> Vec<u64> {
-    if sync_type == 0x02 {
+    if sync_type == SYNC_TYPE_HIERARCHY {
         mailboxes
             .iter()
             .map(|mailbox| mapi_folder_id_for_mailbox(mailbox, folder_id))
@@ -1642,7 +1645,7 @@ fn sync_state_change_numbers(
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> Vec<u64> {
-    if sync_type == 0x02 {
+    if sync_type == SYNC_TYPE_HIERARCHY {
         mailboxes
             .iter()
             .map(|mailbox| canonical_hierarchy_change_number(folder_id, mailbox))
@@ -1676,7 +1679,7 @@ pub(crate) fn final_sync_state_stream(
     write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
     write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset_given);
     write_binary_property(&mut token, META_TAG_CNSET_SEEN, &cnset_seen);
-    if sync_type == 0x01 {
+    if sync_type == SYNC_TYPE_CONTENTS {
         write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, &cnset_seen);
         write_binary_property(&mut token, META_TAG_CNSET_READ, &cnset_seen);
     }
