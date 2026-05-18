@@ -1,3 +1,4 @@
+mod ews_types;
 mod mapi;
 mod mapi_mailstore;
 mod mapi_store;

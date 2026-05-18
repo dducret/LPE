@@ -34,6 +34,10 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{
+    ews_types::{
+        EwsDeleteType, EwsDistinguishedFolderIdName, EwsExternalAudience, EwsMonth, EwsOofState,
+        EwsResponseType, EwsTaskStatus, EwsWeekday,
+    },
     mapi::{self, MapiEndpoint},
     ntlm,
     store::{
@@ -1421,9 +1425,9 @@ where
                             .unwrap_or_else(|| "All".to_string()),
                     )?;
                     let duration = match state {
-                        OofState::Scheduled => Some(parse_oof_duration(settings)?),
-                        OofState::Enabled => None,
-                        OofState::Disabled => unreachable!("disabled OOF is handled separately"),
+                        EwsOofState::Scheduled => Some(parse_oof_duration(settings)?),
+                        EwsOofState::Enabled => None,
+                        EwsOofState::Disabled => unreachable!("disabled OOF is handled separately"),
                     };
                     self.store
                         .put_sieve_script(
@@ -2093,7 +2097,9 @@ where
                     .await?;
             }
             let delete_type = attribute_value_after(request, "DeleteItem", "DeleteType")
-                .unwrap_or("MoveToDeletedItems");
+                .map(EwsDeleteType::parse)
+                .transpose()?
+                .unwrap_or(EwsDeleteType::MoveToDeletedItems);
             let mailboxes = self
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
@@ -2124,7 +2130,7 @@ where
                     timestamp: email.received_at.clone(),
                 };
 
-                if delete_type == "HardDelete" || email.mailbox_role == "trash" {
+                if delete_type == EwsDeleteType::HardDelete || email.mailbox_role == "trash" {
                     self.store
                         .delete_jmap_email(
                             principal.account_id,
@@ -3030,30 +3036,7 @@ fn requested_task_list_id(request: &str) -> Result<Option<Uuid>> {
 }
 
 fn ews_task_status_to_canonical(value: &str) -> Result<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "" | "notstarted" | "needs-action" => Ok("needs-action"),
-        "inprogress" | "waitingonothers" | "in-progress" => Ok("in-progress"),
-        "completed" => Ok("completed"),
-        "deferred" | "cancelled" | "canceled" => Ok("cancelled"),
-        other => bail!("unsupported task Status {other}"),
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum OofState {
-    Disabled,
-    Enabled,
-    Scheduled,
-}
-
-impl OofState {
-    fn as_ews(self) -> &'static str {
-        match self {
-            OofState::Disabled => "Disabled",
-            OofState::Enabled => "Enabled",
-            OofState::Scheduled => "Scheduled",
-        }
-    }
+    Ok(EwsTaskStatus::parse(value)?.canonical_status())
 }
 
 #[derive(Debug, Clone)]
@@ -3064,7 +3047,7 @@ struct OofDuration {
 
 #[derive(Debug, Clone)]
 struct OofProjection {
-    state: OofState,
+    state: EwsOofState,
     external_audience: String,
     text_body: String,
     duration: Option<OofDuration>,
@@ -3073,7 +3056,7 @@ struct OofProjection {
 impl OofProjection {
     fn disabled() -> Self {
         Self {
-            state: OofState::Disabled,
+            state: EwsOofState::Disabled,
             external_audience: "None".to_string(),
             text_body: String::new(),
             duration: None,
@@ -3092,10 +3075,10 @@ fn oof_projection_from_script(content: Option<&str>) -> OofProjection {
         return OofProjection::disabled();
     };
     let state = match oof_metadata_value(content, "State").as_deref() {
-        Some("Scheduled") => OofState::Scheduled,
-        Some("Enabled") | None => OofState::Enabled,
+        Some("Scheduled") => EwsOofState::Scheduled,
+        Some("Enabled") | None => EwsOofState::Enabled,
         Some("Disabled") => return OofProjection::disabled(),
-        Some(_) => OofState::Enabled,
+        Some(_) => EwsOofState::Enabled,
     };
     let external_audience = oof_metadata_value(content, "ExternalAudience")
         .and_then(|value| {
@@ -3104,7 +3087,7 @@ fn oof_projection_from_script(content: Option<&str>) -> OofProjection {
                 .map(str::to_string)
         })
         .unwrap_or_else(|| "All".to_string());
-    let duration = if state == OofState::Scheduled {
+    let duration = if state == EwsOofState::Scheduled {
         match (
             oof_metadata_value(content, "StartTime"),
             oof_metadata_value(content, "EndTime"),
@@ -3162,13 +3145,8 @@ fn find_vacation_reason(statements: &[Statement]) -> Option<String> {
     None
 }
 
-fn parse_oof_state(value: &str) -> Result<OofState> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "disabled" => Ok(OofState::Disabled),
-        "enabled" => Ok(OofState::Enabled),
-        "scheduled" => Ok(OofState::Scheduled),
-        other => bail!("unsupported OofState {other}"),
-    }
+fn parse_oof_state(value: &str) -> Result<EwsOofState> {
+    EwsOofState::parse(value)
 }
 
 fn parse_oof_duration(settings: &str) -> Result<OofDuration> {
@@ -3189,17 +3167,12 @@ fn parse_oof_duration(settings: &str) -> Result<OofDuration> {
 }
 
 fn normalize_oof_external_audience(value: &str) -> Result<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "" | "none" => Ok("None"),
-        "known" => Ok("Known"),
-        "all" => Ok("All"),
-        other => bail!("unsupported ExternalAudience {other}"),
-    }
+    Ok(EwsExternalAudience::parse(value)?.as_ews())
 }
 
 fn vacation_sieve_script(
     text_body: &str,
-    state: OofState,
+    state: EwsOofState,
     external_audience: &str,
     duration: Option<&OofDuration>,
 ) -> String {
@@ -3280,18 +3253,9 @@ fn parse_attendee(attendee: &str, role: &str) -> Option<CalendarParticipantMetad
 }
 
 fn ews_response_type_to_partstat(response_type: &Option<String>) -> String {
-    match response_type
-        .as_deref()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "accept" => "accepted",
-        "tentative" => "tentative",
-        "decline" => "declined",
-        _ => "needs-action",
-    }
-    .to_string()
+    EwsResponseType::parse(response_type.as_deref().unwrap_or_default())
+        .partstat()
+        .to_string()
 }
 
 fn parse_ews_recurrence(event: &str) -> Result<String> {
@@ -3376,34 +3340,11 @@ fn parse_positive_number(value: &str, field: &str) -> Result<u32> {
 }
 
 fn ews_weekday_to_rrule(value: &str) -> Result<&'static str> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "monday" => Ok("MO"),
-        "tuesday" => Ok("TU"),
-        "wednesday" => Ok("WE"),
-        "thursday" => Ok("TH"),
-        "friday" => Ok("FR"),
-        "saturday" => Ok("SA"),
-        "sunday" => Ok("SU"),
-        other => bail!("unsupported recurrence weekday {other}"),
-    }
+    Ok(EwsWeekday::parse(value)?.rrule_day())
 }
 
 fn ews_month_to_number(value: &str) -> Result<u32> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "january" => Ok(1),
-        "february" => Ok(2),
-        "march" => Ok(3),
-        "april" => Ok(4),
-        "may" => Ok(5),
-        "june" => Ok(6),
-        "july" => Ok(7),
-        "august" => Ok(8),
-        "september" => Ok(9),
-        "october" => Ok(10),
-        "november" => Ok(11),
-        "december" => Ok(12),
-        other => bail!("unsupported recurrence month {other}"),
-    }
+    Ok(EwsMonth::parse(value)?.number())
 }
 
 fn rrule_date(value: &str) -> Result<String> {
@@ -3905,13 +3846,7 @@ fn requested_distinguished_folder_id(request: &str) -> Option<&str> {
 }
 
 fn ews_distinguished_mailbox_role(value: &str) -> Option<&'static str> {
-    match value.to_ascii_lowercase().as_str() {
-        "inbox" => Some("inbox"),
-        "drafts" => Some("drafts"),
-        "sentitems" | "sent" => Some("sent"),
-        "deleteditems" | "trash" => Some("trash"),
-        _ => None,
-    }
+    EwsDistinguishedFolderIdName::parse(value).and_then(EwsDistinguishedFolderIdName::mailbox_role)
 }
 
 fn requested_sync_state(request: &str) -> Option<String> {
