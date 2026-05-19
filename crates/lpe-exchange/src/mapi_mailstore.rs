@@ -365,6 +365,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 && property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE);
             let access_forced = force_excluded_hierarchy_count_properties
                 && property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS);
+            let display_name = mapi_folder_display_name(mailbox);
             tracing::info!(
                 rca_debug = true,
                 adapter = "mapi",
@@ -375,7 +376,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 parent_folder_id = format_args!("0x{parent_folder_id:016x}"),
                 source_key_len = source_key.len(),
                 parent_source_key_len = parent_source_key.len(),
-                display_name = %mailbox.name,
+                display_name,
                 container_class,
                 change_number,
                 mailbox_content_count = mailbox.total_emails,
@@ -409,7 +410,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 PID_TAG_PREDECESSOR_CHANGE_LIST,
                 &predecessor_change_list(change_number),
             );
-            write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
+            write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
             write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
             if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
                 write_u32(&mut buffer, PID_TAG_FOLDER_ID);
@@ -1344,6 +1345,12 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
             "reminders" => "Outlook.Reminder",
             _ => "IPF.Note",
         })
+}
+
+fn mapi_folder_display_name(mailbox: &JmapMailbox) -> &str {
+    virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
+        .map(|(_, name, _, _, _)| name)
+        .unwrap_or(&mailbox.name)
 }
 
 fn mapi_folder_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {

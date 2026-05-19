@@ -13863,6 +13863,54 @@ fn mapi_hierarchy_sync_keeps_reminders_generic_until_search_folder_support() {
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
+#[test]
+fn mapi_hierarchy_sync_projects_outlook_special_folder_display_names() {
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "INBOX");
+    let sent = FakeStore::mailbox("66666666-6666-4666-8666-666666666666", "sent", "Sent");
+    let trash = FakeStore::mailbox("77777777-7777-4777-8777-777777777777", "trash", "Trash");
+    let mailboxes = vec![inbox, sent, trash];
+    let buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
+        0x02,
+        0x0101,
+        0,
+        &[
+            PID_TAG_FOLDER_TYPE,
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            0x0E08_0003,
+            0x0FF4_0003,
+            0x3FE0_0102,
+            0x3FE1_0102,
+            0x0E27_0102,
+        ],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        &mailboxes,
+        &[],
+        &[],
+        &[],
+        &mailboxes,
+        &mailboxes,
+        &[],
+        &[],
+        &[],
+        &[],
+        1,
+        true,
+    );
+    let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
+
+    let names = decoded
+        .folder_changes
+        .iter()
+        .map(|folder| folder.display_name.as_str())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"Inbox"));
+    assert!(names.contains(&"Sent Items"));
+    assert!(names.contains(&"Deleted Items"));
+    assert!(!names.contains(&"INBOX"));
+    assert!(!names.contains(&"Trash"));
+}
+
 #[tokio::test]
 async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
     let store = FakeStore {
