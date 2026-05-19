@@ -87,6 +87,7 @@ The important non-negotiable rules are:
 - `docs/architecture/internationalized-mailbox-names.md`
 - `docs/architecture/jmap-mail-mvp.md`
 - `docs/architecture/jmap-contacts-calendars-mvp.md`
+- `docs/architecture/notes-journal-reminders.md`
 - `docs/architecture/activesync-mvp.md`
 - `docs/architecture/ews-mapi-mvp.md`
 - `docs/architecture/mapi-over-http-implementation-plan.md`

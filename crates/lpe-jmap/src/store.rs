@@ -2,12 +2,14 @@ use anyhow::Result;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay,
-    CanonicalPushChangeSet, ClientTask, ClientTaskList, CollaborationCollection,
-    CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
-    JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage,
-    SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    CanonicalPushChangeSet, ClientNote, ClientReminder, ClientTask, ClientTaskList,
+    CollaborationCollection, CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
+    JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
+    JournalEntry, MailboxAccountAccess, ReminderQuery, SavedDraftMessage, SenderIdentity,
+    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpdateTaskListInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertJournalEntryInput,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -304,6 +306,30 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
     ) -> Result<Vec<ClientTask>>;
     async fn upsert_jmap_task(&self, input: UpsertClientTaskInput) -> Result<ClientTask>;
     async fn delete_jmap_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()>;
+    async fn fetch_jmap_notes(&self, account_id: Uuid) -> Result<Vec<ClientNote>>;
+    async fn fetch_jmap_notes_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientNote>>;
+    async fn upsert_jmap_note(&self, input: UpsertClientNoteInput) -> Result<ClientNote>;
+    async fn delete_jmap_note(&self, account_id: Uuid, note_id: Uuid) -> Result<()>;
+    async fn fetch_jmap_journal_entries(&self, account_id: Uuid) -> Result<Vec<JournalEntry>>;
+    async fn fetch_jmap_journal_entries_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JournalEntry>>;
+    async fn upsert_jmap_journal_entry(
+        &self,
+        input: UpsertJournalEntryInput,
+    ) -> Result<JournalEntry>;
+    async fn delete_jmap_journal_entry(&self, account_id: Uuid, entry_id: Uuid) -> Result<()>;
+    async fn query_jmap_reminders(
+        &self,
+        account_id: Uuid,
+        query: ReminderQuery,
+    ) -> Result<Vec<ClientReminder>>;
 }
 
 impl JmapPushListener for CanonicalChangeListener {
@@ -783,5 +809,56 @@ impl JmapStore for Storage {
 
     async fn delete_jmap_task(&self, account_id: Uuid, task_id: Uuid) -> Result<()> {
         self.delete_client_task(account_id, task_id).await
+    }
+
+    async fn fetch_jmap_notes(&self, account_id: Uuid) -> Result<Vec<ClientNote>> {
+        self.fetch_client_notes(account_id).await
+    }
+
+    async fn fetch_jmap_notes_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientNote>> {
+        self.fetch_client_notes_by_ids(account_id, ids).await
+    }
+
+    async fn upsert_jmap_note(&self, input: UpsertClientNoteInput) -> Result<ClientNote> {
+        self.upsert_client_note(input).await
+    }
+
+    async fn delete_jmap_note(&self, account_id: Uuid, note_id: Uuid) -> Result<()> {
+        self.delete_client_note(account_id, note_id).await
+    }
+
+    async fn fetch_jmap_journal_entries(&self, account_id: Uuid) -> Result<Vec<JournalEntry>> {
+        self.fetch_journal_entries(account_id).await
+    }
+
+    async fn fetch_jmap_journal_entries_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JournalEntry>> {
+        self.fetch_journal_entries_by_ids(account_id, ids).await
+    }
+
+    async fn upsert_jmap_journal_entry(
+        &self,
+        input: UpsertJournalEntryInput,
+    ) -> Result<JournalEntry> {
+        self.upsert_journal_entry(input).await
+    }
+
+    async fn delete_jmap_journal_entry(&self, account_id: Uuid, entry_id: Uuid) -> Result<()> {
+        self.delete_journal_entry(account_id, entry_id).await
+    }
+
+    async fn query_jmap_reminders(
+        &self,
+        account_id: Uuid,
+        query: ReminderQuery,
+    ) -> Result<Vec<ClientReminder>> {
+        self.query_client_reminders(account_id, query).await
     }
 }

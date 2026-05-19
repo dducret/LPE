@@ -3,8 +3,9 @@ use std::{env, str::FromStr};
 use anyhow::{Context, Result};
 use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    NewAccount, NewDomain, NewMailbox, NewPstTransferJob, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput,
+    NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput,
+    UpsertJournalEntryInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -152,6 +153,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "ActiveSync state SQL path",
             exercise_activesync_path(&storage, &fixture).await,
+        );
+        collect(
+            &mut failures,
+            "notes journal and reminder SQL path",
+            exercise_notes_journal_reminder_path(&storage, pool, &fixture).await,
         );
 
         if let Some(submitted) = submitted.as_ref() {
@@ -748,6 +754,311 @@ async fn exercise_mailbox_path(storage: &Storage, fixture: &RuntimeFixture) -> R
         .fetch_imap_mailbox_state(fixture.account_id, fixture.inbox_id)
         .await
         .context("fetch_imap_mailbox_state")?;
+    Ok(())
+}
+
+async fn exercise_notes_journal_reminder_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let note_cursor = storage
+        .fetch_jmap_object_change_cursor(fixture.account_id, "Note")
+        .await?
+        .unwrap_or(0);
+    let journal_cursor = storage
+        .fetch_jmap_object_change_cursor(fixture.account_id, "JournalEntry")
+        .await?
+        .unwrap_or(0);
+    let note = storage
+        .upsert_client_note(UpsertClientNoteInput {
+            id: None,
+            account_id: fixture.account_id,
+            title: "Runtime note".to_string(),
+            body_text: "Sticky note body".to_string(),
+            color: "yellow".to_string(),
+            categories_json: r#"["outlook"]"#.to_string(),
+        })
+        .await
+        .context("create canonical note")?;
+    let updated_note = storage
+        .upsert_client_note(UpsertClientNoteInput {
+            id: Some(note.id),
+            account_id: fixture.account_id,
+            title: "Runtime note updated".to_string(),
+            body_text: "Updated body".to_string(),
+            color: "blue".to_string(),
+            categories_json: r#"["updated"]"#.to_string(),
+        })
+        .await
+        .context("update canonical note")?;
+    anyhow::ensure!(updated_note.title == "Runtime note updated");
+    anyhow::ensure!(
+        storage
+            .fetch_client_notes_by_ids(fixture.account_id, &[note.id])
+            .await?
+            .len()
+            == 1,
+        "created note must be readable by the owning account"
+    );
+
+    let other_account_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        SELECT $1, tenant_id, primary_domain_id, 'other-' || id::text || '@' || split_part(primary_email, '@', 2), 'Other Runtime'
+        FROM accounts
+        WHERE id = $2
+        "#,
+    )
+    .bind(other_account_id)
+    .bind(fixture.account_id)
+    .execute(pool)
+    .await
+    .context("seed second runtime account for isolation")?;
+    anyhow::ensure!(
+        storage
+            .fetch_client_notes_by_ids(other_account_id, &[note.id])
+            .await?
+            .is_empty(),
+        "notes must not cross account boundaries"
+    );
+    anyhow::ensure!(
+        storage
+            .upsert_client_note(UpsertClientNoteInput {
+                id: Some(note.id),
+                account_id: other_account_id,
+                title: "Cross-account overwrite".to_string(),
+                body_text: "must fail".to_string(),
+                color: "blue".to_string(),
+                categories_json: "[]".to_string(),
+            })
+            .await
+            .is_err(),
+        "notes must reject cross-account id updates"
+    );
+
+    let journal = storage
+        .upsert_journal_entry(UpsertJournalEntryInput {
+            id: None,
+            account_id: fixture.account_id,
+            subject: "Runtime phone call".to_string(),
+            body_text: "Call notes".to_string(),
+            entry_type: "phone-call".to_string(),
+            message_class: "IPM.Activity".to_string(),
+            starts_at: Some("2026-05-19T09:00:00Z".to_string()),
+            ends_at: Some("2026-05-19T09:10:00Z".to_string()),
+            occurred_at: None,
+            companies_json: r#"["Contoso"]"#.to_string(),
+            contacts_json: r#"["Ada Example"]"#.to_string(),
+        })
+        .await
+        .context("create journal entry")?;
+    let updated_journal = storage
+        .upsert_journal_entry(UpsertJournalEntryInput {
+            id: Some(journal.id),
+            account_id: fixture.account_id,
+            subject: "Runtime call updated".to_string(),
+            body_text: "Updated call notes".to_string(),
+            entry_type: "phone-call".to_string(),
+            message_class: "IPM.Activity".to_string(),
+            starts_at: Some("2026-05-19T09:00:00Z".to_string()),
+            ends_at: Some("2026-05-19T09:15:00Z".to_string()),
+            occurred_at: None,
+            companies_json: r#"["Contoso"]"#.to_string(),
+            contacts_json: r#"["Ada Example"]"#.to_string(),
+        })
+        .await
+        .context("update journal entry")?;
+    anyhow::ensure!(updated_journal.subject == "Runtime call updated");
+    anyhow::ensure!(
+        storage
+            .fetch_journal_entries_by_ids(other_account_id, &[journal.id])
+            .await?
+            .is_empty(),
+        "journal entries must not cross account boundaries"
+    );
+    anyhow::ensure!(
+        storage
+            .upsert_journal_entry(UpsertJournalEntryInput {
+                id: Some(journal.id),
+                account_id: other_account_id,
+                subject: "Cross-account overwrite".to_string(),
+                body_text: "must fail".to_string(),
+                entry_type: "phone-call".to_string(),
+                message_class: "IPM.Activity".to_string(),
+                starts_at: None,
+                ends_at: None,
+                occurred_at: None,
+                companies_json: "[]".to_string(),
+                contacts_json: "[]".to_string(),
+            })
+            .await
+            .is_err(),
+        "journal entries must reject cross-account id updates"
+    );
+
+    seed_reminder_rows(pool, fixture).await?;
+    let active = storage
+        .query_client_reminders(
+            fixture.account_id,
+            ReminderQuery {
+                include_inactive: false,
+            },
+        )
+        .await
+        .context("query active reminders")?;
+    anyhow::ensure!(
+        active.iter().any(|reminder| reminder.status == "due"),
+        "active reminder query must include due reminders"
+    );
+    anyhow::ensure!(
+        active
+            .iter()
+            .all(|reminder| reminder.status == "due" || reminder.status == "pending"),
+        "active reminder query must exclude dismissed, completed, and excluded reminders"
+    );
+
+    let all = storage
+        .query_client_reminders(
+            fixture.account_id,
+            ReminderQuery {
+                include_inactive: true,
+            },
+        )
+        .await
+        .context("query inactive reminders")?;
+    for expected in ["due", "dismissed", "completed", "excluded"] {
+        anyhow::ensure!(
+            all.iter().any(|reminder| reminder.status == expected),
+            "inactive reminder query must include {expected} reminders"
+        );
+    }
+
+    storage
+        .delete_client_note(fixture.account_id, note.id)
+        .await
+        .context("delete note")?;
+    storage
+        .delete_journal_entry(fixture.account_id, journal.id)
+        .await
+        .context("delete journal entry")?;
+    let note_changes = storage
+        .replay_jmap_object_changes(fixture.account_id, "Note", note_cursor, 16)
+        .await?
+        .context("note replay should be retained")?;
+    anyhow::ensure!(
+        note_changes
+            .iter()
+            .any(|change| change.object_id == note.id),
+        "note writes must be replayable as JMAP object changes"
+    );
+    let other_note_changes = storage
+        .replay_jmap_object_changes(other_account_id, "Note", note_cursor, 16)
+        .await?
+        .unwrap_or_default();
+    anyhow::ensure!(
+        !other_note_changes
+            .iter()
+            .any(|change| change.object_id == note.id),
+        "note replay must not cross account boundaries"
+    );
+    let journal_changes = storage
+        .replay_jmap_object_changes(fixture.account_id, "JournalEntry", journal_cursor, 16)
+        .await?
+        .context("journal replay should be retained")?;
+    anyhow::ensure!(
+        journal_changes
+            .iter()
+            .any(|change| change.object_id == journal.id),
+        "journal writes must be replayable as JMAP object changes"
+    );
+    let other_journal_changes = storage
+        .replay_jmap_object_changes(other_account_id, "JournalEntry", journal_cursor, 16)
+        .await?
+        .unwrap_or_default();
+    anyhow::ensure!(
+        !other_journal_changes
+            .iter()
+            .any(|change| change.object_id == journal.id),
+        "journal replay must not cross account boundaries"
+    );
+    Ok(())
+}
+
+async fn seed_reminder_rows(pool: &PgPool, fixture: &RuntimeFixture) -> Result<()> {
+    let calendar_id = Uuid::new_v4();
+    let task_list_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO calendars (id, tenant_id, owner_account_id, display_name, role)
+        VALUES ($1, $2, $3, 'Runtime reminders', 'custom')
+        "#,
+    )
+    .bind(calendar_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .execute(pool)
+    .await
+    .context("seed reminder calendar")?;
+    sqlx::query(
+        r#"
+        INSERT INTO task_lists (id, tenant_id, owner_account_id, display_name, role)
+        VALUES ($1, $2, $3, 'Runtime reminders', 'custom')
+        "#,
+    )
+    .bind(task_list_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .execute(pool)
+    .await
+    .context("seed reminder task list")?;
+    sqlx::query(
+        r#"
+        INSERT INTO calendar_events (
+            id, tenant_id, owner_account_id, calendar_id, uid, title,
+            starts_at, ends_at, reminder_set, reminder_at, reminder_dismissed_at, status
+        )
+        VALUES
+            ($1, $5, $6, $7, $1::text, 'Due calendar reminder', NOW(), NOW() + interval '1 hour', TRUE, NOW() - interval '10 minutes', NULL, 'confirmed'),
+            ($2, $5, $6, $7, $2::text, 'Dismissed calendar reminder', NOW(), NOW() + interval '1 hour', TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes', 'confirmed'),
+            ($3, $5, $6, $7, $3::text, 'Excluded calendar reminder', NOW(), NOW() + interval '1 hour', TRUE, NOW() - interval '30 minutes', NULL, 'cancelled'),
+            ($4, $5, $6, $7, $4::text, 'No reminder calendar event', NOW(), NOW() + interval '1 hour', FALSE, NULL, NULL, 'confirmed')
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(calendar_id)
+    .execute(pool)
+    .await
+    .context("seed calendar reminder rows")?;
+    sqlx::query(
+        r#"
+        INSERT INTO tasks (
+            id, tenant_id, owner_account_id, task_list_id, uid, title,
+            status, due_at, completed_at, reminder_set, reminder_at, reminder_dismissed_at
+        )
+        VALUES
+            ($1, $5, $6, $7, $1::text, 'Due task reminder', 'needs-action', NOW() + interval '1 day', NULL, TRUE, NOW() - interval '10 minutes', NULL),
+            ($2, $5, $6, $7, $2::text, 'Dismissed task reminder', 'needs-action', NOW() + interval '1 day', NULL, TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes'),
+            ($3, $5, $6, $7, $3::text, 'Completed task reminder', 'completed', NOW() + interval '1 day', NOW() - interval '1 minute', TRUE, NOW() - interval '30 minutes', NULL),
+            ($4, $5, $6, $7, $4::text, 'No reminder task', 'needs-action', NOW() + interval '1 day', NULL, FALSE, NULL, NULL)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(Uuid::new_v4())
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(task_list_id)
+    .execute(pool)
+    .await
+    .context("seed task reminder rows")?;
     Ok(())
 }
 

@@ -5,6 +5,7 @@ const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
+const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
 const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
 const PST_STORAGE: &str = include_str!("pst.rs");
@@ -83,12 +84,53 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "body_text TEXT NOT NULL DEFAULT ''",
         "CREATE TABLE task_lists",
         "CREATE TABLE tasks",
+        "CREATE TABLE notes",
+        "CREATE TABLE journal_entries",
         "starts_at TIMESTAMPTZ",
         "due_at TIMESTAMPTZ",
         "completed_at TIMESTAMPTZ",
+        "reminder_set BOOLEAN NOT NULL DEFAULT FALSE",
+        "reminder_at TIMESTAMPTZ",
+        "reminder_dismissed_at TIMESTAMPTZ",
         "priority INTEGER NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 9)",
         "recurrence_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "color TEXT NOT NULL DEFAULT '' CHECK (color IN ('', 'blue', 'green', 'pink', 'white', 'yellow'))",
+        "message_class TEXT NOT NULL DEFAULT 'IPM.Activity'",
+        "entry_type TEXT NOT NULL DEFAULT ''",
     ]);
+}
+
+#[test]
+fn notes_journal_and_reminders_stay_canonical() {
+    assert_schema_contains_all(&[
+        "CREATE TABLE notes",
+        "CREATE TABLE journal_entries",
+        "FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+        "CREATE INDEX notes_owner_updated_idx",
+        "CREATE INDEX journal_entries_owner_time_idx",
+        "CREATE INDEX calendar_events_owner_reminder_idx",
+        "CREATE INDEX tasks_owner_reminder_idx",
+    ]);
+    assert!(
+        NOTES_JOURNAL_STORAGE.contains("FROM calendar_events")
+            && NOTES_JOURNAL_STORAGE.contains("FROM tasks")
+            && NOTES_JOURNAL_STORAGE.contains("UNION ALL")
+            && !SCHEMA.contains("CREATE TABLE reminders"),
+        "reminders must be a computed query over canonical reminder-bearing objects, not a table"
+    );
+    assert!(
+        NOTES_JOURNAL_STORAGE.contains("insert_mail_change_log_in_tx")
+            && NOTES_JOURNAL_STORAGE.contains("\"note\"")
+            && NOTES_JOURNAL_STORAGE.contains("\"journal_entry\"")
+            && NOTES_JOURNAL_STORAGE.contains("insert_collaboration_tombstone_in_tx"),
+        "notes and journal entries must participate in canonical object replay and tombstones"
+    );
+    assert!(
+        NOTES_JOURNAL_STORAGE.contains("SELECT owner_account_id")
+            && NOTES_JOURNAL_STORAGE.contains("FROM notes")
+            && NOTES_JOURNAL_STORAGE.contains("FROM journal_entries"),
+        "notes and journal upserts must reject ids owned by another account before writing"
+    );
 }
 
 #[test]
@@ -232,12 +274,14 @@ fn collaboration_changes_and_tombstones_are_object_level() {
         "'calendar_event'",
         "'task_list'",
         "'task'",
+        "'note'",
+        "'journal_entry'",
         "'contact_book_grant'",
         "'calendar_grant'",
         "'task_list_grant'",
         "'mailbox_delegation_grant'",
         "'sender_right'",
-        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'rights'))",
+        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights'))",
         "affected_principal_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
         "principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
     ]);

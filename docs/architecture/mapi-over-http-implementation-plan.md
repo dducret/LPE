@@ -30,6 +30,62 @@ Typed protocol enum boundaries are strict. Unknown `RopId`, MAPI property type, 
 
 `RopLogon` creates a store handle only for private mailbox logons. Public-folder logons, identified by the request `Private` flag not being set, remain deferred with a parseable unsupported ROP response and no protocol-local public-folder store state.
 
+## Outlook Special Folders Execution Plan
+
+This plan covers Outlook `Journal`, `Notes`, `Tasks`, and `Reminders` support across canonical storage, JMAP, IMAP, MAPI over HTTP, and the client web UI. It is ordered for correctness rather than compatibility-preserving increments because `LPE` is not yet in production.
+
+Key readiness finding: `Tasks` already have canonical storage, JMAP methods, DAV projection, web workspace data, and MAPI task-folder projection. `Journal` and `Notes` now have canonical account-owned item tables and client API endpoints, but MAPI ROP behavior is still deferred. `Reminders` has a MAPI special-folder identifier, but Microsoft defines it as a search folder, so it must not become an ordinary canonical mailbox or protocol-local MAPI store.
+
+### Microsoft Source Log
+
+| Page title | URL | Topic or claim supported | Accessed | Uncertainty or ambiguity |
+| --- | --- | --- | --- | --- |
+| `[MS-OXOSFLD]: Special Folders Protocol` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosfld/a60e9c16-2ba8-424b-b60c-385a8a2837cb | Special folders are the default folders and non-user-visible folders for application data such as reminders and views. | 2026-05-19 | The page indexes protocol versions; detailed semantics are in linked sections. |
+| `[MS-OXOSFLD]: List of Special Folders` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosfld/68a85898-84fe-43c4-b166-4711c13cdd61 | Journal, Notes, Tasks, and Reminders are Exchange special folders; Tasks uses `IPF.Task`, Reminders uses `Outlook.Reminder`. | 2026-05-19 | The list identifies folder classes and related protocols, but not full item-schema implementation order for a non-Exchange server. |
+| `[MS-OXOSFLD]: Search Criteria for Search Special Folders` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxosfld/1169ebe3-22c8-4b77-bc58-791e8a91973f | Reminders is a search folder over eligible reminder-bearing objects, excluding Deleted Items, Junk, Drafts, Outbox, Sync Issues, and failure folders. | 2026-05-19 | The criteria reference reminder and calendar/task properties from other specifications; mapping to current LPE calendar/task fields is an engineering task. |
+| `[MS-OXONOTE]: Note Object Protocol` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxonote/6bf4ed7e-316c-4a3c-be27-5ec93e7ab39f | Notes represent brief sticky-note objects. | 2026-05-19 | Detailed property pages are partly access-limited; canonical note fields are projection-ready engineering choices. |
+| `[MS-OXOJRNL]: Journal Object Protocol` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxojrnl/2aa04fd2-0f36-4ce4-9178-c0fc70aa8d43 | Journal objects track activity related to meetings, tasks, contacts, or application files. | 2026-05-19 | The protocol does not require storing every MAPI named property as first-class canonical data. |
+| `[MS-OXOJRNL]: Journal Object for a Telephone Call Example` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxojrnl/f4f1636e-2571-4994-bb8e-d2c801ecc901 | Journal entries can include start/end, log type, companies, contacts, and body/notes data. | 2026-05-19 | The example is informative, so company/contact/log fields are stored as canonical metadata, not a raw MAPI property bag. |
+| `[MS-OXORMDR]: Reminder Settings Protocol` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxormdr/5454ebcc-e5d1-4da8-a598-d393b101caab | Reminder settings are object properties rather than a standalone mailbox item model. | 2026-05-19 | Some behavior pages are access-limited; LPE stores only set/time/dismissal/reset facts needed for foundation queries. |
+| `[MS-OXORMDR]: Glossary` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxormdr/117aefd1-2f9a-4378-b32c-bd8397f2cf70 | The full reminder domain excludes Deleted Items, Junk Email, Drafts, Outbox, Conflicts, Local Failures, Server Failures, and Sync Issues. | 2026-05-19 | LPE maps this to canonical object visibility/status because calendar/task data is not stored as ordinary mail folders. |
+| `[MS-OXOTASK]: PidLidTaskResetReminder Property` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxotask/e3124e37-9872-4a64-8467-ea468e74837e | Recurring task reminders need reset/dismissal metadata beyond the single reminder-set flag. | 2026-05-19 | Recurring task reminder expansion is deferred; `reminder_reset` is stored for future projection. |
+| `[MS-OXOCAL]: Calendar Object` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxocal/fa22144a-fc6a-48d8-ad75-a7a5e21267bf | Calendar objects can carry reminder-related properties from MS-OXORMDR. | 2026-05-19 | Recurring-instance reminder expansion remains future interoperability work. |
+| `[MS-OXCMAPIHTTP]: Introduction` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/ed19bca1-e08a-41b4-8d5e-f67925abaf9b | MAPI over HTTP carries personal messaging and directory data over HTTP/HTTPS and defines normative sections for implementation. | 2026-05-19 | The transport document does not define Outlook's tolerance for partial special-folder support. Real Outlook evidence remains required. |
+| `[MS-OXCMAPIHTTP]: Common Request Format` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/2e717239-a22b-4508-a2ee-af64ffc090a2 | MAPI/HTTP requests require the documented HTTP method, content type, request type, request ID, and related headers. | 2026-05-19 | Supports transport framing only; folder semantics come from object and special-folder specs. |
+
+### Ordered Implementation
+
+1. Canonical model first.
+   - Implemented foundation: canonical `notes` and `journal_entries` tables with account ownership, tenant ownership, title/body or journal-specific fields, timestamps, source metadata, and projection-ready Outlook metadata.
+   - Implemented foundation: `calendar_events` and `tasks` carry reminder set/time/dismissal metadata, and tasks carry `reminder_reset` for future recurring-task projection.
+   - Implemented foundation: Reminders stay a computed query over canonical calendar/task reminder metadata. Notes and Journal are not included in reminder results until Microsoft docs or an explicit engineering note justifies expanding the reminder domain.
+   - Verify: schema contract tests prove no protocol-local Exchange store was added; runtime schema drift tests cover create, update, delete, account isolation, due reminders, inactive reminders, and excluded rows.
+
+2. JMAP before compatibility adapters.
+   - Implemented foundation: JMAP Mail `Mailbox` roles remain standard mail roles; `Journal` and `Notes` are exposed through the documented private LPE capability `https://l-p-e.ch/jmap/outlook`.
+   - Implemented foundation: `Note/get`, `Note/query`, `Note/changes`, `Note/queryChanges`, `Note/set`, `JournalEntry/get`, `JournalEntry/query`, `JournalEntry/changes`, `JournalEntry/queryChanges`, `JournalEntry/set`, and `Reminder/query` project canonical storage without overloading `Email` or mailboxes.
+   - Implemented foundation: Notes and Journal writes use account/category modseqs, object-level change rows, and tombstones for durable private JMAP change replay.
+   - Verify: JMAP method tests cover private capability gating and canonical Note, Journal, and Reminder store usage.
+
+3. IMAP compatibility after JMAP/storage.
+   - IMAP remains mail-only. Expose `Journal`, `Notes`, `Tasks`, and `Reminders` through IMAP only as mailbox names if an administrator deliberately wants Outlook IMAP fallback discovery to show those names; do not expose task/note/journal item bodies as mail messages and do not implement reminder search through IMAP.
+   - Preserve `SPECIAL-USE` accuracy: only emit standard IMAP special-use attributes. Journal, Notes, Tasks, and Reminders have no standard IMAP special-use attribute.
+   - Verify: IMAP `LIST` / `XLIST` tests show no false special-use flags and no collaboration object leakage through `FETCH` or `SEARCH`.
+
+4. MAPI over HTTP folder identity and contents.
+   - Keep the existing fixed folder IDs for Journal, Notes, Tasks, and Reminders. Convert Journal and Notes from empty virtual hierarchy rows into projections over canonical item tables. Keep Tasks mapped to canonical task lists and tasks.
+   - Implement folder open, hierarchy rows, property rows, contents tables, restrictions, sorting, source keys, change keys, and ICS download for Journal and Notes. Use `IPF.Journal`, `IPF.StickyNote`, `IPF.Task`, and `Outlook.Reminder` container semantics as the MAPI projection, not as canonical storage names.
+   - Implement Reminders as a MAPI search folder: contents are computed from canonical calendar/task/note/journal objects where reminder metadata is active, excluding the folders Microsoft excludes. This recommendation is an engineering inference from MS-OXOSFLD because LPE does not yet have a general Exchange search-folder store.
+   - Verify: MAPI ROP tests for `RopOpenFolder`, hierarchy table, contents table, property get/set/save, ICS hierarchy/content sync, reconnect, and Outlook 2016/2019 cached-mode profile runs.
+
+5. Client web UI last.
+   - Add Notes, Journal, and Reminders surfaces only after storage and JMAP/API behavior are stable. Use the existing client shell and shared Tailwind primitives; no placeholder actions or mock data.
+   - Tasks UI should reuse the canonical task API and add reminder controls only after the API fields exist.
+   - Verify: unit tests for client data mapping, localized labels in `en`, `fr`, `de`, `it`, and `es`, responsive browser checks, and no nonfunctional runtime actions.
+
+6. Publication gate.
+   - Do not widen public `mapiHttp` autodiscover until local harness, Microsoft RCA, and real Outlook 2016 / 2019 cached-mode profile evidence all show successful profile creation, folder hierarchy sync, content sync for mail/tasks/notes/journal/reminders, close/reopen, reconnect, canonical `Sent`, and cross-protocol JMAP/IMAP consistency.
+
 ## Outlook Lab Test Progress Log
 
 This list is updated after each Outlook/RCA lab run. Use it to keep new Outlook profile tests consistent and to avoid retesting already-passed protocol stages unless a later change invalidates them.

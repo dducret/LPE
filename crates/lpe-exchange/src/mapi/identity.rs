@@ -110,6 +110,7 @@ pub(crate) fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
     global_counter_from_globcnt(&long_term_id[16..22]).map(mapi_store_id)
 }
 
+#[cfg(test)]
 pub(crate) fn folder_entry_id_from_object_id(
     mailbox_guid: Uuid,
     object_id: u64,

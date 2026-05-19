@@ -522,6 +522,37 @@ pub struct UpsertClientTaskRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpsertClientNoteRequest {
+    pub id: Option<Uuid>,
+    pub title: String,
+    pub body_text: String,
+    pub color: String,
+    pub categories_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertJournalEntryRequest {
+    pub id: Option<Uuid>,
+    pub subject: String,
+    pub body_text: String,
+    pub entry_type: String,
+    pub message_class: Option<String>,
+    pub starts_at: Option<String>,
+    pub ends_at: Option<String>,
+    pub occurred_at: Option<String>,
+    pub companies_json: Option<String>,
+    pub contacts_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderQueryRequest {
+    pub include_inactive: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpsertTaskListGrantRequest {
     pub grantee_email: String,
     pub may_read: bool,

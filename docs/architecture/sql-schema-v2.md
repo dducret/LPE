@@ -161,7 +161,7 @@ Schema v2 uses counters plus append-only logs.
 
 | Table | Scope | Use |
 | --- | --- | --- |
-| `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, rights |
+| `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, notes, journal, rights |
 | `mailboxes.modseq` | mailbox | IMAP `HIGHESTMODSEQ`, QRESYNC, mailbox-scoped refresh |
 | `mail_change_log` | object | JMAP changes, push replay, MAPI ICS manifests, DAV sync, ActiveSync deltas |
 | `tombstones` | deleted object | JMAP destroyed ids, IMAP expunge, MAPI ICS deletes, ActiveSync deletes |
@@ -431,6 +431,8 @@ Contacts, calendars, and tasks use canonical collections and items:
 - `contact_books`, `contacts`
 - `calendars`, `calendar_events`
 - `task_lists`, `tasks`
+- `notes`
+- `journal_entries`
 - `contact_book_grants`, `calendar_grants`, `task_list_grants`
 
 All collaboration objects are tenant-scoped and owner-account-scoped. Grants are
@@ -453,10 +455,20 @@ arrays. Contacts store structured name parts, email/phone/address arrays,
 organization/title fields, notes, raw vCard text, and source/import metadata so
 JMAP, DAV, EWS, and MAPI can project from one canonical row. Calendar events
 store `UID`, `SEQUENCE`, organizer, attendees, recurrence, recurrence
-exceptions, timezone, location, and body fields without adapter-local event
-tables. Tasks store start, due, completed, priority, and recurrence fields where
-the documented adapters expose them. Completed tasks must carry `completed_at`,
-while non-completed tasks must not.
+exceptions, timezone, location, reminder metadata, and body fields without
+adapter-local event tables. Tasks store start, due, completed, priority,
+recurrence, and reminder fields where the documented adapters expose them.
+Completed tasks must carry `completed_at`, while non-completed tasks must not.
+Notes store sticky-note title/body, color, categories, and source metadata.
+Journal entries store subject/body, entry type, MAPI message-class projection
+metadata, start/end/occurred timestamps, company/contact metadata, and source
+metadata.
+
+Reminders do not have a canonical table. They are a computed API/search-folder
+view over reminder-bearing canonical calendar events and tasks. Active reminder
+queries exclude rows without `reminder_set`, rows with dismissed reminders,
+completed tasks, and cancelled task/calendar state; diagnostic queries can
+include inactive rows with explicit statuses.
 
 Object-level change logs and tombstones cover mailbox and collaboration
 objects. Custom mailbox deletes, collaboration grants, mailbox delegation
@@ -584,6 +596,8 @@ collaboration, rights, or user-visible state.
 - `calendar_events`
 - `task_lists`
 - `tasks`
+- `notes`
+- `journal_entries`
 - `contact_book_grants`
 - `calendar_grants`
 - `task_list_grants`

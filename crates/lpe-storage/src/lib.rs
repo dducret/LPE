@@ -10,6 +10,7 @@ pub mod inbound;
 pub mod mail;
 mod message_ops;
 pub mod models;
+pub mod notes_journal;
 mod outbound;
 pub mod protocols;
 pub mod pst;
@@ -46,6 +47,10 @@ pub use crate::collaboration::{
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights,
 };
 pub use crate::core::Storage;
+pub use crate::notes_journal::{
+    ClientNote, ClientReminder, JournalEntry, ReminderQuery, UpsertClientNoteInput,
+    UpsertJournalEntryInput,
+};
 pub use crate::protocols::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
     ActiveSyncSyncState, ImapEmail, ImapMailboxState, ImapMimePart, JmapEmail, JmapEmailAddress,

@@ -446,6 +446,86 @@ pub struct TaskSetArguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct NoteGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
+    pub limit: Option<u64>,
+    pub filter: Option<NoteQueryFilter>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteQueryFilter {
+    pub text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteSetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalEntryGetArguments {
+    pub account_id: Option<String>,
+    pub ids: Option<Vec<String>>,
+    pub properties: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalEntryQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
+    pub limit: Option<u64>,
+    pub filter: Option<JournalEntryQueryFilter>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalEntryQueryFilter {
+    pub text: Option<String>,
+    pub entry_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JournalEntrySetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderQueryArguments {
+    pub account_id: Option<String>,
+    pub position: Option<i64>,
+    pub anchor: Option<String>,
+    pub anchor_offset: Option<i64>,
+    pub limit: Option<u64>,
+    pub include_inactive: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CalendarEventGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,

@@ -334,7 +334,7 @@ Files:
 - `install-lpe.sh` now verifies that `LPE_DB_PASSWORD`, `DATABASE_URL`, `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_INTEGRATION_SHARED_SECRET` were actually persisted to `/etc/lpe/lpe.env` before it continues
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
-- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, and restarts the service when the installed database already matches the current schema
+- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, applies the bounded Notes/Journal/Reminder schema repair when needed, rebuilds `lpe-cli`, and restarts the service when the installed database matches the current schema
 - `update-lpe.sh` refuses to continue when the installed MAPI identity key constraints still use an older shape; run `repair-mapi-identity-keys.sh` for that specific 22-byte key repair, or use `init-schema.sh` only for an intentional reset
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
@@ -342,6 +342,7 @@ Files:
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
+- `repair-notes-journal-reminders-schema.sh` applies the bounded non-destructive schema additions for canonical Notes, Journal, and computed Reminder support on an existing v2 database
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
 - `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical `0.3.0-sql-v2` schema, including the platform tenant UUID row and default storage pool/policy metadata; use it only for fresh installs or intentional resets
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
@@ -760,7 +761,7 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` rebuilds and redeploys code and web assets. It does not apply general schema migrations; for an intentional fresh schema reset, run `init-schema.sh` explicitly. If `check-lpe.sh` reports that `mapi_object_identities` still has older MAPI identity key constraints, run `repair-mapi-identity-keys.sh` once before retrying Outlook MAPI/HTTP profile creation.
+`update-lpe.sh` rebuilds and redeploys code and web assets. It applies only documented bounded repair steps such as `repair-notes-journal-reminders-schema.sh`; it does not apply general schema migrations. For an intentional fresh schema reset, run `init-schema.sh` explicitly. If `check-lpe.sh` reports that `mapi_object_identities` still has older MAPI identity key constraints, run `repair-mapi-identity-keys.sh` once before retrying Outlook MAPI/HTTP profile creation.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 

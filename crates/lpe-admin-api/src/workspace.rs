@@ -1,13 +1,14 @@
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{HeaderMap, StatusCode},
     Json,
 };
 use lpe_storage::{
-    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientTask, ClientTaskList,
-    ClientWorkspace, HealthResponse, MailboxAccountAccess, SavedDraftMessage, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
+    ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JournalEntry,
+    MailboxAccountAccess, ReminderQuery, SavedDraftMessage, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -16,17 +17,22 @@ use crate::{
     http::{bad_request_error, internal_error},
     observability, require_account,
     types::{
-        ApiResult, SubmitMessageRequest, SubmitRecipientRequest, UpsertClientContactRequest,
-        UpsertClientEventRequest, UpsertClientTaskRequest,
+        ApiResult, ReminderQueryRequest, SubmitMessageRequest, SubmitRecipientRequest,
+        UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientNoteRequest,
+        UpsertClientTaskRequest, UpsertJournalEntryRequest,
     },
 };
 
 #[allow(async_fn_in_trait)]
-trait ClientSubmissionStore {
+trait ClientSessionStore {
     async fn fetch_account_session(
         &self,
         token: &str,
     ) -> anyhow::Result<Option<AuthenticatedAccount>>;
+}
+
+#[allow(async_fn_in_trait)]
+trait ClientSubmissionStore: ClientSessionStore {
     async fn fetch_accessible_mailbox_accounts(
         &self,
         principal_account_id: Uuid,
@@ -38,14 +44,44 @@ trait ClientSubmissionStore {
     ) -> anyhow::Result<SubmittedMessage>;
 }
 
-impl ClientSubmissionStore for Storage {
+impl ClientSessionStore for Storage {
     async fn fetch_account_session(
         &self,
         token: &str,
     ) -> anyhow::Result<Option<AuthenticatedAccount>> {
         Storage::fetch_account_session(self, token).await
     }
+}
 
+#[allow(async_fn_in_trait)]
+trait ClientOutlookStore: ClientSessionStore {
+    async fn fetch_client_notes(&self, account_id: Uuid) -> anyhow::Result<Vec<ClientNote>>;
+    async fn fetch_client_notes_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> anyhow::Result<Vec<ClientNote>>;
+    async fn upsert_client_note(&self, input: UpsertClientNoteInput) -> anyhow::Result<ClientNote>;
+    async fn delete_client_note(&self, account_id: Uuid, note_id: Uuid) -> anyhow::Result<()>;
+    async fn fetch_journal_entries(&self, account_id: Uuid) -> anyhow::Result<Vec<JournalEntry>>;
+    async fn fetch_journal_entries_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> anyhow::Result<Vec<JournalEntry>>;
+    async fn upsert_journal_entry(
+        &self,
+        input: UpsertJournalEntryInput,
+    ) -> anyhow::Result<JournalEntry>;
+    async fn delete_journal_entry(&self, account_id: Uuid, entry_id: Uuid) -> anyhow::Result<()>;
+    async fn query_client_reminders(
+        &self,
+        account_id: Uuid,
+        query: ReminderQuery,
+    ) -> anyhow::Result<Vec<ClientReminder>>;
+}
+
+impl ClientSubmissionStore for Storage {
     async fn fetch_accessible_mailbox_accounts(
         &self,
         principal_account_id: Uuid,
@@ -59,6 +95,59 @@ impl ClientSubmissionStore for Storage {
         audit: AuditEntryInput,
     ) -> anyhow::Result<SubmittedMessage> {
         Storage::submit_message(self, input, audit).await
+    }
+}
+
+impl ClientOutlookStore for Storage {
+    async fn fetch_client_notes(&self, account_id: Uuid) -> anyhow::Result<Vec<ClientNote>> {
+        Storage::fetch_client_notes(self, account_id).await
+    }
+
+    async fn fetch_client_notes_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> anyhow::Result<Vec<ClientNote>> {
+        Storage::fetch_client_notes_by_ids(self, account_id, ids).await
+    }
+
+    async fn upsert_client_note(&self, input: UpsertClientNoteInput) -> anyhow::Result<ClientNote> {
+        Storage::upsert_client_note(self, input).await
+    }
+
+    async fn delete_client_note(&self, account_id: Uuid, note_id: Uuid) -> anyhow::Result<()> {
+        Storage::delete_client_note(self, account_id, note_id).await
+    }
+
+    async fn fetch_journal_entries(&self, account_id: Uuid) -> anyhow::Result<Vec<JournalEntry>> {
+        Storage::fetch_journal_entries(self, account_id).await
+    }
+
+    async fn fetch_journal_entries_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> anyhow::Result<Vec<JournalEntry>> {
+        Storage::fetch_journal_entries_by_ids(self, account_id, ids).await
+    }
+
+    async fn upsert_journal_entry(
+        &self,
+        input: UpsertJournalEntryInput,
+    ) -> anyhow::Result<JournalEntry> {
+        Storage::upsert_journal_entry(self, input).await
+    }
+
+    async fn delete_journal_entry(&self, account_id: Uuid, entry_id: Uuid) -> anyhow::Result<()> {
+        Storage::delete_journal_entry(self, account_id, entry_id).await
+    }
+
+    async fn query_client_reminders(
+        &self,
+        account_id: Uuid,
+        query: ReminderQuery,
+    ) -> anyhow::Result<Vec<ClientReminder>> {
+        Storage::query_client_reminders(self, account_id, query).await
     }
 }
 
@@ -385,7 +474,239 @@ pub(crate) async fn delete_client_task(
     }))
 }
 
-async fn require_account_from_store<S: ClientSubmissionStore>(
+pub(crate) async fn list_client_notes(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<ClientNote>> {
+    Ok(Json(
+        list_client_notes_with_store(&storage, &headers).await?,
+    ))
+}
+
+pub(crate) async fn get_client_note(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(note_id): AxumPath<Uuid>,
+) -> ApiResult<ClientNote> {
+    Ok(Json(
+        get_client_note_with_store(&storage, &headers, note_id).await?,
+    ))
+}
+
+pub(crate) async fn upsert_client_note(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertClientNoteRequest>,
+) -> ApiResult<ClientNote> {
+    Ok(Json(
+        upsert_client_note_with_store(&storage, &headers, request).await?,
+    ))
+}
+
+pub(crate) async fn delete_client_note(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(note_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    delete_client_note_with_store(&storage, &headers, note_id).await?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn list_journal_entries(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<JournalEntry>> {
+    Ok(Json(
+        list_journal_entries_with_store(&storage, &headers).await?,
+    ))
+}
+
+pub(crate) async fn get_journal_entry(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(entry_id): AxumPath<Uuid>,
+) -> ApiResult<JournalEntry> {
+    Ok(Json(
+        get_journal_entry_with_store(&storage, &headers, entry_id).await?,
+    ))
+}
+
+pub(crate) async fn upsert_journal_entry(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertJournalEntryRequest>,
+) -> ApiResult<JournalEntry> {
+    Ok(Json(
+        upsert_journal_entry_with_store(&storage, &headers, request).await?,
+    ))
+}
+
+pub(crate) async fn delete_journal_entry(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(entry_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    delete_journal_entry_with_store(&storage, &headers, entry_id).await?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn query_client_reminders(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Query(request): Query<ReminderQueryRequest>,
+) -> ApiResult<Vec<ClientReminder>> {
+    Ok(Json(
+        query_client_reminders_with_store(&storage, &headers, request).await?,
+    ))
+}
+
+async fn list_client_notes_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+) -> std::result::Result<Vec<ClientNote>, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .fetch_client_notes(account.account_id)
+        .await
+        .map_err(internal_error)
+}
+
+async fn get_client_note_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    note_id: Uuid,
+) -> std::result::Result<ClientNote, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    let mut notes = storage
+        .fetch_client_notes_by_ids(account.account_id, &[note_id])
+        .await
+        .map_err(internal_error)?;
+    notes
+        .pop()
+        .ok_or((StatusCode::NOT_FOUND, "note not found".to_string()))
+}
+
+async fn upsert_client_note_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    request: UpsertClientNoteRequest,
+) -> std::result::Result<ClientNote, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .upsert_client_note(UpsertClientNoteInput {
+            id: request.id,
+            account_id: account.account_id,
+            title: request.title,
+            body_text: request.body_text,
+            color: request.color,
+            categories_json: request.categories_json.unwrap_or_else(|| "[]".to_string()),
+        })
+        .await
+        .map_err(bad_request_error)
+}
+
+async fn delete_client_note_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    note_id: Uuid,
+) -> std::result::Result<(), (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .delete_client_note(account.account_id, note_id)
+        .await
+        .map_err(bad_request_error)
+}
+
+async fn list_journal_entries_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+) -> std::result::Result<Vec<JournalEntry>, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .fetch_journal_entries(account.account_id)
+        .await
+        .map_err(internal_error)
+}
+
+async fn get_journal_entry_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    entry_id: Uuid,
+) -> std::result::Result<JournalEntry, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    let mut entries = storage
+        .fetch_journal_entries_by_ids(account.account_id, &[entry_id])
+        .await
+        .map_err(internal_error)?;
+    entries
+        .pop()
+        .ok_or((StatusCode::NOT_FOUND, "journal entry not found".to_string()))
+}
+
+async fn upsert_journal_entry_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    request: UpsertJournalEntryRequest,
+) -> std::result::Result<JournalEntry, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .upsert_journal_entry(UpsertJournalEntryInput {
+            id: request.id,
+            account_id: account.account_id,
+            subject: request.subject,
+            body_text: request.body_text,
+            entry_type: request.entry_type,
+            message_class: request
+                .message_class
+                .unwrap_or_else(|| "IPM.Activity".to_string()),
+            starts_at: request.starts_at,
+            ends_at: request.ends_at,
+            occurred_at: request.occurred_at,
+            companies_json: request.companies_json.unwrap_or_else(|| "[]".to_string()),
+            contacts_json: request.contacts_json.unwrap_or_else(|| "[]".to_string()),
+        })
+        .await
+        .map_err(bad_request_error)
+}
+
+async fn delete_journal_entry_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    entry_id: Uuid,
+) -> std::result::Result<(), (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .delete_journal_entry(account.account_id, entry_id)
+        .await
+        .map_err(bad_request_error)
+}
+
+async fn query_client_reminders_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    request: ReminderQueryRequest,
+) -> std::result::Result<Vec<ClientReminder>, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .query_client_reminders(
+            account.account_id,
+            ReminderQuery {
+                include_inactive: request.include_inactive.unwrap_or(false),
+            },
+        )
+        .await
+        .map_err(internal_error)
+}
+
+async fn require_account_from_store<S: ClientSessionStore>(
     storage: &S,
     headers: &HeaderMap,
 ) -> std::result::Result<AuthenticatedAccount, (StatusCode, String)> {
@@ -524,14 +845,21 @@ fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientI
 #[cfg(test)]
 mod tests {
     use super::{
-        classify_client_submission_storage_error, map_submit_message_request,
-        resolve_client_sender_fields, submit_message_with_store,
+        classify_client_submission_storage_error, delete_client_note_with_store,
+        delete_journal_entry_with_store, get_client_note_with_store, get_journal_entry_with_store,
+        list_client_notes_with_store, list_journal_entries_with_store, map_submit_message_request,
+        query_client_reminders_with_store, resolve_client_sender_fields, submit_message_with_store,
+        upsert_client_note_with_store, upsert_journal_entry_with_store,
     };
-    use crate::types::SubmitMessageRequest;
+    use crate::types::{
+        ReminderQueryRequest, SubmitMessageRequest, UpsertClientNoteRequest,
+        UpsertJournalEntryRequest,
+    };
     use axum::http::{HeaderMap, HeaderValue};
     use lpe_storage::{
-        AuditEntryInput, AuthenticatedAccount, MailboxAccountAccess, SubmitMessageInput,
-        SubmittedMessage,
+        AuditEntryInput, AuthenticatedAccount, ClientNote, ClientReminder, JournalEntry,
+        MailboxAccountAccess, ReminderQuery, SubmitMessageInput, SubmittedMessage,
+        UpsertClientNoteInput, UpsertJournalEntryInput,
     };
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -544,8 +872,37 @@ mod tests {
         audits: Arc<Mutex<Vec<AuditEntryInput>>>,
     }
 
+    #[derive(Clone)]
+    struct FakeOutlookStore {
+        session: Option<AuthenticatedAccount>,
+        notes: Arc<Mutex<Vec<ClientNote>>>,
+        journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
+        reminders: Arc<Mutex<Vec<ClientReminder>>>,
+        note_inputs: Arc<Mutex<Vec<UpsertClientNoteInput>>>,
+        journal_inputs: Arc<Mutex<Vec<UpsertJournalEntryInput>>>,
+        deleted_notes: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
+        deleted_journal_entries: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
+        reminder_queries: Arc<Mutex<Vec<(Uuid, bool)>>>,
+    }
+
+    impl Default for FakeOutlookStore {
+        fn default() -> Self {
+            Self {
+                session: Some(account()),
+                notes: Arc::new(Mutex::new(vec![note()])),
+                journal_entries: Arc::new(Mutex::new(vec![journal_entry()])),
+                reminders: Arc::new(Mutex::new(vec![reminder()])),
+                note_inputs: Arc::new(Mutex::new(Vec::new())),
+                journal_inputs: Arc::new(Mutex::new(Vec::new())),
+                deleted_notes: Arc::new(Mutex::new(Vec::new())),
+                deleted_journal_entries: Arc::new(Mutex::new(Vec::new())),
+                reminder_queries: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
     #[allow(async_fn_in_trait)]
-    impl super::ClientSubmissionStore for FakeSubmissionStore {
+    impl super::ClientSessionStore for FakeSubmissionStore {
         async fn fetch_account_session(
             &self,
             token: &str,
@@ -556,7 +913,10 @@ mod tests {
                 None
             })
         }
+    }
 
+    #[allow(async_fn_in_trait)]
+    impl super::ClientSubmissionStore for FakeSubmissionStore {
         async fn fetch_accessible_mailbox_accounts(
             &self,
             _principal_account_id: Uuid,
@@ -583,13 +943,217 @@ mod tests {
         }
     }
 
+    #[allow(async_fn_in_trait)]
+    impl super::ClientSessionStore for FakeOutlookStore {
+        async fn fetch_account_session(
+            &self,
+            token: &str,
+        ) -> anyhow::Result<Option<AuthenticatedAccount>> {
+            Ok(if token == "token" {
+                self.session.clone()
+            } else {
+                None
+            })
+        }
+    }
+
+    #[allow(async_fn_in_trait)]
+    impl super::ClientOutlookStore for FakeOutlookStore {
+        async fn fetch_client_notes(&self, account_id: Uuid) -> anyhow::Result<Vec<ClientNote>> {
+            Ok(self
+                .notes
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|_| account_id == account().account_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn fetch_client_notes_by_ids(
+            &self,
+            account_id: Uuid,
+            ids: &[Uuid],
+        ) -> anyhow::Result<Vec<ClientNote>> {
+            Ok(self
+                .notes
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|note| account_id == account().account_id && ids.contains(&note.id))
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert_client_note(
+            &self,
+            input: UpsertClientNoteInput,
+        ) -> anyhow::Result<ClientNote> {
+            self.note_inputs.lock().unwrap().push(input.clone());
+            let note = ClientNote {
+                id: input.id.unwrap_or_else(note_id),
+                title: input.title,
+                body_text: input.body_text,
+                color: input.color,
+                categories_json: input.categories_json,
+                created_at: "2026-05-19T10:00:00Z".to_string(),
+                updated_at: "2026-05-19T10:00:00Z".to_string(),
+            };
+            self.notes.lock().unwrap().push(note.clone());
+            Ok(note)
+        }
+
+        async fn delete_client_note(&self, account_id: Uuid, note_id: Uuid) -> anyhow::Result<()> {
+            self.deleted_notes
+                .lock()
+                .unwrap()
+                .push((account_id, note_id));
+            self.notes.lock().unwrap().retain(|note| note.id != note_id);
+            Ok(())
+        }
+
+        async fn fetch_journal_entries(
+            &self,
+            account_id: Uuid,
+        ) -> anyhow::Result<Vec<JournalEntry>> {
+            Ok(self
+                .journal_entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|_| account_id == account().account_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn fetch_journal_entries_by_ids(
+            &self,
+            account_id: Uuid,
+            ids: &[Uuid],
+        ) -> anyhow::Result<Vec<JournalEntry>> {
+            Ok(self
+                .journal_entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| account_id == account().account_id && ids.contains(&entry.id))
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert_journal_entry(
+            &self,
+            input: UpsertJournalEntryInput,
+        ) -> anyhow::Result<JournalEntry> {
+            self.journal_inputs.lock().unwrap().push(input.clone());
+            let entry = JournalEntry {
+                id: input.id.unwrap_or_else(journal_entry_id),
+                subject: input.subject,
+                body_text: input.body_text,
+                entry_type: input.entry_type,
+                message_class: input.message_class,
+                starts_at: input.starts_at,
+                ends_at: input.ends_at,
+                occurred_at: input.occurred_at,
+                companies_json: input.companies_json,
+                contacts_json: input.contacts_json,
+                created_at: "2026-05-19T10:00:00Z".to_string(),
+                updated_at: "2026-05-19T10:00:00Z".to_string(),
+            };
+            self.journal_entries.lock().unwrap().push(entry.clone());
+            Ok(entry)
+        }
+
+        async fn delete_journal_entry(
+            &self,
+            account_id: Uuid,
+            entry_id: Uuid,
+        ) -> anyhow::Result<()> {
+            self.deleted_journal_entries
+                .lock()
+                .unwrap()
+                .push((account_id, entry_id));
+            self.journal_entries
+                .lock()
+                .unwrap()
+                .retain(|entry| entry.id != entry_id);
+            Ok(())
+        }
+
+        async fn query_client_reminders(
+            &self,
+            account_id: Uuid,
+            query: ReminderQuery,
+        ) -> anyhow::Result<Vec<ClientReminder>> {
+            self.reminder_queries
+                .lock()
+                .unwrap()
+                .push((account_id, query.include_inactive));
+            Ok(self.reminders.lock().unwrap().clone())
+        }
+    }
+
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
             tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
-            account_id: Uuid::new_v4(),
+            account_id: account_id(),
             email: "delegate@example.test".to_string(),
             display_name: "Delegate".to_string(),
             expires_at: "2026-04-22T00:00:00Z".to_string(),
+        }
+    }
+
+    fn account_id() -> Uuid {
+        Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap()
+    }
+
+    fn note_id() -> Uuid {
+        Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap()
+    }
+
+    fn journal_entry_id() -> Uuid {
+        Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()
+    }
+
+    fn note() -> ClientNote {
+        ClientNote {
+            id: note_id(),
+            title: "Sticky note".to_string(),
+            body_text: "Body".to_string(),
+            color: "yellow".to_string(),
+            categories_json: r#"["outlook"]"#.to_string(),
+            created_at: "2026-05-19T09:00:00Z".to_string(),
+            updated_at: "2026-05-19T09:00:00Z".to_string(),
+        }
+    }
+
+    fn journal_entry() -> JournalEntry {
+        JournalEntry {
+            id: journal_entry_id(),
+            subject: "Phone call".to_string(),
+            body_text: "Call notes".to_string(),
+            entry_type: "phone-call".to_string(),
+            message_class: "IPM.Activity".to_string(),
+            starts_at: Some("2026-05-19T09:00:00Z".to_string()),
+            ends_at: None,
+            occurred_at: None,
+            companies_json: "[]".to_string(),
+            contacts_json: "[]".to_string(),
+            created_at: "2026-05-19T09:00:00Z".to_string(),
+            updated_at: "2026-05-19T09:00:00Z".to_string(),
+        }
+    }
+
+    fn reminder() -> ClientReminder {
+        ClientReminder {
+            source_type: "task".to_string(),
+            source_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+            title: "Reminder".to_string(),
+            due_at: None,
+            reminder_at: "2026-05-19T09:00:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "due".to_string(),
         }
     }
 
@@ -761,5 +1325,118 @@ mod tests {
         assert!(recorded[0].cc.is_empty());
         assert!(recorded[0].bcc.is_empty());
         assert_eq!(store.audits.lock().unwrap()[0].action, "submit-message");
+    }
+
+    #[tokio::test]
+    async fn notes_api_helpers_cover_authenticated_crud_path() {
+        let store = FakeOutlookStore::default();
+        let headers = bearer_headers();
+
+        let listed = list_client_notes_with_store(&store, &headers)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        let fetched = get_client_note_with_store(&store, &headers, note_id())
+            .await
+            .unwrap();
+        assert_eq!(fetched.title, "Sticky note");
+
+        let created = upsert_client_note_with_store(
+            &store,
+            &headers,
+            UpsertClientNoteRequest {
+                id: None,
+                title: "New note".to_string(),
+                body_text: "API body".to_string(),
+                color: "blue".to_string(),
+                categories_json: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(created.title, "New note");
+        let recorded = store.note_inputs.lock().unwrap();
+        assert_eq!(recorded[0].account_id, account_id());
+        assert_eq!(recorded[0].categories_json, "[]");
+        drop(recorded);
+
+        delete_client_note_with_store(&store, &headers, note_id())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.deleted_notes.lock().unwrap().as_slice(),
+            &[(account_id(), note_id())]
+        );
+    }
+
+    #[tokio::test]
+    async fn journal_api_helpers_cover_authenticated_crud_path() {
+        let store = FakeOutlookStore::default();
+        let headers = bearer_headers();
+
+        let listed = list_journal_entries_with_store(&store, &headers)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        let fetched = get_journal_entry_with_store(&store, &headers, journal_entry_id())
+            .await
+            .unwrap();
+        assert_eq!(fetched.subject, "Phone call");
+
+        let created = upsert_journal_entry_with_store(
+            &store,
+            &headers,
+            UpsertJournalEntryRequest {
+                id: None,
+                subject: "New journal".to_string(),
+                body_text: "API body".to_string(),
+                entry_type: "note".to_string(),
+                message_class: None,
+                starts_at: None,
+                ends_at: None,
+                occurred_at: Some("2026-05-19T09:30:00Z".to_string()),
+                companies_json: None,
+                contacts_json: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(created.subject, "New journal");
+        let recorded = store.journal_inputs.lock().unwrap();
+        assert_eq!(recorded[0].account_id, account_id());
+        assert_eq!(recorded[0].message_class, "IPM.Activity");
+        assert_eq!(recorded[0].companies_json, "[]");
+        assert_eq!(recorded[0].contacts_json, "[]");
+        drop(recorded);
+
+        delete_journal_entry_with_store(&store, &headers, journal_entry_id())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.deleted_journal_entries.lock().unwrap().as_slice(),
+            &[(account_id(), journal_entry_id())]
+        );
+    }
+
+    #[tokio::test]
+    async fn reminder_api_helper_preserves_include_inactive_query() {
+        let store = FakeOutlookStore::default();
+        let reminders = query_client_reminders_with_store(
+            &store,
+            &bearer_headers(),
+            ReminderQueryRequest {
+                include_inactive: Some(true),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(reminders[0].status, "due");
+        assert_eq!(
+            store.reminder_queries.lock().unwrap().as_slice(),
+            &[(account_id(), true)]
+        );
     }
 }

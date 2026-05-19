@@ -581,6 +581,8 @@ pub(crate) fn query_diff_for_kind(
             | "Calendar/query"
             | "ContactCard"
             | "CalendarEvent"
+            | "Note"
+            | "JournalEntry"
     ) {
         compute_query_diff_with_reorders(previous_ids, current_ids, max_changes)
     } else {

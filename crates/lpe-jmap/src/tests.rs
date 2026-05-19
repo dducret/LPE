@@ -1,6 +1,7 @@
 use lpe_storage::{
-    AuthenticatedAccount, ClientTask, JmapEmail, JmapEmailQuery, JmapMailbox, JmapUploadBlob,
-    SieveScriptDocument, SubmitMessageInput, SubmittedMessage,
+    AuthenticatedAccount, ClientNote, ClientReminder, ClientTask, JmapEmail, JmapEmailQuery,
+    JmapMailbox, JmapUploadBlob, JournalEntry, SieveScriptDocument, SubmitMessageInput,
+    SubmittedMessage,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -24,7 +25,8 @@ use lpe_storage::{
     JmapEmailAddress, JmapEmailMailboxState, JmapEmailSubmission, JmapImportedEmailInput,
     JmapMailObjectChange, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
     JmapStoredQueryState, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
-    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
+    UpsertClientTaskInput, UpsertJournalEntryInput,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -46,6 +48,9 @@ struct FakeStore {
     events: Arc<Mutex<Vec<ClientEvent>>>,
     task_lists: Arc<Mutex<Vec<ClientTaskList>>>,
     tasks: Arc<Mutex<Vec<ClientTask>>>,
+    notes: Arc<Mutex<Vec<ClientNote>>>,
+    journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
+    reminders: Arc<Mutex<Vec<ClientReminder>>>,
     uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
     raw_message_blobs: Arc<Mutex<HashMap<Uuid, JmapUploadBlob>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
@@ -485,6 +490,48 @@ impl FakeStore {
             completed_at: None,
             sort_order: 10,
             updated_at: "2026-04-20T15:00:00Z".to_string(),
+        }
+    }
+
+    fn note() -> ClientNote {
+        ClientNote {
+            id: Uuid::parse_str("67676767-6767-6767-6767-676767676767").unwrap(),
+            title: "Sticky note".to_string(),
+            body_text: "Remember the Outlook lab".to_string(),
+            color: "yellow".to_string(),
+            categories_json: r#"["outlook"]"#.to_string(),
+            created_at: "2026-05-19T08:00:00Z".to_string(),
+            updated_at: "2026-05-19T08:30:00Z".to_string(),
+        }
+    }
+
+    fn journal_entry() -> JournalEntry {
+        JournalEntry {
+            id: Uuid::parse_str("78787878-7878-7878-7878-787878787878").unwrap(),
+            subject: "Customer call".to_string(),
+            body_text: "Reviewed migration plan".to_string(),
+            entry_type: "phone-call".to_string(),
+            message_class: "IPM.Activity".to_string(),
+            starts_at: Some("2026-05-19T09:00:00Z".to_string()),
+            ends_at: Some("2026-05-19T09:15:00Z".to_string()),
+            occurred_at: None,
+            companies_json: r#"["Contoso"]"#.to_string(),
+            contacts_json: r#"["Ada Example"]"#.to_string(),
+            created_at: "2026-05-19T09:00:00Z".to_string(),
+            updated_at: "2026-05-19T09:15:00Z".to_string(),
+        }
+    }
+
+    fn reminder() -> ClientReminder {
+        ClientReminder {
+            source_type: "task".to_string(),
+            source_id: Self::task().id,
+            title: "Prepare release".to_string(),
+            due_at: Some("2026-04-21T09:00:00Z".to_string()),
+            reminder_at: "2026-04-21T08:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "due".to_string(),
         }
     }
 
@@ -1544,6 +1591,119 @@ impl JmapStore for FakeStore {
             bail!("task not found");
         }
         Ok(())
+    }
+
+    async fn fetch_jmap_notes(&self, _account_id: Uuid) -> Result<Vec<ClientNote>> {
+        Ok(self.notes.lock().unwrap().clone())
+    }
+
+    async fn fetch_jmap_notes_by_ids(
+        &self,
+        _account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<ClientNote>> {
+        Ok(self
+            .notes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|note| ids.contains(&note.id))
+            .cloned()
+            .collect())
+    }
+
+    async fn upsert_jmap_note(&self, input: UpsertClientNoteInput) -> Result<ClientNote> {
+        let note = ClientNote {
+            id: input.id.unwrap_or_else(Uuid::new_v4),
+            title: input.title,
+            body_text: input.body_text,
+            color: input.color,
+            categories_json: input.categories_json,
+            created_at: "2026-05-19T08:00:00Z".to_string(),
+            updated_at: "2026-05-19T08:30:00Z".to_string(),
+        };
+        let mut notes = self.notes.lock().unwrap();
+        notes.retain(|entry| entry.id != note.id);
+        notes.push(note.clone());
+        Ok(note)
+    }
+
+    async fn delete_jmap_note(&self, _account_id: Uuid, note_id: Uuid) -> Result<()> {
+        let mut notes = self.notes.lock().unwrap();
+        let original_len = notes.len();
+        notes.retain(|entry| entry.id != note_id);
+        if notes.len() == original_len {
+            bail!("note not found");
+        }
+        Ok(())
+    }
+
+    async fn fetch_jmap_journal_entries(&self, _account_id: Uuid) -> Result<Vec<JournalEntry>> {
+        Ok(self.journal_entries.lock().unwrap().clone())
+    }
+
+    async fn fetch_jmap_journal_entries_by_ids(
+        &self,
+        _account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<JournalEntry>> {
+        Ok(self
+            .journal_entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|entry| ids.contains(&entry.id))
+            .cloned()
+            .collect())
+    }
+
+    async fn upsert_jmap_journal_entry(
+        &self,
+        input: UpsertJournalEntryInput,
+    ) -> Result<JournalEntry> {
+        let entry = JournalEntry {
+            id: input.id.unwrap_or_else(Uuid::new_v4),
+            subject: input.subject,
+            body_text: input.body_text,
+            entry_type: input.entry_type,
+            message_class: input.message_class,
+            starts_at: input.starts_at,
+            ends_at: input.ends_at,
+            occurred_at: input.occurred_at,
+            companies_json: input.companies_json,
+            contacts_json: input.contacts_json,
+            created_at: "2026-05-19T09:00:00Z".to_string(),
+            updated_at: "2026-05-19T09:15:00Z".to_string(),
+        };
+        let mut entries = self.journal_entries.lock().unwrap();
+        entries.retain(|existing| existing.id != entry.id);
+        entries.push(entry.clone());
+        Ok(entry)
+    }
+
+    async fn delete_jmap_journal_entry(&self, _account_id: Uuid, entry_id: Uuid) -> Result<()> {
+        let mut entries = self.journal_entries.lock().unwrap();
+        let original_len = entries.len();
+        entries.retain(|entry| entry.id != entry_id);
+        if entries.len() == original_len {
+            bail!("journal entry not found");
+        }
+        Ok(())
+    }
+
+    async fn query_jmap_reminders(
+        &self,
+        _account_id: Uuid,
+        query: lpe_storage::ReminderQuery,
+    ) -> Result<Vec<ClientReminder>> {
+        let reminders = self.reminders.lock().unwrap();
+        Ok(reminders
+            .iter()
+            .filter(|reminder| {
+                query.include_inactive || reminder.status == "due" || reminder.status == "pending"
+            })
+            .cloned()
+            .collect())
     }
 }
 
@@ -8154,6 +8314,56 @@ async fn scoped_push_change_limits_recompute_to_requested_categories() {
 }
 
 #[tokio::test]
+async fn websocket_push_tracks_private_outlook_note_and_journal_types() {
+    let account = FakeStore::account();
+    let mut updated_note = FakeStore::note();
+    updated_note.updated_at = "2026-05-19T11:00:00Z".to_string();
+    let mut updated_journal = FakeStore::journal_entry();
+    updated_journal.updated_at = "2026-05-19T11:00:00Z".to_string();
+    let enabled_types = HashSet::from([
+        "Note".to_string(),
+        "JournalEntry".to_string(),
+        "Task".to_string(),
+    ]);
+
+    let initial_service = JmapService::new(FakeStore {
+        session: Some(account.clone()),
+        notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+        journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
+        tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+        ..Default::default()
+    });
+    let last_type_states = initial_service
+        .current_push_states(account.account_id, &enabled_types)
+        .await
+        .unwrap();
+    assert!(last_type_states[&account.account_id.to_string()].contains_key("Note"));
+    assert!(last_type_states[&account.account_id.to_string()].contains_key("JournalEntry"));
+    let subscription = push_subscription(enabled_types, last_type_states);
+
+    let updated_service = JmapService::new(FakeStore {
+        session: Some(account.clone()),
+        notes: Arc::new(Mutex::new(vec![updated_note])),
+        journal_entries: Arc::new(Mutex::new(vec![updated_journal])),
+        tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+        ..Default::default()
+    });
+    let mut change_set = CanonicalPushChangeSet::default();
+    change_set.insert_accounts(CanonicalChangeCategory::Notes, [account.account_id]);
+    change_set.insert_accounts(CanonicalChangeCategory::Journal, [account.account_id]);
+
+    let (changed, _) = updated_service
+        .compute_push_changes(account.account_id, &subscription, &change_set)
+        .await
+        .unwrap();
+
+    let account_changes = &changed[&account.account_id.to_string()];
+    assert!(account_changes.contains_key("Note"));
+    assert!(account_changes.contains_key("JournalEntry"));
+    assert!(!account_changes.contains_key("Task"));
+}
+
+#[tokio::test]
 async fn shared_task_push_change_wakes_grantee_principal() {
     let account = FakeStore::account();
     let shared_owner = FakeStore::shared_account();
@@ -9117,6 +9327,226 @@ async fn task_methods_use_canonical_task_store() {
     let tasks = store.tasks.lock().unwrap();
     assert_eq!(tasks.len(), 2);
     assert!(tasks.iter().any(|task| task.title == "Follow up"));
+}
+
+#[tokio::test]
+async fn private_outlook_methods_use_canonical_note_journal_and_reminder_store() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+        journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
+        reminders: Arc::new(Mutex::new(vec![FakeStore::reminder()])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall("Note/query".to_string(), json!({}), "n0".to_string()),
+                    JmapMethodCall(
+                        "Note/get".to_string(),
+                        json!({"ids": [FakeStore::note().id.to_string()]}),
+                        "n1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Note/set".to_string(),
+                        json!({
+                            "create": {
+                                "new-note": {
+                                    "title": "Second note",
+                                    "bodyText": "Private extension",
+                                    "color": "blue",
+                                    "categoriesJson": "[]"
+                                }
+                            }
+                        }),
+                        "n2".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Note/changes".to_string(),
+                        json!({"sinceState": "0"}),
+                        "n3".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/query".to_string(),
+                        json!({"filter": {"entryType": "phone-call"}}),
+                        "j1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/changes".to_string(),
+                        json!({"sinceState": "0"}),
+                        "j2".to_string(),
+                    ),
+                    JmapMethodCall("Reminder/query".to_string(), json!({}), "r1".to_string()),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[1].1["list"][0]["title"],
+        Value::String("Sticky note".to_string())
+    );
+    assert_eq!(response.method_responses[0].1["canCalculateChanges"], true);
+    assert!(response.created_ids.contains_key("new-note"));
+    assert_eq!(
+        response.method_responses[4].1["ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        response.method_responses[5].1["created"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        response.method_responses[6].1["list"][0]["sourceType"],
+        Value::String("task".to_string())
+    );
+    assert_eq!(store.notes.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn private_outlook_query_changes_track_note_and_journal_lists() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+        journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let initial = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall("Note/query".to_string(), json!({}), "n1".to_string()),
+                    JmapMethodCall(
+                        "JournalEntry/query".to_string(),
+                        json!({}),
+                        "j1".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+    let note_query_state = initial.method_responses[0].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let journal_query_state = initial.method_responses[1].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    store.notes.lock().unwrap().push(ClientNote {
+        id: Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap(),
+        title: "Follow-up".to_string(),
+        body_text: "Change tracking".to_string(),
+        color: "green".to_string(),
+        categories_json: "[]".to_string(),
+        created_at: "2026-05-19T10:00:00Z".to_string(),
+        updated_at: "2026-05-19T10:00:00Z".to_string(),
+    });
+    store.journal_entries.lock().unwrap().push(JournalEntry {
+        id: Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap(),
+        subject: "Follow-up call".to_string(),
+        body_text: "Change tracking".to_string(),
+        entry_type: "phone-call".to_string(),
+        message_class: "IPM.Activity".to_string(),
+        starts_at: Some("2026-05-19T10:00:00Z".to_string()),
+        ends_at: None,
+        occurred_at: None,
+        companies_json: "[]".to_string(),
+        contacts_json: "[]".to_string(),
+        created_at: "2026-05-19T10:00:00Z".to_string(),
+        updated_at: "2026-05-19T10:00:00Z".to_string(),
+    });
+
+    let changed = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Note/queryChanges".to_string(),
+                        json!({"sinceQueryState": note_query_state}),
+                        "n2".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/queryChanges".to_string(),
+                        json!({"sinceQueryState": journal_query_state}),
+                        "j2".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(changed.method_responses[0].1["added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value["id"] == "77777777-7777-7777-7777-777777777777"));
+    assert!(changed.method_responses[1].1["added"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|value| value["id"] == "88888888-8888-8888-8888-888888888888"));
+}
+
+#[tokio::test]
+async fn private_outlook_methods_require_private_capability() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CORE_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Note/get".to_string(),
+                    json!({}),
+                    "n1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].0, "error");
+    assert_eq!(
+        response.method_responses[0].1["description"],
+        "method capability is not requested"
+    );
 }
 
 #[tokio::test]

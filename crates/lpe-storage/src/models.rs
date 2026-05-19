@@ -517,6 +517,45 @@ pub(crate) struct ClientTaskRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct ClientNoteRow {
+    pub(crate) id: Uuid,
+    pub(crate) title: String,
+    pub(crate) body_text: String,
+    pub(crate) color: String,
+    pub(crate) categories_json: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct JournalEntryRow {
+    pub(crate) id: Uuid,
+    pub(crate) subject: String,
+    pub(crate) body_text: String,
+    pub(crate) entry_type: String,
+    pub(crate) message_class: String,
+    pub(crate) starts_at: Option<String>,
+    pub(crate) ends_at: Option<String>,
+    pub(crate) occurred_at: Option<String>,
+    pub(crate) companies_json: String,
+    pub(crate) contacts_json: String,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct ClientReminderRow {
+    pub(crate) source_type: String,
+    pub(crate) source_id: Uuid,
+    pub(crate) title: String,
+    pub(crate) due_at: Option<String>,
+    pub(crate) reminder_at: String,
+    pub(crate) dismissed_at: Option<String>,
+    pub(crate) completed_at: Option<String>,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct DavTaskRow {
     pub(crate) id: Uuid,
     pub(crate) owner_account_id: Uuid,

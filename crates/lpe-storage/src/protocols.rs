@@ -4260,6 +4260,8 @@ fn jmap_exact_object_kind(data_type: &str) -> Option<&'static str> {
         "CalendarEvent" => Some("calendar_event"),
         "TaskList" => Some("task_list"),
         "Task" => Some("task"),
+        "Note" => Some("note"),
+        "JournalEntry" => Some("journal_entry"),
         "EmailSubmission" => Some("submission"),
         _ => None,
     }
@@ -4293,6 +4295,8 @@ fn jmap_object_replay_kinds(data_type: &str) -> Option<Vec<&'static str>> {
         "CalendarEvent" => Some(vec!["calendar_event", "calendar", "calendar_grant"]),
         "TaskList" => Some(vec!["task_list", "task_list_grant"]),
         "Task" => Some(vec!["task", "task_list", "task_list_grant"]),
+        "Note" => Some(vec!["note"]),
+        "JournalEntry" => Some(vec!["journal_entry"]),
         "EmailSubmission" => Some(vec!["submission"]),
         _ => None,
     }
@@ -4337,6 +4341,16 @@ mod tests {
         assert_eq!(
             jmap_object_replay_kinds("Task").unwrap(),
             vec!["task", "task_list", "task_list_grant"]
+        );
+        assert_eq!(jmap_exact_object_kind("Note"), Some("note"));
+        assert_eq!(jmap_object_replay_kinds("Note").unwrap(), vec!["note"]);
+        assert_eq!(
+            jmap_exact_object_kind("JournalEntry"),
+            Some("journal_entry")
+        );
+        assert_eq!(
+            jmap_object_replay_kinds("JournalEntry").unwrap(),
+            vec!["journal_entry"]
         );
         assert_eq!(
             jmap_exact_object_kind("EmailSubmission"),

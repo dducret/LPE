@@ -12,6 +12,8 @@ pub enum CanonicalChangeCategory {
     Contacts,
     Calendar,
     Tasks,
+    Notes,
+    Journal,
     Rights,
 }
 
@@ -22,6 +24,8 @@ impl CanonicalChangeCategory {
             Self::Contacts => "contacts",
             Self::Calendar => "calendar",
             Self::Tasks => "tasks",
+            Self::Notes => "notes",
+            Self::Journal => "journal",
             Self::Rights => "rights",
         }
     }
@@ -32,6 +36,8 @@ impl CanonicalChangeCategory {
             "contacts" => Some(Self::Contacts),
             "calendar" => Some(Self::Calendar),
             "tasks" => Some(Self::Tasks),
+            "notes" => Some(Self::Notes),
+            "journal" => Some(Self::Journal),
             "rights" => Some(Self::Rights),
             _ => None,
         }
@@ -664,9 +670,19 @@ mod tests {
     #[test]
     fn rights_change_category_round_trips() {
         assert_eq!(CanonicalChangeCategory::Rights.as_str(), "rights");
+        assert_eq!(CanonicalChangeCategory::Notes.as_str(), "notes");
+        assert_eq!(CanonicalChangeCategory::Journal.as_str(), "journal");
         assert_eq!(
             CanonicalChangeCategory::from_str("rights"),
             Some(CanonicalChangeCategory::Rights)
+        );
+        assert_eq!(
+            CanonicalChangeCategory::from_str("notes"),
+            Some(CanonicalChangeCategory::Notes)
+        );
+        assert_eq!(
+            CanonicalChangeCategory::from_str("journal"),
+            Some(CanonicalChangeCategory::Journal)
         );
     }
 

@@ -34,6 +34,8 @@ pub(crate) const SUPPORTED_PUSH_DATA_TYPES: &[&str] = &[
     "CalendarEvent",
     "TaskList",
     "Task",
+    "Note",
+    "JournalEntry",
 ];
 
 #[derive(Debug, Default)]
@@ -472,6 +474,11 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 CanonicalChangeCategory::Tasks,
                 ["TaskList", "Task"].as_slice(),
             ),
+            (CanonicalChangeCategory::Notes, ["Note"].as_slice()),
+            (
+                CanonicalChangeCategory::Journal,
+                ["JournalEntry"].as_slice(),
+            ),
         ] {
             if !change_set.contains_category(category) {
                 continue;
@@ -593,6 +600,12 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .any(|value| matches!(value.as_str(), "TaskList" | "Task"))
         {
             categories.push(CanonicalChangeCategory::Tasks);
+        }
+        if data_types.iter().any(|value| value == "Note") {
+            categories.push(CanonicalChangeCategory::Notes);
+        }
+        if data_types.iter().any(|value| value == "JournalEntry") {
+            categories.push(CanonicalChangeCategory::Journal);
         }
         categories
     }

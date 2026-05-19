@@ -55,10 +55,12 @@ use crate::{
         update_tenant_storage_policy,
     },
     workspace::{
-        client_workspace, delete_client_contact, delete_client_event, delete_client_task,
-        delete_draft_message, get_client_task, list_client_task_lists, list_client_tasks,
-        save_draft_message, submit_message, upsert_client_contact, upsert_client_event,
-        upsert_client_task,
+        client_workspace, delete_client_contact, delete_client_event, delete_client_note,
+        delete_client_task, delete_draft_message, delete_journal_entry, get_client_note,
+        get_client_task, get_journal_entry, list_client_notes, list_client_task_lists,
+        list_client_tasks, list_journal_entries, query_client_reminders, save_draft_message,
+        submit_message, upsert_client_contact, upsert_client_event, upsert_client_note,
+        upsert_client_task, upsert_journal_entry,
     },
 };
 
@@ -119,6 +121,23 @@ pub fn router(storage: Storage) -> Router {
             "/mail/tasks/{task_id}",
             get(get_client_task).delete(delete_client_task),
         )
+        .route(
+            "/mail/notes",
+            get(list_client_notes).post(upsert_client_note),
+        )
+        .route(
+            "/mail/notes/{note_id}",
+            get(get_client_note).delete(delete_client_note),
+        )
+        .route(
+            "/mail/journal",
+            get(list_journal_entries).post(upsert_journal_entry),
+        )
+        .route(
+            "/mail/journal/{entry_id}",
+            get(get_journal_entry).delete(delete_journal_entry),
+        )
+        .route("/mail/reminders", get(query_client_reminders))
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
@@ -408,6 +427,24 @@ mod tests {
             assert!(
                 app_source.contains(route),
                 "storage policy route is not registered: {route}"
+            );
+        }
+    }
+
+    #[test]
+    fn notes_journal_and_reminder_routes_are_registered() {
+        let app_source = include_str!("app.rs");
+
+        for route in [
+            "/mail/notes",
+            "/mail/notes/{note_id}",
+            "/mail/journal",
+            "/mail/journal/{entry_id}",
+            "/mail/reminders",
+        ] {
+            assert!(
+                app_source.contains(route),
+                "notes, journal, or reminder route is not registered: {route}"
             );
         }
     }

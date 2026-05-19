@@ -51,6 +51,7 @@ pub(crate) const JMAP_BLOB_CAPABILITY: &str = "urn:ietf:params:jmap:blob";
 pub(crate) const JMAP_CONTACTS_CAPABILITY: &str = "urn:ietf:params:jmap:contacts";
 pub(crate) const JMAP_CALENDARS_CAPABILITY: &str = "urn:ietf:params:jmap:calendars";
 pub(crate) const JMAP_TASKS_CAPABILITY: &str = "urn:ietf:params:jmap:tasks";
+pub(crate) const JMAP_LPE_OUTLOOK_CAPABILITY: &str = "https://l-p-e.ch/jmap/outlook";
 pub(crate) const JMAP_VACATION_RESPONSE_CAPABILITY: &str = "urn:ietf:params:jmap:vacationresponse";
 pub(crate) const JMAP_WEBSOCKET_CAPABILITY: &str = "urn:ietf:params:jmap:websocket";
 pub(crate) const SESSION_STATE: &str = "mvp-3";
@@ -462,6 +463,34 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             self.handle_task_set(account, arguments, &mut created_ids)
                                 .await
                         }
+                        "Note/get" => self.handle_note_get(account, arguments).await,
+                        "Note/query" => self.handle_note_query(account, arguments).await,
+                        "Note/queryChanges" => {
+                            self.handle_note_query_changes(account, arguments).await
+                        }
+                        "Note/changes" => self.handle_note_changes(account, arguments).await,
+                        "Note/set" => {
+                            self.handle_note_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "JournalEntry/get" => {
+                            self.handle_journal_entry_get(account, arguments).await
+                        }
+                        "JournalEntry/query" => {
+                            self.handle_journal_entry_query(account, arguments).await
+                        }
+                        "JournalEntry/queryChanges" => {
+                            self.handle_journal_entry_query_changes(account, arguments)
+                                .await
+                        }
+                        "JournalEntry/changes" => {
+                            self.handle_journal_entry_changes(account, arguments).await
+                        }
+                        "JournalEntry/set" => {
+                            self.handle_journal_entry_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Reminder/query" => self.handle_reminder_query(account, arguments).await,
                         "Identity/get" => self.handle_identity_get(account, arguments).await,
                         "Identity/changes" => {
                             self.handle_identity_changes(account, arguments).await
@@ -856,6 +885,44 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     })
                     .collect())
             }
+            "Note" => {
+                let notes = self.store.fetch_jmap_notes(account_id).await?;
+                Ok(notes
+                    .into_iter()
+                    .map(|note| StateEntry {
+                        id: note.id.to_string(),
+                        fingerprint: crate::notes_journal::note_state_fingerprint(&note),
+                    })
+                    .collect())
+            }
+            "JournalEntry" => {
+                let entries = self.store.fetch_jmap_journal_entries(account_id).await?;
+                Ok(entries
+                    .into_iter()
+                    .map(|entry| StateEntry {
+                        id: entry.id.to_string(),
+                        fingerprint: crate::notes_journal::journal_entry_state_fingerprint(&entry),
+                    })
+                    .collect())
+            }
+            "Reminder" => {
+                let reminders = self
+                    .store
+                    .query_jmap_reminders(
+                        account_id,
+                        lpe_storage::ReminderQuery {
+                            include_inactive: true,
+                        },
+                    )
+                    .await?;
+                Ok(reminders
+                    .into_iter()
+                    .map(|reminder| StateEntry {
+                        id: format!("{}:{}", reminder.source_type, reminder.source_id),
+                        fingerprint: crate::notes_journal::reminder_state_fingerprint(&reminder),
+                    })
+                    .collect())
+            }
             _ => Ok(Vec::new()),
         }
     }
@@ -1013,6 +1080,7 @@ fn is_supported_capability(capability: &str) -> bool {
             | JMAP_CONTACTS_CAPABILITY
             | JMAP_CALENDARS_CAPABILITY
             | JMAP_TASKS_CAPABILITY
+            | JMAP_LPE_OUTLOOK_CAPABILITY
             | JMAP_VACATION_RESPONSE_CAPABILITY
             | JMAP_WEBSOCKET_CAPABILITY
     )
@@ -1065,6 +1133,17 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "CalendarEvent/set" => Some(JMAP_CALENDARS_CAPABILITY),
         "TaskList/get" | "TaskList/changes" | "TaskList/set" | "Task/get" | "Task/query"
         | "Task/queryChanges" | "Task/changes" | "Task/set" => Some(JMAP_TASKS_CAPABILITY),
+        "Note/get"
+        | "Note/query"
+        | "Note/queryChanges"
+        | "Note/changes"
+        | "Note/set"
+        | "JournalEntry/get"
+        | "JournalEntry/query"
+        | "JournalEntry/queryChanges"
+        | "JournalEntry/changes"
+        | "JournalEntry/set"
+        | "Reminder/query" => Some(JMAP_LPE_OUTLOOK_CAPABILITY),
         "Blob/upload" | "Blob/get" | "Blob/lookup" => Some(JMAP_BLOB_CAPABILITY),
         "Blob/copy" => Some(JMAP_CORE_CAPABILITY),
         "VacationResponse/get" | "VacationResponse/set" => Some(JMAP_VACATION_RESPONSE_CAPABILITY),

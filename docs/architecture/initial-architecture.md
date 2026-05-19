@@ -15,6 +15,9 @@
   - contacts
   - calendars
   - tasks
+  - notes
+  - journal entries
+  - computed reminders
   - rights
   - storage
   - search
@@ -89,3 +92,6 @@
 | `/api/mail/auth/me` | mailbox session identity |
 | `/api/mail/workspace` | workspace snapshot |
 | `/api/mail/tasks` | task API |
+| `/api/mail/notes` | canonical notes API |
+| `/api/mail/journal` | canonical journal API |
+| `/api/mail/reminders` | computed reminders API |

@@ -11,10 +11,11 @@ use crate::{
     protocol::{SessionAccount, SessionDocument},
     service::opaque_state_fingerprint,
     JmapService, JMAP_BLOB_CAPABILITY, JMAP_CALENDARS_CAPABILITY, JMAP_CONTACTS_CAPABILITY,
-    JMAP_CORE_CAPABILITY, JMAP_MAIL_CAPABILITY, JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY,
-    JMAP_VACATION_RESPONSE_CAPABILITY, JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES,
-    MAX_CALLS_IN_REQUEST, MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_OBJECTS_IN_GET,
-    MAX_OBJECTS_IN_SET, MAX_SIZE_REQUEST, MAX_SIZE_UPLOAD, SESSION_STATE,
+    JMAP_CORE_CAPABILITY, JMAP_LPE_OUTLOOK_CAPABILITY, JMAP_MAIL_CAPABILITY,
+    JMAP_SUBMISSION_CAPABILITY, JMAP_TASKS_CAPABILITY, JMAP_VACATION_RESPONSE_CAPABILITY,
+    JMAP_WEBSOCKET_CAPABILITY, MAX_BLOB_DATA_SOURCES, MAX_CALLS_IN_REQUEST,
+    MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_UPLOAD, MAX_OBJECTS_IN_GET, MAX_OBJECTS_IN_SET,
+    MAX_SIZE_REQUEST, MAX_SIZE_UPLOAD, SESSION_STATE,
 };
 
 impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
@@ -53,6 +54,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         primary_accounts.insert(JMAP_CONTACTS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_CALENDARS_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(JMAP_TASKS_CAPABILITY.to_string(), account_id.clone());
+        primary_accounts.insert(JMAP_LPE_OUTLOOK_CAPABILITY.to_string(), account_id.clone());
         primary_accounts.insert(
             JMAP_VACATION_RESPONSE_CAPABILITY.to_string(),
             account_id.clone(),
@@ -186,6 +188,14 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "minDateTime": "1970-01-01T00:00:00",
                 "maxDateTime": "9999-12-31T23:59:59",
                 "mayCreateTaskList": true,
+            }),
+        ),
+        (
+            JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+            json!({
+                "notes": true,
+                "journal": true,
+                "reminders": true,
             }),
         ),
         (JMAP_VACATION_RESPONSE_CAPABILITY.to_string(), json!({})),

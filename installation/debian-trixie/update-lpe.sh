@@ -120,6 +120,14 @@ if [[ "${MAPI_IDENTITY_CONSTRAINT_COUNT}" != "3" ]]; then
   exit 1
 fi
 
+NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT="${SRC_DIR}/installation/debian-trixie/repair-notes-journal-reminders-schema.sh"
+if [[ -f "${NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT}" ]]; then
+  ENV_FILE="${ENV_FILE}" bash "${NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT}"
+else
+  echo "Notes/Journal/Reminder schema repair script is missing: ${NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT}" >&2
+  exit 1
+fi
+
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"
 validate_host_port "${LPE_IMAP_BIND_ADDRESS}" \

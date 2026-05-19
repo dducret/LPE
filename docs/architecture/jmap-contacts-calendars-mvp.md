@@ -16,6 +16,7 @@
   - contacts capability
   - calendars capability
   - core JMAP capability
+  - private LPE Outlook compatibility capability: `https://l-p-e.ch/jmap/outlook`
 - Supported methods:
   - `AddressBook/get`
   - `ContactCard/get`
@@ -29,16 +30,35 @@
   - `CalendarEvent/changes`
   - `CalendarEvent/query`
   - `CalendarEvent/queryChanges`
+  - `Note/get`
+  - `Note/query`
+  - `Note/changes`
+  - `Note/queryChanges`
+  - `Note/set`
+  - `JournalEntry/get`
+  - `JournalEntry/query`
+  - `JournalEntry/changes`
+  - `JournalEntry/queryChanges`
+  - `JournalEntry/set`
+  - `Reminder/query`
 - Mapping:
   - one canonical `default` address book per account
   - one canonical `default` calendar per account
   - contacts map to canonical `contacts`
   - events map to canonical `calendar_events`
+  - private `Note` maps to canonical `notes`
+  - private `JournalEntry` maps to canonical `journal_entries`
+  - private `Reminder` is computed from reminder-bearing canonical tasks and calendar events
+- Push:
+  - private `Note` and `JournalEntry` are WebSocket push data types
+  - their state changes are driven by canonical `notes` and `journal`
+    categories, not protocol-local sync state
 - Rules:
   - rights are bounded by authenticated account and canonical grants
   - no JMAP-only collection store
   - no protocol-local sharing model
   - query/change behavior uses canonical timestamps and state
+  - private Outlook compatibility methods must not overload JMAP Mail `Mailbox` or `Email`
 
 ## Reference Table/List
 
@@ -48,3 +68,6 @@
 | `ContactCard` | `contacts` |
 | `Calendar` | canonical default calendar |
 | `CalendarEvent` | `calendar_events` |
+| private `Note` | `notes` |
+| private `JournalEntry` | `journal_entries` |
+| private `Reminder` | computed from `tasks` and `calendar_events` |
