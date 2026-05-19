@@ -13802,7 +13802,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
 }
 
 #[test]
-fn mapi_hierarchy_sync_marks_reminders_as_search_folder_type() {
+fn mapi_hierarchy_sync_keeps_reminders_generic_until_search_folder_support() {
     let reminders =
         mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::REMINDERS_FOLDER_ID)
             .expect("Reminders mailbox");
@@ -13837,7 +13837,7 @@ fn mapi_hierarchy_sync_marks_reminders_as_search_folder_type() {
     let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
-    assert_eq!(decoded.folder_changes[0].folder_type, Some(2));
+    assert_eq!(decoded.folder_changes[0].folder_type, Some(1));
     assert!(decoded.folder_changes[0].parent_source_key.is_empty());
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
