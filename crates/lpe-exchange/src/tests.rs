@@ -2420,6 +2420,13 @@ struct StrictFastTransferProperty {
 fn strict_hierarchy_sync_transfer_from_response(
     response_rops: &[u8],
 ) -> Result<StrictHierarchySyncStream, String> {
+    strict_hierarchy_sync_transfer_from_response_with_known_parent_keys(response_rops, &[])
+}
+
+fn strict_hierarchy_sync_transfer_from_response_with_known_parent_keys(
+    response_rops: &[u8],
+    known_parent_source_keys: &[Vec<u8>],
+) -> Result<StrictHierarchySyncStream, String> {
     let chunks = mapi_fast_transfer_chunks(response_rops);
     if chunks.len() != 1 {
         return Err(format!(
@@ -2433,10 +2440,20 @@ fn strict_hierarchy_sync_transfer_from_response(
             chunks[0].0
         ));
     }
-    strict_decode_hierarchy_sync_stream(&chunks[0].1)
+    strict_decode_hierarchy_sync_stream_with_known_parent_keys(
+        &chunks[0].1,
+        known_parent_source_keys,
+    )
 }
 
 fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySyncStream, String> {
+    strict_decode_hierarchy_sync_stream_with_known_parent_keys(bytes, &[])
+}
+
+fn strict_decode_hierarchy_sync_stream_with_known_parent_keys(
+    bytes: &[u8],
+    known_parent_source_keys: &[Vec<u8>],
+) -> Result<StrictHierarchySyncStream, String> {
     let mut offset = 0;
     let mut current_folder: Option<StrictHierarchyFolderBuilder> = None;
     let mut folder_changes = Vec::new();
@@ -2444,6 +2461,7 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
         mapi_mailstore::source_key_for_store_id(crate::mapi::identity::ROOT_FOLDER_ID),
         mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID),
     ];
+    seen_source_keys.extend(known_parent_source_keys.iter().cloned());
     let mut in_state = false;
     let mut state_closed = false;
     let mut idset_given = None;
@@ -13658,8 +13676,11 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &0x65E1_0102u32.to_le_bytes()
     ));
+    let ipm_source_key =
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
     let mut root_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    root_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
+    root_child_parent_source_key.extend_from_slice(&(ipm_source_key.len() as u32).to_le_bytes());
+    root_child_parent_source_key.extend_from_slice(&ipm_source_key);
     assert!(contains_bytes(
         &response_rops,
         &root_child_parent_source_key
@@ -13838,6 +13859,10 @@ fn mapi_hierarchy_sync_marks_reminders_as_search_folder_type() {
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
     assert_eq!(decoded.folder_changes[0].folder_type, Some(2));
+    assert_eq!(
+        decoded.folder_changes[0].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
@@ -14304,11 +14329,17 @@ async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
     assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Archive")));
     assert!(!contains_bytes(&response_rops, &utf16z("Projects")));
-    let decoded =
-        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    let decoded = strict_hierarchy_sync_transfer_from_response_with_known_parent_keys(
+        &response_rops,
+        &[mapi_mailstore::source_key_for_store_id(parent_folder_id)],
+    )
+    .expect("strict hierarchy ICS");
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Archive");
-    assert!(decoded.folder_changes[0].parent_source_key.is_empty());
+    assert_eq!(
+        decoded.folder_changes[0].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(parent_folder_id)
+    );
 }
 
 #[tokio::test]
@@ -14363,9 +14394,10 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
         .position(|name| *name == "Archive")
         .expect("Archive folderChange");
     assert!(projects < archive);
-    assert!(decoded.folder_changes[projects]
-        .parent_source_key
-        .is_empty());
+    assert_eq!(
+        decoded.folder_changes[projects].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
     assert!(decoded.folder_changes[archive]
         .parent_source_key
         .eq(&decoded.folder_changes[projects].source_key));
