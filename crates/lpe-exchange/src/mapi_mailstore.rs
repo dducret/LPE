@@ -411,8 +411,10 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
             write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
-            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-            write_i64(&mut buffer, folder_id as i64);
+            if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
+                write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+                write_i64(&mut buffer, folder_id as i64);
+            }
             if sync_type != SYNC_TYPE_HIERARCHY
                 || sync_flags & 0x0100 != 0
                 || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
@@ -2426,17 +2428,14 @@ mod tests {
         assert_eq!(summary.rows.len(), 1);
         assert_eq!(summary.rows[0].display_name, "Inbox");
         assert_eq!(summary.rows[0].container_class, "IPF.Note");
-        assert_eq!(
-            summary.rows[0].folder_id,
-            Some(crate::mapi::identity::INBOX_FOLDER_ID)
-        );
+        assert_eq!(summary.rows[0].folder_id, None);
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 0);
         assert!(summary.rows[0].missing_core_property_tags.is_empty());
     }
 
     #[test]
-    fn hierarchy_transfer_includes_folder_id_without_eid_extra_flag() {
+    fn hierarchy_transfer_omits_folder_id_without_eid_extra_flag() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -2457,6 +2456,44 @@ mod tests {
             0x02,
             0x0100,
             0,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &[mailbox],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+        assert_eq!(summary.rows.len(), 1);
+        assert_eq!(summary.rows[0].folder_id, None);
+        assert!(!summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
+    }
+
+    #[test]
+    fn hierarchy_transfer_includes_folder_id_with_eid_extra_flag() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x02,
+            0x0100,
+            SYNC_EXTRA_FLAG_EID,
             &[],
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             &[mailbox],

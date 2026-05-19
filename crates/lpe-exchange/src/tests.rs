@@ -2369,6 +2369,8 @@ const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
+const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
@@ -2392,6 +2394,8 @@ struct StrictHierarchyFolderChange {
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
     display_name: String,
+    folder_id: Option<u64>,
+    parent_folder_id: Option<u64>,
     folder_type: Option<u32>,
     content_count: Option<u32>,
     content_unread_count: Option<u32>,
@@ -2405,6 +2409,8 @@ struct StrictHierarchyFolderBuilder {
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
     display_name: Option<String>,
+    folder_id: Option<u64>,
+    parent_folder_id: Option<u64>,
     folder_type: Option<u32>,
     content_count: Option<u32>,
     content_unread_count: Option<u32>,
@@ -2655,6 +2661,12 @@ fn strict_record_folder_property(
         PID_TAG_DISPLAY_NAME_W => {
             folder.display_name = Some(strict_decode_utf16z(&property.value)?)
         }
+        PID_TAG_FOLDER_ID => {
+            folder.folder_id = Some(strict_decode_u64_property(&property)?);
+        }
+        PID_TAG_PARENT_FOLDER_ID => {
+            folder.parent_folder_id = Some(strict_decode_u64_property(&property)?);
+        }
         PID_TAG_FOLDER_TYPE => {
             folder.folder_type = Some(strict_decode_u32_property(&property)?);
         }
@@ -2757,6 +2769,8 @@ fn strict_finish_folder_change(
         parent_source_key,
         change_key,
         display_name,
+        folder_id: folder.folder_id,
+        parent_folder_id: folder.parent_folder_id,
         folder_type: folder.folder_type,
         content_count: folder.content_count,
         content_unread_count: folder.content_unread_count,
@@ -13608,10 +13622,6 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     ));
     assert!(contains_bytes(
         &response_rops,
-        &0x6748_0014u32.to_le_bytes()
-    ));
-    assert!(contains_bytes(
-        &response_rops,
         &0x3008_0040u32.to_le_bytes()
     ));
     let mut empty_local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
@@ -13643,6 +13653,16 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             && tag_position(0x65E3_0102) < tag_position(0x3001_001F)
             && tag_position(0x3001_001F) < tag_position(0x6749_0014)
     );
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    assert!(decoded
+        .folder_changes
+        .iter()
+        .all(|folder| folder.folder_id.is_none()));
+    assert!(decoded
+        .folder_changes
+        .iter()
+        .all(|folder| folder.parent_folder_id == Some(test_mapi_folder_id(4))));
     for tag in [
         0x3601_0003u32,
         0x3602_0003,
