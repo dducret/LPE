@@ -436,20 +436,17 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
             {
                 write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX) {
+            let local_commit_time_max = local_commit_time_max(
+                folder_id,
+                mailboxes,
+                aggregate_emails,
+                aggregate_attachment_facts,
+            );
+            if local_commit_time_max != 0
+                && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX)
+            {
                 write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
-                write_i64(
-                    &mut buffer,
-                    local_commit_time_max(
-                        folder_id,
-                        mailboxes,
-                        aggregate_emails,
-                        aggregate_attachment_facts,
-                    ) as i64,
-                );
-            }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL) {
-                write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
+                write_i64(&mut buffer, local_commit_time_max as i64);
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
                 write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
