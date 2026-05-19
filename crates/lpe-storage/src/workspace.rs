@@ -556,6 +556,14 @@ fn client_folder(role: &str) -> String {
         "drafts" => "drafts",
         "sent" => "sent",
         "archive" => "archive",
+        "junk" => "junk",
+        "outbox" => "outbox",
+        "rss_feeds" => "rss_feeds",
+        "conversation_history" => "conversation_history",
+        "sync_issues" => "sync_issues",
+        "conflicts" => "conflicts",
+        "local_failures" => "local_failures",
+        "server_failures" => "server_failures",
         _ => "inbox",
     }
     .to_string()

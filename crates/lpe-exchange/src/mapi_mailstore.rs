@@ -419,8 +419,6 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 write_i64(&mut buffer, parent_folder_id as i64);
             }
             write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
-            write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
-            write_i64(&mut buffer, change_number as i64);
             if !content_count_excluded || content_count_forced {
                 write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
             }
@@ -1018,6 +1016,7 @@ fn finish_hierarchy_debug_folder(
         predecessor_change_list_len = row.predecessor_change_list_len,
         last_modification_time = row.last_modification_time.unwrap_or_default(),
         change_number = row.change_number.unwrap_or_default(),
+        change_number_present = row.change_number.is_some(),
         content_count = row.content_count.unwrap_or_default(),
         content_count_present = row.content_count.is_some(),
         content_unread_count = row.content_unread_count.unwrap_or_default(),
@@ -1054,7 +1053,6 @@ fn missing_hierarchy_core_property_tags(property_tags: &[u32]) -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_DISPLAY_NAME_W,
-        PID_TAG_CHANGE_NUMBER,
         PID_TAG_SUBFOLDERS,
         PID_TAG_CONTAINER_CLASS_W,
     ]
@@ -1299,6 +1297,24 @@ fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
         "notes" => crate::mapi::identity::NOTES_FOLDER_ID,
         "tasks" => crate::mapi::identity::TASKS_FOLDER_ID,
         "reminders" => crate::mapi::identity::REMINDERS_FOLDER_ID,
+        "suggested_contacts" => crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+        "quick_contacts" => crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+        "im_contact_list" => crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+        "contacts_search" => crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+        "document_libraries" => crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_ID,
+        "sync_issues" => crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+        "conflicts" => crate::mapi::identity::CONFLICTS_FOLDER_ID,
+        "local_failures" => crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+        "server_failures" => crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+        "junk" => crate::mapi::identity::JUNK_FOLDER_ID,
+        "rss_feeds" => crate::mapi::identity::RSS_FEEDS_FOLDER_ID,
+        "tracked_mail_processing" => crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        "todo_search" => crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
+        "conversation_action_settings" => {
+            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+        }
+        "archive" => crate::mapi::identity::ARCHIVE_FOLDER_ID,
+        "conversation_history" => crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(fallback),
     }
 }
@@ -1312,8 +1328,28 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
         | "__mapi_schedule"
         | "__mapi_search"
         | "__mapi_views"
-        | "__mapi_shortcuts" => crate::mapi::identity::ROOT_FOLDER_ID,
-        "journal" | "notes" | "tasks" | "reminders" => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        | "__mapi_shortcuts"
+        | "__mapi_freebusy_data" => crate::mapi::identity::ROOT_FOLDER_ID,
+        "journal"
+        | "notes"
+        | "tasks"
+        | "reminders"
+        | "suggested_contacts"
+        | "quick_contacts"
+        | "im_contact_list"
+        | "contacts_search"
+        | "document_libraries"
+        | "sync_issues"
+        | "junk"
+        | "rss_feeds"
+        | "tracked_mail_processing"
+        | "todo_search"
+        | "conversation_action_settings"
+        | "archive"
+        | "conversation_history" => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        "conflicts" | "local_failures" | "server_failures" => {
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID
+        }
         _ => mailbox
             .parent_id
             .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
@@ -1336,6 +1372,14 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
             "notes" => "IPF.StickyNote",
             "tasks" => "IPF.Task",
             "reminders" => "Outlook.Reminder",
+            "suggested_contacts" => "IPF.Contact",
+            "quick_contacts" => "IPF.Contact.MOC.QuickContacts",
+            "im_contact_list" => "IPF.Contact.MOC.ImContactList",
+            "contacts_search" => "IPF.Contact",
+            "document_libraries" => "IPF.ShortcutFolder",
+            "rss_feeds" => "IPF.Note.OutlookHomepage",
+            "todo_search" => "IPF.Task",
+            "conversation_action_settings" => "IPF.Configuration",
             _ => "IPF.Note",
         })
 }
@@ -1582,40 +1626,159 @@ fn virtual_special_folder_metadata(
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             "Outlook.Reminder",
         )),
+        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID => Some((
+            "suggested_contacts",
+            "Suggested Contacts",
+            62,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact",
+        )),
+        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID => Some((
+            "quick_contacts",
+            "Quick Contacts",
+            63,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact.MOC.QuickContacts",
+        )),
+        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID => Some((
+            "im_contact_list",
+            "IM Contact List",
+            64,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact.MOC.ImContactList",
+        )),
+        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID => Some((
+            "contacts_search",
+            "Contacts Search",
+            65,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Contact",
+        )),
+        crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_ID => Some((
+            "document_libraries",
+            "Document Libraries",
+            66,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.ShortcutFolder",
+        )),
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID => Some((
+            "sync_issues",
+            "Sync Issues",
+            67,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::CONFLICTS_FOLDER_ID => Some((
+            "conflicts",
+            "Conflicts",
+            68,
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID => Some((
+            "local_failures",
+            "Local Failures",
+            69,
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID => Some((
+            "server_failures",
+            "Server Failures",
+            70,
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+            "IPF.Note",
+        )),
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => Some((
             "__mapi_common_views",
             "Common Views",
-            70,
+            80,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::SCHEDULE_FOLDER_ID => Some((
             "__mapi_schedule",
             "Schedule",
-            80,
+            90,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::SEARCH_FOLDER_ID => Some((
             "__mapi_search",
             "Search",
-            90,
+            100,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::VIEWS_FOLDER_ID => Some((
             "__mapi_views",
             "Views",
-            100,
+            110,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
         )),
         crate::mapi::identity::SHORTCUTS_FOLDER_ID => Some((
             "__mapi_shortcuts",
             "Shortcuts",
-            110,
+            120,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Root",
+        )),
+        crate::mapi::identity::JUNK_FOLDER_ID => Some((
+            "junk",
+            "Junk E-mail",
+            130,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::RSS_FEEDS_FOLDER_ID => Some((
+            "rss_feeds",
+            "RSS Feeds",
+            140,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note.OutlookHomepage",
+        )),
+        crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID => Some((
+            "tracked_mail_processing",
+            "Tracked Mail Processing",
+            150,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::TODO_SEARCH_FOLDER_ID => Some((
+            "todo_search",
+            "To-Do",
+            160,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Task",
+        )),
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID => Some((
+            "conversation_action_settings",
+            "Conversation Action Settings",
+            170,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Configuration",
+        )),
+        crate::mapi::identity::ARCHIVE_FOLDER_ID => Some((
+            "archive",
+            "Archive",
+            180,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID => Some((
+            "__mapi_freebusy_data",
+            "FreeBusy Data",
+            190,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Root",
+        )),
+        crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID => Some((
+            "conversation_history",
+            "Conversation History",
+            200,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Note",
         )),
         _ => None,
     }

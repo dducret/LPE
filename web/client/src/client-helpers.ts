@@ -30,7 +30,21 @@ export const blankEvent = (event?: EventItem): EventDraft => ({
 export const quoteMessage = (message: Message) => ["", "", `--- ${message.from} <${message.fromAddress}> ---`, ...message.body].join("\n");
 
 export function countFolders(messages: Message[]): Record<Folder, number> {
-  const value: Record<Folder, number> = { focused: 0, inbox: 0, drafts: 0, sent: 0, archive: 0 };
+  const value: Record<Folder, number> = {
+    focused: 0,
+    inbox: 0,
+    drafts: 0,
+    sent: 0,
+    archive: 0,
+    junk: 0,
+    outbox: 0,
+    rss_feeds: 0,
+    conversation_history: 0,
+    sync_issues: 0,
+    conflicts: 0,
+    local_failures: 0,
+    server_failures: 0
+  };
   for (const item of messages) value[item.folder] += 1;
   value.focused = value.inbox;
   return value;

@@ -218,6 +218,13 @@ impl MailboxNamePolicy {
             "trash" => Some("Trash"),
             "junk" => Some("Junk"),
             "archive" => Some("Archive"),
+            "outbox" => Some("Outbox"),
+            "sync_issues" => Some("Sync Issues"),
+            "conflicts" => Some("Conflicts"),
+            "local_failures" => Some("Local Failures"),
+            "server_failures" => Some("Server Failures"),
+            "rss_feeds" => Some("RSS Feeds"),
+            "conversation_history" => Some("Conversation History"),
             _ => None,
         }
     }
@@ -301,8 +308,22 @@ const RESERVED_MAILBOX_NAMES: &[ReservedMailboxName] = &[
     reserved("trash", "deleted items", "deleted items"),
     reserved("trash", "trash", "trash"),
     reserved("junk", "junk", "junk"),
+    reserved("junk", "junk e-mail", "junk e-mail"),
+    reserved("junk", "junk email", "junk email"),
     reserved("junk", "spam", "spam"),
     reserved("archive", "archive", "archive"),
+    reserved("outbox", "outbox", "outbox"),
+    reserved("sync_issues", "sync issues", "sync issues"),
+    reserved("conflicts", "conflicts", "conflicts"),
+    reserved("local_failures", "local failures", "local failures"),
+    reserved("server_failures", "server failures", "server failures"),
+    reserved("rss_feeds", "rss feeds", "rss feeds"),
+    reserved("rss_feeds", "rss subscriptions", "rss subscriptions"),
+    reserved(
+        "conversation_history",
+        "conversation history",
+        "conversation history",
+    ),
 ];
 
 const fn reserved(

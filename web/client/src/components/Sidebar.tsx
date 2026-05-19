@@ -24,7 +24,15 @@ export function Sidebar(props: {
     { id: "inbox", label: props.copy.folders.inbox, count: props.counts.inbox },
     { id: "drafts", label: props.copy.folders.drafts, count: props.counts.drafts },
     { id: "sent", label: props.copy.folders.sent, count: props.counts.sent },
-    { id: "archive", label: props.copy.folders.archive, count: props.counts.archive }
+    { id: "archive", label: props.copy.folders.archive, count: props.counts.archive },
+    { id: "junk", label: props.copy.folders.junk, count: props.counts.junk },
+    { id: "outbox", label: props.copy.folders.outbox, count: props.counts.outbox },
+    { id: "rss_feeds", label: props.copy.folders.rss_feeds, count: props.counts.rss_feeds },
+    { id: "conversation_history", label: props.copy.folders.conversation_history, count: props.counts.conversation_history },
+    { id: "sync_issues", label: props.copy.folders.sync_issues, count: props.counts.sync_issues },
+    { id: "conflicts", label: props.copy.folders.conflicts, count: props.counts.conflicts },
+    { id: "local_failures", label: props.copy.folders.local_failures, count: props.counts.local_failures },
+    { id: "server_failures", label: props.copy.folders.server_failures, count: props.counts.server_failures }
   ];
   const sectionLinks: Array<{ id: Section; label: string }> = [
     { id: "mail", label: props.copy.sections.mail },
@@ -113,7 +121,7 @@ export function Sidebar(props: {
                   }
                 }}
               >
-                <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : "▤"}</span>
+                <span className="tree-item-icon">{item.id === "inbox" ? "•" : item.id === "drafts" ? "◦" : item.id === "sent" ? "↗" : item.id === "junk" ? "!" : item.id === "outbox" ? "↥" : "▤"}</span>
                 <span className="sidebar-label">{item.label}</span>
                 <span className="sidebar-meta">{item.count ?? ""}</span>
               </button>

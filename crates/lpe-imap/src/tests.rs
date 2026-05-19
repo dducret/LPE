@@ -1063,7 +1063,7 @@ async fn login_list_select_fetch_store_search_and_append_work() {
     assert!(list_custom.contains("\"Projects\""));
     assert!(list_custom.contains("* LIST (\\HasNoChildren \\Trash) \"/\" \"Trash\""));
     assert!(!list_custom.contains("\"Deleted Items\""));
-    assert!(list_custom.contains("\"Junk Email\""));
+    assert!(list_custom.contains("* LIST (\\HasNoChildren \\Junk) \"/\" \"Junk\""));
     assert!(list_custom.contains("\"Outlook Parent/Child\""));
 
     let select_outlook_child = send_command(
@@ -3869,6 +3869,11 @@ fn system_mailbox_for_name(name: &str) -> Option<(&'static str, &'static str, i3
         "draft" | "drafts" => Some(("drafts", "Drafts", 10)),
         "sent" | "sent items" | "sent messages" => Some(("sent", "Sent", 20)),
         "deleted" | "deleted items" | "trash" => Some(("trash", "Trash", 30)),
+        "junk" | "junk e-mail" | "junk email" | "spam" => Some(("junk", "Junk", 40)),
+        "archive" => Some(("archive", "Archive", 50)),
+        "outbox" => Some(("outbox", "Outbox", 60)),
+        "rss feeds" | "rss subscriptions" => Some(("rss_feeds", "RSS Feeds", 80)),
+        "conversation history" => Some(("conversation_history", "Conversation History", 70)),
         _ => None,
     }
 }

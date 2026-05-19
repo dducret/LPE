@@ -2373,6 +2373,8 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 27;
+const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 14;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_IDSET_READ: u32 = 0x402D_0102;
@@ -3870,6 +3872,7 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
     buffer_size: u16,
     state: &[u8],
 ) {
+    let buffer_size = buffer_size.max(8192);
     rops.extend_from_slice(&[
         0x70, 0x00, input, output, // RopSynchronizationConfigure
         0x02,   // hierarchy sync
@@ -5640,8 +5643,12 @@ async fn mapi_over_http_execute_returns_private_mailbox_logon() {
         0
     );
     assert_eq!(response_rop[6], 0x01);
-    assert_eq!(response_rop[111], 0x07);
-    assert_eq!(response_rop_size, 166);
+    let response_flags_offset = 7 + PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT * 8;
+    assert_eq!(response_rop[response_flags_offset], 0x07);
+    assert_eq!(
+        response_rop_size,
+        62 + PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT * 8
+    );
     assert_eq!(
         u32::from_le_bytes(
             rop_buffer[2 + response_rop_size..6 + response_rop_size]
@@ -5754,13 +5761,23 @@ async fn mapi_over_http_execute_accepts_rca_wrapped_private_mailbox_logon() {
         0
     );
     assert_eq!(response_rop[6] & 0x01, 0x01);
-    assert_eq!(response_rop[111], 0x07);
+    let response_flags_offset = 7 + PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT * 8;
+    let mailbox_guid_offset = response_flags_offset + 1;
+    let replid_offset = mailbox_guid_offset + 16;
+    let replica_guid_offset = replid_offset + 2;
+    assert_eq!(response_rop[response_flags_offset], 0x07);
     assert_eq!(
-        &response_rop[112..128],
+        &response_rop[mailbox_guid_offset..mailbox_guid_offset + 16],
         &FakeStore::account().account_id.to_bytes_le()
     );
-    assert_eq!(&response_rop[128..130], &1u16.to_le_bytes());
-    assert_eq!(&response_rop[130..146], &mapi_mailstore::STORE_REPLICA_GUID);
+    assert_eq!(
+        &response_rop[replid_offset..replid_offset + 2],
+        &1u16.to_le_bytes()
+    );
+    assert_eq!(
+        &response_rop[replica_guid_offset..replica_guid_offset + 16],
+        &mapi_mailstore::STORE_REPLICA_GUID
+    );
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         u32::from_le_bytes(
@@ -12682,7 +12699,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((12, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((13, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
@@ -13551,7 +13568,10 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
     assert!(contains_bytes(&response_rops, &change_key));
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
     let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
@@ -13695,10 +13715,13 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         .folder_changes
         .iter()
         .all(|folder| folder.folder_id.is_none()));
-    assert!(decoded
-        .folder_changes
-        .iter()
-        .all(|folder| folder.parent_folder_id == Some(test_mapi_folder_id(4))));
+    assert!(decoded.folder_changes.iter().all(|folder| {
+        let expected_parent = match folder.display_name.as_str() {
+            "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
+            _ => test_mapi_folder_id(4),
+        };
+        folder.parent_folder_id == Some(expected_parent)
+    }));
     for tag in [
         0x3601_0003u32,
         0x3602_0003,
@@ -13775,7 +13798,10 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert!(contains_bytes(&response_rops, &utf16z("Drafts")));
     assert!(contains_bytes(&response_rops, &utf16z("Outbox")));
@@ -13998,7 +14024,7 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
     assert_eq!(response_rops[8], 0x04);
     assert_eq!(
         u32::from_le_bytes(response_rops[14..18].try_into().unwrap()),
-        11
+        27
     );
     let query_offset = 8 + 10 + 7;
     assert_eq!(response_rops[query_offset], 0x15);
@@ -14008,7 +14034,7 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
                 .try_into()
                 .unwrap()
         ),
-        11
+        27
     );
 
     for (name, class, folder_id) in [
@@ -14021,6 +14047,26 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             "Contacts",
             "IPF.Contact",
             crate::mapi::identity::CONTACTS_FOLDER_ID,
+        ),
+        (
+            "Suggested Contacts",
+            "IPF.Contact",
+            crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+        ),
+        (
+            "Quick Contacts",
+            "IPF.Contact.MOC.QuickContacts",
+            crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+        ),
+        (
+            "IM Contact List",
+            "IPF.Contact.MOC.ImContactList",
+            crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+        ),
+        (
+            "Contacts Search",
+            "IPF.Contact",
+            crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
         ),
         (
             "Journal",
@@ -14037,6 +14083,66 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             "Reminders",
             "Outlook.Reminder",
             crate::mapi::identity::REMINDERS_FOLDER_ID,
+        ),
+        (
+            "Document Libraries",
+            "IPF.ShortcutFolder",
+            crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_ID,
+        ),
+        (
+            "Sync Issues",
+            "IPF.Note",
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+        ),
+        (
+            "Conflicts",
+            "IPF.Note",
+            crate::mapi::identity::CONFLICTS_FOLDER_ID,
+        ),
+        (
+            "Local Failures",
+            "IPF.Note",
+            crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+        ),
+        (
+            "Server Failures",
+            "IPF.Note",
+            crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+        ),
+        (
+            "Junk E-mail",
+            "IPF.Note",
+            crate::mapi::identity::JUNK_FOLDER_ID,
+        ),
+        (
+            "RSS Feeds",
+            "IPF.Note.OutlookHomepage",
+            crate::mapi::identity::RSS_FEEDS_FOLDER_ID,
+        ),
+        (
+            "Tracked Mail Processing",
+            "IPF.Note",
+            crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        ),
+        (
+            "To-Do",
+            "IPF.Task",
+            crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
+        ),
+        (
+            "Conversation Action Settings",
+            "IPF.Configuration",
+            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        ),
+        (
+            "Archive",
+            "IPF.Note",
+            crate::mapi::identity::ARCHIVE_FOLDER_ID,
+        ),
+        (
+            "Conversation History",
+            "IPF.Note",
+            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
         ),
     ] {
         assert!(contains_bytes(&response_rops, &utf16z(name)));
@@ -14223,7 +14329,10 @@ async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
         .unwrap();
     let cookie = mapi_cookie_header(&hierarchy_response);
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&hierarchy_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -14366,23 +14475,22 @@ async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((13, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT + 2, 0))
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Projects")));
     assert!(contains_bytes(&response_rops, &utf16z("Archive")));
-    let projects_offset = response_rops
-        .windows(utf16z("Projects").len())
-        .position(|window| window == utf16z("Projects"))
-        .unwrap();
-    let archive_offset = response_rops
-        .windows(utf16z("Archive").len())
-        .position(|window| window == utf16z("Archive"))
-        .unwrap();
-    assert!(projects_offset < archive_offset);
     let mut child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
     let parent_source_key = mapi_mailstore::source_key_for_mailbox_folder(&parent);
     child_parent_source_key.extend_from_slice(&(parent_source_key.len() as u32).to_le_bytes());
     child_parent_source_key.extend_from_slice(&parent_source_key);
     assert!(contains_bytes(&response_rops, &child_parent_source_key));
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    assert!(decoded.folder_changes.iter().any(|folder| {
+        folder.display_name == "Archive" && folder.parent_source_key == parent_source_key
+    }));
 
     let parent_folder_id = crate::mapi::identity::mapped_mapi_object_id(&parent_id).unwrap();
     let connect = service
@@ -14454,7 +14562,10 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
 
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
-    assert_eq!(decoded.folder_changes.len(), 13);
+    assert_eq!(
+        decoded.folder_changes.len(),
+        OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT as usize + 2
+    );
     let names = decoded
         .folder_changes
         .iter()
@@ -14464,11 +14575,14 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
         .iter()
         .position(|name| *name == "Projects")
         .expect("Projects folderChange");
-    let archive = names
+    let archive = decoded
+        .folder_changes
         .iter()
-        .position(|name| *name == "Archive")
-        .expect("Archive folderChange");
-    assert!(projects < archive);
+        .position(|folder| {
+            folder.display_name == "Archive"
+                && folder.parent_source_key == decoded.folder_changes[projects].source_key
+        })
+        .expect("custom Archive folderChange");
     assert!(decoded.folder_changes[projects]
         .parent_source_key
         .is_empty());
@@ -14534,7 +14648,7 @@ async fn mapi_over_http_hierarchy_sync_advertises_counts_from_snapshot_messages(
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&8192u16.to_le_bytes());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -14608,7 +14722,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         0x00, 0x00, // PropertyTagCount
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
-    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&8192u16.to_le_bytes());
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -14619,7 +14733,10 @@ async fn mapi_over_http_hierarchy_sync_manifest_ignores_stale_server_checkpoint(
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
 }
 
@@ -14686,7 +14803,10 @@ async fn mapi_over_http_hierarchy_sync_uses_baseline_for_stale_root_checkpoint_w
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
@@ -14736,7 +14856,10 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
@@ -14845,7 +14968,10 @@ async fn mapi_over_http_hierarchy_sync_checkpoint_resumes_after_completed_downlo
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((11, 0)));
+    assert_eq!(
+        mapi_sync_manifest_counts(&response_rops),
+        Some((OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT, 0))
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Inbox")));
     assert!(contains_bytes(
         &response_rops,

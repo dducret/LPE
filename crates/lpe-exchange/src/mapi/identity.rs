@@ -27,7 +27,24 @@ pub(crate) const JOURNAL_FOLDER_COUNTER: u64 = 17;
 pub(crate) const NOTES_FOLDER_COUNTER: u64 = 18;
 pub(crate) const TASKS_FOLDER_COUNTER: u64 = 19;
 pub(crate) const REMINDERS_FOLDER_COUNTER: u64 = 20;
-pub(crate) const FIRST_DYNAMIC_GLOBAL_COUNTER: u64 = REMINDERS_FOLDER_COUNTER + 1;
+pub(crate) const SUGGESTED_CONTACTS_FOLDER_COUNTER: u64 = 21;
+pub(crate) const QUICK_CONTACTS_FOLDER_COUNTER: u64 = 22;
+pub(crate) const IM_CONTACT_LIST_FOLDER_COUNTER: u64 = 23;
+pub(crate) const CONTACTS_SEARCH_FOLDER_COUNTER: u64 = 24;
+pub(crate) const DOCUMENT_LIBRARIES_FOLDER_COUNTER: u64 = 25;
+pub(crate) const SYNC_ISSUES_FOLDER_COUNTER: u64 = 26;
+pub(crate) const CONFLICTS_FOLDER_COUNTER: u64 = 27;
+pub(crate) const LOCAL_FAILURES_FOLDER_COUNTER: u64 = 28;
+pub(crate) const SERVER_FAILURES_FOLDER_COUNTER: u64 = 29;
+pub(crate) const JUNK_FOLDER_COUNTER: u64 = 30;
+pub(crate) const RSS_FEEDS_FOLDER_COUNTER: u64 = 31;
+pub(crate) const TRACKED_MAIL_PROCESSING_FOLDER_COUNTER: u64 = 32;
+pub(crate) const TODO_SEARCH_FOLDER_COUNTER: u64 = 33;
+pub(crate) const CONVERSATION_ACTION_SETTINGS_FOLDER_COUNTER: u64 = 34;
+pub(crate) const ARCHIVE_FOLDER_COUNTER: u64 = 35;
+pub(crate) const FREEBUSY_DATA_FOLDER_COUNTER: u64 = 36;
+pub(crate) const CONVERSATION_HISTORY_FOLDER_COUNTER: u64 = 37;
+pub(crate) const FIRST_DYNAMIC_GLOBAL_COUNTER: u64 = CONVERSATION_HISTORY_FOLDER_COUNTER + 1;
 
 pub(crate) const ROOT_FOLDER_ID: u64 = mapi_store_id(ROOT_FOLDER_COUNTER);
 pub(crate) const DEFERRED_ACTION_FOLDER_ID: u64 = mapi_store_id(DEFERRED_ACTION_FOLDER_COUNTER);
@@ -49,6 +66,28 @@ pub(crate) const JOURNAL_FOLDER_ID: u64 = mapi_store_id(JOURNAL_FOLDER_COUNTER);
 pub(crate) const NOTES_FOLDER_ID: u64 = mapi_store_id(NOTES_FOLDER_COUNTER);
 pub(crate) const TASKS_FOLDER_ID: u64 = mapi_store_id(TASKS_FOLDER_COUNTER);
 pub(crate) const REMINDERS_FOLDER_ID: u64 = mapi_store_id(REMINDERS_FOLDER_COUNTER);
+pub(crate) const SUGGESTED_CONTACTS_FOLDER_ID: u64 =
+    mapi_store_id(SUGGESTED_CONTACTS_FOLDER_COUNTER);
+pub(crate) const QUICK_CONTACTS_FOLDER_ID: u64 = mapi_store_id(QUICK_CONTACTS_FOLDER_COUNTER);
+pub(crate) const IM_CONTACT_LIST_FOLDER_ID: u64 = mapi_store_id(IM_CONTACT_LIST_FOLDER_COUNTER);
+pub(crate) const CONTACTS_SEARCH_FOLDER_ID: u64 = mapi_store_id(CONTACTS_SEARCH_FOLDER_COUNTER);
+pub(crate) const DOCUMENT_LIBRARIES_FOLDER_ID: u64 =
+    mapi_store_id(DOCUMENT_LIBRARIES_FOLDER_COUNTER);
+pub(crate) const SYNC_ISSUES_FOLDER_ID: u64 = mapi_store_id(SYNC_ISSUES_FOLDER_COUNTER);
+pub(crate) const CONFLICTS_FOLDER_ID: u64 = mapi_store_id(CONFLICTS_FOLDER_COUNTER);
+pub(crate) const LOCAL_FAILURES_FOLDER_ID: u64 = mapi_store_id(LOCAL_FAILURES_FOLDER_COUNTER);
+pub(crate) const SERVER_FAILURES_FOLDER_ID: u64 = mapi_store_id(SERVER_FAILURES_FOLDER_COUNTER);
+pub(crate) const JUNK_FOLDER_ID: u64 = mapi_store_id(JUNK_FOLDER_COUNTER);
+pub(crate) const RSS_FEEDS_FOLDER_ID: u64 = mapi_store_id(RSS_FEEDS_FOLDER_COUNTER);
+pub(crate) const TRACKED_MAIL_PROCESSING_FOLDER_ID: u64 =
+    mapi_store_id(TRACKED_MAIL_PROCESSING_FOLDER_COUNTER);
+pub(crate) const TODO_SEARCH_FOLDER_ID: u64 = mapi_store_id(TODO_SEARCH_FOLDER_COUNTER);
+pub(crate) const CONVERSATION_ACTION_SETTINGS_FOLDER_ID: u64 =
+    mapi_store_id(CONVERSATION_ACTION_SETTINGS_FOLDER_COUNTER);
+pub(crate) const ARCHIVE_FOLDER_ID: u64 = mapi_store_id(ARCHIVE_FOLDER_COUNTER);
+pub(crate) const FREEBUSY_DATA_FOLDER_ID: u64 = mapi_store_id(FREEBUSY_DATA_FOLDER_COUNTER);
+pub(crate) const CONVERSATION_HISTORY_FOLDER_ID: u64 =
+    mapi_store_id(CONVERSATION_HISTORY_FOLDER_COUNTER);
 
 pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
@@ -249,8 +288,11 @@ mod tests {
 
     #[test]
     fn dynamic_counters_start_after_reserved_special_folders() {
-        assert_eq!(FIRST_DYNAMIC_GLOBAL_COUNTER, REMINDERS_FOLDER_COUNTER + 1);
-        assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > REMINDERS_FOLDER_COUNTER);
+        assert_eq!(
+            FIRST_DYNAMIC_GLOBAL_COUNTER,
+            CONVERSATION_HISTORY_FOLDER_COUNTER + 1
+        );
+        assert!(FIRST_DYNAMIC_GLOBAL_COUNTER > CONVERSATION_HISTORY_FOLDER_COUNTER);
     }
 
     #[test]

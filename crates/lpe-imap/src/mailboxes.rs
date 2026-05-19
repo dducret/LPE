@@ -741,6 +741,15 @@ fn special_mailbox_aliases(role: &str) -> &'static [&'static str] {
         "drafts" => &["Draft", "Drafts"],
         "sent" => &["Sent", "Sent Items", "Sent Messages"],
         "trash" => &["Deleted", "Deleted Items", "Trash"],
+        "junk" => &["Junk", "Junk E-mail", "Junk Email", "Spam"],
+        "archive" => &["Archive"],
+        "outbox" => &["Outbox"],
+        "rss_feeds" => &["RSS Feeds", "RSS Subscriptions"],
+        "conversation_history" => &["Conversation History"],
+        "sync_issues" => &["Sync Issues"],
+        "conflicts" => &["Conflicts"],
+        "local_failures" => &["Local Failures"],
+        "server_failures" => &["Server Failures"],
         _ => &[],
     }
 }

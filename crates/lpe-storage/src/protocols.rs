@@ -673,6 +673,75 @@ impl Storage {
             .await?;
         self.ensure_mailbox(&mut tx, &tenant_id, account_id, "trash", "Trash", 30, 365)
             .await?;
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "junk", "Junk", 40, 365)
+            .await?;
+        self.ensure_mailbox(
+            &mut tx, &tenant_id, account_id, "archive", "Archive", 50, 365,
+        )
+        .await?;
+        self.ensure_mailbox(&mut tx, &tenant_id, account_id, "outbox", "Outbox", 60, 365)
+            .await?;
+        self.ensure_mailbox(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            "conversation_history",
+            "Conversation History",
+            70,
+            365,
+        )
+        .await?;
+        self.ensure_mailbox(
+            &mut tx,
+            &tenant_id,
+            account_id,
+            "rss_feeds",
+            "RSS Feeds",
+            80,
+            365,
+        )
+        .await?;
+        let sync_issues = self
+            .ensure_mailbox(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                "sync_issues",
+                "Sync Issues",
+                90,
+                365,
+            )
+            .await?;
+        for (role, display_name, sort_order) in [
+            ("conflicts", "Conflicts", 91),
+            ("local_failures", "Local Failures", 92),
+            ("server_failures", "Server Failures", 93),
+        ] {
+            let mailbox_id = self
+                .ensure_mailbox(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    role,
+                    display_name,
+                    sort_order,
+                    365,
+                )
+                .await?;
+            sqlx::query(
+                r#"
+                UPDATE mailboxes
+                SET parent_mailbox_id = $4
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(mailbox_id)
+            .bind(sync_issues)
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(account_id).await

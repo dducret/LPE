@@ -120,6 +120,7 @@ pub(in crate::mapi) const PID_TAG_IPM_JOURNAL_ENTRY_ID: u32 = 0x36D2_0102;
 pub(in crate::mapi) const PID_TAG_IPM_NOTE_ENTRY_ID: u32 = 0x36D3_0102;
 pub(in crate::mapi) const PID_TAG_IPM_TASK_ENTRY_ID: u32 = 0x36D4_0102;
 pub(in crate::mapi) const PID_TAG_REM_ONLINE_ENTRY_ID: u32 = 0x36D5_0102;
+pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
 pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
@@ -258,6 +259,9 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(special_folder_long_term_id(NOTES_FOLDER_ID)),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(special_folder_long_term_id(TASKS_FOLDER_ID)),
         PID_TAG_REM_ONLINE_ENTRY_ID => Some(special_folder_long_term_id(REMINDERS_FOLDER_ID)),
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => Some(MapiValue::Binary(
+            additional_ren_entry_ids_ex(_mailbox_guid),
+        )),
         _ => None,
     }
 }
@@ -271,6 +275,7 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
             | PID_TAG_REM_ONLINE_ENTRY_ID
+            | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
     )
 }
 
@@ -297,6 +302,50 @@ fn special_folder_long_term_id(folder_id: u64) -> MapiValue {
             .unwrap()
             .to_vec(),
     )
+}
+
+fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
+    let entries = [
+        (0x8001u16, RSS_FEEDS_FOLDER_ID),
+        (0x8002, TRACKED_MAIL_PROCESSING_FOLDER_ID),
+        (0x8004, TODO_SEARCH_FOLDER_ID),
+        (0x8006, CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
+        (0x8008, SUGGESTED_CONTACTS_FOLDER_ID),
+        (0x8009, CONTACTS_SEARCH_FOLDER_ID),
+        (0x800A, IM_CONTACT_LIST_FOLDER_ID),
+        (0x800B, QUICK_CONTACTS_FOLDER_ID),
+    ];
+    let mut value = Vec::new();
+    for (persist_id, folder_id) in entries {
+        let entry_id = special_folder_entry_id(mailbox_guid, folder_id);
+        let data_size = 16usize.saturating_add(entry_id.len());
+        value.extend_from_slice(&persist_id.to_le_bytes());
+        value.extend_from_slice(&(data_size.min(u16::MAX as usize) as u16).to_le_bytes());
+        value.extend_from_slice(&0x0002u16.to_le_bytes());
+        value.extend_from_slice(&4u16.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&0x0001u16.to_le_bytes());
+        value.extend_from_slice(&(entry_id.len().min(u16::MAX as usize) as u16).to_le_bytes());
+        value.extend_from_slice(&entry_id);
+        value.extend_from_slice(&0u16.to_le_bytes());
+        value.extend_from_slice(&0u16.to_le_bytes());
+    }
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value
+}
+
+fn special_folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {
+    let long_term_id = crate::mapi::identity::long_term_id_from_object_id(folder_id)
+        .expect("special folders use valid MAPI folder IDs");
+    let mut value = Vec::with_capacity(46);
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&mailbox_guid.to_bytes_le());
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&long_term_id[..16]);
+    value.extend_from_slice(&long_term_id[16..22]);
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value
 }
 
 fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
