@@ -2716,6 +2716,7 @@ fn strict_finish_folder_change(
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_CONTAINER_CLASS_W,
     ];
     if folder.tags.len() < required_prefix.len()
         || folder.tags[..required_prefix.len()] != required_prefix
@@ -3444,13 +3445,13 @@ fn strict_push_folder_change(
         &strict_test_xid(change_counter),
     );
     strict_push_utf16_property(bytes, PID_TAG_DISPLAY_NAME_W, name);
+    strict_push_utf16_property(bytes, PID_TAG_CONTAINER_CLASS_W, "IPF.Note");
     strict_push_i32_property(bytes, 0x3602_0003, 0);
     bytes.extend_from_slice(&PID_TAG_SUBFOLDERS.to_le_bytes());
     bytes.extend_from_slice(&1u16.to_le_bytes());
     if boolean_width > 2 {
         bytes.extend(std::iter::repeat_n(0, boolean_width - 2));
     }
-    strict_push_utf16_property(bytes, PID_TAG_CONTAINER_CLASS_W, "IPF.Note");
 }
 
 fn strict_push_final_hierarchy_state(bytes: &mut Vec<u8>, source_ids: &[u64], changes: &[u64]) {

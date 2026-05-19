@@ -410,6 +410,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 &predecessor_change_list(change_number),
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, &mailbox.name);
+            write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
             write_u32(&mut buffer, PID_TAG_FOLDER_ID);
             write_i64(&mut buffer, folder_id as i64);
             if sync_type != SYNC_TYPE_HIERARCHY
@@ -462,7 +463,6 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 PID_TAG_SUBFOLDERS,
                 mapi_folder_has_subfolders(mailbox, parent_context_mailboxes),
             );
-            write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
         }
     }
 
@@ -2360,7 +2360,7 @@ mod tests {
         assert_eq!(&buffer[offset + 4..offset + 6], &0u16.to_le_bytes());
         assert_eq!(
             &buffer[offset + 6..offset + 10],
-            &PID_TAG_CONTAINER_CLASS_W.to_le_bytes()
+            &INCR_SYNC_STATE_BEGIN.to_le_bytes()
         );
     }
 
