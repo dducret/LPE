@@ -893,6 +893,29 @@ fn admin_workspace_and_pst_use_v2_mailbox_membership_schema() {
 }
 
 #[test]
+fn mailbox_schema_allows_canonical_outlook_compatibility_mail_roles() {
+    let mailboxes = table_definition("mailboxes");
+    for role in [
+        "outbox",
+        "conversation_history",
+        "rss_feeds",
+        "sync_issues",
+        "conflicts",
+        "local_failures",
+        "server_failures",
+    ] {
+        assert!(
+            mailboxes.contains(&format!("'{role}'")),
+            "mailboxes.role CHECK must allow {role}"
+        );
+        assert!(
+            PROTOCOLS_STORAGE.contains(&format!("\"{role}\"")),
+            "protocol bootstrap must create {role}"
+        );
+    }
+}
+
+#[test]
 fn blob_migration_jobs_capture_milestone_three_worker_contract() {
     let jobs = table_definition("blob_migration_jobs");
     for required in [

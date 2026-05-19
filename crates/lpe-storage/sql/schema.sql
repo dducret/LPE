@@ -489,7 +489,12 @@ CREATE TABLE mailboxes (
     account_id UUID NOT NULL,
     parent_mailbox_id UUID,
     role TEXT NOT NULL DEFAULT 'custom'
-        CHECK (role IN ('inbox', 'sent', 'drafts', 'trash', 'archive', 'junk', 'custom')),
+        CHECK (role IN (
+            'inbox', 'sent', 'drafts', 'trash', 'archive', 'junk',
+            'outbox', 'conversation_history', 'rss_feeds',
+            'sync_issues', 'conflicts', 'local_failures', 'server_failures',
+            'custom'
+        )),
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
     -- Runtime storage APIs enforce NFC, canonical-key, and confusable mailbox-name policy.
     -- This lower(...) column is only the remaining SQL compatibility guard, not Unicode identity.

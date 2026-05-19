@@ -120,6 +120,21 @@ if [[ "${MAPI_IDENTITY_CONSTRAINT_COUNT}" != "3" ]]; then
   exit 1
 fi
 
+psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
+BEGIN;
+
+ALTER TABLE public.mailboxes
+  DROP CONSTRAINT IF EXISTS mailboxes_role_check,
+  ADD CONSTRAINT mailboxes_role_check CHECK (role IN (
+    'inbox', 'sent', 'drafts', 'trash', 'archive', 'junk',
+    'outbox', 'conversation_history', 'rss_feeds',
+    'sync_issues', 'conflicts', 'local_failures', 'server_failures',
+    'custom'
+  ));
+
+COMMIT;
+SQL
+
 NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT="${SRC_DIR}/installation/debian-trixie/repair-notes-journal-reminders-schema.sh"
 if [[ -f "${NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT}" ]]; then
   ENV_FILE="${ENV_FILE}" bash "${NOTES_JOURNAL_SCHEMA_REPAIR_SCRIPT}"

@@ -445,6 +445,10 @@ removing the live row; shared task deletes include task-list grantees in the
 affected principals so delegated projections can observe the removal.
 Non-custom collection roles are unique per owner for mailboxes, contact books,
 calendars, and task lists.
+Mailbox roles include the standard mail roles plus canonical Outlook/Exchange
+compatibility mail folders that are real mailboxes: `outbox`, `rss_feeds`,
+`conversation_history`, `sync_issues`, `conflicts`, `local_failures`, and
+`server_failures`.
 Mailbox hierarchy rows cannot parent themselves. Contact books, calendars, and
 task lists also reserve normalized display names per owner, matching mailbox
 name behavior for client projections.
