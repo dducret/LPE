@@ -538,14 +538,17 @@ pub(in crate::mapi) fn mapi_payload_fingerprint(bytes: &[u8]) -> u64 {
 impl MapiSession {
     pub(in crate::mapi) fn allocate_output_handle(
         &mut self,
-        _output_handle_index: Option<u8>,
+        output_handle_index: Option<u8>,
         object: MapiObject,
     ) -> u32 {
-        while self.next_handle == 0 || self.handles.contains_key(&self.next_handle) {
-            self.next_handle = self.next_handle.saturating_add(1).max(1);
-        }
-        let handle = self.next_handle;
+        let preferred = output_handle_index.map(|index| index as u32 + 1);
+        let handle = preferred
+            .filter(|handle| !self.handles.contains_key(handle))
+            .unwrap_or(self.next_handle);
         self.next_handle = self.next_handle.saturating_add(1).max(1);
+        if handle >= self.next_handle {
+            self.next_handle = handle.saturating_add(1).max(1);
+        }
         self.handles.insert(handle, object);
         handle
     }
@@ -958,31 +961,21 @@ mod tests {
     }
 
     #[test]
-    fn allocate_output_handle_does_not_reuse_released_output_slot_as_handle_id() {
+    fn allocate_output_handle_prefers_free_low_output_slot_handle() {
         let principal = principal();
         let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
         let mut session = remove_session(&session_id).unwrap();
 
         let logon_handle = session.allocate_output_handle(Some(0), MapiObject::Logon);
-        let folder_handle = session.allocate_output_handle(
+        let source_handle = session.allocate_output_handle(
             Some(1),
             MapiObject::Folder {
-                folder_id: 0x0000_0000_0005_0001,
-                properties: HashMap::new(),
-            },
-        );
-        session.handles.remove(&folder_handle);
-
-        let next_folder_handle = session.allocate_output_handle(
-            Some(1),
-            MapiObject::Folder {
-                folder_id: 0x0000_0000_0006_0001,
+                folder_id: 0x0000_0000_0004_0001,
                 properties: HashMap::new(),
             },
         );
 
         assert_eq!(logon_handle, 1);
-        assert_eq!(folder_handle, 2);
-        assert_eq!(next_folder_handle, 3);
+        assert_eq!(source_handle, 2);
     }
 }
