@@ -6231,9 +6231,11 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
         0
     );
     let mut offset = 6;
-    assert_eq!(response_rops[offset], 0);
+    assert_eq!(response_rops[offset], 1);
     offset += 1;
 
+    assert_eq!(response_rops[offset], 0);
+    offset += 1;
     let owner_name = utf16z("Bob Store");
     assert_eq!(
         &response_rops[offset..offset + owner_name.len()],
@@ -6241,11 +6243,15 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     );
     offset += owner_name.len();
 
+    assert_eq!(response_rops[offset], 0);
+    offset += 1;
     let entry_id_len =
         u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
     assert!(entry_id_len > 0);
     offset += 2 + entry_id_len;
 
+    assert_eq!(response_rops[offset], 0);
+    offset += 1;
     let server_name = utf16z("LPE");
     assert_eq!(
         &response_rops[offset..offset + server_name.len()],
@@ -6254,12 +6260,19 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     offset += server_name.len();
 
     for _ in 0..2 {
+        assert_eq!(response_rops[offset], 0x0A);
+        offset += 1;
         assert_eq!(
-            u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()),
-            0
+            u32::from_le_bytes(response_rops[offset..offset + 4].try_into().unwrap()),
+            0x8004_0102
         );
-        offset += 2;
+        offset += 4;
     }
+
+    assert_eq!(response_rops[offset], 0);
+    offset += 1;
+    assert_eq!(response_rops[offset], 0);
+    offset += 1;
 
     assert_eq!(response_rops[offset], 0);
     offset += 1;
@@ -6269,6 +6282,8 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     );
     offset += 4;
 
+    assert_eq!(response_rops[offset], 0);
+    offset += 1;
     assert_eq!(
         u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()),
         16

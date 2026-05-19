@@ -786,6 +786,8 @@ fn log_get_properties_specific_debug(
         unsupported_property_tags = %format_property_tags_for_debug(&unsupported_tags),
         default_ipm_folder_mapping_count = default_folder_mappings.len(),
         default_ipm_folder_mappings = %default_folder_mappings.join(","),
+        response_property_row_kind = %property_row_kind_for_debug(object, principal, columns),
+        unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
         returned_property_value_shapes = %returned_property_value_shapes,
         message = message,
     );
@@ -804,15 +806,31 @@ fn property_is_unsupported_for_object(
 
 fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bool {
     match object {
-        Some(MapiObject::Logon) => matches!(
-            tag,
-            PID_TAG_SERVER_CONNECTED_ICON
-                | PID_TAG_SERVER_ACCOUNT_ICON
-                | PID_TAG_PRIVATE
-                | PID_TAG_OUTLOOK_STORE_STATE
-        ),
+        Some(MapiObject::Logon) => matches!(tag, PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE),
         _ => false,
     }
+}
+
+fn property_row_kind_for_debug(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) -> &'static str {
+    if columns
+        .iter()
+        .any(|tag| property_is_unsupported_for_object(object, principal, *tag))
+    {
+        "flagged"
+    } else {
+        "standard"
+    }
+}
+
+fn format_property_errors_for_debug(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("{tag:#010x}:{}:0x80040102", property_tag_debug_name(*tag)))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn format_property_value_shapes_for_debug(

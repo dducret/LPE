@@ -239,9 +239,6 @@ pub(in crate::mapi) fn logon_property_value(
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
-        PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
-            Some(MapiValue::Binary(Vec::new()))
-        }
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
