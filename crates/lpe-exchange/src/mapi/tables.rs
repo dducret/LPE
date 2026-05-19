@@ -1623,7 +1623,12 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         JOURNAL_FOLDER_ID => ("Journal", IPM_SUBTREE_FOLDER_ID, "IPF.Journal", false),
         NOTES_FOLDER_ID => ("Notes", IPM_SUBTREE_FOLDER_ID, "IPF.StickyNote", false),
         TASKS_FOLDER_ID => ("Tasks", IPM_SUBTREE_FOLDER_ID, "IPF.Task", false),
-        REMINDERS_FOLDER_ID => ("Reminders", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
+        REMINDERS_FOLDER_ID => (
+            "Reminders",
+            IPM_SUBTREE_FOLDER_ID,
+            "Outlook.Reminder",
+            false,
+        ),
         _ => ("Root", 0, "IPF.Root", true),
     }
 }
@@ -1869,6 +1874,20 @@ mod tests {
     }
 
     #[test]
+    fn reminders_folder_projects_reminder_container_class() {
+        let row = serialize_special_folder_row(
+            REMINDERS_FOLDER_ID,
+            &[],
+            &[PID_TAG_CONTAINER_CLASS_W, PID_TAG_MESSAGE_CLASS_W],
+            None,
+        );
+        let expected = utf16z_test_bytes("Outlook.Reminder");
+
+        assert_eq!(&row[..expected.len()], expected.as_slice());
+        assert_eq!(&row[expected.len()..], expected.as_slice());
+    }
+
+    #[test]
     fn attachment_rows_use_by_value_method() {
         let attachment = MapiAttachment {
             attach_num: 0,
@@ -1881,6 +1900,14 @@ mod tests {
 
         let row = serialize_attachment_row(&attachment, &[PID_TAG_ATTACH_METHOD]);
         assert_eq!(u32::from_le_bytes(row.try_into().unwrap()), ATTACH_BY_VALUE);
+    }
+
+    fn utf16z_test_bytes(value: &str) -> Vec<u8> {
+        value
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .flat_map(u16::to_le_bytes)
+            .collect()
     }
 }
 

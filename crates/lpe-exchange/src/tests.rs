@@ -5991,7 +5991,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         u64::from_le_bytes(response_rop[6..14].try_into().unwrap()),
         test_mapi_folder_id(5)
     );
-    assert_eq!(response_rop.get(14), Some(&0));
+    assert_eq!(&response_rop[14..], b"IPM.Note\0");
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
@@ -13881,7 +13881,7 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
         ("Tasks", "IPF.Task", crate::mapi::identity::TASKS_FOLDER_ID),
         (
             "Reminders",
-            "IPF.Note",
+            "Outlook.Reminder",
             crate::mapi::identity::REMINDERS_FOLDER_ID,
         ),
     ] {
@@ -13950,7 +13950,7 @@ async fn mapi_over_http_default_ipm_entry_ids_open_expected_folders() {
         (
             0x36D5_0102,
             "Reminders",
-            "IPF.Note",
+            "Outlook.Reminder",
             crate::mapi::identity::REMINDERS_FOLDER_ID,
         ),
     ];
