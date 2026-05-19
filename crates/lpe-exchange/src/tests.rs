@@ -2728,7 +2728,6 @@ fn strict_finish_folder_change(
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_DISPLAY_NAME_W,
-        PID_TAG_CONTAINER_CLASS_W,
     ];
     if folder.tags.len() < required_prefix.len()
         || folder.tags[..required_prefix.len()] != required_prefix
@@ -2737,6 +2736,28 @@ fn strict_finish_folder_change(
             "folderChange required property prefix was not in documented order: {:x?}",
             folder.tags
         ));
+    }
+    if let Some(container_class_position) = folder
+        .tags
+        .iter()
+        .position(|tag| *tag == PID_TAG_CONTAINER_CLASS_W)
+    {
+        if let Some(folder_id_position) =
+            folder.tags.iter().position(|tag| *tag == PID_TAG_FOLDER_ID)
+        {
+            if container_class_position < folder_id_position {
+                return Err("PidTagContainerClass appeared before PidTagFolderId".into());
+            }
+        }
+        if let Some(parent_folder_id_position) = folder
+            .tags
+            .iter()
+            .position(|tag| *tag == PID_TAG_PARENT_FOLDER_ID)
+        {
+            if container_class_position < parent_folder_id_position {
+                return Err("PidTagContainerClass appeared before PidTagParentFolderId".into());
+            }
+        }
     }
     let source_key = folder
         .source_key

@@ -407,7 +407,6 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 &predecessor_change_list(change_number),
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
-            write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
             if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
                 write_u32(&mut buffer, PID_TAG_FOLDER_ID);
                 write_i64(&mut buffer, folder_id as i64);
@@ -419,6 +418,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
                 write_i64(&mut buffer, parent_folder_id as i64);
             }
+            write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
             write_i64(&mut buffer, change_number as i64);
             if !content_count_excluded || content_count_forced {
