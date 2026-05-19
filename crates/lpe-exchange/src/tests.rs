@@ -13751,6 +13751,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
+    assert!(contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")

@@ -1341,7 +1341,7 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
             "journal" => "IPF.Journal",
             "notes" => "IPF.StickyNote",
             "tasks" => "IPF.Task",
-            "reminders" => "IPF.Note",
+            "reminders" => "Outlook.Reminder",
             _ => "IPF.Note",
         })
 }
@@ -1580,7 +1580,7 @@ fn virtual_special_folder_metadata(
             "Reminders",
             61,
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-            "IPF.Note",
+            "Outlook.Reminder",
         )),
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID => Some((
             "__mapi_common_views",
