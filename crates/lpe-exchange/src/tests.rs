@@ -13858,7 +13858,7 @@ fn mapi_hierarchy_sync_keeps_reminders_generic_until_search_folder_support() {
     let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
-    assert_eq!(decoded.folder_changes[0].folder_type, Some(1));
+    assert_eq!(decoded.folder_changes[0].folder_type, None);
     assert!(decoded.folder_changes[0].parent_source_key.is_empty());
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }

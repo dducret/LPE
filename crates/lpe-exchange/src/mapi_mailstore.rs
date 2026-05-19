@@ -310,7 +310,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     aggregate_emails: &[JmapEmail],
     aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
     _final_change_sequence: u64,
-    force_excluded_hierarchy_count_properties: bool,
+    hierarchy_count_experiment_requested: bool,
 ) -> Vec<u8> {
     let mut buffer = Vec::new();
     let sync_root_folder_id = folder_id;
@@ -356,15 +356,10 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
             let unread_count_excluded =
                 property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT);
-            let force_count_properties = force_excluded_hierarchy_count_properties
-                && sync_type == SYNC_TYPE_HIERARCHY
-                && content_count_source == "snapshot";
-            let content_count_forced = force_count_properties && content_count_excluded;
-            let unread_count_forced = force_count_properties && unread_count_excluded;
-            let folder_type_forced = force_excluded_hierarchy_count_properties
-                && property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE);
-            let access_forced = force_excluded_hierarchy_count_properties
-                && property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS);
+            let content_count_forced = false;
+            let unread_count_forced = false;
+            let folder_type_forced = false;
+            let access_forced = false;
             let display_name = mapi_folder_display_name(mailbox);
             tracing::info!(
                 rca_debug = true,
@@ -384,7 +379,8 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
                 computed_content_count = content_count,
                 computed_unread_count = content_unread_count,
                 content_count_source,
-                hierarchy_count_experiment_enabled = force_excluded_hierarchy_count_properties,
+                hierarchy_count_experiment_requested,
+                hierarchy_count_experiment_enabled = false,
                 content_count_forced_by_experiment = content_count_forced,
                 content_unread_count_forced_by_experiment = unread_count_forced,
                 folder_type_forced_by_experiment = folder_type_forced,
@@ -2621,7 +2617,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_sync_experiment_forces_excluded_computed_count_properties() {
+    fn hierarchy_sync_experiment_request_does_not_override_excluded_properties() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -2643,7 +2639,12 @@ mod tests {
             0x02,
             0x0100,
             0,
-            &[PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT],
+            &[
+                PID_TAG_FOLDER_TYPE,
+                PID_TAG_CONTENT_COUNT,
+                PID_TAG_CONTENT_UNREAD_COUNT,
+                PID_TAG_ACCESS,
+            ],
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             std::slice::from_ref(&mailbox),
             &[],
@@ -2659,10 +2660,13 @@ mod tests {
             true,
         );
 
-        assert_i32_property(&buffer, PID_TAG_CONTENT_COUNT, 1);
-        assert_i32_property(&buffer, PID_TAG_CONTENT_UNREAD_COUNT, 1);
-        assert_i32_property(&buffer, PID_TAG_FOLDER_TYPE, 1);
-        assert_i32_property(&buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
+        let summary =
+            decode_hierarchy_transfer_debug_summary(&buffer).expect("hierarchy transfer debug");
+        let row = summary.rows.first().expect("folder row");
+        assert_eq!(row.content_count, None);
+        assert_eq!(row.content_unread_count, None);
+        assert_eq!(row.folder_type, None);
+        assert_eq!(row.access, None);
     }
 
     #[test]
