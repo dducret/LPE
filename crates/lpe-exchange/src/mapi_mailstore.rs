@@ -1642,7 +1642,7 @@ fn content_property_in_scope(
 }
 
 fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
-    if mailbox.role == "__mapi_search" {
+    if mailbox.role == "__mapi_search" || mailbox.role == "reminders" {
         2
     } else {
         1

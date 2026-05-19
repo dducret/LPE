@@ -2355,6 +2355,7 @@ const FX_INCR_SYNC_STATE_END: u32 = 0x403B_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_DISPLAY_NAME_W: u32 = 0x3001_001F;
+const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
@@ -2391,6 +2392,7 @@ struct StrictHierarchyFolderChange {
     parent_source_key: Vec<u8>,
     change_key: Vec<u8>,
     display_name: String,
+    folder_type: Option<u32>,
     content_count: Option<u32>,
     content_unread_count: Option<u32>,
     local_commit_time_max: Option<u64>,
@@ -2403,6 +2405,7 @@ struct StrictHierarchyFolderBuilder {
     parent_source_key: Option<Vec<u8>>,
     change_key: Option<Vec<u8>>,
     display_name: Option<String>,
+    folder_type: Option<u32>,
     content_count: Option<u32>,
     content_unread_count: Option<u32>,
     local_commit_time_max: Option<u64>,
@@ -2652,6 +2655,9 @@ fn strict_record_folder_property(
         PID_TAG_DISPLAY_NAME_W => {
             folder.display_name = Some(strict_decode_utf16z(&property.value)?)
         }
+        PID_TAG_FOLDER_TYPE => {
+            folder.folder_type = Some(strict_decode_u32_property(&property)?);
+        }
         PID_TAG_CONTENT_COUNT => {
             folder.content_count = Some(strict_decode_u32_property(&property)?);
         }
@@ -2750,6 +2756,7 @@ fn strict_finish_folder_change(
         parent_source_key,
         change_key,
         display_name,
+        folder_type: folder.folder_type,
         content_count: folder.content_count,
         content_unread_count: folder.content_unread_count,
         local_commit_time_max: folder.local_commit_time_max,
@@ -13792,6 +13799,46 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
     ));
+}
+
+#[test]
+fn mapi_hierarchy_sync_marks_reminders_as_search_folder_type() {
+    let reminders =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::REMINDERS_FOLDER_ID)
+            .expect("Reminders mailbox");
+    let buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
+        0x02,
+        0x0101,
+        0,
+        &[
+            PID_TAG_FOLDER_TYPE,
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            0x0E08_0003,
+            0x0FF4_0003,
+            0x3FE0_0102,
+            0x3FE1_0102,
+            0x0E27_0102,
+        ],
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        std::slice::from_ref(&reminders),
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&reminders),
+        std::slice::from_ref(&reminders),
+        &[],
+        &[],
+        &[],
+        &[],
+        1,
+        true,
+    );
+    let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
+    assert_eq!(decoded.folder_changes.len(), 1);
+    assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
+    assert_eq!(decoded.folder_changes[0].folder_type, Some(2));
+    assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
 #[tokio::test]
