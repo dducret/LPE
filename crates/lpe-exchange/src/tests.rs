@@ -13973,8 +13973,6 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     }));
     for tag in [
         0x3601_0003u32,
-        0x3602_0003,
-        0x3603_0003,
         0x0E08_0003,
         0x0FF4_0003,
         0x3FE0_0102,
@@ -13982,6 +13980,9 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         0x0E27_0102,
     ] {
         assert!(!contains_bytes(&response_rops, &tag.to_le_bytes()));
+    }
+    for tag in [0x3602_0003u32, 0x3603_0003] {
+        assert!(contains_bytes(&response_rops, &tag.to_le_bytes()));
     }
     assert!(contains_bytes(
         &response_rops,
@@ -14168,7 +14169,6 @@ fn mapi_hierarchy_sync_keeps_reminders_generic_until_search_folder_support() {
         &[],
         &[],
         1,
-        true,
     );
     let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
     assert_eq!(decoded.folder_changes.len(), 1);
@@ -14213,7 +14213,6 @@ fn mapi_hierarchy_sync_projects_outlook_special_folder_display_names() {
         &[],
         &[],
         1,
-        true,
     );
     let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
 

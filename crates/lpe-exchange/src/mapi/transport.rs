@@ -595,8 +595,6 @@ fn log_mapi_session_disconnect(
         .values()
         .filter(|object| matches!(object, MapiObject::NotificationSubscription { .. }))
         .count();
-    let outlook_hierarchy_without_content_candidates =
-        outlook_hierarchy_without_content_warning_candidates(endpoint, request_type, session);
     let post_hierarchy_summary = post_hierarchy_action_summary(
         session,
         endpoint == MapiEndpoint::Emsmdb && request_type == "Disconnect",
@@ -650,35 +648,6 @@ fn log_mapi_session_disconnect(
         "rca debug mapi session disconnect"
     );
 
-    for candidate in outlook_hierarchy_without_content_candidates {
-        tracing::warn!(
-            rca_debug = true,
-            rca_warning = "outlook_hierarchy_without_content_candidate",
-            adapter = "mapi",
-            endpoint = endpoint_label,
-            tenant_id = %principal.tenant_id,
-            account_id = %principal.account_id,
-            mailbox = %principal.email,
-            request_type = %request_type,
-            mapi_request_id = %request_id,
-            client_application = %client_application,
-            trace_id = %trace_id,
-            sync_root_folder_id = format_args!("0x{:016x}", candidate.sync_root_folder_id),
-            total_computed_content_count = candidate.total_computed_content_count,
-            total_computed_unread_count = candidate.total_computed_unread_count,
-            omitted_count_property_tags =
-                %format_count_property_tags_for_debug(&candidate.omitted_count_property_tags),
-            omitted_count_property_names =
-                %format_count_property_names_for_debug(&candidate.omitted_count_property_tags),
-            omitted_count_row_count = candidate.omitted_count_row_count,
-            sync_state_bytes = candidate.sync_state_bytes,
-            transfer_buffer_bytes = candidate.transfer_buffer_bytes,
-            transfer_position_bytes = candidate.transfer_position_bytes,
-            transfer_remaining_bytes = candidate.transfer_remaining_bytes,
-            "outlook_hierarchy_without_content_candidate"
-        );
-    }
-
     if endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"
         && session
@@ -723,19 +692,6 @@ fn log_mapi_session_disconnect(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-struct OutlookHierarchyWithoutContentWarningCandidate {
-    sync_root_folder_id: u64,
-    total_computed_content_count: i64,
-    total_computed_unread_count: i64,
-    omitted_count_property_tags: Vec<u32>,
-    omitted_count_row_count: usize,
-    sync_state_bytes: usize,
-    transfer_buffer_bytes: usize,
-    transfer_position_bytes: usize,
-    transfer_remaining_bytes: usize,
-}
-
-#[derive(Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: String,
@@ -770,78 +726,6 @@ fn format_rop_ids_for_debug(rop_ids: &[u8]) -> String {
     rop_ids
         .iter()
         .map(|rop_id| format!("0x{rop_id:02x}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn outlook_hierarchy_without_content_warning_candidates(
-    endpoint: MapiEndpoint,
-    request_type: &str,
-    session: &MapiSession,
-) -> Vec<OutlookHierarchyWithoutContentWarningCandidate> {
-    if endpoint != MapiEndpoint::Emsmdb || request_type != "Disconnect" {
-        return Vec::new();
-    }
-    if session.handles.values().any(|object| {
-        matches!(
-            object,
-            MapiObject::SynchronizationSource {
-                sync_type: 0x01,
-                ..
-            }
-        )
-    }) {
-        return Vec::new();
-    }
-
-    session
-        .handles
-        .values()
-        .filter_map(|object| {
-            let MapiObject::SynchronizationSource {
-                sync_type,
-                state,
-                hierarchy_content_candidate,
-                transfer_buffer,
-                transfer_position,
-                ..
-            } = object
-            else {
-                return None;
-            };
-            if *sync_type != 0x02 || *transfer_position < transfer_buffer.len() {
-                return None;
-            }
-            let candidate = hierarchy_content_candidate.as_ref()?;
-            Some(OutlookHierarchyWithoutContentWarningCandidate {
-                sync_root_folder_id: candidate.sync_root_folder_id,
-                total_computed_content_count: candidate.total_computed_content_count,
-                total_computed_unread_count: candidate.total_computed_unread_count,
-                omitted_count_property_tags: candidate.omitted_count_property_tags.clone(),
-                omitted_count_row_count: candidate.omitted_count_row_count,
-                sync_state_bytes: state.len(),
-                transfer_buffer_bytes: transfer_buffer.len(),
-                transfer_position_bytes: *transfer_position,
-                transfer_remaining_bytes: transfer_buffer.len().saturating_sub(*transfer_position),
-            })
-        })
-        .collect()
-}
-
-fn format_count_property_tags_for_debug(tags: &[u32]) -> String {
-    tags.iter()
-        .map(|tag| format!("0x{tag:08x}"))
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
-fn format_count_property_names_for_debug(tags: &[u32]) -> String {
-    tags.iter()
-        .map(|tag| match *tag {
-            crate::mapi::properties::PID_TAG_CONTENT_COUNT => "PidTagContentCount",
-            crate::mapi::properties::PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
-            _ => "unknown",
-        })
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -1370,18 +1254,6 @@ pub(in crate::mapi) fn debug_payload_preview_limit() -> usize {
         .min(512)
 }
 
-pub(in crate::mapi) fn force_hierarchy_count_properties_experiment_enabled() -> bool {
-    env::var("LPE_MAPI_EXPERIMENT_FORCE_HIERARCHY_COUNT_PROPERTIES")
-        .ok()
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "true" | "1" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
-}
-
 pub(crate) fn hex_preview(bytes: &[u8], limit: usize) -> String {
     bytes
         .iter()
@@ -1689,60 +1561,6 @@ mod tests {
         }
     }
 
-    fn hierarchy_source(
-        transfer_position: usize,
-        candidate: Option<crate::mapi_mailstore::HierarchyContentCountOmissionCandidate>,
-    ) -> MapiObject {
-        MapiObject::SynchronizationSource {
-            folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-            mailbox_id: None,
-            checkpoint_kind: MapiCheckpointKind::Hierarchy,
-            checkpoint_change_sequence: 10,
-            checkpoint_modseq: 20,
-            sync_type: 0x02,
-            state: vec![1, 2, 3],
-            state_upload_buffer: Vec::new(),
-            client_state_uploaded_bytes: 0,
-            incremental_transfer_buffer: None,
-            hierarchy_content_candidate: candidate,
-            incremental_hierarchy_content_candidate: None,
-            transfer_buffer: vec![0; 8],
-            transfer_position,
-        }
-    }
-
-    fn content_source() -> MapiObject {
-        MapiObject::SynchronizationSource {
-            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
-            mailbox_id: None,
-            checkpoint_kind: MapiCheckpointKind::Content,
-            checkpoint_change_sequence: 10,
-            checkpoint_modseq: 20,
-            sync_type: 0x01,
-            state: Vec::new(),
-            state_upload_buffer: Vec::new(),
-            client_state_uploaded_bytes: 0,
-            incremental_transfer_buffer: None,
-            hierarchy_content_candidate: None,
-            incremental_hierarchy_content_candidate: None,
-            transfer_buffer: vec![0; 4],
-            transfer_position: 4,
-        }
-    }
-
-    fn count_candidate() -> crate::mapi_mailstore::HierarchyContentCountOmissionCandidate {
-        crate::mapi_mailstore::HierarchyContentCountOmissionCandidate {
-            sync_root_folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-            total_computed_content_count: 3,
-            total_computed_unread_count: 1,
-            omitted_count_property_tags: vec![
-                crate::mapi::properties::PID_TAG_CONTENT_COUNT,
-                crate::mapi::properties::PID_TAG_CONTENT_UNREAD_COUNT,
-            ],
-            omitted_count_row_count: 1,
-        }
-    }
-
     #[test]
     fn connect_body_debug_summary_decodes_fields() {
         let mut body = Vec::new();
@@ -1862,52 +1680,6 @@ mod tests {
         assert!(summary.selected_session_endpoint_matches);
         assert!(!summary.selected_session_principal_matches);
         remove_session(&session_id);
-    }
-
-    #[test]
-    fn outlook_hierarchy_without_content_candidate_requires_completed_hierarchy_and_no_content_sync(
-    ) {
-        let mut handles = HashMap::new();
-        handles.insert(1, hierarchy_source(8, Some(count_candidate())));
-        let session = test_session(handles);
-
-        let candidates = outlook_hierarchy_without_content_warning_candidates(
-            MapiEndpoint::Emsmdb,
-            "Disconnect",
-            &session,
-        );
-
-        assert_eq!(candidates.len(), 1);
-        assert_eq!(
-            candidates[0].sync_root_folder_id,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
-        );
-        assert_eq!(candidates[0].total_computed_content_count, 3);
-        assert_eq!(candidates[0].total_computed_unread_count, 1);
-        assert_eq!(candidates[0].sync_state_bytes, 3);
-        assert_eq!(candidates[0].transfer_buffer_bytes, 8);
-        assert_eq!(candidates[0].transfer_position_bytes, 8);
-
-        let mut handles = HashMap::new();
-        handles.insert(1, hierarchy_source(7, Some(count_candidate())));
-        let session = test_session(handles);
-        assert!(outlook_hierarchy_without_content_warning_candidates(
-            MapiEndpoint::Emsmdb,
-            "Disconnect",
-            &session,
-        )
-        .is_empty());
-
-        let mut handles = HashMap::new();
-        handles.insert(1, hierarchy_source(8, Some(count_candidate())));
-        handles.insert(2, content_source());
-        let session = test_session(handles);
-        assert!(outlook_hierarchy_without_content_warning_candidates(
-            MapiEndpoint::Emsmdb,
-            "Disconnect",
-            &session,
-        )
-        .is_empty());
     }
 
     #[test]

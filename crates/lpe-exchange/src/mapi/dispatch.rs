@@ -4127,8 +4127,6 @@ where
                     &state_attachment_facts,
                     &all_special_sync_objects,
                 );
-                let force_hierarchy_count_properties =
-                    force_hierarchy_count_properties_experiment_enabled();
                 let transfer_buffer =
                     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
                         sync_type,
@@ -4149,16 +4147,6 @@ where
                         &aggregate_sync_emails,
                         &aggregate_attachment_facts,
                         changes.current_change_sequence,
-                        force_hierarchy_count_properties,
-                    );
-                let hierarchy_content_candidate =
-                    mapi_mailstore::hierarchy_content_count_omission_candidate(
-                        sync_type,
-                        sync_flags,
-                        &sync_property_tags,
-                        folder_id,
-                        &all_sync_mailboxes,
-                        &aggregate_sync_emails,
                     );
                 mapi_mailstore::log_hierarchy_transfer_debug(
                     sync_type,
@@ -4187,17 +4175,6 @@ where
                         &aggregate_sync_emails,
                         &aggregate_attachment_facts,
                         changes.current_change_sequence,
-                        force_hierarchy_count_properties,
-                    )
-                });
-                let incremental_hierarchy_content_candidate = checkpoint.as_ref().and_then(|_| {
-                    mapi_mailstore::hierarchy_content_count_omission_candidate(
-                        sync_type,
-                        sync_flags,
-                        &sync_property_tags,
-                        folder_id,
-                        &delta_sync_mailboxes,
-                        &aggregate_sync_emails,
                     )
                 });
                 let checkpoint_delta_mailbox_count = delta_sync_mailboxes.len();
@@ -4222,8 +4199,6 @@ where
                     sync_property_tags = %sync_property_tags_hex,
                     sync_property_filter_mode =
                         sync_property_filter_mode(sync_flags, &sync_property_tags),
-                    force_hierarchy_count_properties_experiment =
-                        force_hierarchy_count_properties,
                     checkpoint_loaded = checkpoint.is_some(),
                     checkpoint_status,
                     checkpoint_cursor_source,
@@ -4262,8 +4237,6 @@ where
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
                         incremental_transfer_buffer,
-                        hierarchy_content_candidate,
-                        incremental_hierarchy_content_candidate,
                         transfer_buffer,
                         transfer_position: 0,
                     },
@@ -4313,8 +4286,6 @@ where
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
                         incremental_transfer_buffer: None,
-                        hierarchy_content_candidate: None,
-                        incremental_hierarchy_content_candidate: None,
                         transfer_buffer,
                         transfer_position: 0,
                     },
@@ -4359,8 +4330,6 @@ where
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
                         incremental_transfer_buffer: None,
-                        hierarchy_content_candidate: None,
-                        incremental_hierarchy_content_candidate: None,
                         transfer_buffer,
                         transfer_position: 0,
                     },
@@ -4617,8 +4586,6 @@ where
                         state_upload_buffer,
                         client_state_uploaded_bytes,
                         incremental_transfer_buffer,
-                        hierarchy_content_candidate,
-                        incremental_hierarchy_content_candidate,
                         transfer_buffer,
                         transfer_position,
                         ..
@@ -4633,8 +4600,6 @@ where
                             if let Some(buffer) = incremental_transfer_buffer.take() {
                                 *transfer_buffer = buffer;
                                 *transfer_position = 0;
-                                *hierarchy_content_candidate =
-                                    incremental_hierarchy_content_candidate.take();
                                 selected_checkpoint_delta = true;
                             }
                         }
@@ -4754,8 +4719,6 @@ where
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
                         incremental_transfer_buffer: None,
-                        hierarchy_content_candidate: None,
-                        incremental_hierarchy_content_candidate: None,
                         transfer_buffer,
                         transfer_position: 0,
                     },
