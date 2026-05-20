@@ -455,6 +455,15 @@ where
             canonical_id: entry.id,
             reserved_global_counter: None,
         }))
+        .chain(
+            search_folder_definitions
+                .iter()
+                .map(|definition| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+                    canonical_id: definition.id,
+                    reserved_global_counter: None,
+                }),
+        )
         .collect::<Vec<_>>();
     log_mapi_store_load_step(
         account_id,

@@ -174,6 +174,7 @@ struct FakeStore {
     mapi_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
+    search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
@@ -1336,7 +1337,8 @@ impl ExchangeStore for FakeStore {
         &'a self,
         _account_id: Uuid,
     ) -> StoreFuture<'a, Vec<SearchFolderDefinition>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        let search_folders = self.search_folders.lock().unwrap().clone();
+        Box::pin(async move { Ok(search_folders) })
     }
 
     fn query_client_reminders<'a>(
@@ -6426,8 +6428,21 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     account.account_id = Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap();
     account.email = "bob@example.test".to_string();
     account.display_name = "Bob Store".to_string();
+    let search_folder_id = Uuid::parse_str("11111111-2222-4333-8444-666666666666").unwrap();
     let store = FakeStore {
         session: Some(account.clone()),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: search_folder_id,
+            account_id: account.account_id,
+            role: "reminders".to_string(),
+            display_name: "Reminders".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            is_builtin: true,
+        }])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
