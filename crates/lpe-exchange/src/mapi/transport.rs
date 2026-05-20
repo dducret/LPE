@@ -1494,10 +1494,13 @@ pub(in crate::mapi) fn request_named_cookie(name: &str, headers: &HeaderMap) -> 
         .get("cookie")
         .and_then(|value| value.to_str().ok())
         .and_then(|cookie| {
-            cookie.split(';').find_map(|part| {
-                let (key, value) = part.trim().split_once('=')?;
-                (key == name && !value.is_empty()).then(|| value.to_string())
-            })
+            cookie
+                .split(';')
+                .filter_map(|part| {
+                    let (key, value) = part.trim().split_once('=')?;
+                    (key == name && !value.is_empty()).then(|| value.to_string())
+                })
+                .last()
         })
 }
 
