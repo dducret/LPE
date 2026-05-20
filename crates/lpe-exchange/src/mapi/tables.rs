@@ -3376,16 +3376,35 @@ pub(in crate::mapi) fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
         "notes" => NOTES_FOLDER_ID,
         "tasks" => TASKS_FOLDER_ID,
         "reminders" => REMINDERS_FOLDER_ID,
+        "suggested_contacts" => SUGGESTED_CONTACTS_FOLDER_ID,
+        "quick_contacts" => QUICK_CONTACTS_FOLDER_ID,
+        "im_contact_list" => IM_CONTACT_LIST_FOLDER_ID,
+        "contacts_search" => CONTACTS_SEARCH_FOLDER_ID,
+        "document_libraries" => DOCUMENT_LIBRARIES_FOLDER_ID,
+        "sync_issues" => SYNC_ISSUES_FOLDER_ID,
+        "conflicts" => CONFLICTS_FOLDER_ID,
+        "local_failures" => LOCAL_FAILURES_FOLDER_ID,
+        "server_failures" => SERVER_FAILURES_FOLDER_ID,
+        "junk" => JUNK_FOLDER_ID,
+        "rss_feeds" => RSS_FEEDS_FOLDER_ID,
+        "tracked_mail_processing" => TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        "todo_search" => TODO_SEARCH_FOLDER_ID,
+        "conversation_action_settings" => CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        "archive" => ARCHIVE_FOLDER_ID,
+        "conversation_history" => CONVERSATION_HISTORY_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
             .expect("MAPI folder identity mapping missing"),
     }
 }
 
 fn mapi_parent_folder_id(mailbox: &JmapMailbox) -> u64 {
-    mailbox
-        .parent_id
-        .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
-        .unwrap_or(IPM_SUBTREE_FOLDER_ID)
+    match mailbox.role.as_str() {
+        "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
+        _ => mailbox
+            .parent_id
+            .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
+            .unwrap_or(IPM_SUBTREE_FOLDER_ID),
+    }
 }
 
 pub(in crate::mapi) fn mapi_message_id(email: &JmapEmail) -> u64 {

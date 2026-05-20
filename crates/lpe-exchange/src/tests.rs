@@ -10113,7 +10113,7 @@ async fn mapi_over_http_move_copy_messages_uses_canonical_store() {
     rops.extend_from_slice(&[
         0x02, 0x00, 0x00, 0x02, // RopOpenFolder, Archive
     ]);
-    rops.extend_from_slice(&test_mapi_uuid_id(&archive_id).to_le_bytes());
+    rops.extend_from_slice(&crate::mapi::identity::ARCHIVE_FOLDER_ID.to_le_bytes());
     rops.push(0);
     rops.extend_from_slice(&[
         0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, move
@@ -13319,7 +13319,7 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
     let source_rops = content_sync_response_rops(store.clone(), 5, b"client-content-state").await;
     let target_rops = content_sync_response_rops(
         store,
-        test_mapi_uuid_id(&archive_id) >> 16,
+        crate::mapi::identity::ARCHIVE_FOLDER_ID >> 16,
         b"client-content-state",
     )
     .await;
@@ -17307,7 +17307,7 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
         0x78, 0x00, 0x02, // RopSynchronizationImportMessageMove
     ]);
     rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(0x6666_6666_6666).to_le_bytes());
+    rops.extend_from_slice(&crate::mapi::identity::ARCHIVE_FOLDER_ID.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());

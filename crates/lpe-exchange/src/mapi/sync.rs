@@ -255,6 +255,7 @@ fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) ->
         | "__mapi_search"
         | "__mapi_views"
         | "__mapi_shortcuts" => ROOT_FOLDER_ID,
+        "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
         _ => mailbox
             .parent_id
             .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
@@ -769,5 +770,53 @@ mod tests {
             .count();
 
         assert_eq!(duplicate_rows, 1);
+    }
+
+    #[test]
+    fn hierarchy_sync_mailboxes_deduplicate_outlook_special_roles() {
+        let roles = [
+            ("suggested_contacts", SUGGESTED_CONTACTS_FOLDER_ID),
+            ("quick_contacts", QUICK_CONTACTS_FOLDER_ID),
+            ("im_contact_list", IM_CONTACT_LIST_FOLDER_ID),
+            ("contacts_search", CONTACTS_SEARCH_FOLDER_ID),
+            ("document_libraries", DOCUMENT_LIBRARIES_FOLDER_ID),
+            ("sync_issues", SYNC_ISSUES_FOLDER_ID),
+            ("conflicts", CONFLICTS_FOLDER_ID),
+            ("local_failures", LOCAL_FAILURES_FOLDER_ID),
+            ("server_failures", SERVER_FAILURES_FOLDER_ID),
+            ("junk", JUNK_FOLDER_ID),
+            ("rss_feeds", RSS_FEEDS_FOLDER_ID),
+            ("tracked_mail_processing", TRACKED_MAIL_PROCESSING_FOLDER_ID),
+            ("todo_search", TODO_SEARCH_FOLDER_ID),
+            (
+                "conversation_action_settings",
+                CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            ),
+            ("archive", ARCHIVE_FOLDER_ID),
+            ("conversation_history", CONVERSATION_HISTORY_FOLDER_ID),
+        ];
+        let mailboxes = roles
+            .iter()
+            .enumerate()
+            .map(|(index, (role, _))| {
+                mailbox(
+                    0x33333333333333333333333333333330 + index as u128,
+                    role,
+                    role,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let rows = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes);
+
+        for (role, folder_id) in roles {
+            assert_eq!(
+                rows.iter()
+                    .filter(|mailbox| mailbox.role == role && mapi_folder_id(mailbox) == folder_id)
+                    .count(),
+                1,
+                "{role} should appear once"
+            );
+        }
     }
 }
