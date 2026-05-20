@@ -2330,6 +2330,39 @@ fn mapi_content_table_order_by(sort_orders: &[MapiContentTableSort]) -> String {
     clauses.join(", ")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mapi_content_table_order_by_uses_projected_columns() {
+        let sort_fields = [
+            MapiContentTableSortField::ReceivedAt,
+            MapiContentTableSortField::Subject,
+            MapiContentTableSortField::SenderName,
+            MapiContentTableSortField::SenderEmail,
+            MapiContentTableSortField::DisplayTo,
+            MapiContentTableSortField::MessageSize,
+            MapiContentTableSortField::HasAttachments,
+            MapiContentTableSortField::MessageFlags,
+        ];
+        let sort_orders = sort_fields
+            .into_iter()
+            .map(|field| MapiContentTableSort {
+                field,
+                descending: false,
+            })
+            .collect::<Vec<_>>();
+
+        let order_by = mapi_content_table_order_by(&sort_orders);
+
+        assert!(!order_by.contains("mm."));
+        assert!(!order_by.contains("m."));
+        assert!(order_by.contains("message_flags ASC"));
+        assert!(order_by.ends_with("id DESC"));
+    }
+}
+
 fn task_matches_collection(task: &ClientTask, collection_id: &str) -> bool {
     matches!(collection_id, "tasks" | "default") || task.task_list_id.to_string() == collection_id
 }
