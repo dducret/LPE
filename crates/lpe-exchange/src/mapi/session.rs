@@ -313,6 +313,9 @@ pub(in crate::mapi) fn reconnect_session(
     }
 
     let session_id = Uuid::new_v4().to_string();
+    if endpoint == MapiEndpoint::Emsmdb {
+        store_session(previous_session_id, session.clone());
+    }
     store_session(session_id.clone(), session);
     Ok(Some(session_id))
 }

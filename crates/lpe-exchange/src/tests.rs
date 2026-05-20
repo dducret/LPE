@@ -4861,6 +4861,49 @@ async fn mapi_over_http_connect_ignores_mismatched_sequence_cookie_on_reconnect(
 }
 
 #[tokio::test]
+async fn mapi_over_http_connect_preserves_previous_cookie_for_follow_up_execute() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let previous_cookie = mapi_cookie_header(&connect);
+
+    let mut reconnect_headers = mapi_headers("Connect");
+    reconnect_headers.insert("cookie", HeaderValue::from_str(&previous_cookie).unwrap());
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &reconnect_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(reconnect.headers().get("x-responsecode").unwrap(), "0");
+
+    let legacy_dn = b"/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0";
+    let mut logon_rop = vec![0xFE, 0x00, 0x00, 0x01];
+    logon_rop.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    logon_rop.extend_from_slice(&0u32.to_le_bytes());
+    logon_rop.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    logon_rop.extend_from_slice(legacy_dn);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&previous_cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rop, &[])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+}
+
+#[tokio::test]
 async fn mapi_over_http_rejects_missing_request_id_with_parseable_error() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
