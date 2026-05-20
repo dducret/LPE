@@ -97,6 +97,7 @@ ALTER TABLE public.mail_change_log
     OR (
       object_kind = 'mailbox'
       AND account_id IS NOT NULL
+      AND mailbox_id IS NOT NULL
       AND mailbox_id = object_id
       AND collection_id IS NULL
     )
