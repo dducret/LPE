@@ -778,31 +778,34 @@ pub(crate) fn log_hierarchy_transfer_debug(
     }
 
     match decode_hierarchy_transfer_debug_summary(transfer_buffer) {
-        Ok(summary) => tracing::info!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            request_rop_id = "0x70",
-            sync_type = format_args!("0x{sync_type:02x}"),
-            folder_id = format_args!("0x{folder_id:016x}"),
-            transfer_buffer_bytes = transfer_buffer.len(),
-            hierarchy_decode_status = "ok",
-            folder_change_count = summary.folder_change_count,
-            final_state_present = summary.final_state_present,
-            parent_before_child_violations = summary.parent_before_child_violations,
-            zero_length_parent_source_key_count = summary.zero_length_parent_source_key_count,
-            source_key_lengths = %format_usize_list(&summary.source_key_lengths),
-            change_key_lengths = %format_usize_list(&summary.change_key_lengths),
-            final_state_property_tags = %format_property_tags(&summary.final_state_property_tags),
-            final_state_property_names = %format_property_tag_names(&summary.final_state_property_tags),
-            final_state_property_lengths = %format_usize_list(&summary.final_state_property_lengths),
-            final_state_idset_given = %summary.final_state_idset_given_summary.as_deref().unwrap_or_default(),
-            final_state_cnset_seen = %summary.final_state_cnset_seen_summary.as_deref().unwrap_or_default(),
-            emitted_property_tags = %format_property_tags(&summary.emitted_property_tags),
-            requested_property_tags = %format_property_tags(requested_property_tags),
-            property_tags_filter_mode = hierarchy_property_filter_mode(sync_flags, requested_property_tags),
-            "rca debug mapi hierarchy transfer stream"
-        ),
+        Ok(summary) => {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                request_rop_id = "0x70",
+                sync_type = format_args!("0x{sync_type:02x}"),
+                folder_id = format_args!("0x{folder_id:016x}"),
+                transfer_buffer_bytes = transfer_buffer.len(),
+                hierarchy_decode_status = "ok",
+                folder_change_count = summary.folder_change_count,
+                final_state_present = summary.final_state_present,
+                parent_before_child_violations = summary.parent_before_child_violations,
+                zero_length_parent_source_key_count = summary.zero_length_parent_source_key_count,
+                source_key_lengths = %format_usize_list(&summary.source_key_lengths),
+                change_key_lengths = %format_usize_list(&summary.change_key_lengths),
+                final_state_property_tags = %format_property_tags(&summary.final_state_property_tags),
+                final_state_property_names = %format_property_tag_names(&summary.final_state_property_tags),
+                final_state_property_lengths = %format_usize_list(&summary.final_state_property_lengths),
+                final_state_idset_given = %summary.final_state_idset_given_summary.as_deref().unwrap_or_default(),
+                final_state_cnset_seen = %summary.final_state_cnset_seen_summary.as_deref().unwrap_or_default(),
+                emitted_property_tags = %format_property_tags(&summary.emitted_property_tags),
+                requested_property_tags = %format_property_tags(requested_property_tags),
+                property_tags_filter_mode = hierarchy_property_filter_mode(sync_flags, requested_property_tags),
+                "rca debug mapi hierarchy transfer stream"
+            );
+            log_hierarchy_final_state_debug(sync_type, folder_id, &summary);
+        }
         Err(error) => tracing::warn!(
             rca_debug = true,
             adapter = "mapi",
@@ -818,6 +821,85 @@ pub(crate) fn log_hierarchy_transfer_debug(
             "rca debug mapi hierarchy transfer stream"
         ),
     }
+}
+
+pub(crate) fn log_hierarchy_get_buffer_payload_summary(
+    sync_type: u8,
+    folder_id: u64,
+    transfer_status: &str,
+    transfer_buffer: &[u8],
+) {
+    if sync_type != SYNC_TYPE_HIERARCHY || !tracing::enabled!(tracing::Level::INFO) {
+        return;
+    }
+
+    match decode_hierarchy_transfer_debug_summary(transfer_buffer) {
+        Ok(summary) => tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            request_type = "Execute",
+            request_rop_id = "0x4e",
+            sync_type = format_args!("0x{sync_type:02x}"),
+            folder_id = format_args!("0x{folder_id:016x}"),
+            transfer_status,
+            transfer_buffer_bytes = transfer_buffer.len(),
+            final_state_idset_given_bytes = summary.final_state_idset_given_len,
+            final_state_cnset_seen_bytes = summary.final_state_cnset_seen_len,
+            folder_change_count = summary.folder_change_count,
+            zero_parent_count = summary.zero_length_parent_source_key_count,
+            nonzero_parent_count = summary.nonzero_parent_source_key_count,
+            first_folder_name = %summary.first_folder_name(),
+            last_folder_name = %summary.last_folder_name(),
+            final_state_idset_given_includes_all_27_folder_source_key_counters =
+                summary.final_state_idset_given_includes_all_27_folder_source_counters,
+            final_state_cnset_seen_includes_all_27_folder_change_counters =
+                summary.final_state_cnset_seen_includes_all_27_folder_change_counters,
+            "rca debug mapi hierarchy get buffer payload summary"
+        ),
+        Err(error) => tracing::warn!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            request_type = "Execute",
+            request_rop_id = "0x4e",
+            sync_type = format_args!("0x{sync_type:02x}"),
+            folder_id = format_args!("0x{folder_id:016x}"),
+            transfer_status,
+            transfer_buffer_bytes = transfer_buffer.len(),
+            hierarchy_decode_status = "error",
+            hierarchy_decode_error = %error,
+            "rca debug mapi hierarchy get buffer payload summary"
+        ),
+    }
+}
+
+fn log_hierarchy_final_state_debug(
+    sync_type: u8,
+    folder_id: u64,
+    summary: &HierarchyTransferDebugSummary,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_rop_id = "0x70",
+        sync_type = format_args!("0x{sync_type:02x}"),
+        folder_id = format_args!("0x{folder_id:016x}"),
+        final_metatag_idset_given = %summary.final_state_idset_given_summary.as_deref().unwrap_or_default(),
+        final_metatag_cnset_seen = %summary.final_state_cnset_seen_summary.as_deref().unwrap_or_default(),
+        final_metatag_idset_given_bytes = summary.final_state_idset_given_len,
+        final_metatag_cnset_seen_bytes = summary.final_state_cnset_seen_len,
+        final_state_expected_folder_counter_count = 27,
+        final_state_folder_change_count = summary.folder_change_count,
+        final_metatag_idset_given_counter_count = summary.final_state_idset_given_counters.len(),
+        final_metatag_cnset_seen_counter_count = summary.final_state_cnset_seen_counters.len(),
+        final_metatag_idset_given_includes_all_27_folder_source_key_counters =
+            summary.final_state_idset_given_includes_all_27_folder_source_counters,
+        final_metatag_cnset_seen_includes_all_27_folder_change_counters =
+            summary.final_state_cnset_seen_includes_all_27_folder_change_counters,
+        "rca debug mapi hierarchy final state"
+    );
 }
 
 fn hierarchy_property_filter_mode(
@@ -839,14 +921,37 @@ struct HierarchyTransferDebugSummary {
     final_state_present: bool,
     parent_before_child_violations: usize,
     zero_length_parent_source_key_count: usize,
+    nonzero_parent_source_key_count: usize,
     source_key_lengths: Vec<usize>,
     change_key_lengths: Vec<usize>,
     final_state_property_tags: Vec<u32>,
     final_state_property_lengths: Vec<usize>,
+    final_state_idset_given_len: usize,
+    final_state_cnset_seen_len: usize,
     final_state_idset_given_summary: Option<String>,
     final_state_cnset_seen_summary: Option<String>,
+    final_state_idset_given_counters: Vec<u64>,
+    final_state_cnset_seen_counters: Vec<u64>,
+    final_state_idset_given_includes_all_27_folder_source_counters: bool,
+    final_state_cnset_seen_includes_all_27_folder_change_counters: bool,
     emitted_property_tags: Vec<u32>,
     rows: Vec<HierarchyTransferRowDebug>,
+}
+
+impl HierarchyTransferDebugSummary {
+    fn first_folder_name(&self) -> &str {
+        self.rows
+            .first()
+            .map(|row| row.display_name.as_str())
+            .unwrap_or_default()
+    }
+
+    fn last_folder_name(&self) -> &str {
+        self.rows
+            .last()
+            .map(|row| row.display_name.as_str())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Default)]
@@ -882,6 +987,8 @@ struct HierarchyTransferRowDebug {
     source_key_len: usize,
     parent_source_key_len: usize,
     change_key_len: usize,
+    source_counter: Option<u64>,
+    change_counter: Option<u64>,
     predecessor_change_list_len: usize,
     last_modification_time: Option<u64>,
     change_number: Option<u64>,
@@ -1011,6 +1118,7 @@ fn decode_hierarchy_transfer_debug_summary(
         finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
     }
     summary.emitted_property_tags = emitted_property_tags.into_iter().collect();
+    finalize_hierarchy_debug_summary(&mut summary);
     Ok(summary)
 }
 
@@ -1024,15 +1132,45 @@ fn collect_final_state_debug_property(
         .push(property.value.len());
     match property.tag {
         META_TAG_IDSET_GIVEN => {
+            summary.final_state_idset_given_len = property.value.len();
             summary.final_state_idset_given_summary =
                 Some(format_replguid_globset_debug(&property.value));
+            summary.final_state_idset_given_counters =
+                replguid_globset_counters(&property.value).unwrap_or_default();
         }
         META_TAG_CNSET_SEEN => {
+            summary.final_state_cnset_seen_len = property.value.len();
             summary.final_state_cnset_seen_summary =
                 Some(format_replguid_globset_debug(&property.value));
+            summary.final_state_cnset_seen_counters =
+                replguid_globset_counters(&property.value).unwrap_or_default();
         }
         _ => {}
     }
+}
+
+fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDebugSummary) {
+    let source_counters = summary
+        .rows
+        .iter()
+        .filter_map(|row| row.source_counter)
+        .collect::<Vec<_>>();
+    let change_counters = summary
+        .rows
+        .iter()
+        .filter_map(|row| row.change_counter)
+        .collect::<Vec<_>>();
+    summary.final_state_idset_given_includes_all_27_folder_source_counters = source_counters.len()
+        == 27
+        && counters_include_all(&summary.final_state_idset_given_counters, &source_counters);
+    summary.final_state_cnset_seen_includes_all_27_folder_change_counters = change_counters.len()
+        == 27
+        && counters_include_all(&summary.final_state_cnset_seen_counters, &change_counters);
+}
+
+fn counters_include_all(haystack: &[u64], needles: &[u64]) -> bool {
+    let haystack = haystack.iter().copied().collect::<BTreeSet<_>>();
+    needles.iter().all(|counter| haystack.contains(counter))
 }
 
 fn finish_hierarchy_debug_folder(
@@ -1044,6 +1182,7 @@ fn finish_hierarchy_debug_folder(
     let parent_source_key_present = folder.parent_source_key.is_some();
     let parent_source_key = folder.parent_source_key.unwrap_or_default();
     if !parent_source_key.is_empty() {
+        summary.nonzero_parent_source_key_count += 1;
         if !hierarchy_debug_known_parent_source_key(&parent_source_key)
             && !seen_source_keys
                 .iter()
@@ -1074,6 +1213,8 @@ fn finish_hierarchy_debug_folder(
         source_key_len: source_key.len(),
         parent_source_key_len: parent_source_key.len(),
         change_key_len: change_key.len(),
+        source_counter: counter_from_xid(&source_key),
+        change_counter: counter_from_xid(&change_key),
         predecessor_change_list_len: predecessor_change_list.len(),
         last_modification_time: folder.last_modification_time,
         change_number: folder.change_number,
@@ -1365,6 +1506,53 @@ fn format_replguid_globset_debug(value: &[u8]) -> String {
         format_debug_hex(replica_guid),
         ranges.len()
     )
+}
+
+fn replguid_globset_counters(value: &[u8]) -> Result<Vec<u64>, String> {
+    if value.len() < 17 {
+        return Err("missing_replica_guid".to_string());
+    }
+    if value[..16] != STORE_REPLICA_GUID {
+        return Err("unexpected_replica_guid".to_string());
+    }
+
+    let mut offset = 16;
+    let mut counters = BTreeSet::new();
+    while offset < value.len() {
+        let command = value[offset];
+        offset += 1;
+        match command {
+            GLOBSET_END_COMMAND => {
+                if offset == value.len() {
+                    return Ok(counters.into_iter().collect());
+                }
+                return Err("trailing_bytes_after_end".to_string());
+            }
+            GLOBSET_RANGE_COMMAND => {
+                let low = value
+                    .get(offset..offset + 6)
+                    .and_then(crate::mapi::identity::global_counter_from_globcnt)
+                    .ok_or_else(|| "truncated_or_invalid_range_low".to_string())?;
+                let high = value
+                    .get(offset + 6..offset + 12)
+                    .and_then(crate::mapi::identity::global_counter_from_globcnt)
+                    .ok_or_else(|| "truncated_or_invalid_range_high".to_string())?;
+                for counter in low..=high.max(low) {
+                    counters.insert(counter);
+                }
+                offset += 12;
+            }
+            _ => return Err("unsupported_command".to_string()),
+        }
+    }
+    Err("missing_end_command".to_string())
+}
+
+fn counter_from_xid(value: &[u8]) -> Option<u64> {
+    if value.len() != 22 || value[..16] != STORE_REPLICA_GUID {
+        return None;
+    }
+    crate::mapi::identity::global_counter_from_globcnt(value.get(16..22)?)
 }
 
 fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
@@ -2704,6 +2892,7 @@ mod tests {
         assert!(summary.final_state_present);
         assert_eq!(summary.parent_before_child_violations, 0);
         assert_eq!(summary.zero_length_parent_source_key_count, 1);
+        assert_eq!(summary.nonzero_parent_source_key_count, 0);
         assert_eq!(summary.source_key_lengths, vec![22]);
         assert_eq!(summary.change_key_lengths, vec![22]);
         assert_eq!(
@@ -2711,6 +2900,14 @@ mod tests {
             vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
         );
         assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
+        assert_eq!(summary.final_state_idset_given_len, 30);
+        assert_eq!(summary.final_state_cnset_seen_len, 30);
+        assert_eq!(summary.final_state_idset_given_counters, vec![5]);
+        assert_eq!(summary.final_state_cnset_seen_counters, vec![42]);
+        assert!(!summary.final_state_idset_given_includes_all_27_folder_source_counters);
+        assert!(!summary.final_state_cnset_seen_includes_all_27_folder_change_counters);
+        assert_eq!(summary.first_folder_name(), "Inbox");
+        assert_eq!(summary.last_folder_name(), "Inbox");
         assert!(summary
             .final_state_idset_given_summary
             .as_deref()
@@ -2733,6 +2930,65 @@ mod tests {
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 0);
         assert!(summary.rows[0].missing_core_property_tags.is_empty());
+    }
+
+    #[test]
+    fn hierarchy_transfer_debug_summary_tracks_full_ipm_final_state_counters() {
+        let folder_ids = [
+            crate::mapi::identity::INBOX_FOLDER_ID,
+            crate::mapi::identity::DRAFTS_FOLDER_ID,
+            crate::mapi::identity::OUTBOX_FOLDER_ID,
+            crate::mapi::identity::SENT_FOLDER_ID,
+            crate::mapi::identity::TRASH_FOLDER_ID,
+            crate::mapi::identity::CONTACTS_FOLDER_ID,
+            crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+            crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+            crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+            crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            crate::mapi::identity::JOURNAL_FOLDER_ID,
+            crate::mapi::identity::NOTES_FOLDER_ID,
+            crate::mapi::identity::TASKS_FOLDER_ID,
+            crate::mapi::identity::REMINDERS_FOLDER_ID,
+            crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_ID,
+            crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+            crate::mapi::identity::CONFLICTS_FOLDER_ID,
+            crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+            crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+            crate::mapi::identity::JUNK_FOLDER_ID,
+            crate::mapi::identity::RSS_FEEDS_FOLDER_ID,
+            crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
+            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            crate::mapi::identity::ARCHIVE_FOLDER_ID,
+            crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
+        ];
+        let mailboxes = folder_ids
+            .into_iter()
+            .map(|folder_id| virtual_special_mailbox(folder_id).expect("virtual folder"))
+            .collect::<Vec<_>>();
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+        assert_eq!(summary.folder_change_count, 27);
+        assert_eq!(summary.zero_length_parent_source_key_count, 24);
+        assert_eq!(summary.nonzero_parent_source_key_count, 3);
+        assert!(summary.final_state_idset_given_includes_all_27_folder_source_counters);
+        assert!(summary.final_state_cnset_seen_includes_all_27_folder_change_counters);
+        assert_eq!(summary.first_folder_name(), "Inbox");
+        assert_eq!(summary.last_folder_name(), "Server Failures");
     }
 
     #[test]

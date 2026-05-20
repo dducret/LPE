@@ -4399,6 +4399,12 @@ where
                             transfer_status = if completed { "0x0003" } else { "0x0001" },
                             "rca debug mapi fast transfer get buffer"
                         );
+                        mapi_mailstore::log_hierarchy_get_buffer_payload_summary(
+                            *sync_type,
+                            *folder_id,
+                            if completed { "0x0003" } else { "0x0001" },
+                            transfer_buffer,
+                        );
                         let checkpoint = (
                             *mailbox_id,
                             *checkpoint_kind,
