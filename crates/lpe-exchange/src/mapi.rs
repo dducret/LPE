@@ -58,6 +58,6 @@ pub(crate) use crate::mapi::{
     session::{create_rpc_emsmdb_context, execute_rpc_emsmdb_rops},
     transport::{
         debug_payload_preview_hex, handle_mapi, mapi_error_response, mapi_response_payload_bytes,
-        mapi_response_payload_preview_hex, safe_header, MapiEndpoint,
+        safe_header, MapiEndpoint,
     },
 };

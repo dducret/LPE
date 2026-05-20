@@ -510,15 +510,8 @@ fn log_mapi_transport_connection(
         .unwrap_or_default();
     let mailbox_id = query_parameter(uri.query().unwrap_or_default(), "mailboxId");
     let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
-    let client_info = mapi::safe_header(headers, "x-clientinfo").unwrap_or_default();
-    let client_application = mapi::safe_header(headers, "x-clientapplication").unwrap_or_default();
-    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
-    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
     let response_payload_bytes = mapi::mapi_response_payload_bytes(response).unwrap_or(0);
     let request_body_bytes = request_body.len();
-    let request_body_preview_hex = mapi::debug_payload_preview_hex(request_body);
-    let response_payload_preview_hex =
-        mapi::mapi_response_payload_preview_hex(response).unwrap_or_default();
     let message = "rca debug mapi transport connection";
 
     if status < 400 && mapi_response_code == "0" {
@@ -532,17 +525,11 @@ fn log_mapi_transport_connection(
             request_type = %request_type,
             mapi_request_id = %mapi_request_id,
             client_request_id = %client_request_id,
-            client_info = %client_info,
-            client_application = %client_application,
-            trace_id = %trace_id,
             http_status = status,
             mapi_response_code = %mapi_response_code,
             request_body_bytes,
             response_payload_bytes,
-            request_body_preview_hex = %request_body_preview_hex,
-            response_payload_preview_hex = %response_payload_preview_hex,
             duration_ms,
-            user_agent = %user_agent,
             "{message}"
         );
     } else {
@@ -556,17 +543,11 @@ fn log_mapi_transport_connection(
             request_type = %request_type,
             mapi_request_id = %mapi_request_id,
             client_request_id = %client_request_id,
-            client_info = %client_info,
-            client_application = %client_application,
-            trace_id = %trace_id,
             http_status = status,
             mapi_response_code = %mapi_response_code,
             request_body_bytes,
             response_payload_bytes,
-            request_body_preview_hex = %request_body_preview_hex,
-            response_payload_preview_hex = %response_payload_preview_hex,
             duration_ms,
-            user_agent = %user_agent,
             error = %error.unwrap_or_default(),
             "{message}"
         );

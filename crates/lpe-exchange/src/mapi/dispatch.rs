@@ -83,6 +83,15 @@ where
     }
     let rop_fingerprint = mapi_payload_fingerprint(&execute.rop_buffer);
     let request_debug = summarize_request_rop_buffer(&execute.rop_buffer);
+    log_execute_request_start_debug(
+        endpoint,
+        principal,
+        headers,
+        request_id,
+        body.len(),
+        &execute.rop_buffer,
+        &request_debug,
+    );
     let hierarchy_completed_before_execute = session.hierarchy_sync_completed();
     if let Some(cached) = session.completed_execute_requests.get(request_id).cloned() {
         if cached.rop_fingerprint == rop_fingerprint {
@@ -124,6 +133,7 @@ where
     }
 
     let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
+    log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
     let snapshot =
         match load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await
         {
@@ -140,6 +150,14 @@ where
         };
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
+    log_execute_dispatch_start_debug(
+        endpoint,
+        principal,
+        headers,
+        request_id,
+        mailboxes.len(),
+        emails.len(),
+    );
     let rop_buffer = execute_rops(
         store,
         principal,
@@ -245,8 +263,8 @@ struct LogonResponseDebugSummary {
 fn log_execute_rop_debug(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
-    headers: &HeaderMap,
-    session_id: &str,
+    _headers: &HeaderMap,
+    _session_id: &str,
     request_id: &str,
     request: &RopRequestDebugSummary,
     request_rop_buffer: &[u8],
@@ -260,9 +278,6 @@ fn log_execute_rop_debug(
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
-    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
-    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
-    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let post_hierarchy = post_hierarchy_action_summary(session, false);
     let message = "rca debug mapi execute rops";
 
@@ -274,11 +289,7 @@ fn log_execute_rop_debug(
         account_id = %principal.account_id,
         mailbox = %principal.email,
         request_type = "Execute",
-        session_context_id = %session_id,
         mapi_request_id = request_id,
-        client_request_id = %client_request_id,
-        client_info = %client_info,
-        client_application = %client_application,
         request_rop_ids = %request.ids_csv,
         request_rop_count = request.ids.len(),
         request_handle_count = request.handle_count,
@@ -298,14 +309,7 @@ fn log_execute_rop_debug(
         post_hierarchy_execute_count = post_hierarchy.execute_count,
         post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
         logon_response_present = logon.present,
-        logon_output_handle_index = %logon.output_handle_index,
         logon_error_code = %logon.error_code,
-        logon_flags = %logon.logon_flags,
-        logon_special_folder_ids = %logon.special_folder_ids,
-        logon_response_flags = %logon.response_flags,
-        logon_mailbox_guid = %logon.mailbox_guid,
-        logon_replid = %logon.replid,
-        logon_replica_guid = %logon.replica_guid,
         logon_parse_error = %logon.parse_error,
         request_rop_buffer_bytes = request_rop_buffer.len(),
         response_rop_buffer_bytes = response_rop_buffer.len(),
@@ -326,11 +330,7 @@ fn log_execute_rop_debug(
             account_id = %principal.account_id,
             mailbox = %principal.email,
             request_type = "Execute",
-            session_context_id = %session_id,
             mapi_request_id = request_id,
-            client_request_id = %client_request_id,
-            client_info = %client_info,
-            client_application = %client_application,
             last_completed_hierarchy_sync_root =
                 %post_hierarchy.last_completed_hierarchy_sync_root,
             first_post_hierarchy_execute = post_hierarchy_observation.first_execute,
@@ -368,11 +368,7 @@ fn log_execute_rop_debug(
                 account_id = %principal.account_id,
                 mailbox = %principal.email,
                 request_type = "Execute",
-                session_context_id = %session_id,
                 mapi_request_id = request_id,
-                client_request_id = %client_request_id,
-                client_info = %client_info,
-                client_application = %client_application,
                 last_completed_hierarchy_sync_root =
                     %post_hierarchy.last_completed_hierarchy_sync_root,
                 post_hierarchy_execute_count = post_hierarchy.execute_count,
@@ -388,6 +384,100 @@ fn log_execute_rop_debug(
             );
         }
     }
+}
+
+fn log_execute_request_start_debug(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    _headers: &HeaderMap,
+    request_id: &str,
+    request_body_bytes: usize,
+    request_rop_buffer: &[u8],
+    request: &RopRequestDebugSummary,
+) {
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let message = "rca debug mapi execute request start";
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        body_bytes = request_body_bytes,
+        request_rop_buffer_bytes = request_rop_buffer.len(),
+        rop_ids = %request.ids_csv,
+        rop_count = request.ids.len(),
+        handle_count = request.handle_count,
+        handle_table = %request.handle_table_summary,
+        extended = request.extended,
+        parse_error = %request.parse_error,
+        message = message,
+    );
+}
+
+fn log_execute_store_access_debug(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    _headers: &HeaderMap,
+    request_id: &str,
+    access_plan: &MapiAccessPlan,
+) {
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let message = "rca debug mapi execute store access";
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        full_snapshot = access_plan.requires_full_snapshot,
+        object_id_count = access_plan.object_ids.len(),
+        content_query_count = access_plan.content_queries.len(),
+        message = message,
+    );
+}
+
+fn log_execute_dispatch_start_debug(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    _headers: &HeaderMap,
+    request_id: &str,
+    mailbox_count: usize,
+    email_count: usize,
+) {
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let message = "rca debug mapi execute dispatch start";
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        mapi_request_id = request_id,
+        mailbox_count = mailbox_count,
+        email_count = email_count,
+        message = message,
+    );
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]

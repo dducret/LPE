@@ -1205,14 +1205,6 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
     response.extensions_mut().insert(MapiResponseDebug {
         payload_bytes: body.len(),
     });
-    let payload_preview_hex = debug_payload_preview_hex(&body);
-    if !payload_preview_hex.is_empty() {
-        response
-            .extensions_mut()
-            .insert(MapiResponsePayloadPreview {
-                hex: payload_preview_hex,
-            });
-    }
     response
         .headers_mut()
         .insert(CONTENT_TYPE, HeaderValue::from_static(MAPI_CONTENT_TYPE));
@@ -1242,23 +1234,11 @@ pub(in crate::mapi) struct MapiResponseDebug {
     payload_bytes: usize,
 }
 
-#[derive(Clone, Debug)]
-pub(in crate::mapi) struct MapiResponsePayloadPreview {
-    hex: String,
-}
-
 pub(crate) fn mapi_response_payload_bytes(response: &Response) -> Option<usize> {
     response
         .extensions()
         .get::<MapiResponseDebug>()
         .map(|debug| debug.payload_bytes)
-}
-
-pub(crate) fn mapi_response_payload_preview_hex(response: &Response) -> Option<&str> {
-    response
-        .extensions()
-        .get::<MapiResponsePayloadPreview>()
-        .map(|preview| preview.hex.as_str())
 }
 
 pub(in crate::mapi) fn finalize_mapi_response(
@@ -1292,19 +1272,11 @@ pub(in crate::mapi) fn log_mapi_connection(
     let status = response.status().as_u16();
     let payload_bytes = mapi_response_payload_bytes(response).unwrap_or(0);
     let request_body_bytes = request_body.len();
-    let request_body_preview_hex = debug_payload_preview_hex(request_body);
-    let response_payload_preview_hex =
-        mapi_response_payload_preview_hex(response).unwrap_or_default();
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
-    let content_type = safe_header(headers, "content-type").unwrap_or_default();
-    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
     let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
-    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
-    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
-    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let set_cookie_names = response_set_cookie_names(response);
     let message = "rca debug mapi connection";
 
@@ -1319,18 +1291,11 @@ pub(in crate::mapi) fn log_mapi_connection(
             request_type = %request_type,
             mapi_request_id = %request_id,
             client_request_id = %client_request_id,
-            client_info = %client_info,
-            client_application = %client_application,
-            trace_id = %trace_id,
             http_status = status,
             mapi_response_code = %response_code,
             request_body_bytes,
             response_payload_bytes = payload_bytes,
-            request_body_preview_hex = %request_body_preview_hex,
-            response_payload_preview_hex = %response_payload_preview_hex,
             set_cookie_names = %set_cookie_names,
-            content_type = %content_type,
-            user_agent = %user_agent,
             "{message}"
         );
     } else {
@@ -1344,18 +1309,11 @@ pub(in crate::mapi) fn log_mapi_connection(
             request_type = %request_type,
             mapi_request_id = %request_id,
             client_request_id = %client_request_id,
-            client_info = %client_info,
-            client_application = %client_application,
-            trace_id = %trace_id,
             http_status = status,
             mapi_response_code = %response_code,
             request_body_bytes,
             response_payload_bytes = payload_bytes,
-            request_body_preview_hex = %request_body_preview_hex,
-            response_payload_preview_hex = %response_payload_preview_hex,
             set_cookie_names = %set_cookie_names,
-            content_type = %content_type,
-            user_agent = %user_agent,
             "{message}"
         );
     }
