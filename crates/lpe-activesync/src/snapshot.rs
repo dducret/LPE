@@ -81,12 +81,53 @@ pub(crate) fn email_application_data(
             })).collect::<Vec<_>>()
         }));
     }
+    if let Some(flag) = email_flag_value(email) {
+        children.push(flag);
+    }
 
     json!({
         "page": 0,
         "name": "ApplicationData",
         "children": children,
     })
+}
+
+fn email_flag_value(email: &JmapEmail) -> Option<Value> {
+    if email.followup_flag_status == "none" && !email.flagged {
+        return None;
+    }
+
+    let status = if email.followup_flag_status == "complete" {
+        "1"
+    } else {
+        "2"
+    };
+    let mut children = vec![
+        json!({"page": 2, "name": "Status", "text": status}),
+        json!({"page": 2, "name": "FlagType", "text": "Flag for follow up"}),
+    ];
+
+    if let (Some(start_at), Some(due_at)) = (&email.followup_start_at, &email.followup_due_at) {
+        children
+            .push(json!({"page": 9, "name": "StartDate", "text": activesync_timestamp(start_at)}));
+        children.push(
+            json!({"page": 9, "name": "UtcStartDate", "text": activesync_timestamp(start_at)}),
+        );
+        children.push(json!({"page": 9, "name": "DueDate", "text": activesync_timestamp(due_at)}));
+        children
+            .push(json!({"page": 9, "name": "UtcDueDate", "text": activesync_timestamp(due_at)}));
+    }
+    if let Some(completed_at) = &email.followup_completed_at {
+        let completed = activesync_timestamp(completed_at);
+        children.push(json!({"page": 2, "name": "CompleteTime", "text": completed}));
+        children.push(json!({"page": 9, "name": "DateCompleted", "text": completed}));
+    }
+
+    Some(json!({
+        "page": 2,
+        "name": "Flag",
+        "children": children,
+    }))
 }
 
 fn email_body_value(

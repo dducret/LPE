@@ -535,6 +535,37 @@ CREATE INDEX mailboxes_parent_idx
 CREATE INDEX mailboxes_hierarchy_idx
     ON mailboxes (tenant_id, account_id, hierarchy_path);
 
+CREATE TABLE search_folders (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    role TEXT NOT NULL DEFAULT 'custom'
+        CHECK (role IN (
+            'reminders', 'todo_search', 'contacts_search',
+            'tracked_mail_processing', 'custom'
+        )),
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    definition_kind TEXT NOT NULL DEFAULT 'exchange_builtin'
+        CHECK (definition_kind IN ('exchange_builtin', 'user_saved')),
+    result_object_kind TEXT NOT NULL
+        CHECK (result_object_kind IN ('message', 'contact', 'task', 'mixed')),
+    scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    restriction_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    excluded_folder_roles TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    is_builtin BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX search_folders_builtin_role_idx
+    ON search_folders (tenant_id, account_id, role)
+    WHERE is_builtin;
+
+CREATE INDEX search_folders_account_idx
+    ON search_folders (tenant_id, account_id, display_name);
+
 CREATE TABLE mailbox_subscriptions (
     tenant_id UUID NOT NULL,
     mailbox_account_id UUID NOT NULL,
@@ -1003,6 +1034,19 @@ CREATE TABLE mailbox_messages (
     is_answered BOOLEAN NOT NULL DEFAULT FALSE,
     is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     is_draft BOOLEAN NOT NULL DEFAULT FALSE,
+    followup_flag_status TEXT NOT NULL DEFAULT 'none'
+        CHECK (followup_flag_status IN ('none', 'flagged', 'complete')),
+    followup_icon INTEGER NOT NULL DEFAULT 0 CHECK (followup_icon >= 0),
+    todo_item_flags INTEGER NOT NULL DEFAULT 0 CHECK (todo_item_flags >= 0),
+    followup_request TEXT NOT NULL DEFAULT '',
+    followup_start_at TIMESTAMPTZ,
+    followup_due_at TIMESTAMPTZ,
+    followup_completed_at TIMESTAMPTZ,
+    reminder_set BOOLEAN NOT NULL DEFAULT FALSE,
+    reminder_at TIMESTAMPTZ,
+    reminder_dismissed_at TIMESTAMPTZ,
+    swapped_todo_store_id UUID,
+    swapped_todo_data BYTEA,
     keywords TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
     visibility TEXT NOT NULL DEFAULT 'visible' CHECK (visibility IN ('visible', 'hidden', 'expunged')),
     received_at TIMESTAMPTZ NOT NULL,
@@ -1665,7 +1709,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
@@ -1846,7 +1890,10 @@ CREATE TABLE contact_books (
     owner_account_id UUID NOT NULL,
     display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
     normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
-    role TEXT NOT NULL DEFAULT 'contacts' CHECK (role IN ('contacts', 'directory', 'custom')),
+    role TEXT NOT NULL DEFAULT 'contacts' CHECK (role IN (
+        'contacts', 'suggested_contacts', 'quick_contacts', 'im_contact_list',
+        'directory', 'custom'
+    )),
     sync_modseq BIGINT NOT NULL DEFAULT 1 CHECK (sync_modseq > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

@@ -1,11 +1,13 @@
 import React from "react";
 import type { ClientCopy } from "../i18n";
-import type { ContactItem, EventItem, Folder, Message, Mode, Section } from "../client-types";
+import type { ContactBookId, ContactItem, EventItem, Folder, Message, Mode, Section } from "../client-types";
 
 export function MasterPane(props: {
   copy: ClientCopy;
   section: Section;
   folder: Folder;
+  contactBook: ContactBookId;
+  setContactBook: (contactBook: ContactBookId) => void;
   mode: Mode;
   filteredMessages: Message[];
   events: EventItem[];
@@ -66,7 +68,23 @@ export function MasterPane(props: {
         </>
       ) : null}
       {props.section === "calendar" ? <div className="agenda-list">{props.events.map((item) => <button className={props.eventId === item.id ? "agenda-card is-active" : "agenda-card"} key={item.id} type="button" onClick={() => props.onSelectEvent(item.id)}><span className="agenda-time">{item.time}</span><div><strong>{item.title}</strong><p>{item.location}</p><span>{item.attendees}</span></div></button>)}{props.events.length === 0 ? <div className="empty-state">{props.copy.noCalendarEvents}</div> : null}</div> : null}
-      {props.section === "contacts" ? <div className="contact-list">{props.contacts.map((item) => <button className={props.contactId === item.id ? "contact-card is-active" : "contact-card"} key={item.id} type="button" onClick={() => props.onSelectContact(item.id)}><div className="contact-avatar">{item.name.slice(0, 2).toUpperCase()}</div><div><strong>{item.name}</strong><p>{item.role}</p><span>{item.team}</span></div></button>)}{props.contacts.length === 0 ? <div className="empty-state">{props.copy.noContacts}</div> : null}</div> : null}
+      {props.section === "contacts" ? (
+        <>
+          <div className="segmented-control" aria-label={props.copy.sections.contacts}>
+            {(["default", "suggested_contacts", "quick_contacts", "im_contact_list"] as ContactBookId[]).map((item) => (
+              <button
+                key={item}
+                className={props.contactBook === item ? "is-active" : ""}
+                type="button"
+                onClick={() => props.setContactBook(item)}
+              >
+                {props.copy.contactBooks[item]}
+              </button>
+            ))}
+          </div>
+          <div className="contact-list">{props.contacts.map((item) => <button className={props.contactId === item.id ? "contact-card is-active" : "contact-card"} key={item.id} type="button" onClick={() => props.onSelectContact(item.id)}><div className="contact-avatar">{item.name.slice(0, 2).toUpperCase()}</div><div><strong>{item.name}</strong><p>{item.role}</p><span>{item.team}</span></div></button>)}{props.contacts.length === 0 ? <div className="empty-state">{props.copy.noContacts}</div> : null}</div>
+        </>
+      ) : null}
     </section>
   );
 }

@@ -1,7 +1,8 @@
 use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ClientTask, CollaborationCollection,
-    JmapEmail, JmapMailbox,
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ClientNote, ClientReminder,
+    ClientTask, CollaborationCollection, JmapEmail, JmapMailbox, JournalEntry, ReminderQuery,
+    SearchFolderDefinition,
 };
 use uuid::Uuid;
 
@@ -19,6 +20,10 @@ pub(crate) struct MapiMailStoreSnapshot {
     contacts: Vec<MapiContact>,
     events: Vec<MapiEvent>,
     tasks: Vec<MapiTask>,
+    notes: Vec<MapiNote>,
+    journal_entries: Vec<MapiJournalEntry>,
+    search_folder_definitions: Vec<MapiSearchFolderDefinitionMessage>,
+    reminders: Vec<ClientReminder>,
     folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
 }
@@ -80,6 +85,33 @@ pub(crate) struct MapiTask {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) task: ClientTask,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiNote {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) note: ClientNote,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiJournalEntry {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) entry: JournalEntry,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiSearchFolderDefinitionMessage {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) definition: SearchFolderDefinition,
 }
 
 #[derive(Debug, Clone)]
@@ -258,9 +290,60 @@ impl MapiMailStoreSnapshot {
             contacts,
             events,
             tasks,
+            notes: Vec::new(),
+            journal_entries: Vec::new(),
+            search_folder_definitions: Vec::new(),
+            reminders: Vec::new(),
             folder_permissions,
             content_windows: Vec::new(),
         }
+    }
+
+    pub(crate) fn with_search_folder_definitions(
+        mut self,
+        search_folder_definitions: Vec<SearchFolderDefinition>,
+    ) -> Self {
+        self.search_folder_definitions = search_folder_definitions
+            .into_iter()
+            .map(|definition| MapiSearchFolderDefinitionMessage {
+                id: mapi_item_id(&definition.id),
+                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                canonical_id: definition.id,
+                definition,
+            })
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_reminders(mut self, reminders: Vec<ClientReminder>) -> Self {
+        self.reminders = reminders;
+        self
+    }
+
+    pub(crate) fn with_notes_and_journal(
+        mut self,
+        notes: Vec<ClientNote>,
+        journal_entries: Vec<JournalEntry>,
+    ) -> Self {
+        self.notes = notes
+            .into_iter()
+            .map(|note| MapiNote {
+                id: mapi_item_id(&note.id),
+                folder_id: crate::mapi::identity::NOTES_FOLDER_ID,
+                canonical_id: note.id,
+                note,
+            })
+            .collect();
+        self.journal_entries = journal_entries
+            .into_iter()
+            .map(|entry| MapiJournalEntry {
+                id: mapi_item_id(&entry.id),
+                folder_id: crate::mapi::identity::JOURNAL_FOLDER_ID,
+                canonical_id: entry.id,
+                entry,
+            })
+            .collect();
+        self
     }
 
     pub(crate) fn with_content_windows(
@@ -361,7 +444,23 @@ impl MapiMailStoreSnapshot {
             .collect()
     }
 
+    pub(crate) fn contacts_search_results(&self) -> Vec<&MapiContact> {
+        if self
+            .search_folder_definition_for_role("contacts_search")
+            .is_none()
+        {
+            return Vec::new();
+        }
+        self.contacts.iter().collect()
+    }
+
     pub(crate) fn contact_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiContact> {
+        if folder_id == crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID {
+            return self
+                .contacts_search_results()
+                .into_iter()
+                .find(|contact| contact.id == item_id);
+        }
         self.contacts
             .iter()
             .find(|contact| contact.folder_id == folder_id && contact.id == item_id)
@@ -375,6 +474,12 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn event_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiEvent> {
+        if folder_id == crate::mapi::identity::REMINDERS_FOLDER_ID {
+            return self
+                .reminder_events()
+                .into_iter()
+                .find(|event| event.id == item_id);
+        }
         self.events
             .iter()
             .find(|event| event.folder_id == folder_id && event.id == item_id)
@@ -387,10 +492,204 @@ impl MapiMailStoreSnapshot {
             .collect()
     }
 
+    pub(crate) fn todo_search_results(&self) -> Vec<&MapiTask> {
+        if self
+            .search_folder_definition_for_role("todo_search")
+            .is_none()
+        {
+            return Vec::new();
+        }
+        self.tasks.iter().collect()
+    }
+
+    pub(crate) fn todo_search_messages(&self) -> Vec<&MapiMessage> {
+        let Some(definition) = self.search_folder_definition_for_role("todo_search") else {
+            return Vec::new();
+        };
+        self.messages
+            .iter()
+            .filter(|message| {
+                !definition
+                    .excluded_folder_roles
+                    .iter()
+                    .any(|role| role == &message.email.mailbox_role)
+            })
+            .filter(|message| {
+                message.email.followup_icon > 0
+                    || message.email.todo_item_flags != 0
+                    || matches!(
+                        message.email.followup_flag_status.as_str(),
+                        "flagged" | "complete"
+                    )
+            })
+            .collect()
+    }
+
+    pub(crate) fn todo_search_message_for_id(&self, message_id: u64) -> Option<&MapiMessage> {
+        self.todo_search_messages()
+            .into_iter()
+            .find(|message| message.id == message_id)
+    }
+
+    pub(crate) fn tracked_mail_processing_messages(&self) -> Vec<&MapiMessage> {
+        let Some(definition) = self.search_folder_definition_for_role("tracked_mail_processing")
+        else {
+            return Vec::new();
+        };
+        self.messages
+            .iter()
+            .filter(|message| {
+                !definition
+                    .excluded_folder_roles
+                    .iter()
+                    .any(|role| role == &message.email.mailbox_role)
+            })
+            .filter(|message| message.email.swapped_todo_store_id.is_some())
+            .collect()
+    }
+
+    pub(crate) fn tracked_mail_processing_message_for_id(
+        &self,
+        message_id: u64,
+    ) -> Option<&MapiMessage> {
+        self.tracked_mail_processing_messages()
+            .into_iter()
+            .find(|message| message.id == message_id)
+    }
+
+    pub(crate) fn reminder_events(&self) -> Vec<&MapiEvent> {
+        if self
+            .search_folder_definition_for_role("reminders")
+            .is_none()
+        {
+            return Vec::new();
+        }
+        self.reminders
+            .iter()
+            .filter(|reminder| reminder.source_type == "calendar")
+            .filter_map(|reminder| {
+                self.events
+                    .iter()
+                    .find(|event| event.canonical_id == reminder.source_id)
+            })
+            .collect()
+    }
+
+    pub(crate) fn reminder_tasks(&self) -> Vec<&MapiTask> {
+        if self
+            .search_folder_definition_for_role("reminders")
+            .is_none()
+        {
+            return Vec::new();
+        }
+        self.reminders
+            .iter()
+            .filter(|reminder| reminder.source_type == "task")
+            .filter_map(|reminder| {
+                self.tasks
+                    .iter()
+                    .find(|task| task.canonical_id == reminder.source_id)
+            })
+            .collect()
+    }
+
+    pub(crate) fn reminder_messages(&self) -> Vec<&MapiMessage> {
+        if self
+            .search_folder_definition_for_role("reminders")
+            .is_none()
+        {
+            return Vec::new();
+        }
+        self.reminders
+            .iter()
+            .filter(|reminder| reminder.source_type == "mail")
+            .filter_map(|reminder| {
+                self.messages
+                    .iter()
+                    .find(|message| message.canonical_id == reminder.source_id)
+            })
+            .collect()
+    }
+
+    pub(crate) fn reminder_for_source(
+        &self,
+        source_type: &str,
+        source_id: Uuid,
+    ) -> Option<&ClientReminder> {
+        self.reminders
+            .iter()
+            .find(|reminder| reminder.source_type == source_type && reminder.source_id == source_id)
+    }
+
     pub(crate) fn task_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiTask> {
+        if folder_id == crate::mapi::identity::REMINDERS_FOLDER_ID {
+            return self
+                .reminder_tasks()
+                .into_iter()
+                .find(|task| task.id == item_id);
+        }
+        if folder_id == crate::mapi::identity::TODO_SEARCH_FOLDER_ID {
+            return self
+                .todo_search_results()
+                .into_iter()
+                .find(|task| task.id == item_id);
+        }
         self.tasks
             .iter()
             .find(|task| task.folder_id == folder_id && task.id == item_id)
+    }
+
+    pub(crate) fn notes_for_folder(&self, folder_id: u64) -> Vec<&MapiNote> {
+        self.notes
+            .iter()
+            .filter(|note| note.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn note_for_id(&self, folder_id: u64, item_id: u64) -> Option<&MapiNote> {
+        self.notes
+            .iter()
+            .find(|note| note.folder_id == folder_id && note.id == item_id)
+    }
+
+    pub(crate) fn journal_entries_for_folder(&self, folder_id: u64) -> Vec<&MapiJournalEntry> {
+        self.journal_entries
+            .iter()
+            .filter(|entry| entry.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn journal_entry_for_id(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> Option<&MapiJournalEntry> {
+        self.journal_entries
+            .iter()
+            .find(|entry| entry.folder_id == folder_id && entry.id == item_id)
+    }
+
+    pub(crate) fn search_folder_definition_for_role(
+        &self,
+        role: &str,
+    ) -> Option<&SearchFolderDefinition> {
+        self.search_folder_definitions
+            .iter()
+            .find(|message| message.definition.role == role)
+            .map(|message| &message.definition)
+    }
+
+    pub(crate) fn search_folder_definition_messages(&self) -> &[MapiSearchFolderDefinitionMessage] {
+        &self.search_folder_definitions
+    }
+
+    pub(crate) fn search_folder_definition_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<&MapiSearchFolderDefinitionMessage> {
+        self.search_folder_definitions
+            .iter()
+            .find(|message| message.id == item_id)
     }
 
     pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
@@ -485,8 +784,27 @@ impl<T: ExchangeStore> MapiStore for T {
                         .await?,
                 );
             }
-            let identity_requests =
-                mapi_identity_requests(&mailboxes, &emails, &contacts, &events, &tasks);
+            let notes = self.fetch_mapi_notes(account_id).await?;
+            let journal_entries = self.fetch_mapi_journal_entries(account_id).await?;
+            let search_folder_definitions = self.fetch_search_folders(account_id).await?;
+            let reminders = self
+                .query_client_reminders(
+                    account_id,
+                    ReminderQuery {
+                        include_inactive: false,
+                    },
+                )
+                .await?;
+            let identity_requests = mapi_identity_requests(
+                &mailboxes,
+                &emails,
+                &contacts,
+                &events,
+                &tasks,
+                &notes,
+                &journal_entries,
+                &search_folder_definitions,
+            );
             for identity in self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
                 .await?
@@ -515,6 +833,9 @@ impl<T: ExchangeStore> MapiStore for T {
                 tasks,
                 folder_permissions,
             ))
+            .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
+            .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
+            .map(|snapshot| snapshot.with_reminders(reminders))
         })
     }
 }
@@ -525,6 +846,9 @@ fn mapi_identity_requests(
     contacts: &[AccessibleContact],
     events: &[AccessibleEvent],
     tasks: &[ClientTask],
+    notes: &[ClientNote],
+    journal_entries: &[JournalEntry],
+    search_folder_definitions: &[SearchFolderDefinition],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
     requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
@@ -552,6 +876,25 @@ fn mapi_identity_requests(
         canonical_id: task.id,
         reserved_global_counter: None,
     }));
+    requests.extend(notes.iter().map(|note| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Note,
+        canonical_id: note.id,
+        reserved_global_counter: None,
+    }));
+    requests.extend(journal_entries.iter().map(|entry| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::JournalEntry,
+        canonical_id: entry.id,
+        reserved_global_counter: None,
+    }));
+    requests.extend(
+        search_folder_definitions
+            .iter()
+            .map(|definition| MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
+                canonical_id: definition.id,
+                reserved_global_counter: None,
+            }),
+    );
     requests
 }
 
@@ -588,6 +931,15 @@ fn mapi_collaboration_folder_id(
     match (kind, collection.id.as_str()) {
         (MapiCollaborationFolderKind::Contacts, "default" | "contacts") => {
             crate::mapi::identity::CONTACTS_FOLDER_ID
+        }
+        (MapiCollaborationFolderKind::Contacts, "suggested_contacts") => {
+            crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID
+        }
+        (MapiCollaborationFolderKind::Contacts, "quick_contacts") => {
+            crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID
+        }
+        (MapiCollaborationFolderKind::Contacts, "im_contact_list") => {
+            crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID
         }
         (MapiCollaborationFolderKind::Calendar, "default" | "calendar") => {
             crate::mapi::identity::CALENDAR_FOLDER_ID
@@ -630,6 +982,9 @@ pub(crate) fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
         "sent" => Some(crate::mapi::identity::SENT_FOLDER_COUNTER),
         "trash" => Some(crate::mapi::identity::TRASH_FOLDER_COUNTER),
         "contacts" => Some(crate::mapi::identity::CONTACTS_FOLDER_COUNTER),
+        "suggested_contacts" => Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_COUNTER),
+        "quick_contacts" => Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_COUNTER),
+        "im_contact_list" => Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_COUNTER),
         "calendar" => Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
         "journal" => Some(crate::mapi::identity::JOURNAL_FOLDER_COUNTER),
         "notes" => Some(crate::mapi::identity::NOTES_FOLDER_COUNTER),
@@ -646,7 +1001,10 @@ fn reserved_folder_id_for_role(role: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpe_storage::{JmapEmailAddress, JmapEmailMailboxState};
+    use lpe_storage::{
+        AccessibleContact, CollaborationCollection, CollaborationRights, JmapEmailAddress,
+        JmapEmailMailboxState,
+    };
 
     #[test]
     fn snapshot_projects_canonical_mailbox_message_and_attachment_ids() {
@@ -687,6 +1045,18 @@ mod tests {
                 modseq: 41,
                 unread: false,
                 flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
                 draft: false,
             }],
             received_at: "2026-05-03T12:00:00Z".to_string(),
@@ -709,6 +1079,18 @@ mod tests {
             body_html_sanitized: None,
             unread: false,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: true,
             size_octets: 42,
             internet_message_id: None,
@@ -746,5 +1128,799 @@ mod tests {
             attachment_id
         );
         assert_eq!(snapshot.messages()[0].attachments[0].attach_num, 0);
+    }
+
+    #[test]
+    fn snapshot_projects_outlook_contact_books_into_fixed_mapi_folders() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        };
+        let cases = [
+            (
+                "suggested_contacts",
+                "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "Suggested Contacts",
+                crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+            ),
+            (
+                "quick_contacts",
+                "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                "Quick Contacts",
+                crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+            ),
+            (
+                "im_contact_list",
+                "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                "IM Contact List",
+                crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+            ),
+        ];
+        let collections = cases
+            .iter()
+            .map(
+                |(collection_id, _, display_name, _)| CollaborationCollection {
+                    id: (*collection_id).to_string(),
+                    kind: "contacts".to_string(),
+                    owner_account_id: account_id,
+                    owner_email: "alice@example.test".to_string(),
+                    owner_display_name: "Alice".to_string(),
+                    display_name: (*display_name).to_string(),
+                    is_owned: true,
+                    rights: rights.clone(),
+                },
+            )
+            .collect::<Vec<_>>();
+        let contacts = cases
+            .iter()
+            .enumerate()
+            .map(|(index, (collection_id, contact_id, _, _))| {
+                let contact_id = Uuid::parse_str(contact_id).unwrap();
+                crate::mapi::identity::remember_mapi_identity(
+                    contact_id,
+                    crate::mapi::identity::mapi_store_id(92 + index as u64),
+                );
+                AccessibleContact {
+                    id: contact_id,
+                    collection_id: (*collection_id).to_string(),
+                    owner_account_id: account_id,
+                    owner_email: "alice@example.test".to_string(),
+                    owner_display_name: "Alice".to_string(),
+                    rights: rights.clone(),
+                    name: "Outlook Contact".to_string(),
+                    role: String::new(),
+                    email: "contact@example.test".to_string(),
+                    phone: String::new(),
+                    team: String::new(),
+                    notes: String::new(),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            collections,
+            Vec::new(),
+            Vec::new(),
+            contacts,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        for (_, contact_id, _, folder_id) in cases {
+            assert!(snapshot
+                .collaboration_folders()
+                .iter()
+                .any(|folder| folder.id == folder_id));
+            assert_eq!(
+                snapshot.contacts_for_folder(folder_id)[0].canonical_id,
+                Uuid::parse_str(contact_id).unwrap()
+            );
+        }
+
+        let definition_id = Uuid::parse_str("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(95),
+        );
+        let snapshot = snapshot.with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id,
+            role: "contacts_search".to_string(),
+            display_name: "Contacts Search".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "contact".to_string(),
+            scope_json: serde_json::json!({"scope": "contacts_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_contacts_search"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        }]);
+        assert_eq!(snapshot.contacts_search_results().len(), 3);
+        assert!(snapshot
+            .contact_for_id(
+                crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+                crate::mapi::identity::mapi_store_id(92)
+            )
+            .is_some());
+    }
+
+    #[test]
+    fn snapshot_projects_canonical_notes_and_journal_into_default_mapi_folders() {
+        let note_id = Uuid::parse_str("51515151-5151-5151-5151-515151515151").unwrap();
+        let journal_id = Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            note_id,
+            crate::mapi::identity::mapi_store_id(90),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            journal_id,
+            crate::mapi::identity::mapi_store_id(91),
+        );
+
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_notes_and_journal(
+            vec![ClientNote {
+                id: note_id,
+                title: "Sticky note".to_string(),
+                body_text: "Remember Outlook content tables".to_string(),
+                color: "yellow".to_string(),
+                categories_json: "[]".to_string(),
+                created_at: "2026-05-19T12:00:00Z".to_string(),
+                updated_at: "2026-05-19T12:30:00Z".to_string(),
+            }],
+            vec![JournalEntry {
+                id: journal_id,
+                subject: "Support call".to_string(),
+                body_text: "Call notes".to_string(),
+                entry_type: "phone-call".to_string(),
+                message_class: "IPM.Activity".to_string(),
+                starts_at: Some("2026-05-19T13:00:00Z".to_string()),
+                ends_at: Some("2026-05-19T13:15:00Z".to_string()),
+                occurred_at: None,
+                companies_json: "[]".to_string(),
+                contacts_json: "[]".to_string(),
+                created_at: "2026-05-19T12:55:00Z".to_string(),
+                updated_at: "2026-05-19T13:15:00Z".to_string(),
+            }],
+        );
+
+        let notes = snapshot.notes_for_folder(crate::mapi::identity::NOTES_FOLDER_ID);
+        let journal = snapshot.journal_entries_for_folder(crate::mapi::identity::JOURNAL_FOLDER_ID);
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, crate::mapi::identity::mapi_store_id(90));
+        assert_eq!(notes[0].folder_id, crate::mapi::identity::NOTES_FOLDER_ID);
+        assert_eq!(journal.len(), 1);
+        assert_eq!(journal[0].id, crate::mapi::identity::mapi_store_id(91));
+        assert_eq!(
+            journal[0].folder_id,
+            crate::mapi::identity::JOURNAL_FOLDER_ID
+        );
+    }
+
+    #[test]
+    fn snapshot_carries_persisted_search_folder_definitions() {
+        let definition_id = Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(96),
+        );
+        let definition = SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap(),
+            role: "reminders".to_string(),
+            display_name: "Reminders".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            is_builtin: true,
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![definition]);
+
+        let reminders = snapshot
+            .search_folder_definition_for_role("reminders")
+            .expect("persisted reminders definition");
+        assert_eq!(reminders.definition_kind, "exchange_builtin");
+        assert_eq!(reminders.result_object_kind, "mixed");
+        assert!(reminders
+            .excluded_folder_roles
+            .contains(&"trash".to_string()));
+        assert!(snapshot
+            .search_folder_definition_for_role("todo_search")
+            .is_none());
+    }
+
+    #[test]
+    fn snapshot_projects_canonical_tasks_into_todo_search_results() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let task_id = Uuid::parse_str("11111111-2222-4333-8444-555555555555").unwrap();
+        let definition_id = Uuid::parse_str("99999999-9999-4999-8999-999999999999").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            task_id,
+            crate::mapi::identity::mapi_store_id(97),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(98),
+        );
+        let rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        };
+        let task_list_id = Uuid::parse_str("12121212-3434-4565-8787-909090909090").unwrap();
+        let task = ClientTask {
+            id: task_id,
+            owner_account_id: account_id,
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            is_owned: true,
+            rights: rights.clone(),
+            task_list_id,
+            task_list_sort_order: 0,
+            title: "Follow up".to_string(),
+            description: String::new(),
+            status: "needs-action".to_string(),
+            due_at: Some("2026-05-21T09:00:00Z".to_string()),
+            completed_at: None,
+            sort_order: 0,
+            updated_at: "2026-05-20T09:00:00Z".to_string(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![CollaborationCollection {
+                id: "default".to_string(),
+                kind: "tasks".to_string(),
+                owner_account_id: account_id,
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                display_name: "Tasks".to_string(),
+                is_owned: true,
+                rights,
+            }],
+            Vec::new(),
+            Vec::new(),
+            vec![task],
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id,
+            role: "todo_search".to_string(),
+            display_name: "To-Do".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_todo"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: true,
+        }]);
+
+        assert_eq!(snapshot.todo_search_results().len(), 1);
+        assert!(snapshot
+            .task_for_id(
+                crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
+                crate::mapi::identity::mapi_store_id(97)
+            )
+            .is_some());
+    }
+
+    #[test]
+    fn snapshot_projects_followup_mail_into_todo_search_results() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        let message_id = Uuid::parse_str("55555555-5555-4555-8555-555555555555").unwrap();
+        let definition_id = Uuid::parse_str("99999999-9999-4999-8999-999999999999").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(18),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(19),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(20),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let email = JmapEmail {
+            id: message_id,
+            thread_id: Uuid::parse_str("12121212-1212-4212-8212-121212121212").unwrap(),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 2,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                modseq: 2,
+                unread: false,
+                flagged: true,
+                followup_flag_status: "flagged".to_string(),
+                followup_icon: 6,
+                todo_item_flags: 8,
+                followup_request: "Follow up".to_string(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                draft: false,
+            }],
+            received_at: "2026-05-20T12:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "alice@example.test".to_string(),
+            from_display: Some("Alice".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: account_id,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Flagged mail".to_string(),
+            preview: "Flagged mail".to_string(),
+            body_text: "Flagged mail".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: true,
+            followup_flag_status: "flagged".to_string(),
+            followup_icon: 6,
+            todo_item_flags: 8,
+            followup_request: "Follow up".to_string(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            has_attachments: false,
+            size_octets: 42,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![mailbox],
+            vec![email],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id,
+            role: "todo_search".to_string(),
+            display_name: "To-Do".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_todo"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: true,
+        }]);
+
+        assert_eq!(snapshot.todo_search_messages().len(), 1);
+        assert!(snapshot
+            .todo_search_message_for_id(crate::mapi::identity::mapi_store_id(19))
+            .is_some());
+    }
+
+    #[test]
+    fn snapshot_projects_swapped_todo_mail_into_tracked_mail_processing_results() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        let message_id = Uuid::parse_str("66666666-6666-4666-8666-666666666666").unwrap();
+        let store_id = Uuid::parse_str("77777777-7777-4777-8777-777777777777").unwrap();
+        let definition_id = Uuid::parse_str("88888888-8888-4888-8888-888888888888").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(20),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(21),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(22),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "sent".to_string(),
+            name: "Sent".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let email = JmapEmail {
+            id: message_id,
+            thread_id: Uuid::parse_str("12121212-1212-4212-8212-121212121212").unwrap(),
+            mailbox_id,
+            mailbox_role: "sent".to_string(),
+            mailbox_name: "Sent".to_string(),
+            modseq: 2,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: "sent".to_string(),
+                name: "Sent".to_string(),
+                modseq: 2,
+                unread: false,
+                flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: Some(store_id),
+                swapped_todo_data: Some(vec![9, 8, 7]),
+                draft: false,
+            }],
+            received_at: "2026-05-20T12:00:00Z".to_string(),
+            sent_at: Some("2026-05-20T12:00:00Z".to_string()),
+            from_address: "alice@example.test".to_string(),
+            from_display: Some("Alice".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: account_id,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Tracked mail".to_string(),
+            preview: "Tracked mail".to_string(),
+            body_text: "Tracked mail".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: Some(store_id),
+            swapped_todo_data: Some(vec![9, 8, 7]),
+            has_attachments: false,
+            size_octets: 42,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![mailbox],
+            vec![email],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id,
+            role: "tracked_mail_processing".to_string(),
+            display_name: "Tracked Mail Processing".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_tracked_mail_processing"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: true,
+        }]);
+
+        assert_eq!(snapshot.tracked_mail_processing_messages().len(), 1);
+        assert!(snapshot
+            .tracked_mail_processing_message_for_id(crate::mapi::identity::mapi_store_id(21))
+            .is_some());
+    }
+
+    #[test]
+    fn snapshot_projects_reminders_as_underlying_calendar_and_task_links() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let message_id = Uuid::parse_str("11112222-3333-4444-8555-666677778888").unwrap();
+        let event_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let task_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
+        let search_definition_id =
+            Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(97),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            event_id,
+            crate::mapi::identity::mapi_store_id(98),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            task_id,
+            crate::mapi::identity::mapi_store_id(99),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            search_definition_id,
+            crate::mapi::identity::mapi_store_id(100),
+        );
+        let rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        };
+        let event = AccessibleEvent {
+            id: event_id,
+            uid: "event-uid".to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account_id,
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            rights: rights.clone(),
+            date: "2026-05-21".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            recurrence_rule: String::new(),
+            title: "Standup".to_string(),
+            location: "Room 1".to_string(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+        };
+        let task_list_id = Uuid::parse_str("12121212-3434-4565-8787-909090909090").unwrap();
+        let task = ClientTask {
+            id: task_id,
+            owner_account_id: account_id,
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            is_owned: true,
+            rights: rights.clone(),
+            task_list_id,
+            task_list_sort_order: 0,
+            title: "Follow up".to_string(),
+            description: String::new(),
+            status: "needs-action".to_string(),
+            due_at: Some("2026-05-21T12:00:00Z".to_string()),
+            completed_at: None,
+            sort_order: 0,
+            updated_at: "2026-05-20T09:00:00Z".to_string(),
+        };
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 10,
+            modseq: 1,
+            total_emails: 1,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let email = JmapEmail {
+            id: message_id,
+            thread_id: Uuid::parse_str("99999999-9999-4999-8999-999999999999").unwrap(),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 2,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                modseq: 2,
+                unread: false,
+                flagged: true,
+                followup_flag_status: "flagged".to_string(),
+                followup_icon: 6,
+                todo_item_flags: 8,
+                followup_request: "Follow up".to_string(),
+                followup_start_at: None,
+                followup_due_at: Some("2026-05-21T17:00:00Z".to_string()),
+                followup_completed_at: None,
+                reminder_set: true,
+                reminder_at: Some("2026-05-21T16:45:00Z".to_string()),
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                draft: false,
+            }],
+            received_at: "2026-05-20T12:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "alice@example.test".to_string(),
+            from_display: Some("Alice".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: account_id,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Mail reminder".to_string(),
+            preview: "Mail reminder".to_string(),
+            body_text: "Mail reminder".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: true,
+            followup_flag_status: "flagged".to_string(),
+            followup_icon: 6,
+            todo_item_flags: 8,
+            followup_request: "Follow up".to_string(),
+            followup_start_at: None,
+            followup_due_at: Some("2026-05-21T17:00:00Z".to_string()),
+            followup_completed_at: None,
+            reminder_set: true,
+            reminder_at: Some("2026-05-21T16:45:00Z".to_string()),
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            has_attachments: false,
+            size_octets: 42,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            vec![mailbox],
+            vec![email],
+            Vec::new(),
+            Vec::new(),
+            vec![CollaborationCollection {
+                id: "default".to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: account_id,
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: rights.clone(),
+            }],
+            vec![CollaborationCollection {
+                id: "default".to_string(),
+                kind: "tasks".to_string(),
+                owner_account_id: account_id,
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                display_name: "Tasks".to_string(),
+                is_owned: true,
+                rights,
+            }],
+            Vec::new(),
+            vec![event],
+            vec![task],
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: search_definition_id,
+            account_id,
+            role: "reminders".to_string(),
+            display_name: "Reminders".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: true,
+        }])
+        .with_reminders(vec![
+            ClientReminder {
+                source_type: "mail".to_string(),
+                source_id: message_id,
+                title: "Mail reminder".to_string(),
+                due_at: Some("2026-05-21T17:00:00Z".to_string()),
+                reminder_at: "2026-05-21T16:45:00Z".to_string(),
+                dismissed_at: None,
+                completed_at: None,
+                status: "pending".to_string(),
+            },
+            ClientReminder {
+                source_type: "calendar".to_string(),
+                source_id: event_id,
+                title: "Standup".to_string(),
+                due_at: Some("2026-05-21T09:30:00Z".to_string()),
+                reminder_at: "2026-05-21T09:00:00Z".to_string(),
+                dismissed_at: None,
+                completed_at: None,
+                status: "pending".to_string(),
+            },
+            ClientReminder {
+                source_type: "task".to_string(),
+                source_id: task_id,
+                title: "Follow up".to_string(),
+                due_at: Some("2026-05-21T12:00:00Z".to_string()),
+                reminder_at: "2026-05-21T11:45:00Z".to_string(),
+                dismissed_at: None,
+                completed_at: None,
+                status: "pending".to_string(),
+            },
+        ]);
+
+        assert_eq!(snapshot.reminder_events().len(), 1);
+        assert_eq!(snapshot.reminder_tasks().len(), 1);
+        assert_eq!(snapshot.reminder_messages().len(), 1);
+        assert!(snapshot
+            .event_for_id(
+                crate::mapi::identity::REMINDERS_FOLDER_ID,
+                crate::mapi::identity::mapi_store_id(98)
+            )
+            .is_some());
+        assert!(snapshot
+            .task_for_id(
+                crate::mapi::identity::REMINDERS_FOLDER_ID,
+                crate::mapi::identity::mapi_store_id(99)
+            )
+            .is_some());
     }
 }

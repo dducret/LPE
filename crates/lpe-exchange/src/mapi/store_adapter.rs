@@ -6,6 +6,7 @@ use super::tables::*;
 use super::*;
 use crate::mapi_store;
 use crate::store::{MapiContentTableQuery, MapiContentTableSort, MapiContentTableSortField};
+use lpe_storage::ReminderQuery;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiAccessPlan {
@@ -217,6 +218,15 @@ where
         .fetch_accessible_calendar_collections(account_id)
         .await?;
     let task_collections = store.fetch_accessible_task_collections(account_id).await?;
+    let search_folder_definitions = store.fetch_search_folders(account_id).await?;
+    let reminders = store
+        .query_client_reminders(
+            account_id,
+            ReminderQuery {
+                include_inactive: false,
+            },
+        )
+        .await?;
     let snapshot_backed_contents = plan
         .content_queries
         .iter()
@@ -234,6 +244,16 @@ where
     let task_ids = identities
         .iter()
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Task)
+        .map(|identity| identity.canonical_id)
+        .collect::<Vec<_>>();
+    let note_ids = identities
+        .iter()
+        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Note)
+        .map(|identity| identity.canonical_id)
+        .collect::<Vec<_>>();
+    let journal_entry_ids = identities
+        .iter()
+        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::JournalEntry)
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
     let contacts = if snapshot_backed_contents {
@@ -281,6 +301,18 @@ where
             .fetch_accessible_tasks_by_ids(account_id, &task_ids)
             .await?
     };
+    let notes = if snapshot_backed_contents {
+        store.fetch_mapi_notes(account_id).await?
+    } else {
+        store.fetch_mapi_notes_by_ids(account_id, &note_ids).await?
+    };
+    let journal_entries = if snapshot_backed_contents {
+        store.fetch_mapi_journal_entries(account_id).await?
+    } else {
+        store
+            .fetch_mapi_journal_entries_by_ids(account_id, &journal_entry_ids)
+            .await?
+    };
     let identity_requests = contacts
         .iter()
         .map(|contact| MapiIdentityRequest {
@@ -296,6 +328,16 @@ where
         .chain(tasks.iter().map(|task| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Task,
             canonical_id: task.id,
+            reserved_global_counter: None,
+        }))
+        .chain(notes.iter().map(|note| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Note,
+            canonical_id: note.id,
+            reserved_global_counter: None,
+        }))
+        .chain(journal_entries.iter().map(|entry| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::JournalEntry,
+            canonical_id: entry.id,
             reserved_global_counter: None,
         }))
         .collect::<Vec<_>>();
@@ -325,6 +367,9 @@ where
         tasks,
         folder_permissions,
     )
+    .with_notes_and_journal(notes, journal_entries)
+    .with_search_folder_definitions(search_folder_definitions)
+    .with_reminders(reminders)
     .with_content_windows(content_windows))
 }
 
@@ -401,6 +446,10 @@ fn simulate_table_access(
                 request.output_handle_index,
                 MapiObject::ContentsTable {
                     folder_id,
+                    associated: request
+                        .payload
+                        .first()
+                        .is_some_and(|flags| flags & 0x02 != 0),
                     columns: Vec::new(),
                     sort_orders: Vec::new(),
                     restriction: None,
@@ -609,6 +658,8 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingContact { folder_id, .. }
         | MapiObject::PendingEvent { folder_id, .. }
         | MapiObject::PendingTask { folder_id, .. }
+        | MapiObject::PendingNote { folder_id, .. }
+        | MapiObject::PendingJournalEntry { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
         | MapiObject::SynchronizationCollector { folder_id, .. }
         | MapiObject::PermissionTable { folder_id, .. } => {
@@ -658,6 +709,24 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         MapiObject::Task { folder_id, task_id } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *task_id);
+        }
+        MapiObject::Note { folder_id, note_id } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *note_id);
+        }
+        MapiObject::JournalEntry {
+            folder_id,
+            journal_entry_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *journal_entry_id);
+        }
+        MapiObject::SearchFolderDefinition {
+            folder_id,
+            definition_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *definition_id);
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }

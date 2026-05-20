@@ -170,12 +170,16 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let (subject, recipient_count) = match object {
         Some(MapiObject::Message {
             folder_id,
             message_id,
-        }) => match message_for_id(*folder_id, *message_id, mailboxes, emails) {
+        }) => match message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
+            search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                .map(|message| &message.email)
+        }) {
             Some(email) => (email.subject.clone(), message_recipients(email).len()),
             None => {
                 return rop_error_response(0x10, request.response_handle_index(), 0x8004_010F);
@@ -215,6 +219,28 @@ pub(in crate::mapi) fn rop_reload_cached_information_response(
             0,
         ),
         Some(MapiObject::PendingTask { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
+        ),
+        Some(MapiObject::PendingNote { properties, .. }) => (
+            pending_text_property(
+                properties,
+                &[
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_DISPLAY_NAME_W,
+                ],
+            ),
+            0,
+        ),
+        Some(MapiObject::PendingJournalEntry { properties, .. }) => (
             pending_text_property(
                 properties,
                 &[
@@ -557,6 +583,15 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
         Some(MapiObject::Task { .. }) | Some(MapiObject::PendingTask { .. }) => {
             default_task_property_tags()
         }
+        Some(MapiObject::Note { .. }) | Some(MapiObject::PendingNote { .. }) => {
+            default_note_property_tags()
+        }
+        Some(MapiObject::JournalEntry { .. }) | Some(MapiObject::PendingJournalEntry { .. }) => {
+            default_journal_entry_property_tags()
+        }
+        Some(MapiObject::SearchFolderDefinition { .. }) => {
+            default_search_folder_definition_property_tags()
+        }
         Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
             default_message_property_tags()
         }
@@ -594,7 +629,12 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
             folder_id,
             message_id,
         }) => {
-            let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+            let Some(email) =
+                message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
+                    search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                        .map(|message| &message.email)
+                })
+            else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
@@ -641,6 +681,12 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
         Some(MapiObject::PendingTask { properties, .. }) => {
             serialize_pending_task_row(principal, properties, &columns)
         }
+        Some(MapiObject::PendingNote { properties, .. }) => {
+            serialize_pending_note_row(principal, properties, &columns)
+        }
+        Some(MapiObject::PendingJournalEntry { properties, .. }) => {
+            serialize_pending_journal_entry_row(principal, properties, &columns)
+        }
         Some(MapiObject::Task { folder_id, task_id }) => {
             let Some(task) = snapshot.task_for_id(*folder_id, *task_id) else {
                 return rop_error_response(
@@ -650,6 +696,40 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
                 );
             };
             serialize_task_row(&task.task, task.id, task.folder_id, &columns)
+        }
+        Some(MapiObject::Note { folder_id, note_id }) => {
+            let Some(note) = snapshot.note_for_id(*folder_id, *note_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_note_row(&note.note, note.id, note.folder_id, &columns)
+        }
+        Some(MapiObject::JournalEntry {
+            folder_id,
+            journal_entry_id,
+        }) => {
+            let Some(entry) = snapshot.journal_entry_for_id(*folder_id, *journal_entry_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_journal_entry_row(&entry.entry, entry.id, entry.folder_id, &columns)
+        }
+        Some(MapiObject::SearchFolderDefinition { definition_id, .. }) => {
+            let Some(message) = snapshot.search_folder_definition_message_for_id(*definition_id)
+            else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_search_folder_definition_row(message, &columns)
         }
         Some(MapiObject::Folder {
             folder_id,
@@ -984,6 +1064,27 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{task_id:#018x}"),
         ),
+        Some(MapiObject::Note { folder_id, note_id }) => (
+            "note",
+            format!("{folder_id:#018x}"),
+            format!("{note_id:#018x}"),
+        ),
+        Some(MapiObject::JournalEntry {
+            folder_id,
+            journal_entry_id,
+        }) => (
+            "journal_entry",
+            format!("{folder_id:#018x}"),
+            format!("{journal_entry_id:#018x}"),
+        ),
+        Some(MapiObject::SearchFolderDefinition {
+            folder_id,
+            definition_id,
+        }) => (
+            "search_folder_definition",
+            format!("{folder_id:#018x}"),
+            format!("{definition_id:#018x}"),
+        ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
             format!("{folder_id:#018x}"),
@@ -1000,6 +1101,14 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
         Some(MapiObject::PendingTask { folder_id, .. }) => {
             ("pending_task", format!("{folder_id:#018x}"), String::new())
         }
+        Some(MapiObject::PendingNote { folder_id, .. }) => {
+            ("pending_note", format!("{folder_id:#018x}"), String::new())
+        }
+        Some(MapiObject::PendingJournalEntry { folder_id, .. }) => (
+            "pending_journal_entry",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
         Some(MapiObject::HierarchyTable { folder_id, .. }) => (
             "hierarchy_table",
             format!("{folder_id:#018x}"),
@@ -1178,6 +1287,24 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
         Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
             default_message_property_tags()
         }
+        Some(MapiObject::Contact { .. }) | Some(MapiObject::PendingContact { .. }) => {
+            default_contact_property_tags()
+        }
+        Some(MapiObject::Event { .. }) | Some(MapiObject::PendingEvent { .. }) => {
+            default_event_property_tags()
+        }
+        Some(MapiObject::Task { .. }) | Some(MapiObject::PendingTask { .. }) => {
+            default_task_property_tags()
+        }
+        Some(MapiObject::Note { .. }) | Some(MapiObject::PendingNote { .. }) => {
+            default_note_property_tags()
+        }
+        Some(MapiObject::JournalEntry { .. }) | Some(MapiObject::PendingJournalEntry { .. }) => {
+            default_journal_entry_property_tags()
+        }
+        Some(MapiObject::SearchFolderDefinition { .. }) => {
+            default_search_folder_definition_property_tags()
+        }
         _ => default_folder_property_tags(),
     };
     response.extend_from_slice(&(tags.len() as u16).to_le_bytes());
@@ -1271,6 +1398,10 @@ pub(in crate::mapi) fn serialize_object_property(
             folder_id,
             message_id,
         }) => message_for_id(*folder_id, *message_id, mailboxes, emails)
+            .or_else(|| {
+                search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                    .map(|message| &message.email)
+            })
             .map(|email| serialize_message_row(email, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
@@ -1313,9 +1444,44 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::PendingTask { properties, .. }) => {
             serialize_pending_task_row(principal, properties, &[tag])
         }
+        Some(MapiObject::PendingNote { properties, .. }) => {
+            serialize_pending_note_row(principal, properties, &[tag])
+        }
+        Some(MapiObject::PendingJournalEntry { properties, .. }) => {
+            serialize_pending_journal_entry_row(principal, properties, &[tag])
+        }
         Some(MapiObject::Task { folder_id, task_id }) => snapshot
             .task_for_id(*folder_id, *task_id)
             .map(|task| serialize_task_row(&task.task, task.id, task.folder_id, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::Note { folder_id, note_id }) => snapshot
+            .note_for_id(*folder_id, *note_id)
+            .map(|note| serialize_note_row(&note.note, note.id, note.folder_id, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::JournalEntry {
+            folder_id,
+            journal_entry_id,
+        }) => snapshot
+            .journal_entry_for_id(*folder_id, *journal_entry_id)
+            .map(|entry| {
+                serialize_journal_entry_row(&entry.entry, entry.id, entry.folder_id, &[tag])
+            })
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::SearchFolderDefinition { definition_id, .. }) => snapshot
+            .search_folder_definition_message_for_id(*definition_id)
+            .map(|message| serialize_search_folder_definition_row(message, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);
@@ -4449,6 +4615,107 @@ mod tests {
         assert_eq!(
             rop_handle_index_error_response(&request),
             vec![0x04, 0x07, 0x0F, 0x01, 0x04, 0x80]
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn note_and_journal_message_handles_serialize_object_properties() {
+        let note_id = Uuid::parse_str("51515151-5151-5151-5151-515151515151").unwrap();
+        let journal_id = Uuid::parse_str("61616161-6161-6161-6161-616161616161").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            note_id,
+            crate::mapi::identity::mapi_store_id(90),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            journal_id,
+            crate::mapi::identity::mapi_store_id(91),
+        );
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_notes_and_journal(
+            vec![ClientNote {
+                id: note_id,
+                title: "Sticky note".to_string(),
+                body_text: "Remember Outlook open-message reads".to_string(),
+                color: "yellow".to_string(),
+                categories_json: "[]".to_string(),
+                created_at: "2026-05-19T12:00:00Z".to_string(),
+                updated_at: "2026-05-19T12:30:00Z".to_string(),
+            }],
+            vec![JournalEntry {
+                id: journal_id,
+                subject: "Support call".to_string(),
+                body_text: "Call notes".to_string(),
+                entry_type: "phone-call".to_string(),
+                message_class: "IPM.Activity".to_string(),
+                starts_at: Some("2026-05-19T13:00:00Z".to_string()),
+                ends_at: Some("2026-05-19T13:15:00Z".to_string()),
+                occurred_at: None,
+                companies_json: "[]".to_string(),
+                contacts_json: "[]".to_string(),
+                created_at: "2026-05-19T12:55:00Z".to_string(),
+                updated_at: "2026-05-19T13:15:00Z".to_string(),
+            }],
+        );
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+        };
+
+        let note_object = MapiObject::Note {
+            folder_id: NOTES_FOLDER_ID,
+            note_id: crate::mapi::identity::mapi_store_id(90),
+        };
+        let journal_object = MapiObject::JournalEntry {
+            folder_id: JOURNAL_FOLDER_ID,
+            journal_entry_id: crate::mapi::identity::mapi_store_id(91),
+        };
+        let notes = snapshot.notes_for_folder(NOTES_FOLDER_ID);
+        let journal_entries = snapshot.journal_entries_for_folder(JOURNAL_FOLDER_ID);
+
+        assert_eq!(
+            serialize_object_property(
+                Some(&note_object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+                PID_TAG_MESSAGE_CLASS_W,
+            ),
+            serialize_note_row(
+                &notes[0].note,
+                crate::mapi::identity::mapi_store_id(90),
+                NOTES_FOLDER_ID,
+                &[PID_TAG_MESSAGE_CLASS_W],
+            )
+        );
+        assert_eq!(
+            serialize_object_property(
+                Some(&journal_object),
+                &principal,
+                &[],
+                &[],
+                &snapshot,
+                PID_TAG_SUBJECT_W,
+            ),
+            serialize_journal_entry_row(
+                &journal_entries[0].entry,
+                crate::mapi::identity::mapi_store_id(91),
+                JOURNAL_FOLDER_ID,
+                &[PID_TAG_SUBJECT_W],
+            )
         );
     }
 

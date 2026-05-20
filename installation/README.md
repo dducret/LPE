@@ -761,7 +761,7 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` rebuilds and redeploys code and web assets. It applies only documented bounded repair steps such as `repair-notes-journal-reminders-schema.sh`; it does not apply general schema migrations. For an intentional fresh schema reset, run `init-schema.sh` explicitly. If `check-lpe.sh` reports that `mapi_object_identities` still has older MAPI identity key constraints, run `repair-mapi-identity-keys.sh` once before retrying Outlook MAPI/HTTP profile creation.
+`update-lpe.sh` rebuilds and redeploys code and web assets. It applies only documented bounded repair steps such as `repair-notes-journal-reminders-schema.sh`, the Outlook follow-up/search-folder compatibility patch, and the current Exchange special-folder role constraint refresh; it does not apply general schema migrations. For an intentional fresh schema reset, run `init-schema.sh` explicitly. If `check-lpe.sh` reports that `mapi_object_identities` still has older MAPI identity key constraints, run `repair-mapi-identity-keys.sh` once before retrying Outlook MAPI/HTTP profile creation.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 

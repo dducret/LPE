@@ -1358,6 +1358,17 @@ mod tests {
             "(\\HasNoChildren \\Archive)"
         );
         assert_eq!(render_list_flags("junk", false), "(\\HasNoChildren \\Junk)");
+        for role in [
+            "outbox",
+            "conversation_history",
+            "rss_feeds",
+            "sync_issues",
+            "conflicts",
+            "local_failures",
+            "server_failures",
+        ] {
+            assert_eq!(render_list_flags(role, false), "(\\HasNoChildren)");
+        }
     }
 
     #[test]

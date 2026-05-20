@@ -9,6 +9,7 @@ The matrix defines the ActiveSync client scenarios required for the supported ad
 - Test both `Basic` and bearer authentication where the client supports them.
 - Verify `Provision`, `FolderSync`, mailbox `Sync`, `SendMail`, `SmartReply`, `SmartForward`, `Ping`, `Search`, and `ItemOperations Fetch`.
 - Treat canonical `Sent` visibility after send as mandatory.
+- Treat canonical Outlook follow-up mail state as mailbox `Sync` behavior: flagged or completed messages include the ActiveSync `email:Flag` container with documented Email and Tasks child elements; client `Change` commands can set, complete, or clear the same canonical follow-up state.
 - Treat sync-key stability, retry behavior, and paged continuation as mandatory.
 - Treat attachment fetch consistency across send, sync, and fetch as mandatory.
 - Keep Outlook desktop ActiveSync testing separate from classic Outlook Exchange-account testing.
@@ -31,6 +32,19 @@ Use `--insecure` only for a closed lab with a temporary certificate. The helper 
 - MobileSync POX Autodiscover publishes the ActiveSync endpoint for mobile-client schema requests.
 
 The helper does not exercise `Provision`, `FolderSync`, `Sync`, send flows, attachments, search, `Ping`, reconnect, stale-key recovery, or `Sent` visibility. Those remain real-client lab steps.
+
+## Microsoft Source Log
+
+| Page title | URL | Topic or claim supported | Date accessed | Uncertainty or ambiguity |
+| --- | --- | --- | --- | --- |
+| `[MS-ASEMAIL]: Updating E-Mail Flags` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asemail/56dc3bae-2bc9-4a5c-be69-ac5e4ee8f90c | ActiveSync email flag actions use `Status = 2` for flagged, `Status = 1` plus completion times for complete, and `Status = 0` or an empty flag for clear. | 2026-05-20 | The page directly defines update behavior; using the same shape for read projection is an engineering inference aligned with Sync payload symmetry. |
+| `[MS-ASEMAIL]: FlagType` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asemail/157c6b73-9401-44e9-b9e0-fbeadef817f6 | `FlagType` is an optional Email namespace child of `Flag`, and common values include `Flag for follow up`. | 2026-05-20 | The value is customizable; LPE emits the common Outlook-compatible value until canonical per-message ActiveSync flag labels are introduced. |
+| `[MS-ASEMAIL]: DueDate` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asemail/cc1cc467-4ecd-4ef6-8ee8-d0e52e9da8b3 | `tasks:DueDate` is an optional `Flag` child; when setting a flag, start/due and UTC start/due must be supplied together or all be null. | 2026-05-20 | This is a write-side validation rule; LPE applies the same all-or-none pairing when projecting stored follow-up dates. |
+| `[MS-ASEMAIL]: Sync Command Request` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-asemail/a8602ea5-a3f3-4426-83b5-a8d5315a953d | `Flag` is an E-mail class element carried under `airsync:ApplicationData` for Sync changes. | 2026-05-20 | The page is request-focused; server response use follows ActiveSync ApplicationData symmetry and local client interop tests remain required. |
+| `[MS-ASCMD]: Change` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-ascmd/3e2b243a-d052-407f-bfc0-ee0de82e1e01 | A Sync `Change` can carry `ApplicationData`, and flag-only changes leave other in-schema properties untouched. | 2026-05-20 | LPE has not enabled ActiveSync flag writes yet; this supports the future mutation boundary. |
+| `[MS-ASWBXML]: Code Page 2: Email` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-aswbxml/06f4ff28-ac7b-4c56-a9e2-6eb33dc55c83 | Email WBXML tokens for `Flag`, `Status`, `FlagType`, and `CompleteTime`. | 2026-05-20 | Learn showed an authorization banner but the token table was visible. |
+| `[MS-ASWBXML]: Relationship to Protocols and Other Algorithms` | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-aswbxml/2e57ccd4-cf38-45a0-bb11-95304bd1180d | ActiveSync WBXML code page 9 is the Tasks namespace used by `[MS-ASTASK]`. | 2026-05-20 | The current Learn search did not surface a dedicated Code Page 9 table page; token values below were cross-checked against Microsoft’s Exchange ActiveSync client implementation guidance. |
+| `Implementing an Exchange ActiveSync client: the transport mechanism` | https://learn.microsoft.com/en-us/previous-versions/office/developer/exchange-server-interoperability-guidance/hh361570(v=exchg.140) | Microsoft sample code lists Tasks code page 9 tokens used here: `DateCompleted`, `DueDate`, `UtcDueDate`, `StartDate`, and `UtcStartDate`. | 2026-05-20 | This is older Exchange Server 2010 implementation guidance rather than the current Open Specifications page; it is used only because the current code-page-9 table was not discoverable on Learn during this slice. |
 
 ## Real-Client Lab Gate
 
@@ -59,6 +73,7 @@ Run this checklist for Outlook mobile on iOS and Android when both are available
 | `Provision` | Initial Provision and acknowledgment complete with policy status `1`; no unsupported device-policy requirement blocks enrollment. |
 | `FolderSync` | Initial `FolderSync` with key `0` returns canonical folders including `Inbox`, `Sent`, `Drafts`, `Trash`, and user mail folders with stable server ids. |
 | Initial `Sync` | Inbox initial collection `Sync` starts with key `0`, receives a new key, and retrieves the first page without duplicate or missing messages. |
+| Follow-up flags | Flagged and completed messages expose `email:Flag` with `Status`, `FlagType`, paired Tasks start/due UTC dates when present, and completion times when complete; client set/complete/clear operations update the same state visible through JMAP, IMAP, and MAPI projections. |
 | Incremental `Sync` | A message delivered after initial sync appears once; a no-change sync does not reload the mailbox. |
 | `SendMail` | Message sent from Outlook mobile is accepted through ActiveSync, relayed through canonical submission, and appears in LPE `Sent`. |
 | `SmartReply` | Reply from a synced message sends successfully and creates the authoritative `Sent` copy. |
@@ -82,6 +97,7 @@ Run this checklist with the native iOS Mail account type that uses Exchange Acti
 | `Provision` | Device policy handshake completes; iOS does not demand an unsupported policy before first sync. |
 | `FolderSync` | Initial folder hierarchy includes canonical mail folders, contacts, and calendar collections that the user enabled. |
 | Initial `Sync` | Mail, contacts, and calendar collections that are enabled start with collection sync key `0` and receive stable follow-up keys. |
+| Follow-up flags | Flagged and completed messages expose ActiveSync `email:Flag` state, and client set/complete/clear operations update canonical state visible through JMAP, IMAP, and MAPI projections. |
 | Incremental `Sync` | New mail, contact changes, and calendar changes appear once and preserve canonical fields documented in `activesync-mvp.md`. |
 | `SendMail` | Sending from iOS Mail uses ActiveSync submission and creates the authoritative LPE `Sent` copy. |
 | Attachments | Received attachment opens through `ItemOperations Fetch`; sent attachment passes canonical validation and is visible to the recipient. |
@@ -101,6 +117,7 @@ Known unsupported ActiveSync behavior for this gate remains the unsupported set 
 | `S1` | account enrollment with `Provision` and first `FolderSync` | auth, device policy, folder discovery |
 | `S2` | mailbox `Sync` with `SyncKey = 0`, priming, and first page | initial sync |
 | `S3` | repeated `Sync` with no changes | idempotence |
+| `S3A` | mailbox `Sync` projects and mutates canonical Outlook follow-up mail state as ActiveSync `email:Flag` | mail flags |
 | `S4` | delegated mailbox folder discovery and sync | shared mail |
 | `S5` | `SendMail` creates canonical `Sent` copy | submission |
 | `S6` | `SmartReply` and `SmartForward` create canonical `Sent` copy | submission |
@@ -122,6 +139,7 @@ Known unsupported ActiveSync behavior for this gate remains the unsupported set 
 | --- | --- |
 | enrollment and folder discovery | `folder_sync_returns_mail_and_collaboration_collections` |
 | initial and paged sync | `sync_key_zero_primes_then_returns_paged_more_available_changes` |
+| follow-up flag read/write projection | `sync_projects_email_followup_flag_state`; `sync_change_updates_followup_flag_state` |
 | stable repeated sync | `stable_sync_does_not_reload_full_email_payloads_without_changes` |
 | sync-key recovery | `stale_sync_key_is_rejected_after_a_completed_round` |
 | mobile send | `send_mail_uses_canonical_submission_model` |

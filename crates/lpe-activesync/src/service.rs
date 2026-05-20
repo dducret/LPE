@@ -9,9 +9,9 @@ use lpe_mail_auth::{authenticate_account, AccountPrincipal};
 use lpe_storage::{
     calendar_attendee_labels, serialize_calendar_participants_metadata, ActiveSyncItemState,
     AuditEntryInput, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    CanonicalChangeCategory, CanonicalChangeListener, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput,
+    CanonicalChangeCategory, CanonicalChangeListener, JmapEmailFollowupUpdate,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, SubmitMessageInput, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1560,20 +1560,36 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                         .map(|node| node.text_value().trim().to_string())
                         .ok_or_else(|| anyhow!("mail change command is missing ServerId"))?;
                     let message_id = Uuid::parse_str(&server_id)?;
-                    let unread = command
-                        .child("ApplicationData")
+                    let application_data = command.child("ApplicationData");
+                    let unread = application_data
                         .and_then(|application_data| application_data.child("Read"))
                         .map(|read| read.text_value().trim() != "1");
-                    if let Some(unread) = unread {
+                    let followup_update = match application_data
+                        .and_then(|application_data| application_data.child("Flag"))
+                    {
+                        Some(flag) => match mail_flag_update(flag) {
+                            Ok(update) => Some(update),
+                            Err(_) => {
+                                let mut change = WbxmlNode::new(0, "Change");
+                                change.push(WbxmlNode::with_text(0, "ServerId", server_id));
+                                change.push(WbxmlNode::with_text(0, "Status", "6"));
+                                responses.push(change);
+                                continue;
+                            }
+                        },
+                        None => None,
+                    };
+                    if unread.is_some() || followup_update.is_some() {
+                        let mut update = followup_update.unwrap_or_default();
+                        update.unread = unread;
                         self.store
-                            .update_jmap_email_flags(
+                            .update_jmap_email_followup_flags(
                                 collection.account_id,
                                 message_id,
-                                Some(unread),
-                                None,
+                                update,
                                 AuditEntryInput {
                                     actor: principal.email.clone(),
-                                    action: "activesync-update-read-flag".to_string(),
+                                    action: "activesync-update-mail-flags".to_string(),
                                     subject: server_id.clone(),
                                 },
                             )
@@ -3420,6 +3436,83 @@ fn value_to_wbxml(value: Value) -> WbxmlNode {
         Value::Object(map) => crate::snapshot::value_to_node(&map),
         _ => WbxmlNode::new(0, "ApplicationData"),
     }
+}
+
+fn mail_flag_update(flag: &WbxmlNode) -> Result<JmapEmailFollowupUpdate> {
+    if flag.children.is_empty() {
+        return Ok(JmapEmailFollowupUpdate {
+            flagged: Some(false),
+            followup_flag_status: Some("none".to_string()),
+            ..Default::default()
+        });
+    }
+
+    let status = field_text(flag, "Status").unwrap_or_else(|| "0".to_string());
+    let mut update = match status.as_str() {
+        "0" => JmapEmailFollowupUpdate {
+            flagged: Some(false),
+            followup_flag_status: Some("none".to_string()),
+            ..Default::default()
+        },
+        "1" => JmapEmailFollowupUpdate {
+            flagged: Some(true),
+            followup_flag_status: Some("complete".to_string()),
+            followup_icon: Some(6),
+            todo_item_flags: Some(8),
+            ..Default::default()
+        },
+        "2" => JmapEmailFollowupUpdate {
+            flagged: Some(true),
+            followup_flag_status: Some("flagged".to_string()),
+            followup_icon: Some(6),
+            todo_item_flags: Some(8),
+            ..Default::default()
+        },
+        _ => bail!("unsupported ActiveSync mail flag status"),
+    };
+
+    if let Some(flag_type) = field_text(flag, "FlagType").filter(|value| !value.is_empty()) {
+        update.followup_request = Some(flag_type);
+    }
+    let start = field_text(flag, "UtcStartDate")
+        .or_else(|| field_text(flag, "StartDate"))
+        .map(|value| active_sync_datetime_to_rfc3339(&value))
+        .transpose()?;
+    let due = field_text(flag, "UtcDueDate")
+        .or_else(|| field_text(flag, "DueDate"))
+        .map(|value| active_sync_datetime_to_rfc3339(&value))
+        .transpose()?;
+    if start.is_some() != due.is_some() {
+        bail!("ActiveSync mail flag start and due dates must be paired");
+    }
+    update.followup_start_at = start;
+    update.followup_due_at = due;
+    update.followup_completed_at = field_text(flag, "CompleteTime")
+        .or_else(|| field_text(flag, "DateCompleted"))
+        .map(|value| active_sync_datetime_to_rfc3339(&value))
+        .transpose()?;
+
+    Ok(update)
+}
+
+fn active_sync_datetime_to_rfc3339(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.contains('-') {
+        return Ok(value.to_string());
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() == 16 && bytes[8] == b'T' && bytes[15] == b'Z' {
+        return Ok(format!(
+            "{}-{}-{}T{}:{}:{}Z",
+            &value[0..4],
+            &value[4..6],
+            &value[6..8],
+            &value[9..11],
+            &value[11..13],
+            &value[13..15]
+        ));
+    }
+    bail!("invalid ActiveSync dateTime value")
 }
 
 fn parse_contact_input(

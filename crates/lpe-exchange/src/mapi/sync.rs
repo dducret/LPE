@@ -3,6 +3,8 @@ use super::session::*;
 use super::tables::*;
 use super::*;
 
+use crate::mapi::properties::*;
+
 pub(in crate::mapi) use super::identity::{
     long_term_id_from_object_id, object_id_from_long_term_id, ARCHIVE_FOLDER_ID,
     CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONFLICTS_FOLDER_ID, CONTACTS_FOLDER_ID,
@@ -404,6 +406,172 @@ pub(in crate::mapi) fn changed_sync_emails(
         .into_iter()
         .filter(|email| changed_ids.contains(&email.id))
         .collect()
+}
+
+pub(in crate::mapi) fn special_sync_objects_for(
+    folder_id: u64,
+    sync_type: u8,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<mapi_mailstore::SpecialMessageSyncFact> {
+    if sync_type == 0x02 {
+        return Vec::new();
+    }
+    match folder_id {
+        NOTES_FOLDER_ID => snapshot
+            .notes_for_folder(folder_id)
+            .into_iter()
+            .map(|note| mapi_mailstore::SpecialMessageSyncFact {
+                folder_id: note.folder_id,
+                item_id: note.id,
+                canonical_id: note.canonical_id,
+                subject: note.note.title.clone(),
+                body_text: note.note.body_text.clone(),
+                message_class: "IPM.StickyNote".to_string(),
+                updated_at: note.note.updated_at.clone(),
+                message_size: note_size(&note.note),
+                named_properties: vec![
+                    (
+                        PID_LID_NOTE_COLOR_TAG,
+                        mapi_mailstore::SpecialMessagePropertyValue::I32(
+                            note_property_value(
+                                &note.note,
+                                note.id,
+                                note.folder_id,
+                                PID_LID_NOTE_COLOR_TAG,
+                            )
+                            .and_then(|value| value.as_i64())
+                            .unwrap_or(3) as i32,
+                        ),
+                    ),
+                    (
+                        PID_LID_NOTE_HEIGHT_TAG,
+                        mapi_mailstore::SpecialMessagePropertyValue::I32(200),
+                    ),
+                    (
+                        PID_LID_NOTE_WIDTH_TAG,
+                        mapi_mailstore::SpecialMessagePropertyValue::I32(166),
+                    ),
+                    (
+                        PID_LID_NOTE_X_TAG,
+                        mapi_mailstore::SpecialMessagePropertyValue::I32(80),
+                    ),
+                    (
+                        PID_LID_NOTE_Y_TAG,
+                        mapi_mailstore::SpecialMessagePropertyValue::I32(80),
+                    ),
+                ],
+            })
+            .collect(),
+        JOURNAL_FOLDER_ID => snapshot
+            .journal_entries_for_folder(folder_id)
+            .into_iter()
+            .map(|entry| journal_sync_object(entry))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+pub(in crate::mapi) fn changed_special_sync_objects(
+    objects: Vec<mapi_mailstore::SpecialMessageSyncFact>,
+    changed_ids: &[Uuid],
+) -> Vec<mapi_mailstore::SpecialMessageSyncFact> {
+    if changed_ids.is_empty() {
+        return Vec::new();
+    }
+    objects
+        .into_iter()
+        .filter(|object| changed_ids.contains(&object.canonical_id))
+        .collect()
+}
+
+fn journal_sync_object(
+    entry: &crate::mapi_store::MapiJournalEntry,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let companies = journal_entry_property_value(
+        &entry.entry,
+        entry.id,
+        entry.folder_id,
+        PID_LID_COMPANIES_TAG,
+    )
+    .and_then(|value| match value {
+        MapiValue::MultiString(values) => Some(values),
+        _ => None,
+    })
+    .unwrap_or_default();
+    let contacts = journal_entry_property_value(
+        &entry.entry,
+        entry.id,
+        entry.folder_id,
+        PID_LID_CONTACTS_TAG,
+    )
+    .and_then(|value| match value {
+        MapiValue::MultiString(values) => Some(values),
+        _ => None,
+    })
+    .unwrap_or_default();
+    let mut named_properties = vec![
+        (
+            PID_LID_LOG_TYPE_W_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::String(entry.entry.entry_type.clone()),
+        ),
+        (
+            PID_LID_LOG_TYPE_DESC_W_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::String(entry.entry.entry_type.clone()),
+        ),
+        (
+            PID_LID_COMPANIES_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::MultiString(companies),
+        ),
+        (
+            PID_LID_CONTACTS_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::MultiString(contacts),
+        ),
+        (
+            PID_LID_LOG_DURATION_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::I32(0),
+        ),
+        (
+            PID_LID_LOG_FLAGS_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::I32(0),
+        ),
+    ];
+    if let Some(starts_at) = entry
+        .entry
+        .starts_at
+        .as_deref()
+        .or(entry.entry.occurred_at.as_deref())
+    {
+        named_properties.push((
+            PID_LID_COMMON_START_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::Time(starts_at.to_string()),
+        ));
+        named_properties.push((
+            PID_LID_LOG_START_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::Time(starts_at.to_string()),
+        ));
+    }
+    if let Some(ends_at) = entry.entry.ends_at.as_deref() {
+        named_properties.push((
+            PID_LID_COMMON_END_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::Time(ends_at.to_string()),
+        ));
+        named_properties.push((
+            PID_LID_LOG_END_TAG,
+            mapi_mailstore::SpecialMessagePropertyValue::Time(ends_at.to_string()),
+        ));
+    }
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: entry.folder_id,
+        item_id: entry.id,
+        canonical_id: entry.canonical_id,
+        subject: entry.entry.subject.clone(),
+        body_text: entry.entry.body_text.clone(),
+        message_class: entry.entry.message_class.clone(),
+        updated_at: entry.entry.updated_at.clone(),
+        message_size: journal_entry_size(&entry.entry),
+        named_properties,
+    }
 }
 
 pub(in crate::mapi) fn sync_attachment_facts_for(

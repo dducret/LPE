@@ -54,9 +54,10 @@ pub use crate::notes_journal::{
 pub use crate::protocols::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
     ActiveSyncSyncState, ImapEmail, ImapMailboxState, ImapMimePart, JmapEmail, JmapEmailAddress,
-    JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput,
-    JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
+    JmapEmailFollowupUpdate, JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission,
+    JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
+    SearchFolderDefinition,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::submission::{
@@ -93,9 +94,11 @@ pub use crate::workspace::{
 pub(crate) use crate::models::*;
 pub(crate) use crate::pst::PstTransferJobRow;
 pub(crate) use crate::shared::{
-    CANONICAL_CHANGE_CHANNEL, DEFAULT_COLLECTION_ID, DEFAULT_TASK_LIST_NAME,
-    DEFAULT_TASK_LIST_ROLE, EXPECTED_SCHEMA_VERSION, MAX_SIEVE_SCRIPTS_PER_ACCOUNT,
-    MAX_SIEVE_SCRIPT_BYTES, PLATFORM_TENANT_ID,
+    CANONICAL_CHANGE_CHANNEL, DEFAULT_COLLECTION_ID, DEFAULT_CONTACT_BOOK_ROLE,
+    DEFAULT_TASK_LIST_NAME, DEFAULT_TASK_LIST_ROLE, EXPECTED_SCHEMA_VERSION,
+    IM_CONTACT_LIST_COLLECTION_ID, IM_CONTACT_LIST_ROLE, MAX_SIEVE_SCRIPTS_PER_ACCOUNT,
+    MAX_SIEVE_SCRIPT_BYTES, PLATFORM_TENANT_ID, QUICK_CONTACTS_COLLECTION_ID, QUICK_CONTACTS_ROLE,
+    SUGGESTED_CONTACTS_COLLECTION_ID, SUGGESTED_CONTACTS_ROLE,
 };
 pub(crate) use crate::tasks::{map_dav_task, map_task, map_task_list, map_task_list_grant};
 pub(crate) use crate::util::*;

@@ -2,10 +2,12 @@ use anyhow::Result;
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CanonicalChangeCategory, ClientTask,
-    CollaborationCollection, JmapEmail, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, SavedDraftMessage, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    AttachmentUploadInput, AuditEntryInput, CanonicalChangeCategory, ClientNote, ClientReminder,
+    ClientTask, CollaborationCollection, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
+    UpsertClientTaskInput, UpsertJournalEntryInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -20,6 +22,9 @@ pub(crate) enum MapiIdentityObjectKind {
     Contact,
     CalendarEvent,
     Task,
+    Note,
+    JournalEntry,
+    SearchFolderDefinition,
 }
 
 impl MapiIdentityObjectKind {
@@ -31,6 +36,9 @@ impl MapiIdentityObjectKind {
             Self::Contact => "contact",
             Self::CalendarEvent => "calendar_event",
             Self::Task => "task",
+            Self::Note => "note",
+            Self::JournalEntry => "journal_entry",
+            Self::SearchFolderDefinition => "search_folder_definition",
         }
     }
 }
@@ -103,7 +111,11 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) current_modseq: u64,
     pub(crate) changed_mailbox_ids: Vec<Uuid>,
     pub(crate) changed_message_ids: Vec<Uuid>,
+    pub(crate) changed_note_ids: Vec<Uuid>,
+    pub(crate) changed_journal_entry_ids: Vec<Uuid>,
     pub(crate) deleted_message_ids: Vec<Uuid>,
+    pub(crate) deleted_note_ids: Vec<Uuid>,
+    pub(crate) deleted_journal_entry_ids: Vec<Uuid>,
 }
 
 impl Default for MapiSyncChangeSet {
@@ -113,7 +125,11 @@ impl Default for MapiSyncChangeSet {
             current_modseq: 1,
             changed_mailbox_ids: Vec::new(),
             changed_message_ids: Vec::new(),
+            changed_note_ids: Vec::new(),
+            changed_journal_entry_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
+            deleted_note_ids: Vec::new(),
+            deleted_journal_entry_ids: Vec::new(),
         }
     }
 }
@@ -369,6 +385,88 @@ pub trait ExchangeStore: AccountAuthStore {
         ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<ClientTask>>;
 
+    fn fetch_mapi_notes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<ClientNote>> {
+        Box::pin(async move {
+            let _ = account_id;
+            Ok(Vec::new())
+        })
+    }
+
+    fn fetch_mapi_notes_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientNote>> {
+        Box::pin(async move {
+            let _ = (account_id, ids);
+            Ok(Vec::new())
+        })
+    }
+
+    fn fetch_mapi_journal_entries<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<JournalEntry>> {
+        Box::pin(async move {
+            let _ = account_id;
+            Ok(Vec::new())
+        })
+    }
+
+    fn fetch_mapi_journal_entries_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JournalEntry>> {
+        Box::pin(async move {
+            let _ = (account_id, ids);
+            Ok(Vec::new())
+        })
+    }
+
+    fn upsert_mapi_note<'a>(&'a self, input: UpsertClientNoteInput) -> StoreFuture<'a, ClientNote> {
+        Box::pin(async move {
+            let _ = input;
+            Err(anyhow::anyhow!(
+                "MAPI note writes are not supported by this store"
+            ))
+        })
+    }
+
+    fn upsert_mapi_journal_entry<'a>(
+        &'a self,
+        input: UpsertJournalEntryInput,
+    ) -> StoreFuture<'a, JournalEntry> {
+        Box::pin(async move {
+            let _ = input;
+            Err(anyhow::anyhow!(
+                "MAPI journal entry writes are not supported by this store"
+            ))
+        })
+    }
+
+    fn delete_mapi_note<'a>(&'a self, account_id: Uuid, note_id: Uuid) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let _ = (account_id, note_id);
+            Err(anyhow::anyhow!(
+                "MAPI note deletes are not supported by this store"
+            ))
+        })
+    }
+
+    fn delete_mapi_journal_entry<'a>(
+        &'a self,
+        account_id: Uuid,
+        entry_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let _ = (account_id, entry_id);
+            Err(anyhow::anyhow!(
+                "MAPI journal entry deletes are not supported by this store"
+            ))
+        })
+    }
+
     fn fetch_active_sieve_script<'a>(
         &'a self,
         account_id: Uuid,
@@ -415,6 +513,17 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<JmapMailbox>>;
+
+    fn fetch_search_folders<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SearchFolderDefinition>>;
+
+    fn query_client_reminders<'a>(
+        &'a self,
+        account_id: Uuid,
+        query: ReminderQuery,
+    ) -> StoreFuture<'a, Vec<ClientReminder>>;
 
     fn create_jmap_mailbox<'a>(
         &'a self,
@@ -520,6 +629,14 @@ pub trait ExchangeStore: AccountAuthStore {
         message_id: Uuid,
         unread: Option<bool>,
         flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
+    fn update_jmap_email_followup_flags<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
 
@@ -1009,8 +1126,13 @@ impl ExchangeStore for Storage {
                     ($4 = 'hierarchy' AND object_kind = 'mailbox')
                     OR (
                         $4 IN ('content', 'read_state')
-                        AND object_kind IN ('mailbox_message', 'attachment')
-                        AND ($5::uuid IS NULL OR mailbox_id = $5 OR mailbox_id IS NULL)
+                        AND (
+                            (
+                                object_kind IN ('mailbox_message', 'attachment')
+                                AND ($5::uuid IS NULL OR mailbox_id = $5 OR mailbox_id IS NULL)
+                            )
+                            OR ($5::uuid IS NULL AND object_kind IN ('note', 'journal_entry'))
+                        )
                     )
                   )
                 ORDER BY cursor ASC
@@ -1051,6 +1173,22 @@ impl ExchangeStore for Storage {
                             push_unique_uuid(&mut changes.changed_message_ids, message_id);
                         }
                     }
+                    "note" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(&mut changes.deleted_note_ids, object_id);
+                        } else {
+                            push_unique_uuid(&mut changes.changed_note_ids, object_id);
+                        }
+                    }
+                    "journal_entry" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(&mut changes.deleted_journal_entry_ids, object_id);
+                        } else {
+                            push_unique_uuid(&mut changes.changed_journal_entry_ids, object_id);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1079,6 +1217,38 @@ impl ExchangeStore for Storage {
                 .await?;
                 for row in tombstones {
                     push_unique_uuid(&mut changes.deleted_message_ids, row.get("message_id"));
+                }
+                let collaboration_tombstones = sqlx::query(
+                    r#"
+                    SELECT object_kind, object_id
+                    FROM tombstones
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                      AND object_kind IN ('note', 'journal_entry')
+                      AND change_cursor > $3
+                      AND $4::uuid IS NULL
+                      AND (retained_until IS NULL OR retained_until > NOW())
+                    ORDER BY change_cursor ASC
+                    LIMIT 1000
+                    "#,
+                )
+                .bind(&tenant_id)
+                .bind(account_id)
+                .bind(after_change_sequence as i64)
+                .bind(mailbox_id)
+                .fetch_all(self.pool())
+                .await?;
+                for row in collaboration_tombstones {
+                    match row.get::<String, _>("object_kind").as_str() {
+                        "note" => {
+                            push_unique_uuid(&mut changes.deleted_note_ids, row.get("object_id"))
+                        }
+                        "journal_entry" => push_unique_uuid(
+                            &mut changes.deleted_journal_entry_ids,
+                            row.get("object_id"),
+                        ),
+                        _ => {}
+                    }
                 }
             }
 
@@ -1513,6 +1683,56 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_mapi_notes<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<ClientNote>> {
+        Box::pin(async move { self.fetch_client_notes(account_id).await })
+    }
+
+    fn fetch_mapi_notes_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientNote>> {
+        Box::pin(async move { self.fetch_client_notes_by_ids(account_id, ids).await })
+    }
+
+    fn fetch_mapi_journal_entries<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<JournalEntry>> {
+        Box::pin(async move { self.fetch_journal_entries(account_id).await })
+    }
+
+    fn fetch_mapi_journal_entries_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JournalEntry>> {
+        Box::pin(async move { self.fetch_journal_entries_by_ids(account_id, ids).await })
+    }
+
+    fn upsert_mapi_note<'a>(&'a self, input: UpsertClientNoteInput) -> StoreFuture<'a, ClientNote> {
+        Box::pin(async move { self.upsert_client_note(input).await })
+    }
+
+    fn upsert_mapi_journal_entry<'a>(
+        &'a self,
+        input: UpsertJournalEntryInput,
+    ) -> StoreFuture<'a, JournalEntry> {
+        Box::pin(async move { self.upsert_journal_entry(input).await })
+    }
+
+    fn delete_mapi_note<'a>(&'a self, account_id: Uuid, note_id: Uuid) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_client_note(account_id, note_id).await })
+    }
+
+    fn delete_mapi_journal_entry<'a>(
+        &'a self,
+        account_id: Uuid,
+        entry_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_journal_entry(account_id, entry_id).await })
+    }
+
     fn fetch_active_sieve_script<'a>(
         &'a self,
         account_id: Uuid,
@@ -1580,6 +1800,21 @@ impl ExchangeStore for Storage {
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<JmapMailbox>> {
         Box::pin(async move { self.ensure_imap_mailboxes(account_id).await })
+    }
+
+    fn fetch_search_folders<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SearchFolderDefinition>> {
+        Box::pin(async move { self.fetch_search_folders(account_id).await })
+    }
+
+    fn query_client_reminders<'a>(
+        &'a self,
+        account_id: Uuid,
+        query: ReminderQuery,
+    ) -> StoreFuture<'a, Vec<ClientReminder>> {
+        Box::pin(async move { self.query_client_reminders(account_id, query).await })
     }
 
     fn create_jmap_mailbox<'a>(
@@ -1842,6 +2077,19 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, JmapEmail> {
         Box::pin(async move {
             self.update_jmap_email_flags(account_id, message_id, unread, flagged, audit)
+                .await
+        })
+    }
+
+    fn update_jmap_email_followup_flags<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.update_jmap_email_followup_flags(account_id, message_id, update, audit)
                 .await
         })
     }
@@ -2117,6 +2365,9 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         "contact" => MapiIdentityObjectKind::Contact,
         "calendar_event" => MapiIdentityObjectKind::CalendarEvent,
         "task" => MapiIdentityObjectKind::Task,
+        "note" => MapiIdentityObjectKind::Note,
+        "journal_entry" => MapiIdentityObjectKind::JournalEntry,
+        "search_folder_definition" => MapiIdentityObjectKind::SearchFolderDefinition,
         value => anyhow::bail!("unsupported MAPI object kind: {value}"),
     };
     Ok(MapiIdentityLookupRecord {

@@ -134,6 +134,44 @@ fn notes_journal_and_reminders_stay_canonical() {
 }
 
 #[test]
+fn mailbox_messages_persist_outlook_followup_state() {
+    let mailbox_messages = table_definition("mailbox_messages");
+    for needle in [
+        "followup_flag_status TEXT NOT NULL DEFAULT 'none'",
+        "CHECK (followup_flag_status IN ('none', 'flagged', 'complete'))",
+        "followup_icon INTEGER NOT NULL DEFAULT 0 CHECK (followup_icon >= 0)",
+        "todo_item_flags INTEGER NOT NULL DEFAULT 0 CHECK (todo_item_flags >= 0)",
+        "followup_request TEXT NOT NULL DEFAULT ''",
+        "followup_start_at TIMESTAMPTZ",
+        "followup_due_at TIMESTAMPTZ",
+        "followup_completed_at TIMESTAMPTZ",
+        "reminder_set BOOLEAN NOT NULL DEFAULT FALSE",
+        "reminder_at TIMESTAMPTZ",
+        "reminder_dismissed_at TIMESTAMPTZ",
+        "swapped_todo_store_id UUID",
+        "swapped_todo_data BYTEA",
+    ] {
+        assert!(
+            mailbox_messages.contains(needle),
+            "mailbox_messages must persist Outlook follow-up flag state: {needle}"
+        );
+    }
+    assert!(
+        MESSAGE_OPS_STORAGE.contains("followup_flag_status = COALESCE")
+            && MESSAGE_OPS_STORAGE.contains("WHEN $6 IN ('none', 'flagged') THEN NULL")
+            && MESSAGE_OPS_STORAGE.contains("WHEN $10::text = '' THEN NULL")
+            && MESSAGE_OPS_STORAGE.contains("WHEN $11::text = '' THEN NULL")
+            && MESSAGE_OPS_STORAGE.contains("reminder_set = CASE")
+            && MESSAGE_OPS_STORAGE.contains("WHEN $14::text = '' THEN NULL")
+            && NOTES_JOURNAL_STORAGE.contains("'mail'::text AS source_type")
+            && PROTOCOLS_STORAGE.contains("followup_flag_status = CASE")
+            && PROTOCOLS_STORAGE.contains("WHEN $5 THEN 'flagged'")
+            && PROTOCOLS_STORAGE.contains("JmapEmailFollowupUpdate"),
+        "canonical message writes must expose a protocol-neutral follow-up update path"
+    );
+}
+
+#[test]
 fn collaboration_rights_are_canonical_and_same_tenant() {
     assert_schema_contains_all(&[
         "CREATE TABLE contact_book_grants",
@@ -360,7 +398,7 @@ fn mapi_identity_mapping_is_store_backed() {
 
     let identities = table_definition("mapi_object_identities");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition'))",
         "canonical_id UUID NOT NULL",
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
@@ -913,6 +951,63 @@ fn mailbox_schema_allows_canonical_outlook_compatibility_mail_roles() {
             "protocol bootstrap must create {role}"
         );
     }
+}
+
+#[test]
+fn search_folder_schema_persists_exchange_builtin_definitions() {
+    let search_folders = table_definition("search_folders");
+    for fragment in [
+        "role TEXT NOT NULL DEFAULT 'custom'",
+        "'reminders'",
+        "'todo_search'",
+        "'contacts_search'",
+        "'tracked_mail_processing'",
+        "definition_kind TEXT NOT NULL DEFAULT 'exchange_builtin'",
+        "result_object_kind TEXT NOT NULL",
+        "scope_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "restriction_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "excluded_folder_roles TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            search_folders.contains(fragment),
+            "search_folders table must persist {fragment}"
+        );
+    }
+
+    assert!(
+        SCHEMA.contains("CREATE UNIQUE INDEX search_folders_builtin_role_idx")
+            && SCHEMA.contains("WHERE is_builtin"),
+        "built-in search folder definitions must be unique per account and role"
+    );
+    for role in [
+        "reminders",
+        "todo_search",
+        "contacts_search",
+        "tracked_mail_processing",
+    ] {
+        assert!(
+            PROTOCOLS_STORAGE.contains(&format!("role: \"{role}\"")),
+            "protocol bootstrap must persist the built-in {role} search folder definition"
+        );
+    }
+}
+
+#[test]
+fn contact_book_schema_allows_outlook_compatibility_roles() {
+    let contact_books = table_definition("contact_books");
+    for role in ["suggested_contacts", "quick_contacts", "im_contact_list"] {
+        assert!(
+            contact_books.contains(&format!("'{role}'")),
+            "contact_books.role CHECK must allow {role}"
+        );
+    }
+    assert!(
+        SCHEMA.contains(
+            "ON contact_books (tenant_id, owner_account_id, role)\n    WHERE role <> 'custom'"
+        ),
+        "contact book default-role uniqueness must remain a partial index"
+    );
 }
 
 #[test]

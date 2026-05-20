@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest};
 use lpe_storage::{
     mail::parse_rfc822_message, AuditEntryInput, AuthenticatedAccount, JmapEmail,
@@ -1852,6 +1853,9 @@ pub(crate) fn email_to_value(
     if properties.contains("keywords") {
         object.insert("keywords".to_string(), email_keywords(email));
     }
+    if properties.contains("xLpeFollowUp") {
+        object.insert("xLpeFollowUp".to_string(), email_followup_value(email));
+    }
     insert_if(properties, &mut object, "size", email.size_octets);
     insert_if(
         properties,
@@ -2189,4 +2193,18 @@ pub(crate) fn email_keywords(email: &JmapEmail) -> Value {
         keywords.insert("$flagged".to_string(), Value::Bool(true));
     }
     Value::Object(keywords)
+}
+
+pub(crate) fn email_followup_value(email: &JmapEmail) -> Value {
+    json!({
+        "status": email.followup_flag_status,
+        "icon": email.followup_icon,
+        "todoItemFlags": email.todo_item_flags,
+        "request": email.followup_request,
+        "startAt": email.followup_start_at,
+        "dueAt": email.followup_due_at,
+        "completedAt": email.followup_completed_at,
+        "swappedToDoStoreId": email.swapped_todo_store_id.map(|id| id.to_string()),
+        "swappedToDoData": email.swapped_todo_data.as_ref().map(|data| BASE64.encode(data)),
+    })
 }

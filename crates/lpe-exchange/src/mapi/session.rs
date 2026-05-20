@@ -111,6 +111,18 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         task_id: u64,
     },
+    Note {
+        folder_id: u64,
+        note_id: u64,
+    },
+    JournalEntry {
+        folder_id: u64,
+        journal_entry_id: u64,
+    },
+    SearchFolderDefinition {
+        folder_id: u64,
+        definition_id: u64,
+    },
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -128,6 +140,14 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
     },
+    PendingNote {
+        folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
+    },
+    PendingJournalEntry {
+        folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
+    },
     HierarchyTable {
         folder_id: u64,
         columns: Vec<u32>,
@@ -139,6 +159,7 @@ pub(in crate::mapi) enum MapiObject {
     },
     ContentsTable {
         folder_id: u64,
+        associated: bool,
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
         restriction: Option<MapiRestriction>,
@@ -646,10 +667,25 @@ impl MapiSession {
         if let Some(property_id) = self.named_properties.get(&property).copied() {
             return Some(property_id);
         }
+        if let Some(property_id) = well_known_named_property_id(&property) {
+            self.named_properties.insert(property.clone(), property_id);
+            self.named_property_ids.insert(property_id, property);
+            return Some(property_id);
+        }
         if !create || self.next_named_property_id > MAX_NAMED_PROPERTY_ID {
             return None;
         }
 
+        while self.next_named_property_id <= MAX_NAMED_PROPERTY_ID
+            && self
+                .named_property_ids
+                .contains_key(&self.next_named_property_id)
+        {
+            self.next_named_property_id = self.next_named_property_id.saturating_add(1);
+        }
+        if self.next_named_property_id > MAX_NAMED_PROPERTY_ID {
+            return None;
+        }
         let property_id = self.next_named_property_id;
         self.next_named_property_id = self.next_named_property_id.saturating_add(1);
         self.named_properties.insert(property.clone(), property_id);
@@ -708,10 +744,15 @@ impl MapiObject {
             | MapiObject::Contact { folder_id, .. }
             | MapiObject::Event { folder_id, .. }
             | MapiObject::Task { folder_id, .. }
+            | MapiObject::Note { folder_id, .. }
+            | MapiObject::JournalEntry { folder_id, .. }
+            | MapiObject::SearchFolderDefinition { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
             | MapiObject::PendingContact { folder_id, .. }
             | MapiObject::PendingEvent { folder_id, .. }
             | MapiObject::PendingTask { folder_id, .. }
+            | MapiObject::PendingNote { folder_id, .. }
+            | MapiObject::PendingJournalEntry { folder_id, .. }
             | MapiObject::HierarchyTable { folder_id, .. }
             | MapiObject::ContentsTable { folder_id, .. }
             | MapiObject::AttachmentTable { folder_id, .. }

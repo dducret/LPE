@@ -1,4 +1,4 @@
-import type { ContactDraft, ContactItem, EventDraft, EventItem, Folder, Message, MessageDraft } from "./client-types";
+import type { ContactBookId, ContactDraft, ContactItem, EventDraft, EventItem, Folder, Message, MessageDraft } from "./client-types";
 
 export const blankDraft = (mailboxAccountId = ""): MessageDraft => ({
   mailboxAccountId,
@@ -58,5 +58,13 @@ export function filterMessages(messages: Message[], folder: Folder, query: strin
       .join(" ")
       .toLowerCase()
       .includes(needle)
+  );
+}
+
+export function filterContacts(contacts: ContactItem[], contactBook: ContactBookId, query: string): ContactItem[] {
+  const needle = query.trim().toLowerCase();
+  return contacts.filter((item) =>
+    item.addressBookId === contactBook &&
+    [item.name, item.role, item.email, item.phone, item.team, item.notes].join(" ").toLowerCase().includes(needle)
   );
 }

@@ -325,6 +325,15 @@ impl FakeStore {
             modseq: 1,
             unread,
             flagged,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             draft,
         }
     }
@@ -363,6 +372,15 @@ impl FakeStore {
             body_html_sanitized: None,
             unread: false,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: false,
             size_octets: 42,
             internet_message_id: Some("<draft@example.test>".to_string()),
@@ -416,6 +434,15 @@ impl FakeStore {
             body_html_sanitized: Some("<p>Inbox body</p>".to_string()),
             unread: true,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: false,
             size_octets: 84,
             internet_message_id: Some("<inbox@example.test>".to_string()),
@@ -427,6 +454,7 @@ impl FakeStore {
     fn contact() -> ClientContact {
         ClientContact {
             id: Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap(),
+            address_book_id: "default".to_string(),
             name: "Bob Example".to_string(),
             role: "Sales".to_string(),
             email: "bob@example.test".to_string(),
@@ -1159,6 +1187,15 @@ impl JmapStore for FakeStore {
             modseq: 1,
             unread: email.unread,
             flagged: email.flagged,
+            followup_flag_status: email.followup_flag_status.clone(),
+            followup_icon: email.followup_icon,
+            todo_item_flags: email.todo_item_flags,
+            followup_request: email.followup_request.clone(),
+            followup_start_at: email.followup_start_at.clone(),
+            followup_due_at: email.followup_due_at.clone(),
+            followup_completed_at: email.followup_completed_at.clone(),
+            swapped_todo_store_id: email.swapped_todo_store_id,
+            swapped_todo_data: email.swapped_todo_data.clone(),
             draft: false,
         }];
         Ok(email)
@@ -1177,6 +1214,15 @@ impl JmapStore for FakeStore {
             modseq: 1,
             unread: false,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             draft: false,
         };
         Ok(JmapEmail {
@@ -1219,6 +1265,15 @@ impl JmapStore for FakeStore {
             body_html_sanitized: None,
             unread: false,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: false,
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
@@ -1277,6 +1332,7 @@ impl JmapStore for FakeStore {
     ) -> Result<AccessibleContact> {
         let contact = ClientContact {
             id: input.id.unwrap_or_else(Uuid::new_v4),
+            address_book_id: _collection_id.unwrap_or("default").to_string(),
             name: input.name,
             role: input.role,
             email: input.email,
@@ -3033,6 +3089,67 @@ async fn email_get_and_query_preserve_multiple_mailbox_ids_for_one_email() {
 }
 
 #[tokio::test]
+async fn email_get_projects_private_followup_state_when_requested() {
+    let mut email = FakeStore::inbox_email();
+    email.flagged = true;
+    email.followup_flag_status = "flagged".to_string();
+    email.followup_icon = 6;
+    email.todo_item_flags = 8;
+    email.followup_request = "Follow up".to_string();
+    email.followup_due_at = Some("2026-05-21T09:00:00Z".to_string());
+    email.swapped_todo_store_id =
+        Some(Uuid::parse_str("77777777-7777-4777-8777-777777777777").unwrap());
+    email.swapped_todo_data = Some(vec![1, 2, 3, 4]);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        emails: vec![email.clone()],
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Email/get".to_string(),
+                    json!({
+                        "ids": [email.id.to_string()],
+                        "properties": ["id", "xLpeFollowUp"]
+                    }),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let followup = &response.method_responses[0].1["list"][0]["xLpeFollowUp"];
+    assert_eq!(followup["status"], Value::String("flagged".to_string()));
+    assert_eq!(followup["icon"], Value::from(6));
+    assert_eq!(followup["todoItemFlags"], Value::from(8));
+    assert_eq!(followup["request"], Value::String("Follow up".to_string()));
+    assert_eq!(
+        followup["dueAt"],
+        Value::String("2026-05-21T09:00:00Z".to_string())
+    );
+    assert_eq!(
+        followup["swappedToDoStoreId"],
+        Value::String("77777777-7777-4777-8777-777777777777".to_string())
+    );
+    assert_eq!(
+        followup["swappedToDoData"],
+        Value::String("AQIDBA==".to_string())
+    );
+}
+
+#[tokio::test]
 async fn email_get_hides_bcc_for_delegated_shared_mailbox_projection() {
     let shared = FakeStore::shared_account();
     let store = FakeStore {
@@ -4251,6 +4368,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
     };
     let first_contact = ClientContact {
         id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+        address_book_id: "default".to_string(),
         name: "Same".to_string(),
         role: "".to_string(),
         email: "first@example.test".to_string(),
@@ -4260,6 +4378,7 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
     };
     let second_contact = ClientContact {
         id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+        address_book_id: "default".to_string(),
         name: "Same".to_string(),
         role: "".to_string(),
         email: "second@example.test".to_string(),
@@ -5586,6 +5705,80 @@ async fn mailbox_get_returns_canonical_system_names_and_roles() {
     assert!(list
         .iter()
         .any(|mailbox| mailbox["name"] == "Trash" && mailbox["role"] == "trash"));
+}
+
+#[tokio::test]
+async fn mailbox_get_exposes_backed_exchange_compatibility_mail_folders() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![
+            FakeStore::inbox_mailbox(),
+            JmapMailbox {
+                id: Uuid::parse_str("45454545-4545-4545-4545-454545454545").unwrap(),
+                parent_id: None,
+                role: "conversation_history".to_string(),
+                name: "Conversation History".to_string(),
+                sort_order: 70,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: Uuid::parse_str("46464646-4646-4646-4646-464646464646").unwrap(),
+                parent_id: None,
+                role: "rss_feeds".to_string(),
+                name: "RSS Feeds".to_string(),
+                sort_order: 80,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: Uuid::parse_str("47474747-4747-4747-4747-474747474747").unwrap(),
+                parent_id: None,
+                role: "sync_issues".to_string(),
+                name: "Sync Issues".to_string(),
+                sort_order: 90,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+        ],
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![JmapMethodCall(
+                    "Mailbox/get".to_string(),
+                    json!({"properties": ["name", "role"]}),
+                    "c1".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let list = response.method_responses[0].1["list"].as_array().unwrap();
+    for (name, role) in [
+        ("Conversation History", "conversation_history"),
+        ("RSS Feeds", "rss_feeds"),
+        ("Sync Issues", "sync_issues"),
+    ] {
+        assert!(list
+            .iter()
+            .any(|mailbox| mailbox["name"] == name && mailbox["role"] == role));
+    }
 }
 
 #[tokio::test]
@@ -8894,6 +9087,7 @@ async fn contact_and_calendar_query_changes_report_reorders() {
             FakeStore::contact(),
             ClientContact {
                 id: later_contact_id,
+                address_book_id: "default".to_string(),
                 name: "Zoe Example".to_string(),
                 role: String::new(),
                 email: "zoe@example.test".to_string(),

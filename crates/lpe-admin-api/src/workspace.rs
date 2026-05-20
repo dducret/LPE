@@ -5,10 +5,11 @@ use axum::{
 };
 use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
-    ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JournalEntry,
-    MailboxAccountAccess, ReminderQuery, SavedDraftMessage, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JmapEmail,
+    JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, ReminderQuery, SavedDraftMessage,
+    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertJournalEntryInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -18,8 +19,8 @@ use crate::{
     observability, require_account,
     types::{
         ApiResult, ReminderQueryRequest, SubmitMessageRequest, SubmitRecipientRequest,
-        UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientNoteRequest,
-        UpsertClientTaskRequest, UpsertJournalEntryRequest,
+        UpdateMessageFlagRequest, UpsertClientContactRequest, UpsertClientEventRequest,
+        UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
     },
 };
 
@@ -42,6 +43,13 @@ trait ClientSubmissionStore: ClientSessionStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> anyhow::Result<SubmittedMessage>;
+    async fn update_jmap_email_followup_flags(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<JmapEmail>;
 }
 
 impl ClientSessionStore for Storage {
@@ -95,6 +103,16 @@ impl ClientSubmissionStore for Storage {
         audit: AuditEntryInput,
     ) -> anyhow::Result<SubmittedMessage> {
         Storage::submit_message(self, input, audit).await
+    }
+
+    async fn update_jmap_email_followup_flags(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<JmapEmail> {
+        Storage::update_jmap_email_followup_flags(self, account_id, message_id, update, audit).await
     }
 }
 
@@ -245,6 +263,108 @@ pub(crate) async fn save_draft_message(
     Ok(Json(draft))
 }
 
+pub(crate) async fn update_message_flag(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(message_id): AxumPath<Uuid>,
+    Json(request): Json<UpdateMessageFlagRequest>,
+) -> ApiResult<HealthResponse> {
+    update_message_flag_with_store(&storage, &headers, message_id, request).await?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+async fn update_message_flag_with_store<S: ClientSubmissionStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    message_id: Uuid,
+    request: UpdateMessageFlagRequest,
+) -> std::result::Result<(), (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .update_jmap_email_followup_flags(
+            account.account_id,
+            message_id,
+            map_update_message_flag_request(&request),
+            AuditEntryInput {
+                actor: account.email,
+                action: "client-update-message-flag".to_string(),
+                subject: format!("message:{message_id}"),
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(classify_client_submission_storage_error)
+}
+
+fn map_update_message_flag_request(request: &UpdateMessageFlagRequest) -> JmapEmailFollowupUpdate {
+    if !request.flagged {
+        return JmapEmailFollowupUpdate {
+            flagged: Some(false),
+            followup_flag_status: Some("none".to_string()),
+            followup_icon: Some(0),
+            todo_item_flags: Some(0),
+            followup_request: Some(String::new()),
+            ..Default::default()
+        };
+    }
+
+    let status = if request.completed.unwrap_or(false) {
+        "complete"
+    } else {
+        "flagged"
+    };
+    let due_at = request
+        .due_at
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let clear_due = request.clear_due.unwrap_or(false);
+    let reminder_at = request
+        .reminder_at
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let clear_reminder = request.clear_reminder.unwrap_or(false);
+    JmapEmailFollowupUpdate {
+        flagged: Some(true),
+        followup_flag_status: Some(status.to_string()),
+        followup_icon: Some(6),
+        todo_item_flags: Some(8),
+        followup_request: Some("Follow up".to_string()),
+        followup_start_at: if clear_due {
+            Some(String::new())
+        } else {
+            due_at.clone()
+        },
+        followup_due_at: if clear_due {
+            Some(String::new())
+        } else {
+            due_at
+        },
+        reminder_set: if clear_reminder {
+            Some(false)
+        } else {
+            reminder_at.as_ref().map(|_| true)
+        },
+        reminder_at: if clear_reminder {
+            Some(String::new())
+        } else {
+            reminder_at
+        },
+        reminder_dismissed_at: if clear_reminder {
+            Some(String::new())
+        } else {
+            None
+        },
+        ..Default::default()
+    }
+}
+
 pub(crate) async fn delete_draft_message(
     State(storage): State<Storage>,
     headers: HeaderMap,
@@ -299,6 +419,7 @@ pub(crate) async fn upsert_client_contact(
     };
     Ok(Json(ClientContact {
         id: contact.id,
+        address_book_id: contact.collection_id,
         name: contact.name,
         role: contact.role,
         email: contact.email,
@@ -848,16 +969,18 @@ mod tests {
         classify_client_submission_storage_error, delete_client_note_with_store,
         delete_journal_entry_with_store, get_client_note_with_store, get_journal_entry_with_store,
         list_client_notes_with_store, list_journal_entries_with_store, map_submit_message_request,
-        query_client_reminders_with_store, resolve_client_sender_fields, submit_message_with_store,
+        map_update_message_flag_request, query_client_reminders_with_store,
+        resolve_client_sender_fields, submit_message_with_store, update_message_flag_with_store,
         upsert_client_note_with_store, upsert_journal_entry_with_store,
     };
     use crate::types::{
-        ReminderQueryRequest, SubmitMessageRequest, UpsertClientNoteRequest,
-        UpsertJournalEntryRequest,
+        ReminderQueryRequest, SubmitMessageRequest, UpdateMessageFlagRequest,
+        UpsertClientNoteRequest, UpsertJournalEntryRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use lpe_storage::{
-        AuditEntryInput, AuthenticatedAccount, ClientNote, ClientReminder, JournalEntry,
+        AuditEntryInput, AuthenticatedAccount, ClientNote, ClientReminder, JmapEmail,
+        JmapEmailAddress, JmapEmailFollowupUpdate, JmapEmailMailboxState, JournalEntry,
         MailboxAccountAccess, ReminderQuery, SubmitMessageInput, SubmittedMessage,
         UpsertClientNoteInput, UpsertJournalEntryInput,
     };
@@ -870,6 +993,15 @@ mod tests {
         accessible_mailbox_accounts: Vec<MailboxAccountAccess>,
         submitted: Arc<Mutex<Vec<SubmitMessageInput>>>,
         audits: Arc<Mutex<Vec<AuditEntryInput>>>,
+        flag_updates: Arc<Mutex<Vec<FlagUpdate>>>,
+    }
+
+    #[derive(Clone)]
+    struct FlagUpdate {
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
+        audit: AuditEntryInput,
     }
 
     #[derive(Clone)]
@@ -940,6 +1072,23 @@ mod tests {
                 outbound_queue_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
                 delivery_status: "queued".to_string(),
             })
+        }
+
+        async fn update_jmap_email_followup_flags(
+            &self,
+            account_id: Uuid,
+            message_id: Uuid,
+            update: JmapEmailFollowupUpdate,
+            audit: AuditEntryInput,
+        ) -> anyhow::Result<JmapEmail> {
+            let flagged = update.flagged.unwrap_or(false);
+            self.flag_updates.lock().unwrap().push(FlagUpdate {
+                account_id,
+                message_id,
+                update,
+                audit,
+            });
+            Ok(jmap_email(message_id, account_id, flagged))
         }
     }
 
@@ -1157,6 +1306,77 @@ mod tests {
         }
     }
 
+    fn jmap_email(id: Uuid, account_id: Uuid, flagged: bool) -> JmapEmail {
+        let mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+        JmapEmail {
+            id,
+            thread_id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![JmapEmailMailboxState {
+                mailbox_id,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                modseq: 1,
+                unread: false,
+                flagged,
+                followup_flag_status: if flagged { "flagged" } else { "none" }.to_string(),
+                followup_icon: if flagged { 6 } else { 0 },
+                todo_item_flags: if flagged { 1 } else { 0 },
+                followup_request: if flagged { "Follow up" } else { "" }.to_string(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                draft: false,
+            }],
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 1,
+            received_at: "2026-05-19T09:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "sender@example.test".to_string(),
+            from_display: Some("Sender".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "direct".to_string(),
+            submitted_by_account_id: account_id,
+            to: vec![JmapEmailAddress {
+                address: "delegate@example.test".to_string(),
+                display_name: Some("Delegate".to_string()),
+            }],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Subject".to_string(),
+            preview: "Preview".to_string(),
+            body_text: "Body".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged,
+            followup_flag_status: if flagged { "flagged" } else { "none" }.to_string(),
+            followup_icon: if flagged { 6 } else { 0 },
+            todo_item_flags: if flagged { 1 } else { 0 },
+            followup_request: if flagged { "Follow up" } else { "" }.to_string(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            has_attachments: false,
+            size_octets: 32,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "delivered".to_string(),
+        }
+    }
+
     fn submit_request() -> SubmitMessageRequest {
         SubmitMessageRequest {
             draft_message_id: None,
@@ -1310,6 +1530,7 @@ mod tests {
             accessible_mailbox_accounts: vec![owned_mailbox_access(&authenticated)],
             submitted: Arc::new(Mutex::new(Vec::new())),
             audits: Arc::new(Mutex::new(Vec::new())),
+            flag_updates: Arc::new(Mutex::new(Vec::new())),
         };
 
         let submitted = submit_message_with_store(&store, &bearer_headers(), request)
@@ -1325,6 +1546,137 @@ mod tests {
         assert!(recorded[0].cc.is_empty());
         assert!(recorded[0].bcc.is_empty());
         assert_eq!(store.audits.lock().unwrap()[0].action, "submit-message");
+    }
+
+    #[tokio::test]
+    async fn update_message_flag_handler_uses_canonical_flag_store_path() {
+        let authenticated = account();
+        let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+        let store = FakeSubmissionStore {
+            session: Some(authenticated.clone()),
+            accessible_mailbox_accounts: vec![owned_mailbox_access(&authenticated)],
+            submitted: Arc::new(Mutex::new(Vec::new())),
+            audits: Arc::new(Mutex::new(Vec::new())),
+            flag_updates: Arc::new(Mutex::new(Vec::new())),
+        };
+
+        update_message_flag_with_store(
+            &store,
+            &bearer_headers(),
+            message_id,
+            UpdateMessageFlagRequest {
+                flagged: true,
+                completed: None,
+                due_at: None,
+                clear_due: None,
+                reminder_at: None,
+                clear_reminder: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        let updates = store.flag_updates.lock().unwrap();
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].account_id, authenticated.account_id);
+        assert_eq!(updates[0].message_id, message_id);
+        assert_eq!(updates[0].update.unread, None);
+        assert_eq!(updates[0].update.flagged, Some(true));
+        assert_eq!(
+            updates[0].update.followup_flag_status.as_deref(),
+            Some("flagged")
+        );
+        assert_eq!(updates[0].audit.actor, authenticated.email);
+        assert_eq!(updates[0].audit.action, "client-update-message-flag");
+    }
+
+    #[test]
+    fn update_message_flag_request_maps_complete_and_clear_states() {
+        let complete = map_update_message_flag_request(&UpdateMessageFlagRequest {
+            flagged: true,
+            completed: Some(true),
+            due_at: None,
+            clear_due: None,
+            reminder_at: None,
+            clear_reminder: None,
+        });
+        assert_eq!(complete.flagged, Some(true));
+        assert_eq!(complete.followup_flag_status.as_deref(), Some("complete"));
+        assert_eq!(complete.followup_icon, Some(6));
+        assert_eq!(complete.todo_item_flags, Some(8));
+
+        let clear = map_update_message_flag_request(&UpdateMessageFlagRequest {
+            flagged: false,
+            completed: Some(true),
+            due_at: None,
+            clear_due: None,
+            reminder_at: None,
+            clear_reminder: None,
+        });
+        assert_eq!(clear.flagged, Some(false));
+        assert_eq!(clear.followup_flag_status.as_deref(), Some("none"));
+        assert_eq!(clear.followup_icon, Some(0));
+        assert_eq!(clear.todo_item_flags, Some(0));
+    }
+
+    #[test]
+    fn update_message_flag_request_maps_due_date_controls() {
+        let due = map_update_message_flag_request(&UpdateMessageFlagRequest {
+            flagged: true,
+            completed: None,
+            due_at: Some("2026-05-20T23:59:59Z".to_string()),
+            clear_due: None,
+            reminder_at: None,
+            clear_reminder: None,
+        });
+        assert_eq!(due.followup_flag_status.as_deref(), Some("flagged"));
+        assert_eq!(
+            due.followup_start_at.as_deref(),
+            Some("2026-05-20T23:59:59Z")
+        );
+        assert_eq!(due.followup_due_at.as_deref(), Some("2026-05-20T23:59:59Z"));
+
+        let clear_due = map_update_message_flag_request(&UpdateMessageFlagRequest {
+            flagged: true,
+            completed: None,
+            due_at: None,
+            clear_due: Some(true),
+            reminder_at: None,
+            clear_reminder: None,
+        });
+        assert_eq!(clear_due.followup_flag_status.as_deref(), Some("flagged"));
+        assert_eq!(clear_due.followup_start_at.as_deref(), Some(""));
+        assert_eq!(clear_due.followup_due_at.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn update_message_flag_request_maps_reminder_controls() {
+        let reminder = map_update_message_flag_request(&UpdateMessageFlagRequest {
+            flagged: true,
+            completed: None,
+            due_at: None,
+            clear_due: None,
+            reminder_at: Some("2026-05-20T12:00:00Z".to_string()),
+            clear_reminder: None,
+        });
+        assert_eq!(reminder.reminder_set, Some(true));
+        assert_eq!(
+            reminder.reminder_at.as_deref(),
+            Some("2026-05-20T12:00:00Z")
+        );
+        assert_eq!(reminder.reminder_dismissed_at, None);
+
+        let clear_reminder = map_update_message_flag_request(&UpdateMessageFlagRequest {
+            flagged: true,
+            completed: None,
+            due_at: None,
+            clear_due: None,
+            reminder_at: None,
+            clear_reminder: Some(true),
+        });
+        assert_eq!(clear_reminder.reminder_set, Some(false));
+        assert_eq!(clear_reminder.reminder_at.as_deref(), Some(""));
+        assert_eq!(clear_reminder.reminder_dismissed_at.as_deref(), Some(""));
     }
 
     #[tokio::test]

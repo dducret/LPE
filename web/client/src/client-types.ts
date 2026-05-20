@@ -1,5 +1,6 @@
 export type Section = "mail" | "calendar" | "contacts" | "settings";
 export type Folder = "focused" | "inbox" | "drafts" | "sent" | "archive" | "junk" | "outbox" | "rss_feeds" | "conversation_history" | "sync_issues" | "conflicts" | "local_failures" | "server_failures";
+export type ContactBookId = "default" | "suggested_contacts" | "quick_contacts" | "im_contact_list";
 export type Mode = "closed" | "new" | "draft" | "reply" | "forward";
 
 export type Attachment = {
@@ -22,6 +23,13 @@ export type Message = {
   timeLabel: string;
   unread: boolean;
   flagged: boolean;
+  followupFlagStatus: "none" | "flagged" | "complete";
+  followupStartAt: string | null;
+  followupDueAt: string | null;
+  followupCompletedAt: string | null;
+  reminderSet: boolean;
+  reminderAt: string | null;
+  reminderDismissedAt: string | null;
   tags: string[];
   attachments: Attachment[];
   body: string[];
@@ -43,6 +51,7 @@ export type EventItem = {
 
 export type ContactItem = {
   id: string;
+  addressBookId: ContactBookId;
   name: string;
   role: string;
   email: string;
@@ -61,7 +70,7 @@ export type MessageDraft = {
 };
 
 export type EventDraft = Omit<EventItem, "id">;
-export type ContactDraft = Omit<ContactItem, "id">;
+export type ContactDraft = Omit<ContactItem, "id" | "addressBookId">;
 
 export type ClientIdentity = {
   account_id: string;

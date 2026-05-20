@@ -5,12 +5,13 @@ use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
-    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientTask,
-    CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress,
+    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientReminder,
+    ClientTask, CollaborationCollection, CollaborationRights, JmapEmail, JmapEmailAddress,
     JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, SavedDraftMessage, SieveScriptDocument, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput,
+    JmapMailboxCreateInput, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SieveScriptDocument, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput,
 };
 use std::{
     collections::HashMap,
@@ -349,6 +350,18 @@ impl FakeStore {
                 modseq: 41,
                 unread: false,
                 flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
                 draft: mailbox_role == "drafts",
             }],
             received_at: "2026-05-03T12:00:00Z".to_string(),
@@ -371,6 +384,18 @@ impl FakeStore {
             body_html_sanitized: None,
             unread: false,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: false,
             size_octets: 128,
             internet_message_id: None,
@@ -1307,6 +1332,21 @@ impl ExchangeStore for FakeStore {
         self.fetch_jmap_mailboxes(account_id)
     }
 
+    fn fetch_search_folders<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<SearchFolderDefinition>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn query_client_reminders<'a>(
+        &'a self,
+        _account_id: Uuid,
+        _query: ReminderQuery,
+    ) -> StoreFuture<'a, Vec<ClientReminder>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -1737,6 +1777,50 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(updated) })
     }
 
+    fn update_jmap_email_followup_flags<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        update: lpe_storage::JmapEmailFollowupUpdate,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .unwrap();
+        if let Some(unread) = update.unread {
+            email.unread = unread;
+        }
+        if let Some(flagged) = update.flagged {
+            email.flagged = flagged;
+        }
+        if let Some(status) = update.followup_flag_status {
+            email.followup_flag_status = status.clone();
+            email.flagged = status != "none";
+        }
+        if let Some(icon) = update.followup_icon {
+            email.followup_icon = icon;
+        }
+        if let Some(flags) = update.todo_item_flags {
+            email.todo_item_flags = flags;
+        }
+        if let Some(request) = update.followup_request {
+            email.followup_request = request;
+        }
+        if let Some(completed_at) = update.followup_completed_at {
+            email.followup_completed_at = Some(completed_at);
+        }
+        if let Some(store_id) = update.swapped_todo_store_id {
+            email.swapped_todo_store_id = Some(store_id);
+        }
+        if let Some(data) = update.swapped_todo_data {
+            email.swapped_todo_data = Some(data);
+        }
+        let updated = email.clone();
+        Box::pin(async move { Ok(updated) })
+    }
+
     fn delete_jmap_email<'a>(
         &'a self,
         _account_id: Uuid,
@@ -1844,6 +1928,18 @@ impl ExchangeStore for FakeStore {
             modseq: sent.modseq,
             unread: sent.unread,
             flagged: sent.flagged,
+            followup_flag_status: sent.followup_flag_status.clone(),
+            followup_icon: sent.followup_icon,
+            todo_item_flags: sent.todo_item_flags,
+            followup_request: sent.followup_request.clone(),
+            followup_start_at: sent.followup_start_at.clone(),
+            followup_due_at: sent.followup_due_at.clone(),
+            followup_completed_at: sent.followup_completed_at.clone(),
+            reminder_set: sent.reminder_set,
+            reminder_at: sent.reminder_at.clone(),
+            reminder_dismissed_at: sent.reminder_dismissed_at.clone(),
+            swapped_todo_store_id: sent.swapped_todo_store_id,
+            swapped_todo_data: sent.swapped_todo_data.clone(),
             draft: false,
         }];
 
@@ -12507,6 +12603,18 @@ async fn mapi_over_http_content_sync_uses_mailbox_state_membership() {
         modseq: 42,
         unread: false,
         flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
         draft: false,
     });
     let store = FakeStore {
@@ -14617,6 +14725,18 @@ async fn mapi_over_http_hierarchy_sync_advertises_counts_from_snapshot_messages(
         modseq: 42,
         unread: true,
         flagged: false,
+        followup_flag_status: "none".to_string(),
+        followup_icon: 0,
+        todo_item_flags: 0,
+        followup_request: String::new(),
+        followup_start_at: None,
+        followup_due_at: None,
+        followup_completed_at: None,
+        reminder_set: false,
+        reminder_at: None,
+        reminder_dismissed_at: None,
+        swapped_todo_store_id: None,
+        swapped_todo_data: None,
         draft: false,
     });
     let inbox_local_commit_time_max = mapi_mailstore::filetime_from_change_number(
@@ -16388,6 +16508,7 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
         changed_mailbox_ids: Vec::new(),
         changed_message_ids: vec![message_id],
         deleted_message_ids: Vec::new(),
+        ..Default::default()
     };
     let service = ExchangeService::new(store.clone());
     let connect = service

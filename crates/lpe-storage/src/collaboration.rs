@@ -7,7 +7,9 @@ use sqlx::{Postgres, Row};
 use crate::{
     normalize_email, AuditEntryInput, CanonicalChangeCategory, CollaborationCollectionRow,
     CollaborationGrantRow, Storage, UpsertClientContactInput, UpsertClientEventInput,
-    DEFAULT_COLLECTION_ID, DEFAULT_TASK_LIST_ROLE,
+    DEFAULT_COLLECTION_ID, DEFAULT_CONTACT_BOOK_ROLE, DEFAULT_TASK_LIST_ROLE,
+    IM_CONTACT_LIST_COLLECTION_ID, IM_CONTACT_LIST_ROLE, QUICK_CONTACTS_COLLECTION_ID,
+    QUICK_CONTACTS_ROLE, SUGGESTED_CONTACTS_COLLECTION_ID, SUGGESTED_CONTACTS_ROLE,
 };
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -769,18 +771,22 @@ impl Storage {
         if !access.rights.may_write {
             bail!("write access is not granted on this address book");
         }
+        let contact_book_role = contact_book_role_for_collection_id(collection_id);
 
         let contact = self
-            .upsert_client_contact(UpsertClientContactInput {
-                id: input.id,
-                account_id: access.owner_account_id,
-                name: input.name,
-                role: input.role,
-                email: input.email,
-                phone: input.phone,
-                team: input.team,
-                notes: input.notes,
-            })
+            .upsert_client_contact_in_book_role(
+                UpsertClientContactInput {
+                    id: input.id,
+                    account_id: access.owner_account_id,
+                    name: input.name,
+                    role: input.role,
+                    email: input.email,
+                    phone: input.phone,
+                    team: input.team,
+                    notes: input.notes,
+                },
+                contact_book_role,
+            )
             .await?;
 
         self.fetch_accessible_contacts_by_ids(principal_account_id, &[contact.id])
@@ -806,16 +812,20 @@ impl Storage {
             bail!("write access is not granted on this address book");
         }
 
-        self.upsert_client_contact(UpsertClientContactInput {
-            id: Some(contact_id),
-            account_id: existing.owner_account_id,
-            name: input.name,
-            role: input.role,
-            email: input.email,
-            phone: input.phone,
-            team: input.team,
-            notes: input.notes,
-        })
+        let contact_book_role = contact_book_role_for_collection_id(Some(&existing.collection_id));
+        self.upsert_client_contact_in_book_role(
+            UpsertClientContactInput {
+                id: Some(contact_id),
+                account_id: existing.owner_account_id,
+                name: input.name,
+                role: input.role,
+                email: input.email,
+                phone: input.phone,
+                team: input.team,
+                notes: input.notes,
+            },
+            contact_book_role,
+        )
         .await?;
 
         self.fetch_accessible_contacts_by_ids(principal_account_id, &[contact_id])
@@ -1000,6 +1010,29 @@ impl Storage {
                 may_share: true,
             },
         }];
+        if kind == CollaborationResourceKind::Contacts {
+            for (id, display_name) in [
+                (SUGGESTED_CONTACTS_COLLECTION_ID, "Suggested Contacts"),
+                (QUICK_CONTACTS_COLLECTION_ID, "Quick Contacts"),
+                (IM_CONTACT_LIST_COLLECTION_ID, "IM Contact List"),
+            ] {
+                collections.push(CollaborationCollection {
+                    id: id.to_string(),
+                    kind: kind.as_str().to_string(),
+                    owner_account_id: principal.id,
+                    owner_email: principal.email.clone(),
+                    owner_display_name: principal.display_name.clone(),
+                    display_name: display_name.to_string(),
+                    is_owned: true,
+                    rights: CollaborationRights {
+                        may_read: true,
+                        may_write: true,
+                        may_delete: true,
+                        may_share: false,
+                    },
+                });
+            }
+        }
 
         let rows = match kind {
             CollaborationResourceKind::Contacts => {
@@ -1138,20 +1171,26 @@ impl Storage {
         ids: Option<&[Uuid]>,
     ) -> Result<Vec<AccessibleContact>> {
         let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
-        let owner_account_id =
+        let collection_scope =
             if let Some(collection_id) = collection_id.filter(|value| !value.trim().is_empty()) {
-                Some(
-                    self.resolve_collection_access(
+                let access = self
+                    .resolve_collection_access(
                         principal_account_id,
                         CollaborationResourceKind::Contacts,
                         collection_id,
                     )
-                    .await?
-                    .owner_account_id,
-                )
+                    .await?;
+                Some((
+                    access.owner_account_id,
+                    contact_book_role_for_collection_id(Some(collection_id)).to_string(),
+                ))
             } else {
                 None
             };
+        let owner_account_id = collection_scope
+            .as_ref()
+            .map(|(owner_account_id, _)| *owner_account_id);
+        let contact_book_role = collection_scope.as_ref().map(|(_, role)| role.as_str());
 
         let rows = sqlx::query_as::<_, crate::AccessibleContactRow>(
             r#"
@@ -1160,6 +1199,7 @@ impl Storage {
                 c.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
+                b.role AS contact_book_role,
                 CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_read, FALSE) END AS may_read,
                 CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_write, FALSE) END AS may_write,
                 CASE WHEN c.owner_account_id = $2 THEN TRUE ELSE COALESCE(g.may_delete, FALSE) END AS may_delete,
@@ -1172,10 +1212,10 @@ impl Storage {
                 c.notes
             FROM contacts c
             JOIN accounts owner ON owner.id = c.owner_account_id
-            LEFT JOIN contact_books b
+            JOIN contact_books b
               ON b.tenant_id = c.tenant_id
              AND b.owner_account_id = c.owner_account_id
-             AND b.role = 'contacts'
+             AND b.id = c.contact_book_id
             LEFT JOIN contact_book_grants g
               ON g.tenant_id = c.tenant_id
              AND g.contact_book_id = b.id
@@ -1184,13 +1224,15 @@ impl Storage {
             WHERE c.tenant_id = $1
               AND (c.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
               AND ($3::uuid IS NULL OR c.owner_account_id = $3)
-              AND ($4::uuid[] IS NULL OR c.id = ANY($4))
+              AND ($4::text IS NULL OR b.role = $4)
+              AND ($5::uuid[] IS NULL OR c.id = ANY($5))
             ORDER BY lower(c.display_name) ASC, c.id ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(principal_account_id)
         .bind(owner_account_id)
+        .bind(contact_book_role)
         .bind(ids)
         .fetch_all(&self.pool)
         .await?;
@@ -1203,6 +1245,7 @@ impl Storage {
                     CollaborationResourceKind::Contacts,
                     principal_account_id,
                     row.owner_account_id,
+                    &row.contact_book_role,
                 ),
                 owner_account_id: row.owner_account_id,
                 owner_email: row.owner_email,
@@ -1301,6 +1344,7 @@ impl Storage {
                     CollaborationResourceKind::Calendar,
                     principal_account_id,
                     row.owner_account_id,
+                    "",
                 ),
                 owner_account_id: row.owner_account_id,
                 owner_email: row.owner_email,
@@ -1330,10 +1374,26 @@ impl Storage {
         tenant_id: &Uuid,
         owner_account_id: Uuid,
     ) -> Result<Uuid> {
+        Self::ensure_contact_book_in_tx(tx, tenant_id, owner_account_id, DEFAULT_CONTACT_BOOK_ROLE)
+            .await
+    }
+
+    pub(crate) async fn ensure_contact_book_in_tx(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        owner_account_id: Uuid,
+        role: &str,
+    ) -> Result<Uuid> {
+        let (role, display_name) = match role {
+            SUGGESTED_CONTACTS_ROLE => (SUGGESTED_CONTACTS_ROLE, "Suggested Contacts"),
+            QUICK_CONTACTS_ROLE => (QUICK_CONTACTS_ROLE, "Quick Contacts"),
+            IM_CONTACT_LIST_ROLE => (IM_CONTACT_LIST_ROLE, "IM Contact List"),
+            _ => (DEFAULT_CONTACT_BOOK_ROLE, "Contacts"),
+        };
         sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO contact_books (id, tenant_id, owner_account_id, display_name, role)
-            VALUES ($1, $2, $3, 'Contacts', 'contacts')
+            VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (tenant_id, owner_account_id, role)
             WHERE role <> 'custom'
             DO UPDATE SET display_name = contact_books.display_name
@@ -1343,6 +1403,8 @@ impl Storage {
         .bind(Uuid::new_v4())
         .bind(tenant_id)
         .bind(owner_account_id)
+        .bind(display_name)
+        .bind(role)
         .fetch_one(&mut **tx)
         .await
         .map_err(Into::into)
@@ -1394,11 +1456,29 @@ fn collection_id_for_owner(
     kind: CollaborationResourceKind,
     principal_account_id: Uuid,
     owner_account_id: Uuid,
+    role: &str,
 ) -> String {
     if principal_account_id == owner_account_id {
-        DEFAULT_COLLECTION_ID.to_string()
+        if kind == CollaborationResourceKind::Contacts && role == SUGGESTED_CONTACTS_ROLE {
+            SUGGESTED_CONTACTS_COLLECTION_ID.to_string()
+        } else if kind == CollaborationResourceKind::Contacts && role == QUICK_CONTACTS_ROLE {
+            QUICK_CONTACTS_COLLECTION_ID.to_string()
+        } else if kind == CollaborationResourceKind::Contacts && role == IM_CONTACT_LIST_ROLE {
+            IM_CONTACT_LIST_COLLECTION_ID.to_string()
+        } else {
+            DEFAULT_COLLECTION_ID.to_string()
+        }
     } else {
         shared_collection_id(kind, owner_account_id)
+    }
+}
+
+fn contact_book_role_for_collection_id(collection_id: Option<&str>) -> &'static str {
+    match collection_id.map(str::trim) {
+        Some(SUGGESTED_CONTACTS_COLLECTION_ID) => SUGGESTED_CONTACTS_ROLE,
+        Some(QUICK_CONTACTS_COLLECTION_ID) => QUICK_CONTACTS_ROLE,
+        Some(IM_CONTACT_LIST_COLLECTION_ID) => IM_CONTACT_LIST_ROLE,
+        _ => DEFAULT_CONTACT_BOOK_ROLE,
     }
 }
 

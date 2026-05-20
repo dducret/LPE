@@ -120,8 +120,55 @@ if [[ "${MAPI_IDENTITY_CONSTRAINT_COUNT}" != "3" ]]; then
   exit 1
 fi
 
+echo "Applying bounded LPE schema compatibility patches..."
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
+
+CREATE TABLE IF NOT EXISTS public.search_folders (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  account_id UUID NOT NULL,
+  role TEXT NOT NULL DEFAULT 'custom'
+    CHECK (role IN (
+      'reminders', 'todo_search', 'contacts_search',
+      'tracked_mail_processing', 'custom'
+    )),
+  display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+  definition_kind TEXT NOT NULL DEFAULT 'exchange_builtin'
+    CHECK (definition_kind IN ('exchange_builtin', 'user_saved')),
+  result_object_kind TEXT NOT NULL
+    CHECK (result_object_kind IN ('message', 'contact', 'task', 'mixed')),
+  scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  restriction_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  excluded_folder_roles TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  is_builtin BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, id),
+  FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS search_folders_builtin_role_idx
+  ON public.search_folders (tenant_id, account_id, role)
+  WHERE is_builtin;
+
+CREATE INDEX IF NOT EXISTS search_folders_account_idx
+  ON public.search_folders (tenant_id, account_id, display_name);
+
+ALTER TABLE public.mailbox_messages
+  ADD COLUMN IF NOT EXISTS followup_flag_status TEXT NOT NULL DEFAULT 'none'
+    CHECK (followup_flag_status IN ('none', 'flagged', 'complete')),
+  ADD COLUMN IF NOT EXISTS followup_icon INTEGER NOT NULL DEFAULT 0 CHECK (followup_icon >= 0),
+  ADD COLUMN IF NOT EXISTS todo_item_flags INTEGER NOT NULL DEFAULT 0 CHECK (todo_item_flags >= 0),
+  ADD COLUMN IF NOT EXISTS followup_request TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS followup_start_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS followup_due_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS followup_completed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reminder_set BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS reminder_dismissed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS swapped_todo_store_id UUID,
+  ADD COLUMN IF NOT EXISTS swapped_todo_data BYTEA;
 
 ALTER TABLE public.mailboxes
   DROP CONSTRAINT IF EXISTS mailboxes_role_check,
@@ -131,6 +178,47 @@ ALTER TABLE public.mailboxes
     'sync_issues', 'conflicts', 'local_failures', 'server_failures',
     'custom'
   ));
+
+ALTER TABLE public.contact_books
+  DROP CONSTRAINT IF EXISTS contact_books_role_check,
+  ADD CONSTRAINT contact_books_role_check CHECK (role IN (
+    'contacts', 'suggested_contacts', 'quick_contacts', 'im_contact_list',
+    'directory', 'custom'
+  ));
+
+DO $$
+DECLARE
+  constraint_name TEXT;
+  constraint_def TEXT;
+BEGIN
+  SELECT c.conname, pg_get_constraintdef(c.oid)
+  INTO constraint_name, constraint_def
+  FROM pg_constraint c
+  JOIN pg_class r ON r.oid = c.conrelid
+  JOIN pg_namespace n ON n.oid = r.relnamespace
+  WHERE n.nspname = 'public'
+    AND r.relname = 'mapi_object_identities'
+    AND c.contype = 'c'
+    AND pg_get_constraintdef(c.oid) LIKE '%object_kind%'
+  ORDER BY c.conname
+  LIMIT 1;
+
+  IF constraint_name IS NOT NULL
+     AND constraint_def NOT LIKE '%search_folder_definition%' THEN
+    EXECUTE format('ALTER TABLE public.mapi_object_identities DROP CONSTRAINT %I', constraint_name);
+    ALTER TABLE public.mapi_object_identities
+      ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
+        'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
+        'note', 'journal_entry', 'search_folder_definition'
+      ));
+  ELSIF constraint_name IS NULL THEN
+    ALTER TABLE public.mapi_object_identities
+      ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
+        'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
+        'note', 'journal_entry', 'search_folder_definition'
+      ));
+  END IF;
+END $$;
 
 COMMIT;
 SQL

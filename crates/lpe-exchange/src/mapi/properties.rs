@@ -4,6 +4,7 @@ use super::sync::*;
 use super::tables::*;
 use super::wire::MapiPropertyType;
 use super::*;
+use crate::mapi_store::{MapiMessage, MapiSearchFolderDefinitionMessage};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(in crate::mapi) struct MapiNamedProperty {
@@ -166,6 +167,11 @@ pub(in crate::mapi) const FOLLOWUP_FLAGGED: u32 = 0x0000_0002;
 pub(in crate::mapi) const PID_TAG_HTML_BINARY: u32 = 0x1013_0102;
 pub(in crate::mapi) const PID_TAG_INTERNET_MESSAGE_ID_W: u32 = 0x1035_001F;
 pub(in crate::mapi) const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+pub(in crate::mapi) const PID_TAG_FLAG_COMPLETE_TIME: u32 = 0x1091_0040;
+pub(in crate::mapi) const PID_TAG_FOLLOWUP_ICON: u32 = 0x1095_0003;
+pub(in crate::mapi) const PID_TAG_TODO_ITEM_FLAGS: u32 = 0x0E2B_0003;
+pub(in crate::mapi) const PID_TAG_SWAPPED_TODO_STORE: u32 = 0x0E2C_0102;
+pub(in crate::mapi) const PID_TAG_SWAPPED_TODO_DATA: u32 = 0x0E2D_0102;
 pub(in crate::mapi) const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 pub(in crate::mapi) const PID_TAG_HIERARCHY_CHANGE_NUMBER: u32 = 0x663E_0003;
 pub(in crate::mapi) const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
@@ -186,6 +192,11 @@ pub(in crate::mapi) const PID_TAG_USER_GUID: u32 = 0x6707_0102;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 pub(in crate::mapi) const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
+pub(in crate::mapi) const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6842_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_EFP_FLAGS: u32 = 0x6844_0003;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
+pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_TAG: u32 = 0x6847_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -215,6 +226,135 @@ pub(in crate::mapi) const PS_MAPI_GUID: [u8; 16] = [
 pub(in crate::mapi) const PS_INTERNET_HEADERS_GUID: [u8; 16] = [
     0x86, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
+pub(in crate::mapi) const PSETID_COMMON_GUID: [u8; 16] = [
+    0x08, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+pub(in crate::mapi) const PSETID_LOG_GUID: [u8; 16] = [
+    0x0A, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+pub(in crate::mapi) const PSETID_NOTE_GUID: [u8; 16] = [
+    0x0E, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+pub(in crate::mapi) const PSETID_TASK_GUID: [u8; 16] = [
+    0x03, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+pub(in crate::mapi) const PSETID_POST_RSS_GUID: [u8; 16] = [
+    0x41, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+
+pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
+pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
+pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
+pub(in crate::mapi) const PID_LID_REMINDER_SET: u32 = 0x0000_8503;
+pub(in crate::mapi) const PID_LID_FLAG_REQUEST: u32 = 0x0000_8530;
+pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME: u32 = 0x0000_8560;
+pub(in crate::mapi) const PID_LID_TASK_START_DATE: u32 = 0x0000_8104;
+pub(in crate::mapi) const PID_LID_TASK_DUE_DATE: u32 = 0x0000_8105;
+pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
+pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME: u32 = 0x0000_8586;
+pub(in crate::mapi) const PID_LID_LOG_TYPE: u32 = 0x0000_8700;
+pub(in crate::mapi) const PID_LID_LOG_START: u32 = 0x0000_8706;
+pub(in crate::mapi) const PID_LID_LOG_DURATION: u32 = 0x0000_8707;
+pub(in crate::mapi) const PID_LID_LOG_END: u32 = 0x0000_8708;
+pub(in crate::mapi) const PID_LID_LOG_FLAGS: u32 = 0x0000_870C;
+pub(in crate::mapi) const PID_LID_LOG_TYPE_DESC: u32 = 0x0000_8712;
+pub(in crate::mapi) const PID_LID_NOTE_COLOR: u32 = 0x0000_8B00;
+pub(in crate::mapi) const PID_LID_NOTE_HEIGHT: u32 = 0x0000_8B02;
+pub(in crate::mapi) const PID_LID_NOTE_WIDTH: u32 = 0x0000_8B03;
+pub(in crate::mapi) const PID_LID_NOTE_X: u32 = 0x0000_8B04;
+pub(in crate::mapi) const PID_LID_NOTE_Y: u32 = 0x0000_8B05;
+pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL_LINK: u32 = 0x0000_8900;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_LINK: u32 = 0x0000_8901;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_HASH: u32 = 0x0000_8902;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_GUID: u32 = 0x0000_8903;
+pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL: u32 = 0x0000_8904;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_XML: u32 = 0x0000_8905;
+pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION: u32 = 0x0000_8906;
+
+pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
+pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
+pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
+pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
+pub(in crate::mapi) const PID_LID_FLAG_REQUEST_W_TAG: u32 = 0x8530_001F;
+pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME_TAG: u32 = 0x8560_0040;
+pub(in crate::mapi) const PID_LID_TASK_START_DATE_TAG: u32 = 0x8104_0040;
+pub(in crate::mapi) const PID_LID_TASK_DUE_DATE_TAG: u32 = 0x8105_0040;
+pub(in crate::mapi) const PID_LID_COMPANIES_TAG: u32 = 0x8539_101F;
+pub(in crate::mapi) const PID_LID_CONTACTS_TAG: u32 = 0x853A_101F;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_W_TAG: u32 = 0x8586_001F;
+pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_STRING8_TAG: u32 = 0x8586_001E;
+pub(in crate::mapi) const PID_LID_LOG_TYPE_W_TAG: u32 = 0x8700_001F;
+pub(in crate::mapi) const PID_LID_LOG_TYPE_STRING8_TAG: u32 = 0x8700_001E;
+pub(in crate::mapi) const PID_LID_LOG_START_TAG: u32 = 0x8706_0040;
+pub(in crate::mapi) const PID_LID_LOG_DURATION_TAG: u32 = 0x8707_0003;
+pub(in crate::mapi) const PID_LID_LOG_END_TAG: u32 = 0x8708_0040;
+pub(in crate::mapi) const PID_LID_LOG_FLAGS_TAG: u32 = 0x870C_0003;
+pub(in crate::mapi) const PID_LID_LOG_TYPE_DESC_W_TAG: u32 = 0x8712_001F;
+pub(in crate::mapi) const PID_LID_LOG_TYPE_DESC_STRING8_TAG: u32 = 0x8712_001E;
+pub(in crate::mapi) const PID_LID_NOTE_COLOR_TAG: u32 = 0x8B00_0003;
+pub(in crate::mapi) const PID_LID_NOTE_HEIGHT_TAG: u32 = 0x8B02_0003;
+pub(in crate::mapi) const PID_LID_NOTE_WIDTH_TAG: u32 = 0x8B03_0003;
+pub(in crate::mapi) const PID_LID_NOTE_X_TAG: u32 = 0x8B04_0003;
+pub(in crate::mapi) const PID_LID_NOTE_Y_TAG: u32 = 0x8B05_0003;
+pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL_LINK_W_TAG: u32 = 0x8900_001F;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_LINK_W_TAG: u32 = 0x8901_001F;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_HASH_TAG: u32 = 0x8902_0003;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_GUID_W_TAG: u32 = 0x8903_001F;
+pub(in crate::mapi) const PID_LID_POST_RSS_CHANNEL_W_TAG: u32 = 0x8904_001F;
+pub(in crate::mapi) const PID_LID_POST_RSS_ITEM_XML_W_TAG: u32 = 0x8905_001F;
+pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION_W_TAG: u32 = 0x8906_001F;
+
+pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty) -> Option<u16> {
+    well_known_named_properties()
+        .into_iter()
+        .find_map(|(property_id, candidate)| (candidate == *property).then_some(property_id))
+}
+
+fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
+    [
+        (PID_LID_COMMON_START, PSETID_COMMON_GUID),
+        (PID_LID_COMMON_END, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_SET, PSETID_COMMON_GUID),
+        (PID_LID_FLAG_REQUEST, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
+        (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
+        (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
+        (PID_LID_COMPANIES, PSETID_COMMON_GUID),
+        (PID_LID_CONTACTS, PSETID_COMMON_GUID),
+        (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
+        (PID_LID_LOG_TYPE, PSETID_LOG_GUID),
+        (PID_LID_LOG_START, PSETID_LOG_GUID),
+        (PID_LID_LOG_DURATION, PSETID_LOG_GUID),
+        (PID_LID_LOG_END, PSETID_LOG_GUID),
+        (PID_LID_LOG_FLAGS, PSETID_LOG_GUID),
+        (PID_LID_LOG_TYPE_DESC, PSETID_LOG_GUID),
+        (PID_LID_NOTE_COLOR, PSETID_NOTE_GUID),
+        (PID_LID_NOTE_HEIGHT, PSETID_NOTE_GUID),
+        (PID_LID_NOTE_WIDTH, PSETID_NOTE_GUID),
+        (PID_LID_NOTE_X, PSETID_NOTE_GUID),
+        (PID_LID_NOTE_Y, PSETID_NOTE_GUID),
+        (PID_LID_POST_RSS_CHANNEL_LINK, PSETID_POST_RSS_GUID),
+        (PID_LID_POST_RSS_ITEM_LINK, PSETID_POST_RSS_GUID),
+        (PID_LID_POST_RSS_ITEM_HASH, PSETID_POST_RSS_GUID),
+        (PID_LID_POST_RSS_ITEM_GUID, PSETID_POST_RSS_GUID),
+        (PID_LID_POST_RSS_CHANNEL, PSETID_POST_RSS_GUID),
+        (PID_LID_POST_RSS_ITEM_XML, PSETID_POST_RSS_GUID),
+        (PID_LID_POST_RSS_SUBSCRIPTION, PSETID_POST_RSS_GUID),
+    ]
+    .into_iter()
+    .map(|(lid, guid)| {
+        (
+            lid as u16,
+            MapiNamedProperty {
+                guid,
+                kind: MapiNamedPropertyKind::Lid(lid),
+            },
+        )
+    })
+    .collect()
+}
 
 const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [
     0xDC, 0xA7, 0x40, 0xC8, 0xC0, 0x42, 0x10, 0x1A, 0xB4, 0xB9, 0x08, 0x00, 0x2B, 0x2F, 0xE1, 0x82,
@@ -366,6 +506,7 @@ pub(in crate::mapi) fn rop_read_recipients_response(
     object: Option<&MapiObject>,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
     let input_handle_index = request.input_handle_index().unwrap_or(0);
     let start = request.row_id().unwrap_or(0) as usize;
@@ -378,7 +519,12 @@ pub(in crate::mapi) fn rop_read_recipients_response(
             folder_id,
             message_id,
         }) => {
-            let Some(email) = message_for_id(*folder_id, *message_id, mailboxes, emails) else {
+            let Some(email) =
+                message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
+                    search_folder_message_for_id(snapshot, *folder_id, *message_id)
+                        .map(|message| &message.email)
+                })
+            else {
                 return rop_error_response(0x0F, input_handle_index, 0x8004_010F);
             };
             let recipients = message_recipients(email);
@@ -422,6 +568,20 @@ pub(in crate::mapi) fn rop_set_message_read_flag_response(
     write_u32(&mut response, 0);
     response.push(read_status_changed as u8);
     response
+}
+
+pub(in crate::mapi) fn search_folder_message_for_id(
+    snapshot: &MapiMailStoreSnapshot,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<&MapiMessage> {
+    match folder_id {
+        TODO_SEARCH_FOLDER_ID => snapshot.todo_search_message_for_id(message_id),
+        TRACKED_MAIL_PROCESSING_FOLDER_ID => {
+            snapshot.tracked_mail_processing_message_for_id(message_id)
+        }
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn restriction_matches_mailbox(
@@ -485,6 +645,29 @@ pub(in crate::mapi) fn restriction_matches_task(
 ) -> bool {
     restriction_matches(restriction, |property_tag| {
         task_property_value(task, mapi_item_id(&task.id), TASKS_FOLDER_ID, property_tag)
+    })
+}
+
+pub(in crate::mapi) fn restriction_matches_note(
+    restriction: Option<&MapiRestriction>,
+    note: &ClientNote,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        note_property_value(note, mapi_item_id(&note.id), NOTES_FOLDER_ID, property_tag)
+    })
+}
+
+pub(in crate::mapi) fn restriction_matches_journal_entry(
+    restriction: Option<&MapiRestriction>,
+    entry: &JournalEntry,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        journal_entry_property_value(
+            entry,
+            mapi_item_id(&entry.id),
+            JOURNAL_FOLDER_ID,
+            property_tag,
+        )
     })
 }
 
@@ -653,12 +836,22 @@ pub(in crate::mapi) fn email_property_value(
     property_tag: u32,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
+    if let Some(value) = rss_email_named_property_value(email, property_tag) {
+        return Some(value);
+    }
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
             Some(MapiValue::String(email.subject.clone()))
         }
-        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Note".to_string())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            if email.mailbox_role == "rss_feeds" {
+                "IPM.Post.RSS"
+            } else {
+                "IPM.Note"
+            }
+            .to_string(),
+        )),
         PID_TAG_MESSAGE_DELIVERY_TIME
         | PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
@@ -667,6 +860,33 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
+        PID_TAG_FLAG_COMPLETE_TIME => email
+            .followup_completed_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_FOLLOWUP_ICON => Some(MapiValue::I32(email.followup_icon)),
+        PID_TAG_TODO_ITEM_FLAGS => Some(MapiValue::I32(email.todo_item_flags)),
+        PID_TAG_SWAPPED_TODO_STORE => email
+            .swapped_todo_store_id
+            .map(|id| MapiValue::Binary(id.as_bytes().to_vec())),
+        PID_TAG_SWAPPED_TODO_DATA => email
+            .swapped_todo_data
+            .as_ref()
+            .map(|data| MapiValue::Binary(data.clone())),
+        PID_LID_FLAG_REQUEST_W_TAG => Some(MapiValue::String(email.followup_request.clone())),
+        PID_LID_TASK_START_DATE_TAG => email
+            .followup_start_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_TASK_DUE_DATE_TAG => email
+            .followup_due_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_REMINDER_SET_TAG => Some(MapiValue::Bool(email.reminder_set)),
+        PID_LID_REMINDER_TIME_TAG | PID_LID_REMINDER_SIGNAL_TIME_TAG => email
+            .reminder_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(email.size_octets)),
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(
             email
@@ -704,6 +924,102 @@ pub(in crate::mapi) fn email_property_value(
             mapi_mailstore::canonical_message_change_number(email),
         )),
         PID_TAG_INTERNET_MESSAGE_ID_W => email.internet_message_id.clone().map(MapiValue::String),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn search_folder_definition_property_value(
+    message: &MapiSearchFolderDefinitionMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let definition = &message.definition;
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(definition.display_name.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(
+            search_folder_definition_blob(definition)
+                .len()
+                .min(i32::MAX as usize) as i32,
+        )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST => Some(
+            MapiValue::Binary(mapi_mailstore::source_key_for_store_id(message.id)),
+        ),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => Some(MapiValue::I32(0x0000_0040)),
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS => Some(MapiValue::I32(0)),
+        PID_TAG_SEARCH_FOLDER_TAG => {
+            Some(MapiValue::I32(search_folder_tag(definition.role.as_str())))
+        }
+        PID_TAG_SEARCH_FOLDER_DEFINITION => {
+            Some(MapiValue::Binary(search_folder_definition_blob(definition)))
+        }
+        _ => None,
+    }
+}
+
+fn search_folder_tag(role: &str) -> i32 {
+    match role {
+        "reminders" => 1,
+        "todo_search" => 2,
+        "contacts_search" => 3,
+        "tracked_mail_processing" => 4,
+        _ => 0,
+    }
+}
+
+fn search_folder_definition_blob(definition: &lpe_storage::SearchFolderDefinition) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    buffer.extend_from_slice(&0x0410_0000u32.to_be_bytes());
+    buffer.extend_from_slice(&0x0000_0040u32.to_be_bytes());
+    buffer.extend_from_slice(&0u32.to_be_bytes());
+    buffer.push(0);
+    buffer.extend_from_slice(&0u32.to_be_bytes());
+    buffer.extend_from_slice(&1u32.to_be_bytes());
+    buffer.push(0);
+    let folder_list = definition.scope_json.to_string().into_bytes();
+    buffer.extend_from_slice(&(folder_list.len().min(u32::MAX as usize) as u32).to_be_bytes());
+    buffer.extend_from_slice(&folder_list);
+    buffer.extend_from_slice(&0u32.to_be_bytes());
+    buffer.extend_from_slice(&0u32.to_be_bytes());
+    buffer
+}
+
+fn rss_email_named_property_value(email: &JmapEmail, property_tag: u32) -> Option<MapiValue> {
+    if email.mailbox_role != "rss_feeds" {
+        return None;
+    }
+    match property_tag {
+        PID_LID_POST_RSS_CHANNEL_LINK_W_TAG => Some(MapiValue::String(String::new())),
+        PID_LID_POST_RSS_ITEM_LINK_W_TAG => Some(MapiValue::String(String::new())),
+        PID_LID_POST_RSS_ITEM_HASH_TAG => Some(MapiValue::I32(
+            (mapi_mailstore::canonical_message_change_number(email) & 0x7FFF_FFFF) as i32,
+        )),
+        PID_LID_POST_RSS_ITEM_GUID_W_TAG => Some(MapiValue::String(
+            email
+                .internet_message_id
+                .clone()
+                .unwrap_or_else(|| email.id.to_string()),
+        )),
+        PID_LID_POST_RSS_CHANNEL_W_TAG => Some(MapiValue::String(email.mailbox_name.clone())),
+        PID_LID_POST_RSS_ITEM_XML_W_TAG => Some(MapiValue::String(email.body_text.clone())),
+        PID_LID_POST_RSS_SUBSCRIPTION_W_TAG => Some(MapiValue::String(email.mailbox_name.clone())),
         _ => None,
     }
 }
@@ -772,6 +1088,19 @@ pub(in crate::mapi) fn event_property_value(
     folder_id: u64,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    event_property_value_with_reminder(event, item_id, folder_id, property_tag, None)
+}
+
+pub(in crate::mapi) fn event_property_value_with_reminder(
+    event: &AccessibleEvent,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+    reminder: Option<&lpe_storage::ClientReminder>,
+) -> Option<MapiValue> {
+    if let Some(value) = event_reminder_property_value(event, reminder, property_tag) {
+        return Some(value);
+    }
     let property_tag = canonical_property_storage_tag(property_tag);
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
@@ -816,6 +1145,19 @@ pub(in crate::mapi) fn task_property_value(
     folder_id: u64,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    task_property_value_with_reminder(task, item_id, folder_id, property_tag, None)
+}
+
+pub(in crate::mapi) fn task_property_value_with_reminder(
+    task: &ClientTask,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+    reminder: Option<&lpe_storage::ClientReminder>,
+) -> Option<MapiValue> {
+    if let Some(value) = task_reminder_property_value(reminder, property_tag) {
+        return Some(value);
+    }
     let property_tag = canonical_property_storage_tag(property_tag);
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
     match property_tag {
@@ -851,6 +1193,244 @@ pub(in crate::mapi) fn task_property_value(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+fn event_reminder_property_value(
+    event: &AccessibleEvent,
+    reminder: Option<&lpe_storage::ClientReminder>,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let reminder = reminder?;
+    match property_tag {
+        PID_LID_REMINDER_SET_TAG => Some(MapiValue::Bool(true)),
+        PID_LID_REMINDER_SIGNAL_TIME_TAG => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&reminder.reminder_at),
+        )),
+        PID_LID_REMINDER_TIME_TAG => Some(MapiValue::U64(event_start_filetime(event))),
+        _ => None,
+    }
+}
+
+fn task_reminder_property_value(
+    reminder: Option<&lpe_storage::ClientReminder>,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let reminder = reminder?;
+    match property_tag {
+        PID_LID_REMINDER_SET_TAG => Some(MapiValue::Bool(true)),
+        PID_LID_REMINDER_TIME_TAG | PID_LID_REMINDER_SIGNAL_TIME_TAG => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&reminder.reminder_at),
+        )),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn note_property_value(
+    note: &ClientNote,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    if let Some(value) = note_named_property_value(note, property_tag) {
+        return Some(value);
+    }
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(note.title.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(note.body_text.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.StickyNote".to_string())),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(note_size(note))),
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&note.updated_at),
+        )),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(item_id),
+        )),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+            &note.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn journal_entry_property_value(
+    entry: &JournalEntry,
+    item_id: u64,
+    folder_id: u64,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    if let Some(value) = journal_entry_named_property_value(entry, property_tag) {
+        return Some(value);
+    }
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(item_id)),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(entry.subject.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(entry.body_text.clone())),
+        PID_TAG_START_DATE | PID_TAG_MESSAGE_DELIVERY_TIME => entry
+            .starts_at
+            .as_deref()
+            .or(entry.occurred_at.as_deref())
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_END_DATE => entry
+            .ends_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&entry.updated_at),
+        )),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(entry.message_class.clone())),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(journal_entry_size(entry))),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(item_id),
+        )),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
+            &entry.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn note_named_property_value(
+    note: &ClientNote,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match property_tag {
+        PID_LID_NOTE_COLOR_TAG => Some(MapiValue::I32(note_color_value(&note.color))),
+        PID_LID_NOTE_HEIGHT_TAG => Some(MapiValue::I32(200)),
+        PID_LID_NOTE_WIDTH_TAG => Some(MapiValue::I32(166)),
+        PID_LID_NOTE_X_TAG | PID_LID_NOTE_Y_TAG => Some(MapiValue::I32(80)),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn journal_entry_named_property_value(
+    entry: &JournalEntry,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    match property_tag {
+        PID_LID_COMMON_START_TAG | PID_LID_LOG_START_TAG => entry
+            .starts_at
+            .as_deref()
+            .or(entry.occurred_at.as_deref())
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_COMMON_END_TAG | PID_LID_LOG_END_TAG => entry
+            .ends_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_COMPANIES_TAG => Some(MapiValue::MultiString(json_string_array(
+            &entry.companies_json,
+        ))),
+        PID_LID_CONTACTS_TAG => Some(MapiValue::MultiString(json_string_array(
+            &entry.contacts_json,
+        ))),
+        PID_LID_CONTACT_LINK_NAME_W_TAG | PID_LID_CONTACT_LINK_NAME_STRING8_TAG => {
+            json_string_array(&entry.contacts_json)
+                .into_iter()
+                .next()
+                .map(MapiValue::String)
+        }
+        PID_LID_LOG_TYPE_W_TAG | PID_LID_LOG_TYPE_STRING8_TAG => {
+            Some(MapiValue::String(entry.entry_type.clone()))
+        }
+        PID_LID_LOG_TYPE_DESC_W_TAG | PID_LID_LOG_TYPE_DESC_STRING8_TAG => {
+            Some(MapiValue::String(entry.entry_type.clone()))
+        }
+        PID_LID_LOG_DURATION_TAG => Some(MapiValue::I32(0)),
+        PID_LID_LOG_FLAGS_TAG => Some(MapiValue::I32(0)),
+        _ => None,
+    }
+}
+
+fn note_color_value(color: &str) -> i32 {
+    match color.trim().to_ascii_lowercase().as_str() {
+        "blue" => 0,
+        "green" => 1,
+        "pink" => 2,
+        "white" => 4,
+        _ => 3,
+    }
+}
+
+fn note_color_name(value: i64) -> &'static str {
+    match value {
+        0 => "blue",
+        1 => "green",
+        2 => "pink",
+        4 => "white",
+        _ => "yellow",
+    }
+}
+
+fn json_string_array(value: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
+}
+
+fn json_from_mapi_multi_string(
+    properties: &HashMap<u32, MapiValue>,
+    tag: u32,
+    existing: &str,
+) -> String {
+    match properties.get(&tag) {
+        Some(MapiValue::MultiString(values)) => {
+            serde_json::to_string(values).unwrap_or_else(|_| existing.to_string())
+        }
+        Some(MapiValue::String(value)) if !value.trim().is_empty() => {
+            serde_json::to_string(&vec![value.clone()]).unwrap_or_else(|_| existing.to_string())
+        }
+        _ => existing.to_string(),
+    }
+}
+
+pub(in crate::mapi) fn note_size(note: &ClientNote) -> i64 {
+    note.title
+        .len()
+        .saturating_add(note.body_text.len())
+        .min(i64::MAX as usize) as i64
+}
+
+pub(in crate::mapi) fn journal_entry_size(entry: &JournalEntry) -> i64 {
+    entry
+        .subject
+        .len()
+        .saturating_add(entry.body_text.len())
+        .saturating_add(entry.entry_type.len())
+        .saturating_add(entry.companies_json.len())
+        .saturating_add(entry.contacts_json.len())
+        .min(i64::MAX as usize) as i64
 }
 
 fn task_flag_status(task: &ClientTask) -> u32 {
@@ -1512,6 +2092,35 @@ pub(in crate::mapi) fn default_task_for_mapping(
     }
 }
 
+pub(in crate::mapi) fn default_note_for_mapping() -> ClientNote {
+    ClientNote {
+        id: Uuid::nil(),
+        title: String::new(),
+        body_text: String::new(),
+        color: "yellow".to_string(),
+        categories_json: "[]".to_string(),
+        created_at: "1970-01-01T00:00:00Z".to_string(),
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    }
+}
+
+pub(in crate::mapi) fn default_journal_entry_for_mapping() -> JournalEntry {
+    JournalEntry {
+        id: Uuid::nil(),
+        subject: String::new(),
+        body_text: String::new(),
+        entry_type: String::new(),
+        message_class: "IPM.Activity".to_string(),
+        starts_at: None,
+        ends_at: None,
+        occurred_at: None,
+        companies_json: "[]".to_string(),
+        contacts_json: "[]".to_string(),
+        created_at: "1970-01-01T00:00:00Z".to_string(),
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    }
+}
+
 pub(in crate::mapi) fn contact_input_from_mapi(
     account_id: Uuid,
     id: Option<Uuid>,
@@ -1561,6 +2170,98 @@ pub(in crate::mapi) fn contact_input_from_mapi(
             .unwrap_or_else(|| existing.team.clone()),
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
+    }
+}
+
+pub(in crate::mapi) fn note_input_from_mapi(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &ClientNote,
+    properties: &HashMap<u32, MapiValue>,
+) -> UpsertClientNoteInput {
+    UpsertClientNoteInput {
+        id,
+        account_id,
+        title: optional_pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
+        )
+        .unwrap_or_else(|| existing.title.clone()),
+        body_text: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
+            .unwrap_or_else(|| existing.body_text.clone()),
+        color: properties
+            .get(&PID_LID_NOTE_COLOR_TAG)
+            .and_then(MapiValue::as_i64)
+            .map(note_color_name)
+            .unwrap_or(&existing.color)
+            .to_string(),
+        categories_json: existing.categories_json.clone(),
+    }
+}
+
+pub(in crate::mapi) fn journal_entry_input_from_mapi(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &JournalEntry,
+    properties: &HashMap<u32, MapiValue>,
+) -> UpsertJournalEntryInput {
+    UpsertJournalEntryInput {
+        id,
+        account_id,
+        subject: optional_pending_text_property(
+            properties,
+            &[
+                PID_TAG_SUBJECT_W,
+                PID_TAG_NORMALIZED_SUBJECT_W,
+                PID_TAG_DISPLAY_NAME_W,
+            ],
+        )
+        .unwrap_or_else(|| existing.subject.clone()),
+        body_text: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
+            .unwrap_or_else(|| existing.body_text.clone()),
+        entry_type: optional_pending_text_property(
+            properties,
+            &[
+                PID_LID_LOG_TYPE_W_TAG,
+                PID_LID_LOG_TYPE_STRING8_TAG,
+                PID_LID_LOG_TYPE_DESC_W_TAG,
+                PID_LID_LOG_TYPE_DESC_STRING8_TAG,
+            ],
+        )
+        .unwrap_or_else(|| existing.entry_type.clone()),
+        message_class: optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W])
+            .unwrap_or_else(|| existing.message_class.clone()),
+        starts_at: properties
+            .get(&PID_TAG_START_DATE)
+            .or_else(|| properties.get(&PID_LID_COMMON_START_TAG))
+            .or_else(|| properties.get(&PID_LID_LOG_START_TAG))
+            .and_then(MapiValue::as_i64)
+            .and_then(filetime_to_date_time)
+            .map(|(date, time)| format!("{date}T{time}:00Z"))
+            .or_else(|| existing.starts_at.clone()),
+        ends_at: properties
+            .get(&PID_TAG_END_DATE)
+            .or_else(|| properties.get(&PID_LID_COMMON_END_TAG))
+            .or_else(|| properties.get(&PID_LID_LOG_END_TAG))
+            .and_then(MapiValue::as_i64)
+            .and_then(filetime_to_date_time)
+            .map(|(date, time)| format!("{date}T{time}:00Z"))
+            .or_else(|| existing.ends_at.clone()),
+        occurred_at: existing.occurred_at.clone(),
+        companies_json: json_from_mapi_multi_string(
+            properties,
+            PID_LID_COMPANIES_TAG,
+            &existing.companies_json,
+        ),
+        contacts_json: json_from_mapi_multi_string(
+            properties,
+            PID_LID_CONTACTS_TAG,
+            &existing.contacts_json,
+        ),
     }
 }
 
@@ -2020,8 +2721,7 @@ where
 {
     let email = message_for_id(folder_id, message_id, mailboxes, emails)
         .ok_or_else(|| anyhow!("canonical MAPI message was not found"))?;
-    let mut unread = None;
-    let mut flagged = None;
+    let mut update = lpe_storage::JmapEmailFollowupUpdate::default();
 
     for (tag, value) in values {
         match tag {
@@ -2029,30 +2729,107 @@ where
                 let flags = value
                     .into_u32()
                     .ok_or_else(|| anyhow!("invalid PidTagMessageFlags value"))?;
-                unread = Some(flags & MSGFLAG_READ == 0);
+                update.unread = Some(flags & MSGFLAG_READ == 0);
             }
             PID_TAG_FLAG_STATUS => {
-                flagged = Some(
+                let status = match value
+                    .as_i64()
+                    .ok_or_else(|| anyhow!("invalid PidTagFlagStatus value"))?
+                {
+                    0 => "none",
+                    1 => "complete",
+                    2 => "flagged",
+                    _ => return Err(anyhow!("invalid PidTagFlagStatus value")),
+                };
+                update.flagged = Some(status != "none");
+                update.followup_flag_status = Some(status.to_string());
+            }
+            PID_TAG_FOLLOWUP_ICON => {
+                update.followup_icon = Some(
                     value
                         .as_i64()
-                        .ok_or_else(|| anyhow!("invalid PidTagFlagStatus value"))?
-                        != 0,
+                        .and_then(|value| i32::try_from(value).ok())
+                        .ok_or_else(|| anyhow!("invalid PidTagFollowupIcon value"))?,
                 );
+            }
+            PID_TAG_TODO_ITEM_FLAGS => {
+                update.todo_item_flags = Some(
+                    value
+                        .as_i64()
+                        .and_then(|value| i32::try_from(value).ok())
+                        .ok_or_else(|| anyhow!("invalid PidTagToDoItemFlags value"))?,
+                );
+            }
+            PID_TAG_FLAG_COMPLETE_TIME => {
+                update.followup_completed_at = Some(
+                    value
+                        .as_i64()
+                        .and_then(filetime_to_rfc3339_utc)
+                        .ok_or_else(|| anyhow!("invalid PidTagFlagCompleteTime value"))?,
+                );
+            }
+            PID_LID_TASK_START_DATE_TAG => {
+                update.followup_start_at = Some(
+                    value
+                        .as_i64()
+                        .and_then(filetime_to_rfc3339_utc)
+                        .ok_or_else(|| anyhow!("invalid PidLidTaskStartDate value"))?,
+                );
+            }
+            PID_LID_TASK_DUE_DATE_TAG => {
+                update.followup_due_at = Some(
+                    value
+                        .as_i64()
+                        .and_then(filetime_to_rfc3339_utc)
+                        .ok_or_else(|| anyhow!("invalid PidLidTaskDueDate value"))?,
+                );
+            }
+            PID_LID_FLAG_REQUEST_W_TAG => {
+                update.followup_request = Some(
+                    value
+                        .into_text()
+                        .ok_or_else(|| anyhow!("invalid PidLidFlagRequest value"))?,
+                );
+            }
+            PID_TAG_SWAPPED_TODO_STORE => {
+                let MapiValue::Binary(bytes) = value else {
+                    return Err(anyhow!("invalid PidTagSwappedToDoStore value"));
+                };
+                update.swapped_todo_store_id = Some(
+                    Uuid::from_slice(&bytes)
+                        .map_err(|_| anyhow!("invalid PidTagSwappedToDoStore value"))?,
+                );
+            }
+            PID_TAG_SWAPPED_TODO_DATA => {
+                let MapiValue::Binary(bytes) = value else {
+                    return Err(anyhow!("invalid PidTagSwappedToDoData value"));
+                };
+                update.swapped_todo_data = Some(bytes);
             }
             _ => return Err(anyhow!("canonical MAPI message property is not mutable")),
         }
     }
 
-    if unread.is_none() && flagged.is_none() {
+    if update.unread.is_none()
+        && update.flagged.is_none()
+        && update.followup_flag_status.is_none()
+        && update.followup_icon.is_none()
+        && update.todo_item_flags.is_none()
+        && update.followup_request.is_none()
+        && update.followup_start_at.is_none()
+        && update.followup_due_at.is_none()
+        && update.followup_completed_at.is_none()
+        && update.swapped_todo_store_id.is_none()
+        && update.swapped_todo_data.is_none()
+    {
         return Ok(());
     }
 
     store
-        .update_jmap_email_flags(
+        .update_jmap_email_followup_flags(
             principal.account_id,
             email.id,
-            unread,
-            flagged,
+            update,
             AuditEntryInput {
                 actor: principal.email.clone(),
                 action: "mapi-set-message-properties".to_string(),
@@ -2061,6 +2838,10 @@ where
         )
         .await?;
     Ok(())
+}
+
+fn filetime_to_rfc3339_utc(filetime: i64) -> Option<String> {
+    filetime_to_date_time(filetime).map(|(date, time)| format!("{date}T{time}:00Z"))
 }
 
 pub(in crate::mapi) async fn apply_canonical_contact_property_values<S>(
@@ -2145,6 +2926,56 @@ where
     Ok(())
 }
 
+pub(in crate::mapi) async fn apply_canonical_note_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    note_id: u64,
+    values: Vec<(u32, MapiValue)>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let note = snapshot
+        .note_for_id(folder_id, note_id)
+        .ok_or_else(|| anyhow!("canonical MAPI note was not found"))?;
+    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let input = note_input_from_mapi(
+        principal.account_id,
+        Some(note.canonical_id),
+        &note.note,
+        &properties,
+    );
+    store.upsert_mapi_note(input).await?;
+    Ok(())
+}
+
+pub(in crate::mapi) async fn apply_canonical_journal_entry_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    journal_entry_id: u64,
+    values: Vec<(u32, MapiValue)>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let entry = snapshot
+        .journal_entry_for_id(folder_id, journal_entry_id)
+        .ok_or_else(|| anyhow!("canonical MAPI journal entry was not found"))?;
+    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let input = journal_entry_input_from_mapi(
+        principal.account_id,
+        Some(entry.canonical_id),
+        &entry.entry,
+        &properties,
+    );
+    store.upsert_mapi_journal_entry(input).await?;
+    Ok(())
+}
+
 pub(in crate::mapi) fn apply_mapi_property_values(
     object: Option<&mut MapiObject>,
     values: Vec<(u32, MapiValue)>,
@@ -2160,7 +2991,9 @@ pub(in crate::mapi) fn apply_mapi_property_values(
         }
         Some(MapiObject::PendingContact { properties, .. })
         | Some(MapiObject::PendingEvent { properties, .. })
-        | Some(MapiObject::PendingTask { properties, .. }) => {
+        | Some(MapiObject::PendingTask { properties, .. })
+        | Some(MapiObject::PendingNote { properties, .. })
+        | Some(MapiObject::PendingJournalEntry { properties, .. }) => {
             properties.extend(values);
             Ok(())
         }
@@ -2210,7 +3043,9 @@ pub(in crate::mapi) fn delete_mapi_properties(
         }
         Some(MapiObject::PendingContact { properties, .. })
         | Some(MapiObject::PendingEvent { properties, .. })
-        | Some(MapiObject::PendingTask { properties, .. }) => {
+        | Some(MapiObject::PendingTask { properties, .. })
+        | Some(MapiObject::PendingNote { properties, .. })
+        | Some(MapiObject::PendingJournalEntry { properties, .. }) => {
             for tag in &property_tags {
                 properties.remove(tag);
             }
@@ -2606,6 +3441,463 @@ mod tests {
         let large = MapiValue::String("A".repeat(4096));
 
         assert_eq!(round_trip(PID_TAG_BODY_W, &large), large);
+    }
+
+    #[test]
+    fn mapi_note_and_journal_inputs_preserve_canonical_fields() {
+        let mut note_properties = HashMap::new();
+        note_properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Mapped note".into()));
+        note_properties.insert(PID_TAG_BODY_W, MapiValue::String("Note body".into()));
+        note_properties.insert(PID_LID_NOTE_COLOR_TAG, MapiValue::I32(1));
+        let note = note_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(1)),
+            &default_note_for_mapping(),
+            &note_properties,
+        );
+        assert_eq!(note.id, Some(Uuid::from_u128(1)));
+        assert_eq!(note.title, "Mapped note");
+        assert_eq!(note.body_text, "Note body");
+        assert_eq!(note.color, "green");
+
+        let mut journal_properties = HashMap::new();
+        journal_properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Mapped call".into()));
+        journal_properties.insert(PID_TAG_BODY_W, MapiValue::String("Call body".into()));
+        journal_properties.insert(
+            PID_TAG_MESSAGE_CLASS_W,
+            MapiValue::String("IPM.Activity".into()),
+        );
+        journal_properties.insert(
+            PID_LID_LOG_TYPE_W_TAG,
+            MapiValue::String("Phone call".into()),
+        );
+        journal_properties.insert(
+            PID_LID_COMPANIES_TAG,
+            MapiValue::MultiString(vec!["Contoso".into()]),
+        );
+        journal_properties.insert(
+            PID_LID_CONTACTS_TAG,
+            MapiValue::MultiString(vec!["Adam Barr".into()]),
+        );
+        let journal = journal_entry_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(2)),
+            &default_journal_entry_for_mapping(),
+            &journal_properties,
+        );
+        assert_eq!(journal.id, Some(Uuid::from_u128(2)));
+        assert_eq!(journal.subject, "Mapped call");
+        assert_eq!(journal.body_text, "Call body");
+        assert_eq!(journal.entry_type, "Phone call");
+        assert_eq!(journal.message_class, "IPM.Activity");
+        assert_eq!(journal.companies_json, "[\"Contoso\"]");
+        assert_eq!(journal.contacts_json, "[\"Adam Barr\"]");
+    }
+
+    #[test]
+    fn mapi_note_and_journal_named_properties_project_canonical_values() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_NOTE_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_NOTE_COLOR),
+            }),
+            Some(PID_LID_NOTE_COLOR as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_LOG_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_LOG_TYPE),
+            }),
+            Some(PID_LID_LOG_TYPE as u16)
+        );
+
+        let note = ClientNote {
+            color: "pink".to_string(),
+            ..default_note_for_mapping()
+        };
+        assert_eq!(
+            note_property_value(&note, 1, NOTES_FOLDER_ID, PID_LID_NOTE_COLOR_TAG),
+            Some(MapiValue::I32(2))
+        );
+
+        let journal = JournalEntry {
+            entry_type: "Phone call".to_string(),
+            starts_at: Some("2026-05-19T10:00:00Z".to_string()),
+            companies_json: "[\"Contoso\"]".to_string(),
+            contacts_json: "[\"Adam Barr\"]".to_string(),
+            ..default_journal_entry_for_mapping()
+        };
+        assert_eq!(
+            journal_entry_property_value(&journal, 1, JOURNAL_FOLDER_ID, PID_LID_LOG_TYPE_W_TAG),
+            Some(MapiValue::String("Phone call".to_string()))
+        );
+        assert_eq!(
+            journal_entry_property_value(&journal, 1, JOURNAL_FOLDER_ID, PID_LID_COMPANIES_TAG),
+            Some(MapiValue::MultiString(vec!["Contoso".to_string()]))
+        );
+        assert_eq!(
+            journal_entry_property_value(
+                &journal,
+                1,
+                JOURNAL_FOLDER_ID,
+                PID_LID_CONTACT_LINK_NAME_W_TAG
+            ),
+            Some(MapiValue::String("Adam Barr".to_string()))
+        );
+    }
+
+    #[test]
+    fn rss_feed_messages_project_rss_message_class_and_named_properties() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_POST_RSS_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_POST_RSS_ITEM_GUID),
+            }),
+            Some(PID_LID_POST_RSS_ITEM_GUID as u16)
+        );
+
+        let mailbox_id = Uuid::from_u128(0x3333);
+        let email = JmapEmail {
+            id: Uuid::from_u128(0x1111),
+            thread_id: Uuid::from_u128(0x2222),
+            mailbox_id,
+            mailbox_role: "rss_feeds".to_string(),
+            mailbox_name: "RSS Feeds".to_string(),
+            modseq: 7,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![lpe_storage::JmapEmailMailboxState {
+                mailbox_id,
+                role: "rss_feeds".to_string(),
+                name: "RSS Feeds".to_string(),
+                modseq: 7,
+                unread: false,
+                flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
+                draft: false,
+            }],
+            received_at: "2026-05-20T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "feed@example.test".to_string(),
+            from_display: Some("Feed".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "RSS item".to_string(),
+            preview: "Preview".to_string(),
+            body_text: "<item>RSS item</item>".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: Some("rss-guid".to_string()),
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+
+        assert_eq!(
+            email_property_value(&email, PID_TAG_MESSAGE_CLASS_W),
+            Some(MapiValue::String("IPM.Post.RSS".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_POST_RSS_ITEM_GUID_W_TAG),
+            Some(MapiValue::String("rss-guid".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_POST_RSS_CHANNEL_W_TAG),
+            Some(MapiValue::String("RSS Feeds".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_POST_RSS_ITEM_XML_W_TAG),
+            Some(MapiValue::String("<item>RSS item</item>".to_string()))
+        );
+    }
+
+    #[test]
+    fn followup_mail_projects_outlook_flag_properties() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_FLAG_REQUEST),
+            }),
+            Some(PID_LID_FLAG_REQUEST as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_TASK_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_TASK_START_DATE),
+            }),
+            Some(PID_LID_TASK_START_DATE as u16)
+        );
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_TASK_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_TASK_DUE_DATE),
+            }),
+            Some(PID_LID_TASK_DUE_DATE as u16)
+        );
+
+        let mailbox_id = Uuid::from_u128(0x4444);
+        let store_id = Uuid::from_u128(0x5555);
+        let email = JmapEmail {
+            id: Uuid::from_u128(0x1111),
+            thread_id: Uuid::from_u128(0x2222),
+            mailbox_id,
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "Inbox".to_string(),
+            modseq: 7,
+            mailbox_ids: vec![mailbox_id],
+            mailbox_states: vec![lpe_storage::JmapEmailMailboxState {
+                mailbox_id,
+                role: "inbox".to_string(),
+                name: "Inbox".to_string(),
+                modseq: 7,
+                unread: false,
+                flagged: true,
+                followup_flag_status: "complete".to_string(),
+                followup_icon: 6,
+                todo_item_flags: 8,
+                followup_request: "Follow up".to_string(),
+                followup_start_at: Some("2026-05-20T09:00:00Z".to_string()),
+                followup_due_at: Some("2026-05-21T17:00:00Z".to_string()),
+                followup_completed_at: Some("2026-05-20T10:30:00Z".to_string()),
+                reminder_set: true,
+                reminder_at: Some("2026-05-20T09:30:00Z".to_string()),
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: Some(store_id),
+                swapped_todo_data: Some(vec![1, 2, 3, 4]),
+                draft: false,
+            }],
+            received_at: "2026-05-20T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: "alice@example.test".to_string(),
+            from_display: Some("Alice".to_string()),
+            sender_address: None,
+            sender_display: None,
+            sender_authorization_kind: "self".to_string(),
+            submitted_by_account_id: Uuid::nil(),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Flagged item".to_string(),
+            preview: "Flagged item".to_string(),
+            body_text: "Flagged item".to_string(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: true,
+            followup_flag_status: "complete".to_string(),
+            followup_icon: 6,
+            todo_item_flags: 8,
+            followup_request: "Follow up".to_string(),
+            followup_start_at: Some("2026-05-20T09:00:00Z".to_string()),
+            followup_due_at: Some("2026-05-21T17:00:00Z".to_string()),
+            followup_completed_at: Some("2026-05-20T10:30:00Z".to_string()),
+            reminder_set: true,
+            reminder_at: Some("2026-05-20T09:30:00Z".to_string()),
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: Some(store_id),
+            swapped_todo_data: Some(vec![1, 2, 3, 4]),
+            has_attachments: false,
+            size_octets: 128,
+            internet_message_id: None,
+            mime_blob_ref: None,
+            delivery_status: "stored".to_string(),
+        };
+
+        assert_eq!(
+            email_property_value(&email, PID_TAG_FLAG_STATUS),
+            Some(MapiValue::U32(1))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_FOLLOWUP_ICON),
+            Some(MapiValue::I32(6))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_TODO_ITEM_FLAGS),
+            Some(MapiValue::I32(8))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_FLAG_REQUEST_W_TAG),
+            Some(MapiValue::String("Follow up".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_FLAG_COMPLETE_TIME),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-20T10:30:00Z"
+            )))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_TASK_START_DATE_TAG),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-20T09:00:00Z"
+            )))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_TASK_DUE_DATE_TAG),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-21T17:00:00Z"
+            )))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_REMINDER_SET_TAG),
+            Some(MapiValue::Bool(true))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_REMINDER_TIME_TAG),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-20T09:30:00Z"
+            )))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_LID_REMINDER_SIGNAL_TIME_TAG),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-20T09:30:00Z"
+            )))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SWAPPED_TODO_STORE),
+            Some(MapiValue::Binary(store_id.as_bytes().to_vec()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SWAPPED_TODO_DATA),
+            Some(MapiValue::Binary(vec![1, 2, 3, 4]))
+        );
+    }
+
+    #[test]
+    fn reminder_named_properties_project_from_canonical_reminder_links() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_COMMON_GUID,
+                kind: MapiNamedPropertyKind::Lid(PID_LID_REMINDER_SET),
+            }),
+            Some(PID_LID_REMINDER_SET as u16)
+        );
+        let rights = lpe_storage::CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: false,
+        };
+        let event_id = Uuid::from_u128(0x3333);
+        let event = lpe_storage::AccessibleEvent {
+            id: event_id,
+            uid: "event-uid".to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: Uuid::nil(),
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            rights: rights.clone(),
+            date: "2026-05-21".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            recurrence_rule: String::new(),
+            title: "Standup".to_string(),
+            location: String::new(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+        };
+        let reminder = lpe_storage::ClientReminder {
+            source_type: "calendar".to_string(),
+            source_id: event_id,
+            title: "Standup".to_string(),
+            due_at: Some("2026-05-21T09:30:00Z".to_string()),
+            reminder_at: "2026-05-21T08:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "pending".to_string(),
+        };
+        assert_eq!(
+            event_property_value_with_reminder(
+                &event,
+                1,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_SET_TAG,
+                Some(&reminder)
+            ),
+            Some(MapiValue::Bool(true))
+        );
+        assert_eq!(
+            event_property_value_with_reminder(
+                &event,
+                1,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_SIGNAL_TIME_TAG,
+                Some(&reminder)
+            ),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-21T08:45:00Z"
+            )))
+        );
+
+        let task = lpe_storage::ClientTask {
+            id: Uuid::from_u128(0x4444),
+            owner_account_id: Uuid::nil(),
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            is_owned: true,
+            rights,
+            task_list_id: Uuid::nil(),
+            task_list_sort_order: 0,
+            title: "Follow up".to_string(),
+            description: String::new(),
+            status: "needs-action".to_string(),
+            due_at: Some("2026-05-21T12:00:00Z".to_string()),
+            completed_at: None,
+            sort_order: 0,
+            updated_at: "2026-05-20T09:00:00Z".to_string(),
+        };
+        let task_reminder = lpe_storage::ClientReminder {
+            source_type: "task".to_string(),
+            source_id: task.id,
+            title: "Follow up".to_string(),
+            due_at: task.due_at.clone(),
+            reminder_at: "2026-05-21T11:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "pending".to_string(),
+        };
+        assert_eq!(
+            task_property_value_with_reminder(
+                &task,
+                2,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_TIME_TAG,
+                Some(&task_reminder)
+            ),
+            Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
+                "2026-05-21T11:45:00Z"
+            )))
+        );
     }
 
     #[test]

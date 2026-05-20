@@ -14,6 +14,10 @@ export function MailDetail(props: {
   setDraft: React.Dispatch<React.SetStateAction<MessageDraft>>;
   onReply: (message: Message) => void;
   onForward: (message: Message) => void;
+  onToggleFlag: (message: Message) => void;
+  onCompleteFlag: (message: Message, completed: boolean) => void;
+  onSetFlagDue: (message: Message, daysFromToday: number | null) => void;
+  onSetFlagReminder: (message: Message, minutesFromNow: number | null) => void;
   onCancel: () => void;
   onSaveDraft: () => void;
   onSend: () => void;
@@ -120,6 +124,24 @@ export function MailDetail(props: {
       <div className="detail-header">
         <div><p className="detail-label">{props.copy.readingPane}</p><h3>{current.subject}</h3></div>
         <div className="detail-actions">
+          {current.flagged ? (
+            <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onCompleteFlag(current, current.followupFlagStatus !== "complete")}>
+              {current.followupFlagStatus === "complete" ? props.copy.messageActions.reopenFlag : props.copy.messageActions.completeFlag}
+            </Button>
+          ) : null}
+          {current.flagged ? (
+            <>
+              <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onSetFlagDue(current, 0)}>{props.copy.messageActions.dueToday}</Button>
+              <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onSetFlagDue(current, 1)}>{props.copy.messageActions.dueTomorrow}</Button>
+              {current.followupDueAt ? <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onSetFlagDue(current, null)}>{props.copy.messageActions.clearDue}</Button> : null}
+              <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onSetFlagReminder(current, 60)}>{props.copy.messageActions.remindOneHour}</Button>
+              <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onSetFlagReminder(current, 24 * 60)}>{props.copy.messageActions.remindTomorrow}</Button>
+              {current.reminderAt ? <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onSetFlagReminder(current, null)}>{props.copy.messageActions.clearReminder}</Button> : null}
+            </>
+          ) : null}
+          <Button variant="ghost" type="button" disabled={props.messageBusy} onClick={() => props.onToggleFlag(current)}>
+            {current.flagged ? props.copy.messageActions.clearFlag : props.copy.messageActions.flag}
+          </Button>
           <Button variant="ghost" type="button" onClick={() => props.onReply(current)}>{props.copy.messageActions.reply}</Button>
           <Button variant="ghost" type="button" onClick={() => props.onForward(current)}>{props.copy.messageActions.forward}</Button>
         </div>

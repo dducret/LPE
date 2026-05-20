@@ -16,10 +16,10 @@ use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     AccountLogin, ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState,
     ActiveSyncItemState, ActiveSyncSyncState, AuditEntryInput, AuthenticatedAccount, ClientContact,
-    ClientEvent, JmapEmail, JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapUploadBlob, MailboxAccountAccess,
-    SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
-    UpsertClientContactInput, UpsertClientEventInput,
+    ClientEvent, JmapEmail, JmapEmailAddress, JmapEmailFollowupUpdate, JmapEmailMailboxState,
+    JmapEmailQuery, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapUploadBlob,
+    MailboxAccountAccess, SavedDraftMessage, StoredAccountAppPassword, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use uuid::Uuid;
 
@@ -151,6 +151,15 @@ impl FakeStore {
                 modseq: 1,
                 unread: true,
                 flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
                 draft: role == "drafts",
             }],
             mailbox_id,
@@ -177,6 +186,15 @@ impl FakeStore {
             body_html_sanitized: None,
             unread: true,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: false,
             size_octets: 32,
             internet_message_id: None,
@@ -688,6 +706,87 @@ impl ActiveSyncStore for FakeStore {
         Box::pin(async move { email.ok_or_else(|| anyhow!("message not found")) })
     }
 
+    fn update_jmap_email_followup_flags<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        let mut emails = self.emails.lock().unwrap();
+        let email = emails
+            .iter_mut()
+            .find(|email| email.id == message_id)
+            .map(|email| {
+                if let Some(unread) = update.unread {
+                    email.unread = unread;
+                    for state in &mut email.mailbox_states {
+                        state.unread = unread;
+                    }
+                }
+                if let Some(flagged) = update.flagged {
+                    email.flagged = flagged;
+                    for state in &mut email.mailbox_states {
+                        state.flagged = flagged;
+                    }
+                }
+                if let Some(status) = update.followup_flag_status {
+                    if status == "none" {
+                        email.followup_start_at = None;
+                        email.followup_due_at = None;
+                        email.followup_completed_at = None;
+                    }
+                    email.followup_flag_status = status.clone();
+                    for state in &mut email.mailbox_states {
+                        if status == "none" {
+                            state.followup_start_at = None;
+                            state.followup_due_at = None;
+                            state.followup_completed_at = None;
+                        }
+                        state.followup_flag_status = status.clone();
+                    }
+                }
+                if let Some(icon) = update.followup_icon {
+                    email.followup_icon = icon;
+                    for state in &mut email.mailbox_states {
+                        state.followup_icon = icon;
+                    }
+                }
+                if let Some(flags) = update.todo_item_flags {
+                    email.todo_item_flags = flags;
+                    for state in &mut email.mailbox_states {
+                        state.todo_item_flags = flags;
+                    }
+                }
+                if let Some(request) = update.followup_request {
+                    email.followup_request = request.clone();
+                    for state in &mut email.mailbox_states {
+                        state.followup_request = request.clone();
+                    }
+                }
+                if let Some(start_at) = update.followup_start_at {
+                    email.followup_start_at = Some(start_at.clone());
+                    for state in &mut email.mailbox_states {
+                        state.followup_start_at = Some(start_at.clone());
+                    }
+                }
+                if let Some(due_at) = update.followup_due_at {
+                    email.followup_due_at = Some(due_at.clone());
+                    for state in &mut email.mailbox_states {
+                        state.followup_due_at = Some(due_at.clone());
+                    }
+                }
+                if let Some(completed_at) = update.followup_completed_at {
+                    email.followup_completed_at = Some(completed_at.clone());
+                    for state in &mut email.mailbox_states {
+                        state.followup_completed_at = Some(completed_at.clone());
+                    }
+                }
+                email.clone()
+            });
+        Box::pin(async move { email.ok_or_else(|| anyhow!("message not found")) })
+    }
+
     fn fetch_activesync_message_attachments<'a>(
         &'a self,
         _account_id: Uuid,
@@ -909,6 +1008,7 @@ impl ActiveSyncStore for FakeStore {
     ) -> StoreFuture<'a, ClientContact> {
         let contact = ClientContact {
             id: input.id.unwrap_or_else(Uuid::new_v4),
+            address_book_id: "default".to_string(),
             name: input.name,
             role: input.role,
             email: input.email,
@@ -2479,6 +2579,7 @@ async fn unsupported_sync_child_command_returns_protocol_status() {
     };
 
     let response = handle_sync_node(&service, request).await;
+    eprintln!("{response:#?}");
     let collection = only_sync_collection(&response, &inbox.id.to_string());
 
     assert_eq!(status_value(collection), "4");
@@ -2759,6 +2860,93 @@ async fn sync_change_updates_read_state_and_round_trips() {
         .child("ApplicationData")
         .unwrap();
     assert_eq!(app_data.child("Read").unwrap().text_value(), "1");
+}
+
+#[tokio::test]
+async fn sync_change_updates_followup_flag_state() {
+    let inbox = FakeStore::inbox_mailbox();
+    let message_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let emails = Arc::new(Mutex::new(vec![FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "Follow up",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let inbox_id = inbox.id.to_string();
+    let first_inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, "0")).await,
+        &inbox_id,
+    );
+    let inbox_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, &first_inbox_key)).await,
+        &inbox_id,
+    );
+
+    let mut request = one_collection_sync(&inbox_id, &inbox_key);
+    let mut commands = WbxmlNode::new(0, "Commands");
+    let mut change = WbxmlNode::new(0, "Change");
+    change.push(WbxmlNode::with_text(0, "ServerId", message_id.to_string()));
+    let mut app_data = WbxmlNode::new(0, "ApplicationData");
+    let mut flag = WbxmlNode::new(2, "Flag");
+    flag.push(WbxmlNode::with_text(2, "Status", "2"));
+    flag.push(WbxmlNode::with_text(2, "FlagType", "Flag for follow up"));
+    flag.push(WbxmlNode::with_text(9, "UtcStartDate", "20260419T080000Z"));
+    flag.push(WbxmlNode::with_text(9, "UtcDueDate", "20260420T170000Z"));
+    app_data.push(flag);
+    change.push(app_data);
+    commands.push(change);
+    request.children[0].children[0].push(commands);
+
+    let response = handle_sync_node(&service, request).await;
+    let change = only_sync_collection(&response, &inbox_id)
+        .child("Responses")
+        .unwrap()
+        .child("Change")
+        .unwrap();
+    assert_eq!(change.child("Status").unwrap().text_value(), "1");
+    let email = emails.lock().unwrap()[0].clone();
+    assert!(email.flagged);
+    assert_eq!(email.followup_flag_status, "flagged");
+    assert_eq!(email.followup_request, "Flag for follow up");
+    assert_eq!(
+        email.followup_start_at.as_deref(),
+        Some("2026-04-19T08:00:00Z")
+    );
+    assert_eq!(
+        email.followup_due_at.as_deref(),
+        Some("2026-04-20T17:00:00Z")
+    );
+
+    let next_key = collection_sync_key(&response, &inbox_id);
+    let mut clear_request = one_collection_sync(&inbox_id, &next_key);
+    let mut commands = WbxmlNode::new(0, "Commands");
+    let mut change = WbxmlNode::new(0, "Change");
+    change.push(WbxmlNode::with_text(0, "ServerId", message_id.to_string()));
+    let mut app_data = WbxmlNode::new(0, "ApplicationData");
+    app_data.push(WbxmlNode::new(2, "Flag"));
+    change.push(app_data);
+    commands.push(change);
+    clear_request.children[0].children[0].push(commands);
+
+    let clear_response = handle_sync_node(&service, clear_request).await;
+    let change = only_sync_collection(&clear_response, &inbox_id)
+        .child("Responses")
+        .unwrap()
+        .child("Change")
+        .unwrap();
+    assert_eq!(change.child("Status").unwrap().text_value(), "1");
+    let email = emails.lock().unwrap()[0].clone();
+    assert!(!email.flagged);
+    assert_eq!(email.followup_flag_status, "none");
+    assert_eq!(email.followup_start_at, None);
+    assert_eq!(email.followup_due_at, None);
 }
 
 #[tokio::test]
@@ -4775,6 +4963,74 @@ async fn search_queries_canonical_mail_projection() {
 }
 
 #[tokio::test]
+async fn sync_projects_email_followup_flag_state() {
+    let inbox = FakeStore::inbox_mailbox();
+    let mut email = FakeStore::inbox_email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox.id,
+        "inbox",
+        "Flagged",
+    );
+    email.flagged = true;
+    email.followup_flag_status = "complete".to_string();
+    email.followup_start_at = Some("2026-04-19T08:00:00Z".to_string());
+    email.followup_due_at = Some("2026-04-20T17:00:00Z".to_string());
+    email.followup_completed_at = Some("2026-04-20T09:30:00Z".to_string());
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![inbox.clone()],
+        emails: Arc::new(Mutex::new(vec![email])),
+        ..Default::default()
+    };
+    let service = ActiveSyncService::new(store);
+    let inbox_id = inbox.id.to_string();
+
+    let sync_key = collection_sync_key(
+        &handle_sync_node(&service, one_collection_sync(&inbox_id, "0")).await,
+        &inbox_id,
+    );
+    let response = handle_sync_node(&service, one_collection_sync(&inbox_id, &sync_key)).await;
+    let flag = only_sync_collection(&response, &inbox_id)
+        .child("Commands")
+        .unwrap()
+        .child("Add")
+        .unwrap()
+        .child("ApplicationData")
+        .unwrap()
+        .child("Flag")
+        .unwrap();
+    assert_eq!(flag.child("Status").unwrap().text_value(), "1");
+    assert_eq!(
+        flag.child("FlagType").unwrap().text_value(),
+        "Flag for follow up"
+    );
+    assert_eq!(
+        flag.child("StartDate").unwrap().text_value(),
+        "20260419T080000Z"
+    );
+    assert_eq!(
+        flag.child("UtcStartDate").unwrap().text_value(),
+        "20260419T080000Z"
+    );
+    assert_eq!(
+        flag.child("DueDate").unwrap().text_value(),
+        "20260420T170000Z"
+    );
+    assert_eq!(
+        flag.child("UtcDueDate").unwrap().text_value(),
+        "20260420T170000Z"
+    );
+    assert_eq!(
+        flag.child("CompleteTime").unwrap().text_value(),
+        "20260420T093000Z"
+    );
+    assert_eq!(
+        flag.child("DateCompleted").unwrap().text_value(),
+        "20260420T093000Z"
+    );
+}
+
+#[tokio::test]
 async fn ping_reports_changed_collections_after_sync_state_exists() {
     let inbox = FakeStore::inbox_mailbox();
     let emails = Arc::new(Mutex::new(vec![FakeStore::inbox_email(
@@ -5660,6 +5916,7 @@ async fn sync_contact_and_calendar_projection_includes_supported_application_dat
         session: Some(FakeStore::account()),
         contacts: Arc::new(Mutex::new(vec![ClientContact {
             id: contact_id,
+            address_book_id: "default".to_string(),
             name: "Carol Example".to_string(),
             role: "Product Manager".to_string(),
             email: "carol@example.test".to_string(),

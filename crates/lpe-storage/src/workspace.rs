@@ -31,6 +31,13 @@ pub struct ClientMessage {
     pub time_label: String,
     pub unread: bool,
     pub flagged: bool,
+    pub followup_flag_status: String,
+    pub followup_start_at: Option<String>,
+    pub followup_due_at: Option<String>,
+    pub followup_completed_at: Option<String>,
+    pub reminder_set: bool,
+    pub reminder_at: Option<String>,
+    pub reminder_dismissed_at: Option<String>,
     pub tags: Vec<String>,
     pub attachments: Vec<ClientAttachment>,
     pub body: Vec<String>,
@@ -55,6 +62,7 @@ pub struct ClientEvent {
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientContact {
     pub id: Uuid,
+    pub address_book_id: String,
     pub name: String,
     pub role: String,
     pub email: String,
@@ -122,6 +130,28 @@ impl Storage {
                 to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'UTC', 'HH24:MI') AS time_label,
                 NOT mm.is_seen AS unread,
                 mm.is_flagged AS flagged,
+                mm.followup_flag_status,
+                CASE
+                    WHEN mm.followup_start_at IS NULL THEN NULL
+                    ELSE to_char(mm.followup_start_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS followup_start_at,
+                CASE
+                    WHEN mm.followup_due_at IS NULL THEN NULL
+                    ELSE to_char(mm.followup_due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS followup_due_at,
+                CASE
+                    WHEN mm.followup_completed_at IS NULL THEN NULL
+                    ELSE to_char(mm.followup_completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS followup_completed_at,
+                mm.reminder_set,
+                CASE
+                    WHEN mm.reminder_at IS NULL THEN NULL
+                    ELSE to_char(mm.reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS reminder_at,
+                CASE
+                    WHEN mm.reminder_dismissed_at IS NULL THEN NULL
+                    ELSE to_char(mm.reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                END AS reminder_dismissed_at,
                 COALESCE(sq.status, CASE WHEN mm.is_draft THEN 'draft' ELSE 'stored' END) AS delivery_status,
                 COALESCE(b.body_text, '') AS body_text
             FROM messages m
@@ -213,6 +243,13 @@ impl Storage {
                     time_label: row.time_label,
                     unread: row.unread,
                     flagged: row.flagged,
+                    followup_flag_status: row.followup_flag_status,
+                    followup_start_at: row.followup_start_at,
+                    followup_due_at: row.followup_due_at,
+                    followup_completed_at: row.followup_completed_at,
+                    reminder_set: row.reminder_set,
+                    reminder_at: row.reminder_at,
+                    reminder_dismissed_at: row.reminder_dismissed_at,
                     tags: client_message_tags(&row.mailbox_role, &row.delivery_status),
                     attachments,
                     body: body_paragraphs(&row.body_text),
@@ -232,6 +269,15 @@ impl Storage {
         &self,
         input: UpsertClientContactInput,
     ) -> Result<ClientContact> {
+        self.upsert_client_contact_in_book_role(input, crate::DEFAULT_CONTACT_BOOK_ROLE)
+            .await
+    }
+
+    pub(crate) async fn upsert_client_contact_in_book_role(
+        &self,
+        input: UpsertClientContactInput,
+        contact_book_role: &str,
+    ) -> Result<ClientContact> {
         let name = input.name.trim();
         let email = normalize_email(&input.email);
         if name.is_empty() || email.is_empty() {
@@ -241,8 +287,13 @@ impl Storage {
         let contact_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let contact_book_id =
-            Self::ensure_default_contact_book_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        let contact_book_id = Self::ensure_contact_book_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            contact_book_role,
+        )
+        .await?;
         let row = sqlx::query_as::<_, ClientContactRow>(
             r#"
             INSERT INTO contacts (
@@ -274,6 +325,7 @@ impl Storage {
               AND contacts.owner_account_id = EXCLUDED.owner_account_id
             RETURNING
                 id,
+                $11::text AS address_book_id,
                 display_name AS name,
                 role,
                 COALESCE(emails_json->0->>'email', '') AS email,
@@ -292,6 +344,7 @@ impl Storage {
         .bind(input.phone.trim())
         .bind(input.team.trim())
         .bind(input.notes.trim())
+        .bind(client_address_book_id_for_role(contact_book_role))
         .fetch_one(&mut *tx)
         .await?;
 
@@ -421,7 +474,7 @@ impl Storage {
                 attendees_json::text AS attendees_json,
                 body_text AS notes
             FROM calendar_events
-            WHERE tenant_id = $1 AND owner_account_id = $2
+            WHERE contacts.tenant_id = $1 AND contacts.owner_account_id = $2
             ORDER BY starts_at ASC, id ASC
             "#,
         )
@@ -459,9 +512,9 @@ impl Storage {
                 attendees_json::text AS attendees_json,
                 body_text AS notes
             FROM calendar_events
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND id = ANY($3)
+            WHERE contacts.tenant_id = $1
+              AND contacts.owner_account_id = $2
+              AND contacts.id = ANY($3)
             ORDER BY starts_at ASC, id ASC
             "#,
         )
@@ -480,6 +533,12 @@ impl Storage {
             r#"
             SELECT
                 id,
+                CASE
+                    WHEN b.role = 'suggested_contacts' THEN 'suggested_contacts'
+                    WHEN b.role = 'quick_contacts' THEN 'quick_contacts'
+                    WHEN b.role = 'im_contact_list' THEN 'im_contact_list'
+                    ELSE 'default'
+                END AS address_book_id,
                 display_name AS name,
                 role,
                 COALESCE(emails_json->0->>'email', '') AS email,
@@ -487,6 +546,10 @@ impl Storage {
                 organization_unit AS team,
                 notes
             FROM contacts
+            JOIN contact_books b
+              ON b.tenant_id = contacts.tenant_id
+             AND b.owner_account_id = contacts.owner_account_id
+             AND b.id = contacts.contact_book_id
             WHERE tenant_id = $1 AND owner_account_id = $2
             ORDER BY display_name ASC
             "#,
@@ -513,6 +576,12 @@ impl Storage {
             r#"
             SELECT
                 id,
+                CASE
+                    WHEN b.role = 'suggested_contacts' THEN 'suggested_contacts'
+                    WHEN b.role = 'quick_contacts' THEN 'quick_contacts'
+                    WHEN b.role = 'im_contact_list' THEN 'im_contact_list'
+                    ELSE 'default'
+                END AS address_book_id,
                 display_name AS name,
                 role,
                 COALESCE(emails_json->0->>'email', '') AS email,
@@ -520,6 +589,10 @@ impl Storage {
                 organization_unit AS team,
                 notes
             FROM contacts
+            JOIN contact_books b
+              ON b.tenant_id = contacts.tenant_id
+             AND b.owner_account_id = contacts.owner_account_id
+             AND b.id = contacts.contact_book_id
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND id = ANY($3)
@@ -610,11 +683,21 @@ fn map_event(row: ClientEventRow) -> ClientEvent {
 fn map_contact(row: ClientContactRow) -> ClientContact {
     ClientContact {
         id: row.id,
+        address_book_id: row.address_book_id,
         name: row.name,
         role: row.role,
         email: row.email,
         phone: row.phone,
         team: row.team,
         notes: row.notes,
+    }
+}
+
+fn client_address_book_id_for_role(role: &str) -> &'static str {
+    match role {
+        crate::SUGGESTED_CONTACTS_ROLE => crate::SUGGESTED_CONTACTS_COLLECTION_ID,
+        crate::QUICK_CONTACTS_ROLE => crate::QUICK_CONTACTS_COLLECTION_ID,
+        crate::IM_CONTACT_LIST_ROLE => crate::IM_CONTACT_LIST_COLLECTION_ID,
+        _ => crate::DEFAULT_COLLECTION_ID,
     }
 }

@@ -16,7 +16,7 @@ use crate::{
     util::{canonical_system_mailbox_display_name, system_mailbox_role_for_display_name},
     AccountQuotaRow, ActiveSyncDeviceRow, ActiveSyncSyncStateRow, AuditEntryInput, ImapEmailRow,
     JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow,
-    MessageBccRecipientRecordRow, Storage,
+    MessageBccRecipientRecordRow, SearchFolderRow, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -76,6 +76,111 @@ pub struct JmapMailbox {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SearchFolderDefinition {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub role: String,
+    pub display_name: String,
+    pub definition_kind: String,
+    pub result_object_kind: String,
+    pub scope_json: Value,
+    pub restriction_json: Value,
+    pub excluded_folder_roles: Vec<String>,
+    pub is_builtin: bool,
+}
+
+struct BuiltinSearchFolderDefinition {
+    role: &'static str,
+    display_name: &'static str,
+    result_object_kind: &'static str,
+    scope_json: Value,
+    restriction_json: Value,
+    excluded_folder_roles: Vec<String>,
+}
+
+fn exchange_builtin_search_folder_definitions() -> Vec<BuiltinSearchFolderDefinition> {
+    let top_ipm_scope = serde_json::json!({
+        "scope": "top_of_personal_folders",
+        "recursive": true
+    });
+    let excluded_mail_roles = vec![
+        "trash",
+        "junk",
+        "drafts",
+        "outbox",
+        "conflicts",
+        "local_failures",
+        "server_failures",
+        "sync_issues",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+
+    vec![
+        BuiltinSearchFolderDefinition {
+            role: "reminders",
+            display_name: "Reminders",
+            result_object_kind: "mixed",
+            scope_json: top_ipm_scope.clone(),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_reminders",
+                "match": "reminder_set_or_recurring"
+            }),
+            excluded_folder_roles: excluded_mail_roles.clone(),
+        },
+        BuiltinSearchFolderDefinition {
+            role: "todo_search",
+            display_name: "To-Do",
+            result_object_kind: "mixed",
+            scope_json: top_ipm_scope.clone(),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_todo"
+            }),
+            excluded_folder_roles: excluded_mail_roles.clone(),
+        },
+        BuiltinSearchFolderDefinition {
+            role: "contacts_search",
+            display_name: "Contacts Search",
+            result_object_kind: "contact",
+            scope_json: serde_json::json!({
+                "scope": "contacts_folders",
+                "recursive": false
+            }),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_contacts_search"
+            }),
+            excluded_folder_roles: Vec::new(),
+        },
+        BuiltinSearchFolderDefinition {
+            role: "tracked_mail_processing",
+            display_name: "Tracked Mail Processing",
+            result_object_kind: "message",
+            scope_json: top_ipm_scope,
+            restriction_json: serde_json::json!({
+                "kind": "exchange_tracked_mail_processing"
+            }),
+            excluded_folder_roles: excluded_mail_roles,
+        },
+    ]
+}
+
+fn map_search_folder(row: SearchFolderRow) -> SearchFolderDefinition {
+    SearchFolderDefinition {
+        id: row.id,
+        account_id: row.account_id,
+        role: row.role,
+        display_name: row.display_name,
+        definition_kind: row.definition_kind,
+        result_object_kind: row.result_object_kind,
+        scope_json: row.scope_json,
+        restriction_json: row.restriction_json,
+        excluded_folder_roles: row.excluded_folder_roles,
+        is_builtin: row.is_builtin,
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailAddress {
     pub address: String,
     pub display_name: Option<String>,
@@ -108,11 +213,41 @@ pub struct JmapEmail {
     pub body_html_sanitized: Option<String>,
     pub unread: bool,
     pub flagged: bool,
+    pub followup_flag_status: String,
+    pub followup_icon: i32,
+    pub todo_item_flags: i32,
+    pub followup_request: String,
+    pub followup_start_at: Option<String>,
+    pub followup_due_at: Option<String>,
+    pub followup_completed_at: Option<String>,
+    pub reminder_set: bool,
+    pub reminder_at: Option<String>,
+    pub reminder_dismissed_at: Option<String>,
+    pub swapped_todo_store_id: Option<Uuid>,
+    pub swapped_todo_data: Option<Vec<u8>>,
     pub has_attachments: bool,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
     pub mime_blob_ref: Option<String>,
     pub delivery_status: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct JmapEmailFollowupUpdate {
+    pub unread: Option<bool>,
+    pub flagged: Option<bool>,
+    pub followup_flag_status: Option<String>,
+    pub followup_icon: Option<i32>,
+    pub todo_item_flags: Option<i32>,
+    pub followup_request: Option<String>,
+    pub followup_start_at: Option<String>,
+    pub followup_due_at: Option<String>,
+    pub followup_completed_at: Option<String>,
+    pub reminder_set: Option<bool>,
+    pub reminder_at: Option<String>,
+    pub reminder_dismissed_at: Option<String>,
+    pub swapped_todo_store_id: Option<Uuid>,
+    pub swapped_todo_data: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -123,6 +258,18 @@ pub struct JmapEmailMailboxState {
     pub modseq: u64,
     pub unread: bool,
     pub flagged: bool,
+    pub followup_flag_status: String,
+    pub followup_icon: i32,
+    pub todo_item_flags: i32,
+    pub followup_request: String,
+    pub followup_start_at: Option<String>,
+    pub followup_due_at: Option<String>,
+    pub followup_completed_at: Option<String>,
+    pub reminder_set: bool,
+    pub reminder_at: Option<String>,
+    pub reminder_dismissed_at: Option<String>,
+    pub swapped_todo_store_id: Option<Uuid>,
+    pub swapped_todo_data: Option<Vec<u8>>,
     pub draft: bool,
 }
 
@@ -660,10 +807,44 @@ impl Storage {
             .collect()
     }
 
+    pub async fn fetch_search_folders(
+        &self,
+        account_id: Uuid,
+    ) -> Result<Vec<SearchFolderDefinition>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query_as::<_, SearchFolderRow>(
+            r#"
+            SELECT
+                id,
+                account_id,
+                role,
+                display_name,
+                definition_kind,
+                result_object_kind,
+                scope_json,
+                restriction_json,
+                excluded_folder_roles,
+                is_builtin
+            FROM search_folders
+            WHERE tenant_id = $1
+              AND account_id = $2
+            ORDER BY is_builtin DESC, display_name ASC, id ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_search_folder).collect())
+    }
+
     pub async fn ensure_imap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
         let mut tx = self.pool.begin().await?;
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         self.ensure_account_exists(&mut tx, &tenant_id, account_id)
+            .await?;
+        self.ensure_exchange_search_folders(&mut tx, &tenant_id, account_id)
             .await?;
         self.ensure_mailbox(&mut tx, &tenant_id, account_id, "inbox", "INBOX", 0, 365)
             .await?;
@@ -745,6 +926,47 @@ impl Storage {
         tx.commit().await?;
 
         self.fetch_jmap_mailboxes(account_id).await
+    }
+
+    async fn ensure_exchange_search_folders(
+        &self,
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        account_id: Uuid,
+    ) -> Result<()> {
+        for definition in exchange_builtin_search_folder_definitions() {
+            sqlx::query(
+                r#"
+                INSERT INTO search_folders (
+                    id, tenant_id, account_id, role, display_name, definition_kind,
+                    result_object_kind, scope_json, restriction_json, excluded_folder_roles,
+                    is_builtin
+                )
+                VALUES ($1, $2, $3, $4, $5, 'exchange_builtin', $6, $7, $8, $9, TRUE)
+                ON CONFLICT (tenant_id, account_id, role) WHERE is_builtin
+                DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    definition_kind = EXCLUDED.definition_kind,
+                    result_object_kind = EXCLUDED.result_object_kind,
+                    scope_json = EXCLUDED.scope_json,
+                    restriction_json = EXCLUDED.restriction_json,
+                    excluded_folder_roles = EXCLUDED.excluded_folder_roles,
+                    updated_at = NOW()
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(definition.role)
+            .bind(definition.display_name)
+            .bind(definition.result_object_kind)
+            .bind(definition.scope_json)
+            .bind(definition.restriction_json)
+            .bind(definition.excluded_folder_roles)
+            .execute(&mut **tx)
+            .await?;
+        }
+        Ok(())
     }
 
     pub async fn fetch_imap_highest_modseq(&self, account_id: Uuid) -> Result<u64> {
@@ -1921,6 +2143,18 @@ impl Storage {
                     mm.thread_id,
                     mm.is_seen,
                     mm.is_flagged,
+                    mm.followup_flag_status,
+                    mm.followup_icon,
+                    mm.todo_item_flags,
+                    mm.followup_request,
+                    CASE WHEN mm.followup_start_at IS NULL THEN NULL ELSE to_char(mm.followup_start_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS followup_start_at,
+                    CASE WHEN mm.followup_due_at IS NULL THEN NULL ELSE to_char(mm.followup_due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS followup_due_at,
+                    CASE WHEN mm.followup_completed_at IS NULL THEN NULL ELSE to_char(mm.followup_completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS followup_completed_at,
+                    mm.reminder_set,
+                    CASE WHEN mm.reminder_at IS NULL THEN NULL ELSE to_char(mm.reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS reminder_at,
+                    CASE WHEN mm.reminder_dismissed_at IS NULL THEN NULL ELSE to_char(mm.reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS reminder_dismissed_at,
+                    mm.swapped_todo_store_id,
+                    mm.swapped_todo_data,
                     mm.is_draft,
                     mm.modseq,
                     mm.updated_at,
@@ -1948,10 +2182,34 @@ impl Storage {
                     array_agg(modseq ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_modseqs,
                     array_agg(NOT is_seen ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_unreads,
                     array_agg(is_flagged ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_flaggeds,
+                    array_agg(followup_flag_status ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_followup_flag_statuses,
+                    array_agg(followup_icon ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_followup_icons,
+                    array_agg(todo_item_flags ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_todo_item_flags,
+                    array_agg(followup_request ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_followup_requests,
+                    array_agg(followup_start_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_followup_start_ats,
+                    array_agg(followup_due_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_followup_due_ats,
+                    array_agg(followup_completed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_followup_completed_ats,
+                    array_agg(reminder_set ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_reminder_sets,
+                    array_agg(reminder_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_reminder_ats,
+                    array_agg(reminder_dismissed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_reminder_dismissed_ats,
+                    array_agg(swapped_todo_store_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_swapped_todo_store_ids,
+                    array_agg(swapped_todo_data ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_swapped_todo_datas,
                     array_agg(is_draft ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_drafts,
                     array_agg(id) AS mailbox_message_ids,
                     BOOL_OR(NOT is_seen) AS unread,
                     BOOL_OR(is_flagged) AS flagged,
+                    COALESCE((array_agg(followup_flag_status ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], 'none') AS followup_flag_status,
+                    COALESCE((array_agg(followup_icon ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], 0) AS followup_icon,
+                    COALESCE((array_agg(todo_item_flags ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], 0) AS todo_item_flags,
+                    COALESCE((array_agg(followup_request ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], '') AS followup_request,
+                    (array_agg(followup_start_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS followup_start_at,
+                    (array_agg(followup_due_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS followup_due_at,
+                    (array_agg(followup_completed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS followup_completed_at,
+                    COALESCE((array_agg(reminder_set ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], FALSE) AS reminder_set,
+                    (array_agg(reminder_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS reminder_at,
+                    (array_agg(reminder_dismissed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS reminder_dismissed_at,
+                    (array_agg(swapped_todo_store_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS swapped_todo_store_id,
+                    (array_agg(swapped_todo_data ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS swapped_todo_data,
                     BOOL_OR(is_draft) AS draft
                 FROM visible_memberships
                 GROUP BY message_id
@@ -1965,6 +2223,18 @@ impl Storage {
                 rollup.mailbox_modseqs,
                 rollup.mailbox_unreads,
                 rollup.mailbox_flaggeds,
+                rollup.mailbox_followup_flag_statuses,
+                rollup.mailbox_followup_icons,
+                rollup.mailbox_todo_item_flags,
+                rollup.mailbox_followup_requests,
+                rollup.mailbox_followup_start_ats,
+                rollup.mailbox_followup_due_ats,
+                rollup.mailbox_followup_completed_ats,
+                rollup.mailbox_reminder_sets,
+                rollup.mailbox_reminder_ats,
+                rollup.mailbox_reminder_dismissed_ats,
+                rollup.mailbox_swapped_todo_store_ids,
+                rollup.mailbox_swapped_todo_datas,
                 rollup.mailbox_drafts,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
                 CASE
@@ -1983,6 +2253,18 @@ impl Storage {
                 hb.sanitized_html AS body_html_sanitized,
                 rollup.unread,
                 rollup.flagged,
+                rollup.followup_flag_status,
+                rollup.followup_icon,
+                rollup.todo_item_flags,
+                rollup.followup_request,
+                rollup.followup_start_at,
+                rollup.followup_due_at,
+                rollup.followup_completed_at,
+                rollup.reminder_set,
+                rollup.reminder_at,
+                rollup.reminder_dismissed_at,
+                rollup.swapped_todo_store_id,
+                rollup.swapped_todo_data,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
@@ -2095,6 +2377,58 @@ impl Storage {
                             .unwrap_or(1),
                         unread: row.mailbox_unreads.get(index).copied().unwrap_or(false),
                         flagged: row.mailbox_flaggeds.get(index).copied().unwrap_or(false),
+                        followup_flag_status: row
+                            .mailbox_followup_flag_statuses
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_else(|| "none".to_string()),
+                        followup_icon: row.mailbox_followup_icons.get(index).copied().unwrap_or(0),
+                        todo_item_flags: row
+                            .mailbox_todo_item_flags
+                            .get(index)
+                            .copied()
+                            .unwrap_or(0),
+                        followup_request: row
+                            .mailbox_followup_requests
+                            .get(index)
+                            .cloned()
+                            .unwrap_or_default(),
+                        followup_start_at: row
+                            .mailbox_followup_start_ats
+                            .get(index)
+                            .cloned()
+                            .unwrap_or(None),
+                        followup_due_at: row
+                            .mailbox_followup_due_ats
+                            .get(index)
+                            .cloned()
+                            .unwrap_or(None),
+                        followup_completed_at: row
+                            .mailbox_followup_completed_ats
+                            .get(index)
+                            .cloned()
+                            .unwrap_or(None),
+                        reminder_set: row
+                            .mailbox_reminder_sets
+                            .get(index)
+                            .copied()
+                            .unwrap_or(false),
+                        reminder_at: row.mailbox_reminder_ats.get(index).cloned().unwrap_or(None),
+                        reminder_dismissed_at: row
+                            .mailbox_reminder_dismissed_ats
+                            .get(index)
+                            .cloned()
+                            .unwrap_or(None),
+                        swapped_todo_store_id: row
+                            .mailbox_swapped_todo_store_ids
+                            .get(index)
+                            .copied()
+                            .unwrap_or(None),
+                        swapped_todo_data: row
+                            .mailbox_swapped_todo_datas
+                            .get(index)
+                            .cloned()
+                            .unwrap_or(None),
                         draft: row.mailbox_drafts.get(index).copied().unwrap_or(false),
                     })
                     .collect::<Vec<_>>();
@@ -2132,6 +2466,18 @@ impl Storage {
                     body_html_sanitized: row.body_html_sanitized.clone(),
                     unread: row.unread,
                     flagged: row.flagged,
+                    followup_flag_status: row.followup_flag_status.clone(),
+                    followup_icon: row.followup_icon,
+                    todo_item_flags: row.todo_item_flags,
+                    followup_request: row.followup_request.clone(),
+                    followup_start_at: row.followup_start_at.clone(),
+                    followup_due_at: row.followup_due_at.clone(),
+                    followup_completed_at: row.followup_completed_at.clone(),
+                    reminder_set: row.reminder_set,
+                    reminder_at: row.reminder_at.clone(),
+                    reminder_dismissed_at: row.reminder_dismissed_at.clone(),
+                    swapped_todo_store_id: row.swapped_todo_store_id,
+                    swapped_todo_data: row.swapped_todo_data.clone(),
                     has_attachments: row.has_attachments,
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),
@@ -2478,6 +2824,27 @@ impl Storage {
             SET
                 is_seen = COALESCE(NOT $4, is_seen),
                 is_flagged = COALESCE($5, is_flagged),
+                followup_flag_status = CASE
+                    WHEN $5::bool IS NULL THEN followup_flag_status
+                    WHEN $5 THEN 'flagged'
+                    ELSE 'none'
+                END,
+                followup_icon = CASE
+                    WHEN $5::bool IS NULL THEN followup_icon
+                    WHEN $5 AND followup_icon = 0 THEN 6
+                    WHEN NOT $5 THEN 0
+                    ELSE followup_icon
+                END,
+                todo_item_flags = CASE
+                    WHEN $5::bool IS NULL THEN todo_item_flags
+                    WHEN $5 AND todo_item_flags = 0 THEN 8
+                    WHEN NOT $5 THEN 0
+                    ELSE todo_item_flags
+                END,
+                followup_completed_at = CASE
+                    WHEN $5 = FALSE THEN NULL
+                    ELSE followup_completed_at
+                END,
                 is_deleted = COALESCE($6, is_deleted),
                 deleted_at = CASE
                     WHEN COALESCE($6, is_deleted) THEN COALESCE(deleted_at, NOW())

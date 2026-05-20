@@ -385,6 +385,16 @@ pub struct SubmitMessageRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateMessageFlagRequest {
+    pub flagged: bool,
+    pub completed: Option<bool>,
+    pub due_at: Option<String>,
+    pub clear_due: Option<bool>,
+    pub reminder_at: Option<String>,
+    pub clear_reminder: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SubmitRecipientRequest {
     pub address: String,
     pub display_name: Option<String>,

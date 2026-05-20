@@ -1,5 +1,5 @@
 import React from "react";
-import { blankContact, blankDraft, blankEvent, countFolders, filterMessages, quoteMessage } from "./client-helpers";
+import { blankContact, blankDraft, blankEvent, countFolders, filterContacts, filterMessages, quoteMessage } from "./client-helpers";
 import type { ClientCopy } from "./i18n";
 import type {
   ClientIdentity,
@@ -9,6 +9,7 @@ import type {
   ClientTaskList,
   EventItem,
   Folder,
+  ContactBookId,
   MailboxAccountAccess,
   MailboxDelegationOverview,
   Message,
@@ -107,9 +108,21 @@ function draftFromMessage(message: Message, mailboxAccountId: string): MessageDr
   };
 }
 
+function followupDueIso(daysFromToday: number) {
+  const value = new Date();
+  value.setDate(value.getDate() + daysFromToday);
+  value.setHours(23, 59, 59, 0);
+  return value.toISOString();
+}
+
+function reminderIso(minutesFromNow: number) {
+  return new Date(Date.now() + minutesFromNow * 60 * 1000).toISOString();
+}
+
 export function useClientWorkspace(copy: ClientCopy, authToken: string | null, identity: ClientIdentity | null) {
   const [section, setSection] = React.useState<Section>("mail");
   const [folder, setFolder] = React.useState<Folder>("inbox");
+  const [contactBook, setContactBook] = React.useState<ContactBookId>("default");
   const [query, setQuery] = React.useState("");
   const [mail, setMail] = React.useState<Message[]>([]);
   const [events, setEvents] = React.useState<EventItem[]>([]);
@@ -289,11 +302,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     if (!needle) return events;
     return events.filter((item) => [item.title, item.location, item.attendees, item.notes, item.date, item.time].join(" ").toLowerCase().includes(needle));
   }, [events, query]);
-  const filteredContacts = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return contacts;
-    return contacts.filter((item) => [item.name, item.role, item.email, item.phone, item.team, item.notes].join(" ").toLowerCase().includes(needle));
-  }, [contacts, query]);
+  const filteredContacts = React.useMemo(() => filterContacts(contacts, contactBook, query), [contactBook, contacts, query]);
 
   React.useEffect(() => {
     if (messageId && !filtered.some((item) => item.id === messageId)) setMessageId("");
@@ -414,6 +423,123 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     pushNotice(copy.noticeSyncDone);
   }, [copy.noticeSyncDone, loadWorkspace, pushNotice]);
 
+  const toggleMessageFlag = React.useCallback(async (message: Message) => {
+    if (!authToken || messageBusy) return;
+    const flagged = !message.flagged;
+    setMessageBusy(true);
+    try {
+      await apiJson<{ status: string }>(`mail/messages/${message.id}/flag`, authToken, {
+        method: "PUT",
+        body: JSON.stringify({ flagged })
+      });
+      setMail((items) => items.map((item) => item.id === message.id ? {
+        ...item,
+        flagged,
+        followupFlagStatus: flagged ? "flagged" : "none",
+        followupStartAt: null,
+        followupDueAt: null,
+        followupCompletedAt: null,
+        reminderSet: false,
+        reminderAt: null,
+        reminderDismissedAt: null
+      } : item));
+      await loadWorkspace();
+      pushNotice(flagged ? copy.noticeFlagged : copy.noticeUnflagged);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    } finally {
+      setMessageBusy(false);
+    }
+  }, [authToken, copy.noticeFlagged, copy.noticeUnflagged, copy.saveError, loadWorkspace, messageBusy, pushNotice]);
+
+  const completeMessageFlag = React.useCallback(async (message: Message, completed: boolean) => {
+    if (!authToken || messageBusy) return;
+    setMessageBusy(true);
+    try {
+      await apiJson<{ status: string }>(`mail/messages/${message.id}/flag`, authToken, {
+        method: "PUT",
+        body: JSON.stringify({ flagged: true, completed })
+      });
+      setMail((items) => items.map((item) => item.id === message.id ? {
+        ...item,
+        flagged: true,
+        followupFlagStatus: completed ? "complete" : "flagged",
+        followupStartAt: item.followupStartAt,
+        followupDueAt: item.followupDueAt,
+        followupCompletedAt: completed ? new Date().toISOString() : null,
+        reminderSet: completed ? false : item.reminderSet,
+        reminderAt: completed ? null : item.reminderAt,
+        reminderDismissedAt: completed ? null : item.reminderDismissedAt
+      } : item));
+      await loadWorkspace();
+      pushNotice(completed ? copy.noticeFlagCompleted : copy.noticeFlagReopened);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    } finally {
+      setMessageBusy(false);
+    }
+  }, [authToken, copy.noticeFlagCompleted, copy.noticeFlagReopened, copy.saveError, loadWorkspace, messageBusy, pushNotice]);
+
+  const setMessageFlagDue = React.useCallback(async (message: Message, daysFromToday: number | null) => {
+    if (!authToken || messageBusy) return;
+    const dueAt = daysFromToday === null ? null : followupDueIso(daysFromToday);
+    setMessageBusy(true);
+    try {
+      await apiJson<{ status: string }>(`mail/messages/${message.id}/flag`, authToken, {
+        method: "PUT",
+        body: JSON.stringify(daysFromToday === null
+          ? { flagged: true, completed: false, clear_due: true }
+          : { flagged: true, completed: false, due_at: dueAt })
+      });
+      setMail((items) => items.map((item) => item.id === message.id ? {
+        ...item,
+        flagged: true,
+        followupFlagStatus: "flagged",
+        followupStartAt: dueAt,
+        followupDueAt: dueAt,
+        followupCompletedAt: null,
+        reminderSet: item.reminderSet,
+        reminderAt: item.reminderAt,
+        reminderDismissedAt: item.reminderDismissedAt
+      } : item));
+      await loadWorkspace();
+      pushNotice(daysFromToday === null ? copy.noticeFlagDueCleared : copy.noticeFlagDueUpdated);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    } finally {
+      setMessageBusy(false);
+    }
+  }, [authToken, copy.noticeFlagDueCleared, copy.noticeFlagDueUpdated, copy.saveError, loadWorkspace, messageBusy, pushNotice]);
+
+  const setMessageFlagReminder = React.useCallback(async (message: Message, minutesFromNow: number | null) => {
+    if (!authToken || messageBusy) return;
+    const remindAt = minutesFromNow === null ? null : reminderIso(minutesFromNow);
+    setMessageBusy(true);
+    try {
+      await apiJson<{ status: string }>(`mail/messages/${message.id}/flag`, authToken, {
+        method: "PUT",
+        body: JSON.stringify(minutesFromNow === null
+          ? { flagged: true, completed: false, clear_reminder: true }
+          : { flagged: true, completed: false, reminder_at: remindAt })
+      });
+      setMail((items) => items.map((item) => item.id === message.id ? {
+        ...item,
+        flagged: true,
+        followupFlagStatus: "flagged",
+        followupCompletedAt: null,
+        reminderSet: minutesFromNow !== null,
+        reminderAt: remindAt,
+        reminderDismissedAt: null
+      } : item));
+      await loadWorkspace();
+      pushNotice(minutesFromNow === null ? copy.noticeReminderCleared : copy.noticeReminderUpdated);
+    } catch (error) {
+      pushNotice(mapClientError(error, copy.saveError));
+    } finally {
+      setMessageBusy(false);
+    }
+  }, [authToken, copy.noticeReminderCleared, copy.noticeReminderUpdated, copy.saveError, loadWorkspace, messageBusy, pushNotice]);
+
   const deleteDraft = React.useCallback(async () => {
     if (!authToken || !draftMessageId) return;
     try {
@@ -435,7 +561,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     try {
       const item = await apiJson<ContactItem>("mail/contacts", authToken, {
         method: "POST",
-        body: JSON.stringify({ id: currentContact?.id ?? null, ...contactForm })
+        body: JSON.stringify({ id: currentContact?.id ?? null, collectionId: currentContact?.addressBookId ?? contactBook, ...contactForm })
       });
       await loadWorkspace();
       setContactId(item.id);
@@ -443,7 +569,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     } catch {
       pushNotice(copy.saveError);
     }
-  }, [authToken, contactForm, copy, currentContact, loadWorkspace, pushNotice]);
+  }, [authToken, contactBook, contactForm, copy, currentContact, loadWorkspace, pushNotice]);
 
   const deleteContact = React.useCallback(async () => {
     if (!authToken || !currentContact) return;
@@ -655,6 +781,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     setSection,
     folder,
     setFolder,
+    contactBook,
+    setContactBook,
     query,
     setQuery,
     mail,
@@ -687,6 +815,10 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     currentContact,
     openComposer,
     saveMessage,
+    toggleMessageFlag,
+    completeMessageFlag,
+    setMessageFlagDue,
+    setMessageFlagReminder,
     deleteDraft,
     refreshWorkspace,
     saveContact,

@@ -1281,6 +1281,38 @@ where
                         message_recipients(email).len(),
                     ));
                     output_handles.push(handle);
+                } else if let Some(message) = snapshot.todo_search_message_for_id(message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Message {
+                            folder_id: TODO_SEARCH_FOLDER_ID,
+                            message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &message.email.subject,
+                        message_recipients(&message.email).len(),
+                    ));
+                    output_handles.push(handle);
+                } else if let Some(message) =
+                    snapshot.tracked_mail_processing_message_for_id(message_id)
+                {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Message {
+                            folder_id: TRACKED_MAIL_PROCESSING_FOLDER_ID,
+                            message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &message.email.subject,
+                        message_recipients(&message.email).len(),
+                    ));
+                    output_handles.push(handle);
                 } else if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
@@ -1326,6 +1358,61 @@ where
                         0,
                     ));
                     output_handles.push(handle);
+                } else if let Some(note) = snapshot.note_for_id(folder_id, message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Note {
+                            folder_id,
+                            note_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &note.note.title,
+                        0,
+                    ));
+                    output_handles.push(handle);
+                } else if let Some(entry) = snapshot.journal_entry_for_id(folder_id, message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::JournalEntry {
+                            folder_id,
+                            journal_entry_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &entry.entry.subject,
+                        0,
+                    ));
+                    output_handles.push(handle);
+                } else if folder_id == COMMON_VIEWS_FOLDER_ID {
+                    if let Some(message) =
+                        snapshot.search_folder_definition_message_for_id(message_id)
+                    {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::SearchFolderDefinition {
+                                folder_id,
+                                definition_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &message.definition.display_name,
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
                 } else {
                     responses.extend_from_slice(&rop_error_response(
                         0x03,
@@ -1386,6 +1473,10 @@ where
                     request.output_handle_index,
                     MapiObject::ContentsTable {
                         folder_id,
+                        associated: request
+                            .payload
+                            .first()
+                            .is_some_and(|flags| flags & 0x02 != 0),
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
                         restriction: None,
@@ -1397,7 +1488,15 @@ where
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_get_contents_table_response(
                     &request,
-                    folder_message_count(folder_id, mailboxes, emails, snapshot),
+                    if request
+                        .payload
+                        .first()
+                        .is_some_and(|flags| flags & 0x02 != 0)
+                    {
+                        associated_folder_message_count(folder_id, snapshot)
+                    } else {
+                        folder_message_count(folder_id, mailboxes, emails, snapshot)
+                    },
                 ));
                 output_handles.push(handle);
             }
@@ -1428,6 +1527,8 @@ where
                             | SENT_FOLDER_ID
                             | TRASH_FOLDER_ID
                             | OUTBOX_FOLDER_ID
+                            | NOTES_FOLDER_ID
+                            | JOURNAL_FOLDER_ID
                     )
                 {
                     responses.extend_from_slice(&rop_error_response(
@@ -1451,6 +1552,14 @@ where
                         properties: HashMap::new(),
                     },
                     Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
+                    _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
+                    _ if folder_id == JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
                         folder_id,
                         properties: HashMap::new(),
                     },
@@ -1527,6 +1636,26 @@ where
                         Some(MapiObject::Task { folder_id, task_id }) => {
                             apply_canonical_task_property_values(
                                 store, principal, folder_id, task_id, values, snapshot,
+                            )
+                            .await
+                        }
+                        Some(MapiObject::Note { folder_id, note_id }) => {
+                            apply_canonical_note_property_values(
+                                store, principal, folder_id, note_id, values, snapshot,
+                            )
+                            .await
+                        }
+                        Some(MapiObject::JournalEntry {
+                            folder_id,
+                            journal_entry_id,
+                        }) => {
+                            apply_canonical_journal_entry_property_values(
+                                store,
+                                principal,
+                                folder_id,
+                                journal_entry_id,
+                                values,
+                                snapshot,
                             )
                             .await
                         }
@@ -1862,6 +1991,111 @@ where
                         }
                         continue;
                     }
+                    Some(MapiObject::PendingNote {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let input = note_input_from_mapi(
+                            principal.account_id,
+                            None,
+                            &default_note_for_mapping(),
+                            &properties,
+                        );
+                        match store.upsert_mapi_note(input).await {
+                            Ok(note) => {
+                                let note_id = match remember_created_mapi_identity(
+                                    store,
+                                    principal,
+                                    MapiIdentityObjectKind::Note,
+                                    note.id,
+                                    None,
+                                )
+                                .await
+                                {
+                                    Ok(note_id) => note_id,
+                                    Err(_) => {
+                                        responses.extend_from_slice(&rop_error_response(
+                                            0x0C,
+                                            request.response_handle_index(),
+                                            0x8004_010F,
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                session
+                                    .handles
+                                    .insert(handle, MapiObject::Note { folder_id, note_id });
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request, note_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
+                    Some(MapiObject::PendingJournalEntry {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let input = journal_entry_input_from_mapi(
+                            principal.account_id,
+                            None,
+                            &default_journal_entry_for_mapping(),
+                            &properties,
+                        );
+                        match store.upsert_mapi_journal_entry(input).await {
+                            Ok(entry) => {
+                                let journal_entry_id = match remember_created_mapi_identity(
+                                    store,
+                                    principal,
+                                    MapiIdentityObjectKind::JournalEntry,
+                                    entry.id,
+                                    None,
+                                )
+                                .await
+                                {
+                                    Ok(journal_entry_id) => journal_entry_id,
+                                    Err(_) => {
+                                        responses.extend_from_slice(&rop_error_response(
+                                            0x0C,
+                                            request.response_handle_index(),
+                                            0x8004_010F,
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::JournalEntry {
+                                        folder_id,
+                                        journal_entry_id,
+                                    },
+                                );
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request,
+                                    journal_entry_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
                     Some(MapiObject::Contact { contact_id, .. })
                     | Some(MapiObject::Event {
                         event_id: contact_id,
@@ -1869,6 +2103,14 @@ where
                     })
                     | Some(MapiObject::Task {
                         task_id: contact_id,
+                        ..
+                    })
+                    | Some(MapiObject::Note {
+                        note_id: contact_id,
+                        ..
+                    })
+                    | Some(MapiObject::JournalEntry {
+                        journal_entry_id: contact_id,
                         ..
                     }) => {
                         responses.extend_from_slice(&rop_save_changes_message_response(
@@ -1995,6 +2237,7 @@ where
                     input_object(session, &handle_slots, &request),
                     mailboxes,
                     emails,
+                    snapshot,
                 ))
             }
             Some(RopId::ReloadCachedInformation) => {
@@ -2003,6 +2246,7 @@ where
                     input_object(session, &handle_slots, &request),
                     mailboxes,
                     emails,
+                    snapshot,
                 ))
             }
             Some(RopId::SetMessageReadFlag) => {
@@ -2441,6 +2685,26 @@ where
                     if let Some(task) = snapshot.task_for_id(folder_id, message_id) {
                         if store
                             .delete_accessible_task(principal.account_id, task.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(note) = snapshot.note_for_id(folder_id, message_id) {
+                        if store
+                            .delete_mapi_note(principal.account_id, note.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(entry) = snapshot.journal_entry_for_id(folder_id, message_id) {
+                        if store
+                            .delete_mapi_journal_entry(principal.account_id, entry.canonical_id)
                             .await
                             .is_err()
                         {
@@ -3204,6 +3468,102 @@ where
                         continue;
                     }
                 };
+                if matches!(source_folder_id, NOTES_FOLDER_ID | JOURNAL_FOLDER_ID) {
+                    let mut partial_completion = false;
+                    for message_id in request.move_copy_message_ids() {
+                        if source_folder_id == NOTES_FOLDER_ID {
+                            let Some(note) = snapshot.note_for_id(source_folder_id, message_id)
+                            else {
+                                partial_completion = true;
+                                continue;
+                            };
+                            if target_folder_id != NOTES_FOLDER_ID {
+                                partial_completion = true;
+                                continue;
+                            }
+                            if request.move_copy_want_copy() {
+                                match store
+                                    .upsert_mapi_note(UpsertClientNoteInput {
+                                        id: None,
+                                        account_id: principal.account_id,
+                                        title: note.note.title.clone(),
+                                        body_text: note.note.body_text.clone(),
+                                        color: note.note.color.clone(),
+                                        categories_json: note.note.categories_json.clone(),
+                                    })
+                                    .await
+                                {
+                                    Ok(copied) => {
+                                        if remember_created_mapi_identity(
+                                            store,
+                                            principal,
+                                            MapiIdentityObjectKind::Note,
+                                            copied.id,
+                                            None,
+                                        )
+                                        .await
+                                        .is_err()
+                                        {
+                                            partial_completion = true;
+                                        }
+                                    }
+                                    Err(_) => partial_completion = true,
+                                }
+                            }
+                            continue;
+                        }
+                        let Some(entry) =
+                            snapshot.journal_entry_for_id(source_folder_id, message_id)
+                        else {
+                            partial_completion = true;
+                            continue;
+                        };
+                        if target_folder_id != JOURNAL_FOLDER_ID {
+                            partial_completion = true;
+                            continue;
+                        }
+                        if request.move_copy_want_copy() {
+                            match store
+                                .upsert_mapi_journal_entry(UpsertJournalEntryInput {
+                                    id: None,
+                                    account_id: principal.account_id,
+                                    subject: entry.entry.subject.clone(),
+                                    body_text: entry.entry.body_text.clone(),
+                                    entry_type: entry.entry.entry_type.clone(),
+                                    message_class: entry.entry.message_class.clone(),
+                                    starts_at: entry.entry.starts_at.clone(),
+                                    ends_at: entry.entry.ends_at.clone(),
+                                    occurred_at: entry.entry.occurred_at.clone(),
+                                    companies_json: entry.entry.companies_json.clone(),
+                                    contacts_json: entry.entry.contacts_json.clone(),
+                                })
+                                .await
+                            {
+                                Ok(copied) => {
+                                    if remember_created_mapi_identity(
+                                        store,
+                                        principal,
+                                        MapiIdentityObjectKind::JournalEntry,
+                                        copied.id,
+                                        None,
+                                    )
+                                    .await
+                                    .is_err()
+                                    {
+                                        partial_completion = true;
+                                    }
+                                }
+                                Err(_) => partial_completion = true,
+                            }
+                        }
+                    }
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x33,
+                        request.response_handle_index(),
+                        partial_completion,
+                    ));
+                    continue;
+                }
                 let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes) else {
                     responses.extend_from_slice(&rop_error_response(
                         0x33,
@@ -3429,19 +3789,39 @@ where
                 };
                 let all_sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
+                let all_special_sync_objects =
+                    special_sync_objects_for(folder_id, sync_type, snapshot);
                 let available_sync_mailbox_count = all_sync_mailboxes.len();
                 let available_sync_email_count = all_sync_emails.len();
-                let (delta_sync_mailboxes, delta_sync_emails) = if checkpoint.is_some() {
-                    (
-                        changed_sync_mailboxes(
+                let available_special_sync_object_count = all_special_sync_objects.len();
+                let (delta_sync_mailboxes, delta_sync_emails, delta_special_sync_objects) =
+                    if checkpoint.is_some() {
+                        let changed_special_ids: &[Uuid] = match folder_id {
+                            NOTES_FOLDER_ID => &changes.changed_note_ids,
+                            JOURNAL_FOLDER_ID => &changes.changed_journal_entry_ids,
+                            _ => &[],
+                        };
+                        (
+                            changed_sync_mailboxes(
+                                all_sync_mailboxes.clone(),
+                                &changes.changed_mailbox_ids,
+                            ),
+                            changed_sync_emails(
+                                all_sync_emails.clone(),
+                                &changes.changed_message_ids,
+                            ),
+                            changed_special_sync_objects(
+                                all_special_sync_objects.clone(),
+                                changed_special_ids,
+                            ),
+                        )
+                    } else {
+                        (
                             all_sync_mailboxes.clone(),
-                            &changes.changed_mailbox_ids,
-                        ),
-                        changed_sync_emails(all_sync_emails.clone(), &changes.changed_message_ids),
-                    )
-                } else {
-                    (all_sync_mailboxes.clone(), all_sync_emails.clone())
-                };
+                            all_sync_emails.clone(),
+                            all_special_sync_objects.clone(),
+                        )
+                    };
                 let sync_attachment_facts =
                     sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
                 let delta_attachment_facts =
@@ -3455,7 +3835,7 @@ where
                     sync_attachment_facts_for(folder_id, &all_sync_emails, snapshot);
                 let aggregate_attachment_facts =
                     sync_attachment_facts_for(folder_id, &aggregate_sync_emails, snapshot);
-                let deleted_message_ids = if checkpoint.is_some() {
+                let mut deleted_message_ids = if checkpoint.is_some() {
                     mapi_message_ids_for_deleted_changes(
                         store,
                         principal,
@@ -3466,34 +3846,62 @@ where
                 } else {
                     Vec::new()
                 };
-                let state = mapi_mailstore::sync_state_token_with_attachments(
+                if checkpoint.is_some() && folder_id == NOTES_FOLDER_ID {
+                    deleted_message_ids.extend(
+                        mapi_object_ids_for_deleted_changes(
+                            store,
+                            principal,
+                            MapiIdentityObjectKind::Note,
+                            &changes.deleted_note_ids,
+                        )
+                        .await
+                        .unwrap_or_default(),
+                    );
+                }
+                if checkpoint.is_some() && folder_id == JOURNAL_FOLDER_ID {
+                    deleted_message_ids.extend(
+                        mapi_object_ids_for_deleted_changes(
+                            store,
+                            principal,
+                            MapiIdentityObjectKind::JournalEntry,
+                            &changes.deleted_journal_entry_ids,
+                        )
+                        .await
+                        .unwrap_or_default(),
+                    );
+                }
+                let state = mapi_mailstore::sync_state_token_with_special_objects(
                     sync_type,
                     folder_id,
                     &all_sync_mailboxes,
                     &all_sync_emails,
                     &state_attachment_facts,
+                    &all_special_sync_objects,
                 );
                 let force_hierarchy_count_properties =
                     force_hierarchy_count_properties_experiment_enabled();
-                let transfer_buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
-                    sync_type,
-                    sync_flags,
-                    sync_extra_flags,
-                    &sync_property_tags,
-                    folder_id,
-                    &all_sync_mailboxes,
-                    &all_sync_emails,
-                    &sync_attachment_facts,
-                    &[],
-                    mailboxes,
-                    &all_sync_mailboxes,
-                    &all_sync_emails,
-                    &state_attachment_facts,
-                    &aggregate_sync_emails,
-                    &aggregate_attachment_facts,
-                    changes.current_change_sequence,
-                    force_hierarchy_count_properties,
-                );
+                let transfer_buffer =
+                    mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+                        sync_type,
+                        sync_flags,
+                        sync_extra_flags,
+                        &sync_property_tags,
+                        folder_id,
+                        &all_sync_mailboxes,
+                        &all_sync_emails,
+                        &sync_attachment_facts,
+                        &all_special_sync_objects,
+                        &[],
+                        mailboxes,
+                        &all_sync_mailboxes,
+                        &all_sync_emails,
+                        &state_attachment_facts,
+                        &all_special_sync_objects,
+                        &aggregate_sync_emails,
+                        &aggregate_attachment_facts,
+                        changes.current_change_sequence,
+                        force_hierarchy_count_properties,
+                    );
                 let hierarchy_content_candidate =
                     mapi_mailstore::hierarchy_content_count_omission_candidate(
                         sync_type,
@@ -3511,7 +3919,7 @@ where
                     &transfer_buffer,
                 );
                 let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
-                    mapi_mailstore::sync_manifest_buffer_with_final_state(
+                    mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
                         sync_type,
                         sync_flags,
                         sync_extra_flags,
@@ -3520,11 +3928,13 @@ where
                         &delta_sync_mailboxes,
                         &delta_sync_emails,
                         &delta_attachment_facts,
+                        &delta_special_sync_objects,
                         &deleted_message_ids,
                         mailboxes,
                         &all_sync_mailboxes,
                         &all_sync_emails,
                         &state_attachment_facts,
+                        &all_special_sync_objects,
                         &aggregate_sync_emails,
                         &aggregate_attachment_facts,
                         changes.current_change_sequence,
@@ -3577,10 +3987,13 @@ where
                     snapshot_email_count = emails.len(),
                     available_sync_mailbox_count,
                     available_sync_email_count,
+                    available_special_sync_object_count,
                     sync_mailbox_count = all_sync_mailboxes.len(),
                     sync_email_count = all_sync_emails.len(),
+                    sync_special_object_count = all_special_sync_objects.len(),
                     checkpoint_delta_mailbox_count,
                     checkpoint_delta_email_count,
+                    checkpoint_delta_special_object_count = delta_special_sync_objects.len(),
                     checkpoint_deleted_message_count,
                     current_change_sequence = changes.current_change_sequence,
                     transfer_buffer_bytes = transfer_buffer.len(),
@@ -4160,15 +4573,90 @@ where
                         &rop_synchronization_import_message_change_response(&request, message_id),
                     );
                     output_handles.push(handle);
-                } else {
+                } else if message_id != 0 && snapshot.note_for_id(folder_id, message_id).is_some() {
+                    if apply_canonical_note_property_values(
+                        store,
+                        principal,
+                        folder_id,
+                        message_id,
+                        property_values,
+                        snapshot,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
-                        MapiObject::PendingMessage {
+                        MapiObject::Note {
+                            folder_id,
+                            note_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_message_change_response(&request, message_id),
+                    );
+                    output_handles.push(handle);
+                } else if message_id != 0
+                    && snapshot
+                        .journal_entry_for_id(folder_id, message_id)
+                        .is_some()
+                {
+                    if apply_canonical_journal_entry_property_values(
+                        store,
+                        principal,
+                        folder_id,
+                        message_id,
+                        property_values,
+                        snapshot,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::JournalEntry {
+                            folder_id,
+                            journal_entry_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_message_change_response(&request, message_id),
+                    );
+                    output_handles.push(handle);
+                } else {
+                    let pending_object = match folder_id {
+                        NOTES_FOLDER_ID => MapiObject::PendingNote {
+                            folder_id,
+                            properties: property_values.into_iter().collect(),
+                        },
+                        JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
+                            folder_id,
+                            properties: property_values.into_iter().collect(),
+                        },
+                        _ => MapiObject::PendingMessage {
                             folder_id,
                             properties: property_values.into_iter().collect(),
                             recipients: Vec::new(),
                         },
-                    );
+                    };
+                    let handle =
+                        session.allocate_output_handle(request.output_handle_index, pending_object);
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(
                         &rop_synchronization_import_message_change_response(&request, 0),
@@ -4301,6 +4789,26 @@ where
                 let mut partial_completion = false;
                 let hard_delete = request.import_delete_hard_delete();
                 for message_id in request.import_delete_message_ids() {
+                    if let Some(note) = snapshot.note_for_id(folder_id, message_id) {
+                        if store
+                            .delete_mapi_note(principal.account_id, note.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(entry) = snapshot.journal_entry_for_id(folder_id, message_id) {
+                        if store
+                            .delete_mapi_journal_entry(principal.account_id, entry.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                     else {
                         partial_completion = true;
@@ -4374,6 +4882,34 @@ where
                 let source_folder_id = input_object(session, &handle_slots, &request)
                     .and_then(MapiObject::folder_id)
                     .unwrap_or(INBOX_FOLDER_ID);
+                if let Some(note) = snapshot.note_for_id(source_folder_id, message_id) {
+                    if target_folder_id == NOTES_FOLDER_ID {
+                        responses.extend_from_slice(
+                            &rop_synchronization_import_message_move_response(&request, note.id),
+                        );
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x78,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                    }
+                    continue;
+                }
+                if let Some(entry) = snapshot.journal_entry_for_id(source_folder_id, message_id) {
+                    if target_folder_id == JOURNAL_FOLDER_ID {
+                        responses.extend_from_slice(
+                            &rop_synchronization_import_message_move_response(&request, entry.id),
+                        );
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x78,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                    }
+                    continue;
+                }
                 let Some(email) = message_for_id(source_folder_id, message_id, mailboxes, emails)
                 else {
                     responses.extend_from_slice(&rop_error_response(
@@ -4758,11 +5294,29 @@ async fn mapi_message_ids_for_deleted_changes<S>(
 where
     S: ExchangeStore,
 {
-    let requests = message_ids
+    mapi_object_ids_for_deleted_changes(
+        store,
+        principal,
+        MapiIdentityObjectKind::Message,
+        message_ids,
+    )
+    .await
+}
+
+async fn mapi_object_ids_for_deleted_changes<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object_kind: MapiIdentityObjectKind,
+    object_ids: &[Uuid],
+) -> Result<Vec<u64>>
+where
+    S: ExchangeStore,
+{
+    let requests = object_ids
         .iter()
-        .map(|message_id| MapiIdentityRequest {
-            object_kind: MapiIdentityObjectKind::Message,
-            canonical_id: *message_id,
+        .map(|object_id| MapiIdentityRequest {
+            object_kind,
+            canonical_id: *object_id,
             reserved_global_counter: None,
         })
         .collect::<Vec<_>>();

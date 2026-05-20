@@ -315,6 +315,8 @@ export function App() {
                 copy={copy}
                 section={workspace.section}
                 folder={workspace.folder}
+                contactBook={workspace.contactBook}
+                setContactBook={workspace.setContactBook}
                 mode={workspace.mode}
                 filteredMessages={workspace.filtered}
                 events={workspace.filteredEvents}
@@ -341,6 +343,10 @@ export function App() {
                   setDraft={workspace.setDraft}
                   onReply={(message) => workspace.openComposer("reply", message)}
                   onForward={(message) => workspace.openComposer("forward", message)}
+                  onToggleFlag={(message) => void workspace.toggleMessageFlag(message)}
+                  onCompleteFlag={(message, completed) => void workspace.completeMessageFlag(message, completed)}
+                  onSetFlagDue={(message, daysFromToday) => void workspace.setMessageFlagDue(message, daysFromToday)}
+                  onSetFlagReminder={(message, minutesFromNow) => void workspace.setMessageFlagReminder(message, minutesFromNow)}
                   onCancel={workspace.closeComposer}
                   onSaveDraft={() => void workspace.saveMessage(true)}
                   onSend={() => void workspace.saveMessage(false)}

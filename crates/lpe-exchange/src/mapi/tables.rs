@@ -5,6 +5,7 @@ use super::session::*;
 use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
+use crate::mapi_store::MapiSearchFolderDefinitionMessage;
 
 pub(in crate::mapi) fn hierarchy_row_count(
     folder_id: u64,
@@ -32,6 +33,20 @@ pub(in crate::mapi) fn folder_message_count(
     folder_row_for_id(folder_id, mailboxes)
         .map(|mailbox| mailbox.total_emails)
         .unwrap_or_else(|| emails_for_folder(folder_id, mailboxes, emails).len() as u32)
+}
+
+pub(in crate::mapi) fn associated_folder_message_count(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> u32 {
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        snapshot
+            .search_folder_definition_messages()
+            .len()
+            .min(u32::MAX as usize) as u32
+    } else {
+        0
+    }
 }
 
 pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
@@ -62,6 +77,31 @@ pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
         PID_TAG_HAS_ATTACHMENTS,
         PID_TAG_ENTRY_ID,
         PID_TAG_INSTANCE_KEY,
+    ]
+}
+
+pub(in crate::mapi) fn default_search_folder_definition_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_ACCESS,
+        PID_TAG_ASSOCIATED,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE,
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
+        PID_TAG_SEARCH_FOLDER_TAG,
+        PID_TAG_SEARCH_FOLDER_DEFINITION,
     ]
 }
 
@@ -101,6 +141,11 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
+        PID_LID_NOTE_COLOR_TAG,
+        PID_LID_NOTE_HEIGHT_TAG,
+        PID_LID_NOTE_WIDTH_TAG,
+        PID_LID_NOTE_X_TAG,
+        PID_LID_NOTE_Y_TAG,
     ]
 }
 
@@ -328,6 +373,16 @@ pub(in crate::mapi) fn default_message_property_tags() -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
+        PID_LID_COMMON_START_TAG,
+        PID_LID_COMMON_END_TAG,
+        PID_LID_COMPANIES_TAG,
+        PID_LID_CONTACTS_TAG,
+        PID_LID_LOG_TYPE_W_TAG,
+        PID_LID_LOG_START_TAG,
+        PID_LID_LOG_END_TAG,
+        PID_LID_LOG_DURATION_TAG,
+        PID_LID_LOG_FLAGS_TAG,
+        PID_LID_LOG_TYPE_DESC_W_TAG,
     ]
 }
 
@@ -370,6 +425,9 @@ pub(in crate::mapi) fn default_event_property_tags() -> Vec<u32> {
         PID_TAG_END_DATE,
         PID_TAG_LOCATION_W,
         PID_TAG_MESSAGE_CLASS_W,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
         PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_SIZE,
@@ -393,6 +451,51 @@ pub(in crate::mapi) fn default_task_property_tags() -> Vec<u32> {
         PID_TAG_ACCESS,
         PID_TAG_MESSAGE_FLAGS,
         PID_TAG_FLAG_STATUS,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_note_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_journal_entry_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_BODY_W,
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
         PID_TAG_MESSAGE_SIZE,
         PID_TAG_SOURCE_KEY,
         PID_TAG_PARENT_SOURCE_KEY,
@@ -446,6 +549,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
         }
         Some(MapiObject::ContentsTable {
             folder_id,
+            associated,
             columns,
             sort_orders,
             restriction,
@@ -454,11 +558,25 @@ pub(in crate::mapi) fn rop_query_rows_response(
         }) => {
             start_position = *table_position;
             let columns = if columns.is_empty() {
-                default_contents_columns()
+                if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+                    default_search_folder_definition_property_tags()
+                } else {
+                    default_contents_columns()
+                }
             } else {
                 columns.clone()
             };
-            if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
+            if *associated {
+                if *folder_id == COMMON_VIEWS_FOLDER_ID {
+                    snapshot
+                        .search_folder_definition_messages()
+                        .iter()
+                        .map(|message| serialize_search_folder_definition_row(message, &columns))
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                }
+            } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
                     MapiCollaborationFolderKind::Contacts => {
                         let mut rows = snapshot.contacts_for_folder(*folder_id);
@@ -507,6 +625,105 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             .collect::<Vec<_>>()
                     }
                 }
+            } else if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
+                let mut rows = snapshot.contacts_search_results();
+                rows.retain(|contact| {
+                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                });
+                sort_contacts(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|contact| {
+                        serialize_contact_row(
+                            &contact.contact,
+                            contact.id,
+                            CONTACTS_SEARCH_FOLDER_ID,
+                            &columns,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            } else if *folder_id == TODO_SEARCH_FOLDER_ID {
+                let mut message_rows = snapshot.todo_search_messages();
+                message_rows.retain(|message| {
+                    restriction_matches_email(restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut message_rows, sort_orders);
+                let mut rows = snapshot.todo_search_results();
+                rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
+                sort_tasks(&mut rows, sort_orders);
+                message_rows
+                    .into_iter()
+                    .map(|message| serialize_message_row(&message.email, &columns))
+                    .chain(rows.into_iter().map(|task| {
+                        serialize_task_row(&task.task, task.id, TODO_SEARCH_FOLDER_ID, &columns)
+                    }))
+                    .collect::<Vec<_>>()
+            } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
+                let mut rows = snapshot.tracked_mail_processing_messages();
+                rows.retain(|message| {
+                    restriction_matches_email(restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|message| serialize_message_row(&message.email, &columns))
+                    .collect::<Vec<_>>()
+            } else if *folder_id == REMINDERS_FOLDER_ID {
+                let mut event_rows = snapshot.reminder_events();
+                event_rows
+                    .retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
+                sort_events(&mut event_rows, sort_orders);
+                let mut task_rows = snapshot.reminder_tasks();
+                task_rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
+                sort_tasks(&mut task_rows, sort_orders);
+                let mut message_rows = snapshot.reminder_messages();
+                message_rows.retain(|message| {
+                    restriction_matches_email(restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut message_rows, sort_orders);
+                event_rows
+                    .into_iter()
+                    .map(|event| {
+                        serialize_reminder_event_row(
+                            event,
+                            snapshot.reminder_for_source("calendar", event.canonical_id),
+                            &columns,
+                        )
+                    })
+                    .chain(task_rows.into_iter().map(|task| {
+                        serialize_reminder_task_row(
+                            task,
+                            snapshot.reminder_for_source("task", task.canonical_id),
+                            &columns,
+                        )
+                    }))
+                    .chain(
+                        message_rows
+                            .into_iter()
+                            .map(|message| serialize_message_row(&message.email, &columns)),
+                    )
+                    .collect::<Vec<_>>()
+            } else if *folder_id == NOTES_FOLDER_ID {
+                let mut rows = snapshot.notes_for_folder(*folder_id);
+                rows.retain(|note| restriction_matches_note(restriction.as_ref(), &note.note));
+                sort_notes(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|note| serialize_note_row(&note.note, note.id, note.folder_id, &columns))
+                    .collect::<Vec<_>>()
+            } else if *folder_id == JOURNAL_FOLDER_ID {
+                let mut rows = snapshot.journal_entries_for_folder(*folder_id);
+                rows.retain(|entry| {
+                    restriction_matches_journal_entry(restriction.as_ref(), &entry.entry)
+                });
+                sort_journal_entries(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|entry| {
+                        serialize_journal_entry_row(
+                            &entry.entry,
+                            entry.id,
+                            entry.folder_id,
+                            &columns,
+                        )
+                    })
+                    .collect::<Vec<_>>()
             } else {
                 let window_offset = if request.query_forward_read() {
                     start_position
@@ -632,15 +849,37 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
 ) -> Vec<u8> {
     let columns = match object {
         Some(MapiObject::HierarchyTable { .. }) => default_folder_property_tags(),
-        Some(MapiObject::ContentsTable { folder_id, .. }) => match snapshot
-            .collaboration_folder_for_id(*folder_id)
-            .map(|folder| folder.kind)
-        {
-            Some(MapiCollaborationFolderKind::Contacts) => default_contact_property_tags(),
-            Some(MapiCollaborationFolderKind::Calendar) => default_event_property_tags(),
-            Some(MapiCollaborationFolderKind::Task) => default_task_property_tags(),
-            None => default_message_property_tags(),
-        },
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            ..
+        }) => {
+            if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+                default_search_folder_definition_property_tags()
+            } else {
+                match snapshot
+                    .collaboration_folder_for_id(*folder_id)
+                    .map(|folder| folder.kind)
+                {
+                    Some(MapiCollaborationFolderKind::Contacts) => default_contact_property_tags(),
+                    Some(MapiCollaborationFolderKind::Calendar) => default_event_property_tags(),
+                    Some(MapiCollaborationFolderKind::Task) => default_task_property_tags(),
+                    None if *folder_id == CONTACTS_SEARCH_FOLDER_ID => {
+                        default_contact_property_tags()
+                    }
+                    None if *folder_id == TODO_SEARCH_FOLDER_ID => default_task_property_tags(),
+                    None if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID => {
+                        default_message_property_tags()
+                    }
+                    None if *folder_id == REMINDERS_FOLDER_ID => default_event_property_tags(),
+                    None if *folder_id == NOTES_FOLDER_ID => default_note_property_tags(),
+                    None if *folder_id == JOURNAL_FOLDER_ID => {
+                        default_journal_entry_property_tags()
+                    }
+                    None => default_message_property_tags(),
+                }
+            }
+        }
         Some(MapiObject::AttachmentTable { .. }) => default_attachment_columns(),
         Some(MapiObject::PermissionTable { .. }) => default_permission_columns(),
         _ => return rop_error_response(0x37, request.response_handle_index(), 0x8004_0102),
@@ -682,6 +921,58 @@ pub(in crate::mapi) fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiS
                 PID_TAG_MESSAGE_SIZE => left.size_octets.cmp(&right.size_octets),
                 PID_TAG_HAS_ATTACHMENTS => left.has_attachments.cmp(&right.has_attachments),
                 PID_TAG_MID => mapi_message_id(left).cmp(&mapi_message_id(right)),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+pub(in crate::mapi) fn sort_mapi_messages(
+    rows: &mut [&crate::mapi_store::MapiMessage],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.email.subject, &right.email.subject)
+                }
+                PID_TAG_SENDER_NAME_W => compare_case_insensitive(
+                    left.email
+                        .from_display
+                        .as_deref()
+                        .unwrap_or(&left.email.from_address),
+                    right
+                        .email
+                        .from_display
+                        .as_deref()
+                        .unwrap_or(&right.email.from_address),
+                ),
+                PID_TAG_SENDER_EMAIL_ADDRESS_W => {
+                    compare_case_insensitive(&left.email.from_address, &right.email.from_address)
+                }
+                PID_TAG_DISPLAY_TO_W => {
+                    compare_case_insensitive(&display_to(&left.email), &display_to(&right.email))
+                }
+                PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+                    left.email.received_at.cmp(&right.email.received_at)
+                }
+                PID_TAG_MESSAGE_FLAGS => {
+                    message_flags(&left.email).cmp(&message_flags(&right.email))
+                }
+                PID_TAG_MESSAGE_SIZE => left.email.size_octets.cmp(&right.email.size_octets),
+                PID_TAG_HAS_ATTACHMENTS => {
+                    left.email.has_attachments.cmp(&right.email.has_attachments)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
             };
             let ordering = apply_sort_direction(ordering, sort_order.order);
@@ -801,6 +1092,66 @@ pub(in crate::mapi) fn sort_tasks(
                 }
                 PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
                     left.task.updated_at.cmp(&right.task.updated_at)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+pub(in crate::mapi) fn sort_notes(
+    rows: &mut [&crate::mapi_store::MapiNote],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+                    compare_case_insensitive(&left.note.title, &right.note.title)
+                }
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+                    left.note.updated_at.cmp(&right.note.updated_at)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+pub(in crate::mapi) fn sort_journal_entries(
+    rows: &mut [&crate::mapi_store::MapiJournalEntry],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+                    compare_case_insensitive(&left.entry.subject, &right.entry.subject)
+                }
+                PID_TAG_START_DATE | PID_TAG_MESSAGE_DELIVERY_TIME => {
+                    journal_entry_start_sort_key(&left.entry)
+                        .cmp(&journal_entry_start_sort_key(&right.entry))
+                }
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_LOCAL_COMMIT_TIME => {
+                    left.entry.updated_at.cmp(&right.entry.updated_at)
                 }
                 PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
@@ -1206,6 +1557,7 @@ pub(in crate::mapi) fn rop_find_row_response(
         }
         MapiObject::ContentsTable {
             folder_id,
+            associated,
             columns,
             sort_orders,
             restriction: table_restriction,
@@ -1213,21 +1565,49 @@ pub(in crate::mapi) fn rop_find_row_response(
             ..
         } => {
             let columns = if columns.is_empty() {
-                default_contents_columns()
+                if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+                    default_search_folder_definition_property_tags()
+                } else {
+                    default_contents_columns()
+                }
             } else {
                 columns.clone()
             };
-            let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
-            rows.retain(|email| restriction_matches_email(table_restriction.as_ref(), email));
-            sort_emails(&mut rows, sort_orders);
-            if let Some((index, email)) = find_row(rows.as_slice(), *position, request, |email| {
-                restriction_matches_email(Some(&restriction), email)
-            }) {
-                *position = index;
-                response.push(1);
-                write_standard_property_row(&mut response, &serialize_message_row(email, &columns));
+            if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+                let rows = snapshot
+                    .search_folder_definition_messages()
+                    .iter()
+                    .collect::<Vec<_>>();
+                if let Some((index, message)) =
+                    find_row(rows.as_slice(), *position, request, |_message| true)
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_search_folder_definition_row(message, &columns),
+                    );
+                } else {
+                    response.push(0);
+                }
             } else {
-                response.push(0);
+                let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
+                rows.retain(|email| restriction_matches_email(table_restriction.as_ref(), email));
+                sort_emails(&mut rows, sort_orders);
+                if let Some((index, email)) =
+                    find_row(rows.as_slice(), *position, request, |email| {
+                        restriction_matches_email(Some(&restriction), email)
+                    })
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_message_row(email, &columns),
+                    );
+                } else {
+                    response.push(0);
+                }
             }
         }
         MapiObject::AttachmentTable {
@@ -1356,22 +1736,81 @@ pub(in crate::mapi) fn table_position_and_count(
         }
         Some(MapiObject::ContentsTable {
             folder_id,
+            associated,
             position,
             restriction,
             sort_orders,
             ..
         }) => {
-            let total = snapshot
-                .content_table_total(
-                    *folder_id,
-                    table_view_signature(sort_orders, restriction.as_ref()),
-                )
-                .unwrap_or_else(|| {
-                    emails_for_folder(*folder_id, mailboxes, emails)
+            let total = if *associated {
+                associated_folder_message_count(*folder_id, snapshot) as usize
+            } else if *folder_id == NOTES_FOLDER_ID {
+                snapshot
+                    .notes_for_folder(*folder_id)
+                    .into_iter()
+                    .filter(|note| restriction_matches_note(restriction.as_ref(), &note.note))
+                    .count()
+            } else if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
+                snapshot
+                    .contacts_search_results()
+                    .into_iter()
+                    .filter(|contact| {
+                        restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                    })
+                    .count()
+            } else if *folder_id == TODO_SEARCH_FOLDER_ID {
+                snapshot
+                    .todo_search_messages()
+                    .into_iter()
+                    .filter(|message| {
+                        restriction_matches_email(restriction.as_ref(), &message.email)
+                    })
+                    .count()
+                    + snapshot
+                        .todo_search_results()
                         .into_iter()
-                        .filter(|email| restriction_matches_email(restriction.as_ref(), email))
+                        .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
                         .count()
-                });
+            } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
+                snapshot
+                    .tracked_mail_processing_messages()
+                    .into_iter()
+                    .filter(|message| {
+                        restriction_matches_email(restriction.as_ref(), &message.email)
+                    })
+                    .count()
+            } else if *folder_id == REMINDERS_FOLDER_ID {
+                snapshot
+                    .reminder_events()
+                    .into_iter()
+                    .filter(|event| restriction_matches_event(restriction.as_ref(), &event.event))
+                    .count()
+                    + snapshot
+                        .reminder_tasks()
+                        .into_iter()
+                        .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
+                        .count()
+            } else if *folder_id == JOURNAL_FOLDER_ID {
+                snapshot
+                    .journal_entries_for_folder(*folder_id)
+                    .into_iter()
+                    .filter(|entry| {
+                        restriction_matches_journal_entry(restriction.as_ref(), &entry.entry)
+                    })
+                    .count()
+            } else {
+                snapshot
+                    .content_table_total(
+                        *folder_id,
+                        table_view_signature(sort_orders, restriction.as_ref()),
+                    )
+                    .unwrap_or_else(|| {
+                        emails_for_folder(*folder_id, mailboxes, emails)
+                            .into_iter()
+                            .filter(|email| restriction_matches_email(restriction.as_ref(), email))
+                            .count()
+                    })
+            };
             (*position, total)
         }
         Some(MapiObject::AttachmentTable {
@@ -1468,6 +1907,65 @@ pub(in crate::mapi) fn table_row_keys(
             restriction,
             ..
         } => {
+            if *folder_id == NOTES_FOLDER_ID {
+                let mut rows = snapshot.notes_for_folder(*folder_id);
+                rows.retain(|note| restriction_matches_note(restriction.as_ref(), &note.note));
+                sort_notes(&mut rows, sort_orders);
+                return rows.into_iter().map(|note| note.id).collect();
+            }
+            if *folder_id == CONTACTS_SEARCH_FOLDER_ID {
+                let mut rows = snapshot.contacts_search_results();
+                rows.retain(|contact| {
+                    restriction_matches_contact(restriction.as_ref(), &contact.contact)
+                });
+                sort_contacts(&mut rows, sort_orders);
+                return rows.into_iter().map(|contact| contact.id).collect();
+            }
+            if *folder_id == TODO_SEARCH_FOLDER_ID {
+                let mut message_rows = snapshot.todo_search_messages();
+                message_rows.retain(|message| {
+                    restriction_matches_email(restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut message_rows, sort_orders);
+                let mut rows = snapshot.todo_search_results();
+                rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
+                sort_tasks(&mut rows, sort_orders);
+                return message_rows
+                    .into_iter()
+                    .map(|message| message.id)
+                    .chain(rows.into_iter().map(|task| task.id))
+                    .collect();
+            }
+            if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
+                let mut rows = snapshot.tracked_mail_processing_messages();
+                rows.retain(|message| {
+                    restriction_matches_email(restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut rows, sort_orders);
+                return rows.into_iter().map(|message| message.id).collect();
+            }
+            if *folder_id == REMINDERS_FOLDER_ID {
+                let mut event_rows = snapshot.reminder_events();
+                event_rows
+                    .retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
+                sort_events(&mut event_rows, sort_orders);
+                let mut task_rows = snapshot.reminder_tasks();
+                task_rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
+                sort_tasks(&mut task_rows, sort_orders);
+                return event_rows
+                    .into_iter()
+                    .map(|event| event.id)
+                    .chain(task_rows.into_iter().map(|task| task.id))
+                    .collect();
+            }
+            if *folder_id == JOURNAL_FOLDER_ID {
+                let mut rows = snapshot.journal_entries_for_folder(*folder_id);
+                rows.retain(|entry| {
+                    restriction_matches_journal_entry(restriction.as_ref(), &entry.entry)
+                });
+                sort_journal_entries(&mut rows, sort_orders);
+                return rows.into_iter().map(|entry| entry.id).collect();
+            }
             let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
             rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
             sort_emails(&mut rows, sort_orders);
@@ -1732,6 +2230,7 @@ fn special_folder_type(folder_id: u64) -> u32 {
         ROOT_FOLDER_ID => FOLDER_ROOT,
         SEARCH_FOLDER_ID
         | CONTACTS_SEARCH_FOLDER_ID
+        | REMINDERS_FOLDER_ID
         | TRACKED_MAIL_PROCESSING_FOLDER_ID
         | TODO_SEARCH_FOLDER_ID => FOLDER_SEARCH,
         _ => FOLDER_GENERIC,
@@ -1857,6 +2356,7 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpe_storage::SearchFolderDefinition;
 
     #[test]
     fn special_folder_rows_use_global_counters_for_change_xids() {
@@ -1935,12 +2435,90 @@ mod tests {
             FOLDER_GENERIC
         );
 
-        let search_row =
-            serialize_special_folder_row(SEARCH_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
-        assert_eq!(
-            u32::from_le_bytes(search_row.try_into().unwrap()),
-            FOLDER_SEARCH
+        for folder_id in [
+            SEARCH_FOLDER_ID,
+            CONTACTS_SEARCH_FOLDER_ID,
+            REMINDERS_FOLDER_ID,
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            TODO_SEARCH_FOLDER_ID,
+        ] {
+            let search_row =
+                serialize_special_folder_row(folder_id, &[], &[PID_TAG_FOLDER_TYPE], None);
+            assert_eq!(
+                u32::from_le_bytes(search_row.try_into().unwrap()),
+                FOLDER_SEARCH
+            );
+        }
+    }
+
+    #[test]
+    fn common_views_associated_contents_project_search_folder_definitions() {
+        let definition_id = Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            definition_id,
+            crate::mapi::identity::mapi_store_id(123),
         );
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::nil(),
+            role: "reminders".to_string(),
+            display_name: "Reminders".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "mixed".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: true,
+        }]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: vec![
+                PID_TAG_MID,
+                PID_TAG_ASSOCIATED,
+                PID_TAG_MESSAGE_CLASS_W,
+                PID_TAG_SEARCH_FOLDER_DEFINITION,
+            ],
+            sort_orders: Vec::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: 0x15,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 1, 0],
+        };
+
+        assert_eq!(
+            associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
+            1
+        );
+        let response = rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
+
+        assert_eq!(response[0], 0x15);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+        let mut message_class = Vec::new();
+        for code_unit in "IPM.Microsoft.WunderBar.SFInfo".encode_utf16() {
+            message_class.extend_from_slice(&code_unit.to_le_bytes());
+        }
+        assert!(response
+            .windows(message_class.len())
+            .any(|window| window == message_class.as_slice()));
     }
 
     #[test]
@@ -2213,6 +2791,20 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
     row
 }
 
+pub(in crate::mapi) fn serialize_search_folder_definition_row(
+    message: &MapiSearchFolderDefinitionMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match search_folder_definition_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
 pub(in crate::mapi) fn serialize_contact_row(
     contact: &AccessibleContact,
     item_id: u64,
@@ -2254,6 +2846,141 @@ pub(in crate::mapi) fn serialize_task_row(
     let mut row = Vec::new();
     for column in columns {
         match task_property_value(task, item_id, folder_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_reminder_event_row(
+    event: &crate::mapi_store::MapiEvent,
+    reminder: Option<&lpe_storage::ClientReminder>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match event_property_value_with_reminder(
+            &event.event,
+            event.id,
+            REMINDERS_FOLDER_ID,
+            *column,
+            reminder,
+        ) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_reminder_task_row(
+    task: &crate::mapi_store::MapiTask,
+    reminder: Option<&lpe_storage::ClientReminder>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match task_property_value_with_reminder(
+            &task.task,
+            task.id,
+            REMINDERS_FOLDER_ID,
+            *column,
+            reminder,
+        ) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_pending_note_row(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let note = note_input_from_mapi(
+        principal.account_id,
+        None,
+        &default_note_for_mapping(),
+        properties,
+    );
+    let item_id = properties
+        .get(&PID_TAG_MID)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or_default();
+    let note = ClientNote {
+        id: Uuid::nil(),
+        title: note.title,
+        body_text: note.body_text,
+        color: note.color,
+        categories_json: note.categories_json,
+        created_at: "1970-01-01T00:00:00Z".to_string(),
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    };
+    serialize_note_row(&note, item_id, NOTES_FOLDER_ID, columns)
+}
+
+pub(in crate::mapi) fn serialize_pending_journal_entry_row(
+    principal: &AccountPrincipal,
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let entry = journal_entry_input_from_mapi(
+        principal.account_id,
+        None,
+        &default_journal_entry_for_mapping(),
+        properties,
+    );
+    let item_id = properties
+        .get(&PID_TAG_MID)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or_default();
+    let entry = JournalEntry {
+        id: Uuid::nil(),
+        subject: entry.subject,
+        body_text: entry.body_text,
+        entry_type: entry.entry_type,
+        message_class: entry.message_class,
+        starts_at: entry.starts_at,
+        ends_at: entry.ends_at,
+        occurred_at: entry.occurred_at,
+        companies_json: entry.companies_json,
+        contacts_json: entry.contacts_json,
+        created_at: "1970-01-01T00:00:00Z".to_string(),
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    };
+    serialize_journal_entry_row(&entry, item_id, JOURNAL_FOLDER_ID, columns)
+}
+
+pub(in crate::mapi) fn serialize_note_row(
+    note: &ClientNote,
+    item_id: u64,
+    folder_id: u64,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match note_property_value(note, item_id, folder_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_journal_entry_row(
+    entry: &JournalEntry,
+    item_id: u64,
+    folder_id: u64,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match journal_entry_property_value(entry, item_id, folder_id, *column) {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }
@@ -2493,6 +3220,14 @@ pub(in crate::mapi) fn task_size(task: &ClientTask) -> i64 {
         .len()
         .saturating_add(task.description.len())
         .min(i64::MAX as usize) as i64
+}
+
+pub(in crate::mapi) fn journal_entry_start_sort_key(entry: &JournalEntry) -> &str {
+    entry
+        .starts_at
+        .as_deref()
+        .or(entry.occurred_at.as_deref())
+        .unwrap_or(&entry.updated_at)
 }
 
 pub(in crate::mapi) fn event_start_sort_key(event: &AccessibleEvent) -> String {

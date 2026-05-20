@@ -3,9 +3,9 @@ use lpe_mail_auth::AccountAuthStore;
 use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, ActiveSyncDeviceState, ActiveSyncItemState,
     ActiveSyncSyncState, AuditEntryInput, CanonicalChangeListener, ClientContact, ClientEvent,
-    JmapEmail, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapUploadBlob,
-    MailboxAccountAccess, SavedDraftMessage, Storage, SubmitMessageInput, SubmittedMessage,
-    UpsertClientContactInput, UpsertClientEventInput,
+    JmapEmail, JmapEmailFollowupUpdate, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapUploadBlob, MailboxAccountAccess, SavedDraftMessage, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
 };
 use std::{future::Future, pin::Pin};
 use uuid::Uuid;
@@ -125,6 +125,13 @@ pub trait ActiveSyncStore: AccountAuthStore {
         message_id: Uuid,
         unread: Option<bool>,
         flagged: Option<bool>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+    fn update_jmap_email_followup_flags<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapEmail>;
     fn fetch_activesync_message_attachments<'a>(
@@ -444,6 +451,19 @@ impl ActiveSyncStore for Storage {
     ) -> StoreFuture<'a, JmapEmail> {
         Box::pin(async move {
             self.update_jmap_email_flags(account_id, message_id, unread, flagged, audit)
+                .await
+        })
+    }
+
+    fn update_jmap_email_followup_flags<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: JmapEmailFollowupUpdate,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.update_jmap_email_followup_flags(account_id, message_id, update, audit)
                 .await
         })
     }

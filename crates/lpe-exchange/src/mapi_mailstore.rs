@@ -87,6 +87,27 @@ pub(crate) struct MessageAttachmentSyncFacts {
     pub(crate) attachments: Vec<AttachmentSyncFact>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SpecialMessageSyncFact {
+    pub(crate) folder_id: u64,
+    pub(crate) item_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) subject: String,
+    pub(crate) body_text: String,
+    pub(crate) message_class: String,
+    pub(crate) updated_at: String,
+    pub(crate) message_size: i64,
+    pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SpecialMessagePropertyValue {
+    I32(i32),
+    String(String),
+    MultiString(Vec<String>),
+    Time(String),
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HierarchyContentCountOmissionCandidate {
     pub(crate) sync_root_folder_id: u64,
@@ -258,6 +279,28 @@ pub(crate) fn sync_state_token_with_attachments(
     )
 }
 
+pub(crate) fn sync_state_token_with_special_objects(
+    sync_type: u8,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    special_objects: &[SpecialMessageSyncFact],
+) -> Vec<u8> {
+    let mut object_ids = sync_state_object_ids(sync_type, folder_id, mailboxes, emails);
+    let mut change_numbers =
+        sync_state_change_numbers(sync_type, folder_id, mailboxes, emails, attachment_facts);
+    if sync_type == SYNC_TYPE_CONTENTS {
+        object_ids.extend(special_objects.iter().map(|object| object.item_id));
+        change_numbers.extend(
+            special_objects
+                .iter()
+                .map(|object| change_number_for_store_id(object.item_id)),
+        );
+    }
+    final_sync_state_stream(sync_type, &object_ids, &change_numbers)
+}
+
 #[cfg(test)]
 pub(crate) fn sync_manifest_buffer_with_attachments(
     sync_type: u8,
@@ -292,7 +335,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, dead_code)]
 pub(crate) fn sync_manifest_buffer_with_final_state(
     sync_type: u8,
     sync_flags: u16,
@@ -307,6 +350,51 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     state_mailboxes: &[JmapMailbox],
     state_emails: &[JmapEmail],
     state_attachment_facts: &[MessageAttachmentSyncFacts],
+    aggregate_emails: &[JmapEmail],
+    aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
+    _final_change_sequence: u64,
+    hierarchy_count_experiment_requested: bool,
+) -> Vec<u8> {
+    sync_manifest_buffer_with_special_objects_and_final_state(
+        sync_type,
+        sync_flags,
+        sync_extra_flags,
+        sync_property_tags,
+        folder_id,
+        mailboxes,
+        emails,
+        attachment_facts,
+        &[],
+        deleted_message_ids,
+        parent_context_mailboxes,
+        state_mailboxes,
+        state_emails,
+        state_attachment_facts,
+        &[],
+        aggregate_emails,
+        aggregate_attachment_facts,
+        _final_change_sequence,
+        hierarchy_count_experiment_requested,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
+    sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    sync_property_tags: &[u32],
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    attachment_facts: &[MessageAttachmentSyncFacts],
+    special_objects: &[SpecialMessageSyncFact],
+    deleted_message_ids: &[u64],
+    parent_context_mailboxes: &[JmapMailbox],
+    state_mailboxes: &[JmapMailbox],
+    state_emails: &[JmapEmail],
+    state_attachment_facts: &[MessageAttachmentSyncFacts],
+    state_special_objects: &[SpecialMessageSyncFact],
     aggregate_emails: &[JmapEmail],
     aggregate_attachment_facts: &[MessageAttachmentSyncFacts],
     _final_change_sequence: u64,
@@ -566,6 +654,91 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         }
     }
 
+    let mut special_objects = special_objects.iter().collect::<Vec<_>>();
+    special_objects.sort_by(|left, right| {
+        left.folder_id
+            .cmp(&right.folder_id)
+            .then(left.subject.cmp(&right.subject))
+            .then(left.canonical_id.cmp(&right.canonical_id))
+    });
+    for object in special_objects {
+        let change_number = change_number_for_store_id(object.item_id);
+        write_u32(&mut buffer, INCR_SYNC_CHG);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_SOURCE_KEY,
+            &source_key_for_store_id(object.item_id),
+        );
+        write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
+        write_i64(
+            &mut buffer,
+            filetime_from_rfc3339_utc(&object.updated_at) as i64,
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_CHANGE_KEY,
+            &change_key_for_change_number(change_number),
+        );
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            &predecessor_change_list(change_number),
+        );
+        write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, false);
+        if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
+            write_u32(&mut buffer, PID_TAG_MID);
+            write_i64(&mut buffer, object.item_id as i64);
+        }
+        if sync_extra_flags & 0x0000_0002 != 0 {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_MESSAGE_SIZE,
+                object.message_size as i32,
+            );
+        }
+        if sync_extra_flags & 0x0000_0004 != 0 {
+            write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
+            write_i64(&mut buffer, change_number as i64);
+        }
+        write_u32(&mut buffer, INCR_SYNC_MESSAGE);
+        write_binary_property(
+            &mut buffer,
+            PID_TAG_PARENT_SOURCE_KEY,
+            &source_key_for_store_id(object.folder_id),
+        );
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_FLAGS,
+        ) {
+            write_i32_property(&mut buffer, PID_TAG_MESSAGE_FLAGS, MSGFLAG_READ as i32);
+        }
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_SUBJECT_W) {
+            write_utf16_property(&mut buffer, PID_TAG_SUBJECT_W, &object.subject);
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_NORMALIZED_SUBJECT_A,
+        ) {
+            write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
+        }
+        write_utf16_property(&mut buffer, 0x001A_001F, &object.message_class);
+        write_utf16_property(&mut buffer, 0x1000_001F, &object.body_text);
+        write_i32_property(
+            &mut buffer,
+            PID_TAG_MESSAGE_SIZE,
+            object.message_size as i32,
+        );
+        for (tag, value) in &object.named_properties {
+            write_special_message_property(&mut buffer, *tag, value);
+        }
+        buffer.extend_from_slice(&0u16.to_le_bytes());
+        buffer.extend_from_slice(&0u16.to_le_bytes());
+    }
+
     if !deleted_message_ids.is_empty() {
         write_u32(&mut buffer, INCR_SYNC_DEL);
         write_binary_property(
@@ -605,12 +778,13 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
         }
     }
 
-    buffer.extend_from_slice(&sync_state_token_with_attachments(
+    buffer.extend_from_slice(&sync_state_token_with_special_objects(
         sync_type,
         folder_id,
         state_mailboxes,
         state_emails,
         state_attachment_facts,
+        state_special_objects,
     ));
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer
@@ -1974,10 +2148,11 @@ pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
 }
 
 pub(crate) fn canonical_flag_status(email: &JmapEmail) -> u32 {
-    if email.flagged {
-        FOLLOWUP_FLAGGED
-    } else {
-        0
+    match email.followup_flag_status.as_str() {
+        "complete" => 1,
+        "flagged" => FOLLOWUP_FLAGGED,
+        _ if email.flagged => FOLLOWUP_FLAGGED,
+        _ => 0,
     }
 }
 
@@ -2102,6 +2277,40 @@ fn write_string8_property(buffer: &mut Vec<u8>, property_tag: u32, value: &str) 
     buffer.extend_from_slice(&bytes);
 }
 
+fn write_multi_string_property(buffer: &mut Vec<u8>, property_tag: u32, values: &[String]) {
+    write_u32(buffer, property_tag);
+    write_u32(buffer, values.len().min(u32::MAX as usize) as u32);
+    for value in values.iter().take(u32::MAX as usize) {
+        let mut bytes = value
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        bytes.extend_from_slice(&0u16.to_le_bytes());
+        write_u32(buffer, bytes.len().min(u32::MAX as usize) as u32);
+        buffer.extend_from_slice(&bytes);
+    }
+}
+
+fn write_special_message_property(
+    buffer: &mut Vec<u8>,
+    property_tag: u32,
+    value: &SpecialMessagePropertyValue,
+) {
+    match value {
+        SpecialMessagePropertyValue::I32(value) => write_i32_property(buffer, property_tag, *value),
+        SpecialMessagePropertyValue::String(value) => {
+            write_utf16_property(buffer, property_tag, value)
+        }
+        SpecialMessagePropertyValue::MultiString(values) => {
+            write_multi_string_property(buffer, property_tag, values)
+        }
+        SpecialMessagePropertyValue::Time(value) => {
+            write_u32(buffer, property_tag);
+            write_i64(buffer, filetime_from_rfc3339_utc(value) as i64);
+        }
+    }
+}
+
 fn replguid_idset_from_object_ids(ids: &[u64]) -> Vec<u8> {
     let counters = ids
         .iter()
@@ -2204,6 +2413,18 @@ mod tests {
             modseq: 43,
             unread: false,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             draft: false,
         });
         let with_archive = canonical_message_change_number(&email);
@@ -2677,6 +2898,52 @@ mod tests {
     }
 
     #[test]
+    fn content_sync_manifest_includes_special_folder_message_objects() {
+        let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+        let item_id = crate::mapi::identity::mapi_store_id(99);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let special = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::NOTES_FOLDER_ID,
+            item_id,
+            canonical_id,
+            subject: "Sticky".to_string(),
+            body_text: "Remember this".to_string(),
+            message_class: "IPM.StickyNote".to_string(),
+            updated_at: "2026-05-19T10:00:00Z".to_string(),
+            message_size: 19,
+            named_properties: vec![(0x8B00_0003, SpecialMessagePropertyValue::I32(3))],
+        };
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            SYNC_TYPE_CONTENTS,
+            0,
+            SYNC_EXTRA_FLAG_EID,
+            &[],
+            crate::mapi::identity::NOTES_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            &[special.clone()],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[special],
+            &[],
+            &[],
+            1,
+            false,
+        );
+
+        assert!(contains_bytes(&buffer, &INCR_SYNC_CHG.to_le_bytes()));
+        assert!(contains_bytes(&buffer, &INCR_SYNC_MESSAGE.to_le_bytes()));
+        assert!(contains_bytes(&buffer, &item_id.to_le_bytes()));
+        assert!(contains_bytes(&buffer, &utf16z("IPM.StickyNote")));
+        assert!(contains_bytes(&buffer, &utf16z("Remember this")));
+        assert!(contains_bytes(&buffer, &0x8B00_0003u32.to_le_bytes()));
+    }
+
+    #[test]
     fn hierarchy_content_count_omission_candidate_requires_positive_omitted_count_row() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
@@ -2726,6 +2993,13 @@ mod tests {
             &[email],
         )
         .is_none());
+    }
+
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        needle.is_empty()
+            || haystack
+                .windows(needle.len())
+                .any(|window| window == needle)
     }
 
     #[test]
@@ -2981,6 +3255,18 @@ mod tests {
                 modseq: 42,
                 unread: true,
                 flagged: false,
+                followup_flag_status: "none".to_string(),
+                followup_icon: 0,
+                todo_item_flags: 0,
+                followup_request: String::new(),
+                followup_start_at: None,
+                followup_due_at: None,
+                followup_completed_at: None,
+                reminder_set: false,
+                reminder_at: None,
+                reminder_dismissed_at: None,
+                swapped_todo_store_id: None,
+                swapped_todo_data: None,
                 draft: false,
             }],
             received_at: "2026-05-06T12:00:00Z".to_string(),
@@ -3003,6 +3289,18 @@ mod tests {
             body_html_sanitized: None,
             unread: true,
             flagged: false,
+            followup_flag_status: "none".to_string(),
+            followup_icon: 0,
+            todo_item_flags: 0,
+            followup_request: String::new(),
+            followup_start_at: None,
+            followup_due_at: None,
+            followup_completed_at: None,
+            reminder_set: false,
+            reminder_at: None,
+            reminder_dismissed_at: None,
+            swapped_todo_store_id: None,
+            swapped_todo_data: None,
             has_attachments: false,
             size_octets: 42,
             internet_message_id: Some("<message@example.test>".to_string()),

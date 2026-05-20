@@ -525,14 +525,65 @@ impl Storage {
         flagged: Option<bool>,
         audit: AuditEntryInput,
     ) -> Result<JmapEmail> {
+        self.update_jmap_email_followup_flags(
+            account_id,
+            message_id,
+            crate::JmapEmailFollowupUpdate {
+                unread,
+                flagged,
+                followup_flag_status: flagged.map(|flagged| {
+                    if flagged {
+                        "flagged".to_string()
+                    } else {
+                        "none".to_string()
+                    }
+                }),
+                ..Default::default()
+            },
+            audit,
+        )
+        .await
+    }
+
+    pub async fn update_jmap_email_followup_flags(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        update: crate::JmapEmailFollowupUpdate,
+        audit: AuditEntryInput,
+    ) -> Result<JmapEmail> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
-        if unread.is_none() && flagged.is_none() {
+        if update.unread.is_none()
+            && update.flagged.is_none()
+            && update.followup_flag_status.is_none()
+            && update.followup_icon.is_none()
+            && update.todo_item_flags.is_none()
+            && update.followup_request.is_none()
+            && update.followup_start_at.is_none()
+            && update.followup_due_at.is_none()
+            && update.followup_completed_at.is_none()
+            && update.reminder_set.is_none()
+            && update.reminder_at.is_none()
+            && update.reminder_dismissed_at.is_none()
+            && update.swapped_todo_store_id.is_none()
+            && update.swapped_todo_data.is_none()
+        {
             return self
                 .fetch_jmap_emails(account_id, &[message_id])
                 .await?
                 .into_iter()
                 .next()
                 .ok_or_else(|| anyhow::anyhow!("message not found"));
+        }
+        if let Some(status) = update.followup_flag_status.as_deref() {
+            if !matches!(status, "none" | "flagged" | "complete") {
+                bail!("invalid follow-up flag status");
+            }
+        }
+        if update.followup_icon.is_some_and(|value| value < 0)
+            || update.todo_item_flags.is_some_and(|value| value < 0)
+        {
+            bail!("invalid follow-up flag value");
         }
 
         let mut tx = self.pool.begin().await?;
@@ -543,8 +594,63 @@ impl Storage {
             r#"
             UPDATE mailbox_messages
             SET is_seen = CASE WHEN $4::bool IS NULL THEN is_seen ELSE NOT $4 END,
-                is_flagged = COALESCE($5, is_flagged),
-                modseq = $6,
+                is_flagged = CASE
+                    WHEN $5::bool IS NOT NULL THEN $5
+                    WHEN $6::text IS NULL THEN is_flagged
+                    ELSE $6 IN ('flagged', 'complete')
+                END,
+                followup_flag_status = COALESCE($6, followup_flag_status),
+                followup_icon = CASE
+                    WHEN $6 = 'none' THEN 0
+                    WHEN $7::integer IS NOT NULL THEN $7
+                    WHEN $6 = 'flagged' AND followup_icon = 0 THEN 6
+                    ELSE followup_icon
+                END,
+                todo_item_flags = CASE
+                    WHEN $6 = 'none' THEN 0
+                    WHEN $8::integer IS NOT NULL THEN $8
+                    WHEN $6 IN ('flagged', 'complete') AND todo_item_flags = 0 THEN 8
+                    ELSE todo_item_flags
+                END,
+                followup_request = COALESCE($9, followup_request),
+                followup_start_at = CASE
+                    WHEN $6 = 'none' THEN NULL
+                    WHEN $10::text = '' THEN NULL
+                    WHEN $10::text IS NOT NULL THEN $10::timestamptz
+                    ELSE followup_start_at
+                END,
+                followup_due_at = CASE
+                    WHEN $6 = 'none' THEN NULL
+                    WHEN $11::text = '' THEN NULL
+                    WHEN $11::text IS NOT NULL THEN $11::timestamptz
+                    ELSE followup_due_at
+                END,
+                followup_completed_at = CASE
+                    WHEN $6 IN ('none', 'flagged') THEN NULL
+                    WHEN $12::text IS NOT NULL THEN $12::timestamptz
+                    WHEN $6 = 'complete' THEN COALESCE(followup_completed_at, NOW())
+                    ELSE followup_completed_at
+                END,
+                reminder_set = CASE
+                    WHEN $6 = 'none' THEN FALSE
+                    WHEN $13::bool IS NOT NULL THEN $13
+                    ELSE reminder_set
+                END,
+                reminder_at = CASE
+                    WHEN $6 = 'none' THEN NULL
+                    WHEN $14::text = '' THEN NULL
+                    WHEN $14::text IS NOT NULL THEN $14::timestamptz
+                    ELSE reminder_at
+                END,
+                reminder_dismissed_at = CASE
+                    WHEN $6 = 'none' THEN NULL
+                    WHEN $15::text = '' THEN NULL
+                    WHEN $15::text IS NOT NULL THEN $15::timestamptz
+                    ELSE reminder_dismissed_at
+                END,
+                swapped_todo_store_id = COALESCE($16, swapped_todo_store_id),
+                swapped_todo_data = COALESCE($17, swapped_todo_data),
+                modseq = $18,
                 updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
               AND visibility = 'visible'
@@ -554,8 +660,20 @@ impl Storage {
         .bind(&tenant_id)
         .bind(account_id)
         .bind(message_id)
-        .bind(unread)
-        .bind(flagged)
+        .bind(update.unread)
+        .bind(update.flagged)
+        .bind(update.followup_flag_status)
+        .bind(update.followup_icon)
+        .bind(update.todo_item_flags)
+        .bind(update.followup_request)
+        .bind(update.followup_start_at)
+        .bind(update.followup_due_at)
+        .bind(update.followup_completed_at)
+        .bind(update.reminder_set)
+        .bind(update.reminder_at)
+        .bind(update.reminder_dismissed_at)
+        .bind(update.swapped_todo_store_id)
+        .bind(update.swapped_todo_data)
         .bind(modseq)
         .fetch_all(&mut *tx)
         .await?;
