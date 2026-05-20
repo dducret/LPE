@@ -129,17 +129,25 @@ where
     S: ExchangeStore,
 {
     if plan.requires_full_snapshot {
+        log_mapi_store_load_step(account_id, plan, "full snapshot", 0);
         return store
             .load_mapi_mail_store(account_id, full_message_limit)
             .await
             .context("load full MAPI mail store snapshot");
     }
 
+    log_mapi_store_load_step(account_id, plan, "ensure system mailboxes", 0);
     let mailboxes = store
         .ensure_jmap_system_mailboxes(account_id)
         .await
         .context("ensure MAPI system mailboxes")?;
     let mailbox_requests = mapi_identity_requests_for_mailboxes(&mailboxes);
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "allocate mailbox identities",
+        mailbox_requests.len(),
+    );
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &mailbox_requests)
         .await
@@ -148,6 +156,12 @@ where
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
 
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "fetch requested identities",
+        plan.object_ids.len(),
+    );
     let identities = store
         .fetch_mapi_identities_by_object_ids(account_id, &plan.object_ids)
         .await
@@ -158,10 +172,11 @@ where
 
     let mut content_windows = Vec::new();
     let mut content_message_ids = Vec::new();
-    for query in &plan.content_queries {
+    for (query_index, query) in plan.content_queries.iter().enumerate() {
         let Some(mailbox_id) = mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id) else {
             continue;
         };
+        log_mapi_store_load_step(account_id, plan, "query content table ids", query_index);
         let result = store
             .query_mapi_content_table_ids(
                 account_id,
@@ -207,6 +222,12 @@ where
             reserved_global_counter: None,
         })
         .collect::<Vec<_>>();
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "allocate message identities",
+        message_identity_requests.len(),
+    );
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &message_identity_requests)
         .await
@@ -214,12 +235,19 @@ where
     {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "fetch content messages",
+        message_ids.len(),
+    );
     let emails = store
         .fetch_jmap_emails(account_id, &message_ids)
         .await
         .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?;
     let mut attachments = Vec::with_capacity(emails.len());
-    for email in &emails {
+    for (email_index, email) in emails.iter().enumerate() {
+        log_mapi_store_load_step(account_id, plan, "fetch message attachments", email_index);
         attachments.push((
             email.id,
             store
@@ -229,22 +257,27 @@ where
         ));
     }
 
+    log_mapi_store_load_step(account_id, plan, "fetch contact collections", 0);
     let contact_collections = store
         .fetch_accessible_contact_collections(account_id)
         .await
         .context("fetch MAPI contact collections")?;
+    log_mapi_store_load_step(account_id, plan, "fetch calendar collections", 0);
     let calendar_collections = store
         .fetch_accessible_calendar_collections(account_id)
         .await
         .context("fetch MAPI calendar collections")?;
+    log_mapi_store_load_step(account_id, plan, "fetch task collections", 0);
     let task_collections = store
         .fetch_accessible_task_collections(account_id)
         .await
         .context("fetch MAPI task collections")?;
+    log_mapi_store_load_step(account_id, plan, "fetch search folders", 0);
     let search_folder_definitions = store
         .fetch_search_folders(account_id)
         .await
         .context("fetch MAPI search folders")?;
+    log_mapi_store_load_step(account_id, plan, "fetch reminders", 0);
     let reminders = store
         .query_client_reminders(
             account_id,
@@ -284,6 +317,12 @@ where
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
     let contacts = if snapshot_backed_contents {
+        log_mapi_store_load_step(
+            account_id,
+            plan,
+            "fetch snapshot contacts",
+            contact_collections.len(),
+        );
         let mut contacts = Vec::new();
         for collection in &contact_collections {
             contacts.extend(
@@ -297,12 +336,19 @@ where
         }
         contacts
     } else {
+        log_mapi_store_load_step(account_id, plan, "fetch contacts by id", contact_ids.len());
         store
             .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
             .await
             .with_context(|| format!("fetch {} MAPI contacts by id", contact_ids.len()))?
     };
     let events = if snapshot_backed_contents {
+        log_mapi_store_load_step(
+            account_id,
+            plan,
+            "fetch snapshot events",
+            calendar_collections.len(),
+        );
         let mut events = Vec::new();
         for collection in &calendar_collections {
             events.extend(
@@ -316,12 +362,19 @@ where
         }
         events
     } else {
+        log_mapi_store_load_step(account_id, plan, "fetch events by id", event_ids.len());
         store
             .fetch_accessible_events_by_ids(account_id, &event_ids)
             .await
             .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
     };
     let tasks = if snapshot_backed_contents {
+        log_mapi_store_load_step(
+            account_id,
+            plan,
+            "fetch snapshot tasks",
+            task_collections.len(),
+        );
         let mut tasks = Vec::new();
         for collection in &task_collections {
             tasks.extend(
@@ -333,28 +386,38 @@ where
         }
         tasks
     } else {
+        log_mapi_store_load_step(account_id, plan, "fetch tasks by id", task_ids.len());
         store
             .fetch_accessible_tasks_by_ids(account_id, &task_ids)
             .await
             .with_context(|| format!("fetch {} MAPI tasks by id", task_ids.len()))?
     };
     let notes = if snapshot_backed_contents {
+        log_mapi_store_load_step(account_id, plan, "fetch snapshot notes", 0);
         store
             .fetch_mapi_notes(account_id)
             .await
             .context("fetch MAPI notes")?
     } else {
+        log_mapi_store_load_step(account_id, plan, "fetch notes by id", note_ids.len());
         store
             .fetch_mapi_notes_by_ids(account_id, &note_ids)
             .await
             .with_context(|| format!("fetch {} MAPI notes by id", note_ids.len()))?
     };
     let journal_entries = if snapshot_backed_contents {
+        log_mapi_store_load_step(account_id, plan, "fetch snapshot journal entries", 0);
         store
             .fetch_mapi_journal_entries(account_id)
             .await
             .context("fetch MAPI journal entries")?
     } else {
+        log_mapi_store_load_step(
+            account_id,
+            plan,
+            "fetch journal entries by id",
+            journal_entry_ids.len(),
+        );
         store
             .fetch_mapi_journal_entries_by_ids(account_id, &journal_entry_ids)
             .await
@@ -393,6 +456,12 @@ where
             reserved_global_counter: None,
         }))
         .collect::<Vec<_>>();
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "allocate non-message identities",
+        identity_requests.len(),
+    );
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
         .await
@@ -404,11 +473,18 @@ where
         .iter()
         .map(|mailbox| mailbox.id)
         .collect::<Vec<_>>();
+    log_mapi_store_load_step(
+        account_id,
+        plan,
+        "fetch folder permissions",
+        mailbox_ids.len(),
+    );
     let folder_permissions = store
         .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
         .await
         .context("fetch MAPI folder permissions")?;
 
+    log_mapi_store_load_step(account_id, plan, "complete", 0);
     Ok(MapiMailStoreSnapshot::new(
         mailboxes,
         emails,
@@ -425,6 +501,26 @@ where
     .with_search_folder_definitions(search_folder_definitions)
     .with_reminders(reminders)
     .with_content_windows(content_windows))
+}
+
+fn log_mapi_store_load_step(
+    account_id: Uuid,
+    plan: &MapiAccessPlan,
+    step: &'static str,
+    item_count: usize,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        full_snapshot = plan.requires_full_snapshot,
+        object_id_count = plan.object_ids.len(),
+        content_query_count = plan.content_queries.len(),
+        step = step,
+        item_count = item_count,
+        message = "rca debug mapi execute store load step",
+    );
 }
 
 fn rop_requires_full_snapshot(rop_id: u8) -> bool {

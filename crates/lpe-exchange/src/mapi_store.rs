@@ -135,6 +135,21 @@ pub(crate) struct MapiContentTableWindow {
 }
 
 impl MapiMailStoreSnapshot {
+    pub(crate) fn empty() -> Self {
+        Self::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
     pub(crate) fn new(
         mailboxes: Vec<JmapMailbox>,
         emails: Vec<JmapEmail>,

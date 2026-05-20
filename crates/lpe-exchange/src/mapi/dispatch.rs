@@ -132,6 +132,59 @@ where
         );
     }
 
+    if rop_buffer_is_store_independent_logon(&execute.rop_buffer) {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mailboxes = snapshot.mailboxes();
+        let emails = snapshot.emails();
+        log_execute_dispatch_start_debug(
+            endpoint,
+            principal,
+            headers,
+            request_id,
+            mailboxes.len(),
+            emails.len(),
+        );
+        let rop_buffer = execute_rops(
+            store,
+            principal,
+            &mut session,
+            &mailboxes,
+            &emails,
+            &snapshot,
+            validator,
+            &execute.rop_buffer,
+        )
+        .await;
+        let post_hierarchy_observation =
+            if endpoint == MapiEndpoint::Emsmdb && hierarchy_completed_before_execute {
+                session.record_execute_after_hierarchy_completion(&request_debug.ids)
+            } else {
+                PostHierarchyExecuteObservation::default()
+            };
+        log_execute_rop_debug(
+            endpoint,
+            principal,
+            headers,
+            &session_id,
+            request_id,
+            &request_debug,
+            &execute.rop_buffer,
+            &rop_buffer,
+            &session,
+            post_hierarchy_observation,
+        );
+        let response_body = execute_success_body(rop_buffer, Vec::new());
+        cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
+        store_session(session_id.clone(), session);
+        return mapi_response_with_cookies(
+            "Execute",
+            request_id,
+            0,
+            response_body,
+            session_context_cookies(endpoint, &session_id, false),
+        );
+    }
+
     let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
     let snapshot =
@@ -212,6 +265,24 @@ pub(in crate::mapi) fn parse_execute_request(body: &[u8]) -> Result<ExecuteReque
     let auxiliary_buffer_size = cursor.read_u32()? as usize;
     let _auxiliary_buffer = cursor.read_bytes(auxiliary_buffer_size)?;
     Ok(ExecuteRequest { rop_buffer })
+}
+
+fn rop_buffer_is_store_independent_logon(rop_buffer: &[u8]) -> bool {
+    let Some((requests, _handle_table)) = split_rop_buffer(rop_buffer) else {
+        return false;
+    };
+    let mut cursor = Cursor::new(requests);
+    let mut saw_request = false;
+    while cursor.remaining() > 0 {
+        let Ok(request) = read_rop_request(&mut cursor) else {
+            return false;
+        };
+        if !matches!(RopId::from_u8(request.rop_id), Some(RopId::Logon)) {
+            return false;
+        }
+        saw_request = true;
+    }
+    saw_request
 }
 
 fn execute_success_rop_buffer(body: &[u8]) -> Option<&[u8]> {
