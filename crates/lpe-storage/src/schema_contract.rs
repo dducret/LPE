@@ -114,6 +114,7 @@ fn notes_journal_and_reminders_stay_canonical() {
     assert!(
         NOTES_JOURNAL_STORAGE.contains("FROM calendar_events")
             && NOTES_JOURNAL_STORAGE.contains("FROM tasks")
+            && NOTES_JOURNAL_STORAGE.contains(") mail_reminders")
             && NOTES_JOURNAL_STORAGE.contains("UNION ALL")
             && !SCHEMA.contains("CREATE TABLE reminders"),
         "reminders must be a computed query over canonical reminder-bearing objects, not a table"
@@ -332,6 +333,7 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         "UNIQUE (tenant_id, cursor, object_kind, object_id)",
         "CHECK (jsonb_typeof(summary_json) = 'object')",
         "CHECK (array_position(affected_principal_ids, NULL) IS NULL)",
+        "object_kind = 'mailbox'\n            AND account_id IS NOT NULL\n            AND mailbox_id IS NOT NULL",
         "object_kind = 'mailbox_message'",
         "summary_json ? 'messageId'",
         "summary_json ? 'threadId'",

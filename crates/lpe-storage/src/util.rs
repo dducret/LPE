@@ -228,7 +228,7 @@ pub(crate) fn normalize_gal_visibility(value: &str) -> Result<String> {
 
 pub(crate) fn normalize_directory_kind(value: &str) -> Result<String> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "person" | "" => Ok("person".to_string()),
+        "person" | "user" | "" => Ok("person".to_string()),
         "room" => Ok("room".to_string()),
         "equipment" => Ok("equipment".to_string()),
         other => bail!("unsupported directory kind: {other}"),

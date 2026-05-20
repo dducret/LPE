@@ -466,7 +466,9 @@ impl Storage {
         .bind(account_id)
         .fetch_one(&self.pool)
         .await?;
-        if earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1) {
+        if after_cursor > 0
+            && earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1)
+        {
             return Ok(None);
         }
 
@@ -627,7 +629,9 @@ impl Storage {
         .bind(object_kinds.clone())
         .fetch_one(&self.pool)
         .await?;
-        if earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1) {
+        if after_cursor > 0
+            && earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1)
+        {
             return Ok(None);
         }
 

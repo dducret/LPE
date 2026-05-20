@@ -213,7 +213,7 @@ impl Storage {
         }
         let existed = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT 1
+            SELECT 1::bigint
             FROM notes
             WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             LIMIT 1
@@ -297,7 +297,7 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let exists = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT 1
+            SELECT 1::bigint
             FROM notes
             WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             LIMIT 1
@@ -418,7 +418,7 @@ impl Storage {
         }
         let existed = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT 1
+            SELECT 1::bigint
             FROM journal_entries
             WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             LIMIT 1
@@ -522,7 +522,7 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let exists = sqlx::query_scalar::<_, i64>(
             r#"
-            SELECT 1
+            SELECT 1::bigint
             FROM journal_entries
             WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
             LIMIT 1
@@ -623,36 +623,39 @@ impl Storage {
                   AND reminder_set
                   AND reminder_at IS NOT NULL
                 UNION ALL
-                SELECT DISTINCT ON (mm.message_id)
-                    'mail'::text AS source_type,
-                    mm.message_id AS source_id,
-                    m.normalized_subject AS title,
-                    CASE WHEN mm.followup_due_at IS NULL THEN NULL ELSE to_char(mm.followup_due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS due_at,
-                    to_char(mm.reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,
-                    CASE WHEN mm.reminder_dismissed_at IS NULL THEN NULL ELSE to_char(mm.reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS dismissed_at,
-                    CASE WHEN mm.followup_completed_at IS NULL THEN NULL ELSE to_char(mm.followup_completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS completed_at,
-                    CASE
-                        WHEN mm.followup_flag_status = 'complete' THEN 'completed'
-                        WHEN mm.reminder_dismissed_at IS NOT NULL THEN 'dismissed'
-                        WHEN mm.reminder_at <= NOW() THEN 'due'
-                        ELSE 'pending'
-                    END AS status
-                FROM mailbox_messages mm
-                JOIN messages m
-                  ON m.tenant_id = mm.tenant_id
-                 AND m.id = mm.message_id
-                JOIN mailboxes mb
-                  ON mb.tenant_id = mm.tenant_id
-                 AND mb.account_id = mm.account_id
-                 AND mb.id = mm.mailbox_id
-                WHERE mm.tenant_id = $1
-                  AND mm.account_id = $2
-                  AND mm.visibility = 'visible'
-                  AND NOT mm.is_deleted
-                  AND mm.reminder_set
-                  AND mm.reminder_at IS NOT NULL
-                  AND mb.role NOT IN ('trash', 'junk', 'drafts', 'outbox', 'sync_issues', 'conflicts', 'local_failures', 'server_failures')
-                ORDER BY mm.message_id, mb.sort_order ASC, mb.display_name ASC, mb.id ASC
+                SELECT *
+                FROM (
+                    SELECT DISTINCT ON (mm.message_id)
+                        'mail'::text AS source_type,
+                        mm.message_id AS source_id,
+                        m.normalized_subject AS title,
+                        CASE WHEN mm.followup_due_at IS NULL THEN NULL ELSE to_char(mm.followup_due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS due_at,
+                        to_char(mm.reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,
+                        CASE WHEN mm.reminder_dismissed_at IS NULL THEN NULL ELSE to_char(mm.reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS dismissed_at,
+                        CASE WHEN mm.followup_completed_at IS NULL THEN NULL ELSE to_char(mm.followup_completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS completed_at,
+                        CASE
+                            WHEN mm.followup_flag_status = 'complete' THEN 'completed'
+                            WHEN mm.reminder_dismissed_at IS NOT NULL THEN 'dismissed'
+                            WHEN mm.reminder_at <= NOW() THEN 'due'
+                            ELSE 'pending'
+                        END AS status
+                    FROM mailbox_messages mm
+                    JOIN messages m
+                      ON m.tenant_id = mm.tenant_id
+                     AND m.id = mm.message_id
+                    JOIN mailboxes mb
+                      ON mb.tenant_id = mm.tenant_id
+                     AND mb.account_id = mm.account_id
+                     AND mb.id = mm.mailbox_id
+                    WHERE mm.tenant_id = $1
+                      AND mm.account_id = $2
+                      AND mm.visibility = 'visible'
+                      AND NOT mm.is_deleted
+                      AND mm.reminder_set
+                      AND mm.reminder_at IS NOT NULL
+                      AND mb.role NOT IN ('trash', 'junk', 'drafts', 'outbox', 'sync_issues', 'conflicts', 'local_failures', 'server_failures')
+                    ORDER BY mm.message_id, mb.sort_order ASC, mb.display_name ASC, mb.id ASC
+                ) mail_reminders
             ) reminders
             WHERE $3 OR status IN ('due', 'pending')
             ORDER BY reminder_at ASC, source_type ASC, source_id ASC

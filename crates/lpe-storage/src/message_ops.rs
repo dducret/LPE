@@ -463,7 +463,7 @@ impl Storage {
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         let principals =
             Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
-        let cursor = Self::insert_mail_change_log_in_tx(
+        Self::insert_mail_change_log_in_tx(
             &mut tx,
             &tenant_id,
             Some(account_id),
@@ -481,6 +481,28 @@ impl Storage {
                 "targetMailboxMessageId": target_membership_id,
                 "threadId": thread_id,
                 "imapUid": target_uid,
+                "sourceImapUid": source_imap_uid,
+                "targetImapUid": target_uid
+            }),
+        )
+        .await?;
+        let source_cursor = Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            Some(source_mailbox_id),
+            "mailbox_message",
+            source_membership_id,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "threadId": thread_id,
+                "imapUid": source_imap_uid,
+                "targetMailboxId": target_mailbox_id,
+                "sourceMailboxMessageId": source_membership_id,
+                "targetMailboxMessageId": target_membership_id,
                 "sourceImapUid": source_imap_uid,
                 "targetImapUid": target_uid
             }),
@@ -504,7 +526,7 @@ impl Storage {
         .bind(message_id)
         .bind(source_imap_uid)
         .bind(modseq)
-        .bind(cursor)
+        .bind(source_cursor)
         .execute(&mut *tx)
         .await?;
         Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
