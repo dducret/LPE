@@ -1,4 +1,4 @@
-export type Section = "mail" | "calendar" | "contacts" | "settings";
+export type Section = "mail" | "calendar" | "contacts" | "tasks" | "notes" | "journal" | "reminders" | "settings";
 export type Folder = "focused" | "inbox" | "drafts" | "sent" | "archive" | "junk" | "outbox" | "rss_feeds" | "conversation_history" | "sync_issues" | "conflicts" | "local_failures" | "server_failures";
 export type ContactBookId = "default" | "suggested_contacts" | "quick_contacts" | "im_contact_list";
 export type Mode = "closed" | "new" | "draft" | "reply" | "forward";
@@ -102,6 +102,56 @@ export type TaskItem = {
   completedAt: string | null;
   sortOrder: number;
   updatedAt: string;
+};
+
+export type TaskDraft = {
+  taskListId: string | null;
+  title: string;
+  description: string;
+  status: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  sortOrder: number;
+};
+
+export type NoteItem = {
+  id: string;
+  title: string;
+  bodyText: string;
+  color: string;
+  categoriesJson: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NoteDraft = Omit<NoteItem, "id" | "createdAt" | "updatedAt">;
+
+export type JournalEntryItem = {
+  id: string;
+  subject: string;
+  bodyText: string;
+  entryType: string;
+  messageClass: string;
+  startsAt: string | null;
+  endsAt: string | null;
+  occurredAt: string | null;
+  companiesJson: string;
+  contactsJson: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type JournalEntryDraft = Omit<JournalEntryItem, "id" | "createdAt" | "updatedAt">;
+
+export type ReminderItem = {
+  sourceType: string;
+  sourceId: string;
+  title: string;
+  dueAt: string | null;
+  reminderAt: string;
+  dismissedAt: string | null;
+  completedAt: string | null;
+  status: string;
 };
 
 export type CollaborationRights = {

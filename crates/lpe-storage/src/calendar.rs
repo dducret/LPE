@@ -105,7 +105,7 @@ pub fn parse_calendar_participants_metadata(raw: &str) -> CalendarParticipantsMe
 }
 
 pub fn serialize_calendar_participants_metadata(metadata: &CalendarParticipantsMetadata) -> String {
-    serde_json::to_string(&normalize_calendar_participants_metadata(metadata.clone()).attendees)
+    serde_json::to_string(&normalize_calendar_participants_metadata(metadata.clone()))
         .unwrap_or_else(|_| "[]".to_string())
 }
 
@@ -204,11 +204,11 @@ mod tests {
         });
         let value: Value = serde_json::from_str(&serialized).unwrap();
 
-        assert!(value.is_array());
-        assert_eq!(value[0]["email"], "bob@example.test");
-        assert_eq!(value[0]["common_name"], "Bob");
-        assert_eq!(value[0]["partstat"], "accepted");
-        assert!(!serialized.contains("alice@example.test"));
+        assert_eq!(value["organizer"]["email"], "alice@example.test");
+        assert_eq!(value["organizer"]["common_name"], "Alice");
+        assert_eq!(value["attendees"][0]["email"], "bob@example.test");
+        assert_eq!(value["attendees"][0]["common_name"], "Bob");
+        assert_eq!(value["attendees"][0]["partstat"], "accepted");
     }
 
     #[test]

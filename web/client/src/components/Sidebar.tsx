@@ -38,6 +38,10 @@ export function Sidebar(props: {
     { id: "mail", label: props.copy.sections.mail },
     { id: "calendar", label: props.copy.sections.calendar },
     { id: "contacts", label: props.copy.sections.contacts },
+    { id: "tasks", label: props.copy.sections.tasks },
+    { id: "notes", label: props.copy.sections.notes },
+    { id: "journal", label: props.copy.sections.journal },
+    { id: "reminders", label: props.copy.sections.reminders },
     { id: "settings", label: props.copy.sections.settings }
   ];
 

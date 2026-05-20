@@ -5,6 +5,7 @@ import { MasterPane } from "./components/MasterPane";
 import { MailDetail } from "./components/MailDetail";
 import { EventEditor } from "./components/EventEditor";
 import { ContactEditor } from "./components/ContactEditor";
+import { OutlookObjectEditor } from "./components/OutlookObjectEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
@@ -211,11 +212,19 @@ export function App() {
       ? workspace.filteredEvents.length
       : workspace.section === "contacts"
         ? workspace.filteredContacts.length
-        : (workspace.collaboration?.outgoingContacts.length ?? 0)
-          + (workspace.collaboration?.outgoingCalendars.length ?? 0)
-          + (workspace.collaboration?.outgoingTaskLists.length ?? 0)
-          + (workspace.mailboxDelegation?.outgoingMailboxes.length ?? 0)
-          + (workspace.sieve?.scripts.length ?? 0);
+        : workspace.section === "tasks"
+          ? workspace.filteredTasks.length
+          : workspace.section === "notes"
+            ? workspace.filteredNotes.length
+            : workspace.section === "journal"
+              ? workspace.filteredJournalEntries.length
+              : workspace.section === "reminders"
+                ? workspace.filteredReminders.length
+                : (workspace.collaboration?.outgoingContacts.length ?? 0)
+                  + (workspace.collaboration?.outgoingCalendars.length ?? 0)
+                  + (workspace.collaboration?.outgoingTaskLists.length ?? 0)
+                  + (workspace.mailboxDelegation?.outgoingMailboxes.length ?? 0)
+                  + (workspace.sieve?.scripts.length ?? 0);
   const attachmentCount = workspace.section === "mail"
     ? workspace.filtered.reduce((total, item) => total + item.attachments.length, 0)
     : 0;
@@ -321,12 +330,24 @@ export function App() {
                 filteredMessages={workspace.filtered}
                 events={workspace.filteredEvents}
                 contacts={workspace.filteredContacts}
+                tasks={workspace.filteredTasks}
+                notes={workspace.filteredNotes}
+                journalEntries={workspace.filteredJournalEntries}
+                reminders={workspace.filteredReminders}
                 messageId={workspace.messageId}
                 eventId={workspace.eventId}
                 contactId={workspace.contactId}
+                taskId={workspace.taskId}
+                noteId={workspace.noteId}
+                journalEntryId={workspace.journalEntryId}
+                reminderId={workspace.reminderId}
                 onSelectMessage={workspace.setMessageId}
                 onSelectEvent={workspace.setEventId}
                 onSelectContact={workspace.setContactId}
+                onSelectTask={workspace.setTaskId}
+                onSelectNote={workspace.setNoteId}
+                onSelectJournalEntry={workspace.setJournalEntryId}
+                onSelectReminder={workspace.setReminderId}
               />
             ) : null}
 
@@ -408,6 +429,35 @@ export function App() {
                 onLoadSieve={(name) => void workspace.loadSieveScript(name)}
                 onDeleteSieve={(name) => void workspace.deleteSieve(name)}
                 onSetActiveSieve={(name) => void workspace.activateSieve(name)}
+              />
+            </section>
+            ) : null}
+
+            {["tasks", "notes", "journal", "reminders"].includes(workspace.section) ? (
+            <section className="detail-pane">
+              <OutlookObjectEditor
+                copy={copy}
+                section={workspace.section}
+                taskLists={workspace.taskLists}
+                currentTask={workspace.currentTask}
+                taskForm={workspace.taskForm}
+                setTaskForm={workspace.setTaskForm}
+                currentNote={workspace.currentNote}
+                noteForm={workspace.noteForm}
+                setNoteForm={workspace.setNoteForm}
+                currentJournalEntry={workspace.currentJournalEntry}
+                journalEntryForm={workspace.journalEntryForm}
+                setJournalEntryForm={workspace.setJournalEntryForm}
+                currentReminder={workspace.currentReminder}
+                onNewTask={workspace.resetTaskForm}
+                onSaveTask={() => void workspace.saveTask()}
+                onDeleteTask={() => void workspace.deleteTask()}
+                onNewNote={workspace.resetNoteForm}
+                onSaveNote={() => void workspace.saveNote()}
+                onDeleteNote={() => void workspace.deleteNote()}
+                onNewJournalEntry={workspace.resetJournalEntryForm}
+                onSaveJournalEntry={() => void workspace.saveJournalEntry()}
+                onDeleteJournalEntry={() => void workspace.deleteJournalEntry()}
               />
             </section>
             ) : null}

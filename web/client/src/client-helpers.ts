@@ -1,4 +1,4 @@
-import type { ContactBookId, ContactDraft, ContactItem, EventDraft, EventItem, Folder, Message, MessageDraft } from "./client-types";
+import type { ContactBookId, ContactDraft, ContactItem, EventDraft, EventItem, Folder, JournalEntryDraft, JournalEntryItem, Message, MessageDraft, NoteDraft, NoteItem, TaskDraft, TaskItem } from "./client-types";
 
 export const blankDraft = (mailboxAccountId = ""): MessageDraft => ({
   mailboxAccountId,
@@ -25,6 +25,35 @@ export const blankEvent = (event?: EventItem): EventDraft => ({
   location: event?.location ?? "",
   attendees: event?.attendees ?? "",
   notes: event?.notes ?? ""
+});
+
+export const blankTask = (task?: TaskItem, taskListId?: string): TaskDraft => ({
+  taskListId: task?.taskListId ?? taskListId ?? null,
+  title: task?.title ?? "",
+  description: task?.description ?? "",
+  status: task?.status ?? "needs-action",
+  dueAt: task?.dueAt ?? null,
+  completedAt: task?.completedAt ?? null,
+  sortOrder: task?.sortOrder ?? 0
+});
+
+export const blankNote = (note?: NoteItem): NoteDraft => ({
+  title: note?.title ?? "",
+  bodyText: note?.bodyText ?? "",
+  color: note?.color ?? "yellow",
+  categoriesJson: note?.categoriesJson ?? "[]"
+});
+
+export const blankJournalEntry = (entry?: JournalEntryItem): JournalEntryDraft => ({
+  subject: entry?.subject ?? "",
+  bodyText: entry?.bodyText ?? "",
+  entryType: entry?.entryType ?? "Phone call",
+  messageClass: entry?.messageClass ?? "IPM.Activity",
+  startsAt: entry?.startsAt ?? null,
+  endsAt: entry?.endsAt ?? null,
+  occurredAt: entry?.occurredAt ?? null,
+  companiesJson: entry?.companiesJson ?? "[]",
+  contactsJson: entry?.contactsJson ?? "[]"
 });
 
 export const quoteMessage = (message: Message) => ["", "", `--- ${message.from} <${message.fromAddress}> ---`, ...message.body].join("\n");
@@ -66,5 +95,26 @@ export function filterContacts(contacts: ContactItem[], contactBook: ContactBook
   return contacts.filter((item) =>
     item.addressBookId === contactBook &&
     [item.name, item.role, item.email, item.phone, item.team, item.notes].join(" ").toLowerCase().includes(needle)
+  );
+}
+
+export function filterTasks(tasks: TaskItem[], query: string): TaskItem[] {
+  const needle = query.trim().toLowerCase();
+  return tasks.filter((item) =>
+    [item.title, item.description, item.status, item.ownerEmail, item.dueAt ?? ""].join(" ").toLowerCase().includes(needle)
+  );
+}
+
+export function filterNotes(notes: NoteItem[], query: string): NoteItem[] {
+  const needle = query.trim().toLowerCase();
+  return notes.filter((item) =>
+    [item.title, item.bodyText, item.color, item.categoriesJson].join(" ").toLowerCase().includes(needle)
+  );
+}
+
+export function filterJournalEntries(entries: JournalEntryItem[], query: string): JournalEntryItem[] {
+  const needle = query.trim().toLowerCase();
+  return entries.filter((item) =>
+    [item.subject, item.bodyText, item.entryType, item.messageClass, item.companiesJson, item.contactsJson].join(" ").toLowerCase().includes(needle)
   );
 }

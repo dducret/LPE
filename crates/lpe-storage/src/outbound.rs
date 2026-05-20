@@ -263,20 +263,20 @@ impl Storage {
         let current = sqlx::query_as::<_, OutboundQueueStateRow>(
             r#"
             SELECT
-                tenant_id,
-                account_id,
+                q.tenant_id,
+                q.account_id,
                 mm.message_id,
-                status,
-                attempts,
-                last_trace_id,
-                remote_message_ref,
+                q.status,
+                q.attempts,
+                q.last_trace_id,
+                q.remote_message_ref,
                 NULL::integer AS retry_after_seconds,
                 NULL::text AS retry_policy,
                 jsonb_build_object(
-                    'status', status,
-                    'traceId', last_trace_id,
-                    'remoteMessageRef', remote_message_ref,
-                    'lastError', last_error
+                    'status', q.status,
+                    'traceId', q.last_trace_id,
+                    'remoteMessageRef', q.remote_message_ref,
+                    'lastError', q.last_error
                 ) AS last_result_json
             FROM submission_queue q
             JOIN mailbox_messages mm
@@ -319,39 +319,39 @@ impl Storage {
         let technical_status = serde_json::to_value(&normalized)?;
         let row = sqlx::query(
             r#"
-            UPDATE submission_queue
+            UPDATE submission_queue q
             SET status = $3,
-                attempts = attempts + 1,
+                attempts = q.attempts + 1,
                 next_attempt_at = CASE
                     WHEN $3 = 'deferred'
-                        THEN NOW() + make_interval(secs => GREATEST(1, COALESCE($4, LEAST(3600, GREATEST(1, attempts + 1) * 300))))
+                        THEN NOW() + make_interval(secs => GREATEST(1, COALESCE($4, LEAST(3600, GREATEST(1, q.attempts + 1) * 300))))
                     ELSE NOW()
                 END,
                 last_error = CASE
                     WHEN $3 = 'relayed' THEN NULL
                     ELSE $5
                 END,
-                remote_message_ref = COALESCE($6, remote_message_ref),
+                remote_message_ref = COALESCE($6, q.remote_message_ref),
                 last_attempt_at = NOW(),
                 terminal_at = CASE
                     WHEN $3 IN ('relayed', 'bounced', 'failed', 'cancelled')
-                        THEN COALESCE(terminal_at, NOW())
-                    ELSE terminal_at
+                        THEN COALESCE(q.terminal_at, NOW())
+                    ELSE q.terminal_at
                 END,
                 last_trace_id = $7,
                 updated_at = NOW()
-            WHERE tenant_id = $1 AND id = $2
+            WHERE q.tenant_id = $1 AND q.id = $2
             RETURNING
-                status,
-                last_trace_id,
-                remote_message_ref,
+                q.status,
+                q.last_trace_id,
+                q.remote_message_ref,
                 NULL::integer AS retry_after_seconds,
                 NULL::text AS retry_policy,
                 jsonb_build_object(
-                    'status', status,
-                    'traceId', last_trace_id,
-                    'remoteMessageRef', remote_message_ref,
-                    'lastError', last_error,
+                    'status', q.status,
+                    'traceId', q.last_trace_id,
+                    'remoteMessageRef', q.remote_message_ref,
+                    'lastError', q.last_error,
                     'transportResponse', $8::jsonb
                 ) AS last_result_json
             "#,
