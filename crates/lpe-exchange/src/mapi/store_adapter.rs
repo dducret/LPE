@@ -6,6 +6,7 @@ use super::tables::*;
 use super::*;
 use crate::mapi_store;
 use crate::store::{MapiContentTableQuery, MapiContentTableSort, MapiContentTableSortField};
+use anyhow::Context;
 use lpe_storage::ReminderQuery;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -130,21 +131,27 @@ where
     if plan.requires_full_snapshot {
         return store
             .load_mapi_mail_store(account_id, full_message_limit)
-            .await;
+            .await
+            .context("load full MAPI mail store snapshot");
     }
 
-    let mailboxes = store.ensure_jmap_system_mailboxes(account_id).await?;
+    let mailboxes = store
+        .ensure_jmap_system_mailboxes(account_id)
+        .await
+        .context("ensure MAPI system mailboxes")?;
     let mailbox_requests = mapi_identity_requests_for_mailboxes(&mailboxes);
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &mailbox_requests)
-        .await?
+        .await
+        .context("allocate MAPI mailbox identities")?
     {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
 
     let identities = store
         .fetch_mapi_identities_by_object_ids(account_id, &plan.object_ids)
-        .await?;
+        .await
+        .context("fetch MAPI requested object identities")?;
     for identity in &identities {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
@@ -165,7 +172,13 @@ where
                     sort_orders: query.sort_orders.clone(),
                 },
             )
-            .await?;
+            .await
+            .with_context(|| {
+                format!(
+                    "query MAPI content table ids for folder {:#018x} offset {} limit {}",
+                    query.folder_id, query.offset, query.limit
+                )
+            })?;
         content_message_ids.extend(result.ids.iter().copied());
         content_windows.push(mapi_store::MapiContentTableWindow {
             folder_id: query.folder_id,
@@ -196,29 +209,42 @@ where
         .collect::<Vec<_>>();
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &message_identity_requests)
-        .await?
+        .await
+        .context("allocate MAPI message identities")?
     {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
-    let emails = store.fetch_jmap_emails(account_id, &message_ids).await?;
+    let emails = store
+        .fetch_jmap_emails(account_id, &message_ids)
+        .await
+        .with_context(|| format!("fetch {} MAPI content messages", message_ids.len()))?;
     let mut attachments = Vec::with_capacity(emails.len());
     for email in &emails {
         attachments.push((
             email.id,
             store
                 .fetch_message_attachments(account_id, email.id)
-                .await?,
+                .await
+                .with_context(|| format!("fetch MAPI attachments for message {}", email.id))?,
         ));
     }
 
     let contact_collections = store
         .fetch_accessible_contact_collections(account_id)
-        .await?;
+        .await
+        .context("fetch MAPI contact collections")?;
     let calendar_collections = store
         .fetch_accessible_calendar_collections(account_id)
-        .await?;
-    let task_collections = store.fetch_accessible_task_collections(account_id).await?;
-    let search_folder_definitions = store.fetch_search_folders(account_id).await?;
+        .await
+        .context("fetch MAPI calendar collections")?;
+    let task_collections = store
+        .fetch_accessible_task_collections(account_id)
+        .await
+        .context("fetch MAPI task collections")?;
+    let search_folder_definitions = store
+        .fetch_search_folders(account_id)
+        .await
+        .context("fetch MAPI search folders")?;
     let reminders = store
         .query_client_reminders(
             account_id,
@@ -226,7 +252,8 @@ where
                 include_inactive: false,
             },
         )
-        .await?;
+        .await
+        .context("fetch MAPI reminders")?;
     let snapshot_backed_contents = plan
         .content_queries
         .iter()
@@ -262,14 +289,18 @@ where
             contacts.extend(
                 store
                     .fetch_accessible_contacts_in_collection(account_id, &collection.id)
-                    .await?,
+                    .await
+                    .with_context(|| {
+                        format!("fetch MAPI contacts in collection {}", collection.id)
+                    })?,
             );
         }
         contacts
     } else {
         store
             .fetch_accessible_contacts_by_ids(account_id, &contact_ids)
-            .await?
+            .await
+            .with_context(|| format!("fetch {} MAPI contacts by id", contact_ids.len()))?
     };
     let events = if snapshot_backed_contents {
         let mut events = Vec::new();
@@ -277,14 +308,18 @@ where
             events.extend(
                 store
                     .fetch_accessible_events_in_collection(account_id, &collection.id)
-                    .await?,
+                    .await
+                    .with_context(|| {
+                        format!("fetch MAPI events in collection {}", collection.id)
+                    })?,
             );
         }
         events
     } else {
         store
             .fetch_accessible_events_by_ids(account_id, &event_ids)
-            .await?
+            .await
+            .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
     };
     let tasks = if snapshot_backed_contents {
         let mut tasks = Vec::new();
@@ -292,26 +327,43 @@ where
             tasks.extend(
                 store
                     .fetch_accessible_tasks_in_collection(account_id, &collection.id)
-                    .await?,
+                    .await
+                    .with_context(|| format!("fetch MAPI tasks in collection {}", collection.id))?,
             );
         }
         tasks
     } else {
         store
             .fetch_accessible_tasks_by_ids(account_id, &task_ids)
-            .await?
+            .await
+            .with_context(|| format!("fetch {} MAPI tasks by id", task_ids.len()))?
     };
     let notes = if snapshot_backed_contents {
-        store.fetch_mapi_notes(account_id).await?
+        store
+            .fetch_mapi_notes(account_id)
+            .await
+            .context("fetch MAPI notes")?
     } else {
-        store.fetch_mapi_notes_by_ids(account_id, &note_ids).await?
+        store
+            .fetch_mapi_notes_by_ids(account_id, &note_ids)
+            .await
+            .with_context(|| format!("fetch {} MAPI notes by id", note_ids.len()))?
     };
     let journal_entries = if snapshot_backed_contents {
-        store.fetch_mapi_journal_entries(account_id).await?
+        store
+            .fetch_mapi_journal_entries(account_id)
+            .await
+            .context("fetch MAPI journal entries")?
     } else {
         store
             .fetch_mapi_journal_entries_by_ids(account_id, &journal_entry_ids)
-            .await?
+            .await
+            .with_context(|| {
+                format!(
+                    "fetch {} MAPI journal entries by id",
+                    journal_entry_ids.len()
+                )
+            })?
     };
     let identity_requests = contacts
         .iter()
@@ -343,7 +395,8 @@ where
         .collect::<Vec<_>>();
     for identity in store
         .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
-        .await?
+        .await
+        .context("allocate MAPI non-message identities")?
     {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
@@ -353,7 +406,8 @@ where
         .collect::<Vec<_>>();
     let folder_permissions = store
         .fetch_mapi_folder_permissions(account_id, &mailbox_ids)
-        .await?;
+        .await
+        .context("fetch MAPI folder permissions")?;
 
     Ok(MapiMailStoreSnapshot::new(
         mailboxes,
