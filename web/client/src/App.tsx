@@ -5,7 +5,7 @@ import { MasterPane } from "./components/MasterPane";
 import { MailDetail } from "./components/MailDetail";
 import { EventEditor } from "./components/EventEditor";
 import { ContactEditor } from "./components/ContactEditor";
-import { OutlookObjectEditor } from "./components/OutlookObjectEditor";
+import { CanonicalItemEditor } from "./components/CanonicalItemEditor";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { useClientWorkspace } from "./useClientWorkspace";
 import type { ClientIdentity } from "./client-types";
@@ -234,6 +234,13 @@ export function App() {
   const workspaceTitle = workspace.section === "mail"
     ? copy.folders[workspace.folder]
     : copy.altViews[workspace.section];
+  const syncCounts = workspace.syncStatus.counts;
+  const lastRefreshed = workspace.syncStatus.lastRefreshedAt
+    ? new Date(workspace.syncStatus.lastRefreshedAt).toLocaleString(locale)
+    : copy.syncStatus.notLoaded;
+  const pushState = workspace.syncStatus.pushConnected
+    ? copy.syncStatus.connected
+    : copy.syncStatus.reconnecting;
 
   return (
     <main className="app-shell">
@@ -312,11 +319,29 @@ export function App() {
             </div>
             <div className="workspace-hero-meta">
               <span className="workspace-stat-pill">{`${visibleCount} visible`}</span>
+              <span className="workspace-stat-pill">{`${copy.syncStatus.push}: ${pushState}`}</span>
               <span className="workspace-stat-pill is-soft">{copy.productSubtitle}</span>
             </div>
           </section>
 
           {workspace.notice ? <div className="notice-banner">{workspace.notice}</div> : null}
+
+          <section className="sync-status-strip" aria-label={copy.syncStatus.title}>
+            <div>
+              <p className="workspace-hero-eyebrow">{copy.syncStatus.title}</p>
+              <strong>{copy.syncStatus.lastRefreshed.replace("{time}", lastRefreshed)}</strong>
+            </div>
+            <div className="sync-status-counts">
+              <span>{copy.syncStatus.mail.replace("{count}", String(syncCounts.mail))}</span>
+              <span>{copy.syncStatus.calendar.replace("{count}", String(syncCounts.calendar))}</span>
+              <span>{copy.syncStatus.contacts.replace("{count}", String(syncCounts.contacts))}</span>
+              <span>{copy.syncStatus.tasks.replace("{count}", String(syncCounts.tasks))}</span>
+              <span>{copy.syncStatus.notes.replace("{count}", String(syncCounts.notes))}</span>
+              <span>{copy.syncStatus.journal.replace("{count}", String(syncCounts.journal))}</span>
+              <span>{copy.syncStatus.reminders.replace("{count}", String(syncCounts.reminders))}</span>
+              <span>{copy.syncStatus.delegation.replace("{count}", String(syncCounts.delegation))}</span>
+            </div>
+          </section>
 
           <div className={showMailPane || workspace.section !== "mail" ? "content-grid has-detail" : "content-grid"}>
             {workspace.section !== "settings" ? (
@@ -435,7 +460,7 @@ export function App() {
 
             {["tasks", "notes", "journal", "reminders"].includes(workspace.section) ? (
             <section className="detail-pane">
-              <OutlookObjectEditor
+              <CanonicalItemEditor
                 copy={copy}
                 section={workspace.section}
                 taskLists={workspace.taskLists}

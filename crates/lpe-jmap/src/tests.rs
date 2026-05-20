@@ -187,6 +187,37 @@ fn strip_bcc_headers_for_test(raw: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+fn email_matches_visible_search(email: &JmapEmail, search_text: Option<&str>) -> bool {
+    let Some(search_text) = search_text.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+    let search_text = search_text.to_lowercase();
+    let mut visible_text = vec![
+        email.subject.as_str(),
+        email.preview.as_str(),
+        email.body_text.as_str(),
+        email.from_address.as_str(),
+        email.from_display.as_deref().unwrap_or_default(),
+        email.sender_address.as_deref().unwrap_or_default(),
+        email.sender_display.as_deref().unwrap_or_default(),
+    ];
+    visible_text.extend(email.to.iter().flat_map(|recipient| {
+        [
+            recipient.address.as_str(),
+            recipient.display_name.as_deref().unwrap_or_default(),
+        ]
+    }));
+    visible_text.extend(email.cc.iter().flat_map(|recipient| {
+        [
+            recipient.address.as_str(),
+            recipient.display_name.as_deref().unwrap_or_default(),
+        ]
+    }));
+    visible_text
+        .into_iter()
+        .any(|value| value.to_lowercase().contains(&search_text))
+}
+
 impl JmapPushListener for FakePushListener {
     async fn wait_for_change(
         &mut self,
@@ -845,7 +876,7 @@ impl JmapStore for FakeStore {
         &self,
         _account_id: Uuid,
         mailbox_id: Option<Uuid>,
-        _search_text: Option<&str>,
+        search_text: Option<&str>,
         position: u64,
         limit: u64,
     ) -> Result<JmapEmailQuery> {
@@ -856,6 +887,7 @@ impl JmapStore for FakeStore {
                 mailbox_id.is_none()
                     || mailbox_id.is_some_and(|mailbox_id| email.mailbox_ids.contains(&mailbox_id))
             })
+            .filter(|email| email_matches_visible_search(email, search_text))
             .map(|email| email.id)
             .collect::<Vec<_>>();
         let total = ids.len() as u64;
@@ -885,7 +917,7 @@ impl JmapStore for FakeStore {
         &self,
         _account_id: Uuid,
         mailbox_id: Option<Uuid>,
-        _search_text: Option<&str>,
+        search_text: Option<&str>,
         position: u64,
         limit: u64,
     ) -> Result<lpe_storage::JmapThreadQuery> {
@@ -896,6 +928,7 @@ impl JmapStore for FakeStore {
                 mailbox_id.is_none()
                     || mailbox_id.is_some_and(|mailbox_id| email.mailbox_ids.contains(&mailbox_id))
             })
+            .filter(|email| email_matches_visible_search(email, search_text))
             .map(|email| email.thread_id)
             .collect::<HashSet<_>>()
             .into_iter()
@@ -3209,6 +3242,75 @@ async fn email_get_hides_bcc_for_delegated_shared_mailbox_projection() {
 }
 
 #[tokio::test]
+async fn jmap_mail_query_snippet_and_blob_projections_do_not_expose_bcc() {
+    let email = FakeStore::draft_email();
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::draft_mailbox()],
+        emails: vec![email.clone()],
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                    JMAP_BLOB_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Email/query".to_string(),
+                        json!({"filter": {"text": "hidden@example.test"}}),
+                        "q1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Thread/query".to_string(),
+                        json!({"filter": {"text": "hidden@example.test"}}),
+                        "q2".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Email/query".to_string(),
+                        json!({"filter": {"text": "Draft body"}}),
+                        "q3".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({"ids": [email.id.to_string()]}),
+                        "g1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "SearchSnippet/get".to_string(),
+                        json!({"emailIds": [email.id.to_string()]}),
+                        "s1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Blob/get".to_string(),
+                        json!({
+                            "ids": [format!("message:{}", email.id)],
+                            "properties": ["data:asText"]
+                        }),
+                        "b1".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].1["ids"], json!([]));
+    assert_eq!(response.method_responses[1].1["ids"], json!([]));
+    assert_eq!(
+        response.method_responses[2].1["ids"],
+        json!([email.id.to_string()])
+    );
+    let response_json = serde_json::to_string(&response).unwrap();
+    assert!(!response_json.contains("hidden@example.test"));
+    assert!(!response_json.contains("Bcc:"));
+}
+
+#[tokio::test]
 async fn delegated_email_and_thread_states_ignore_bcc_only_changes() {
     let mut visible_email = FakeStore::draft_email();
     visible_email.bcc.clear();
@@ -4022,6 +4124,151 @@ async fn stored_mailbox_query_state_keeps_snapshot_out_of_token_and_paginates_ch
         decode_query_state(final_query_state).unwrap().cursor,
         Some(8)
     );
+}
+
+#[tokio::test]
+async fn canonical_query_state_tokens_are_scoped_to_each_jmap_surface() {
+    let service = JmapService::new_with_validator(
+        FakeStore {
+            session: Some(FakeStore::account()),
+            mailboxes: vec![FakeStore::draft_mailbox()],
+            emails: vec![FakeStore::draft_email()],
+            contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+            events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+            tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+            notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+            journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
+            ..Default::default()
+        },
+        validator_ok("message/rfc822", "email", "eml", 0.99),
+    );
+    let initial = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                    JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_CALENDARS_CAPABILITY.to_string(),
+                    JMAP_TASKS_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/query".to_string(),
+                        json!({}),
+                        "mailbox".to_string(),
+                    ),
+                    JmapMethodCall("Email/query".to_string(), json!({}), "email".to_string()),
+                    JmapMethodCall(
+                        "EmailSubmission/query".to_string(),
+                        json!({}),
+                        "submission".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "ContactCard/query".to_string(),
+                        json!({}),
+                        "contact".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "CalendarEvent/query".to_string(),
+                        json!({}),
+                        "event".to_string(),
+                    ),
+                    JmapMethodCall("Task/query".to_string(), json!({}), "task".to_string()),
+                    JmapMethodCall("Note/query".to_string(), json!({}), "note".to_string()),
+                    JmapMethodCall(
+                        "JournalEntry/query".to_string(),
+                        json!({}),
+                        "journal".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+    let email_query_state = initial.method_responses[1].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let contact_query_state = initial.method_responses[3].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                    JMAP_SUBMISSION_CAPABILITY.to_string(),
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_CALENDARS_CAPABILITY.to_string(),
+                    JMAP_TASKS_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Email/queryChanges".to_string(),
+                        json!({"sinceQueryState": contact_query_state}),
+                        "email".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Mailbox/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "mailbox".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "EmailSubmission/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "submission".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "ContactCard/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "contact".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "CalendarEvent/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "event".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Task/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "task".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Note/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "note".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/queryChanges".to_string(),
+                        json!({"sinceQueryState": email_query_state}),
+                        "journal".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    for method in response.method_responses {
+        assert_eq!(method.0, "error");
+        assert_eq!(
+            method.1["type"],
+            Value::String("invalidArguments".to_string())
+        );
+        assert!(method.1["description"]
+            .as_str()
+            .unwrap()
+            .contains("queryState does not match requested method"));
+    }
 }
 
 #[tokio::test]

@@ -86,6 +86,21 @@ export type ClientWorkspacePayload = {
   tasks: TaskItem[];
 };
 
+export type ClientSyncStatus = {
+  lastRefreshedAt: string | null;
+  pushConnected: boolean;
+  counts: {
+    mail: number;
+    calendar: number;
+    contacts: number;
+    tasks: number;
+    notes: number;
+    journal: number;
+    reminders: number;
+    delegation: number;
+  };
+};
+
 export type TaskItem = {
   id: string;
   ownerAccountId: string;

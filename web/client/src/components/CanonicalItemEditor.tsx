@@ -3,7 +3,7 @@ import { Button, Input, Select, Textarea } from "../../../ui/src/components/prim
 import type { ClientCopy } from "../i18n";
 import type { ClientTaskList, JournalEntryDraft, JournalEntryItem, NoteDraft, NoteItem, ReminderItem, Section, TaskDraft, TaskItem } from "../client-types";
 
-export function OutlookObjectEditor(props: {
+export function CanonicalItemEditor(props: {
   copy: ClientCopy;
   section: Section;
   taskLists: ClientTaskList[];

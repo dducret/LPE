@@ -417,7 +417,8 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
         W: AsyncWriteExt + Unpin,
     {
         let principal = self.require_auth()?;
-        let mailbox_path = parse_mailbox_path_token(arguments, "SELECT expects a mailbox name")?;
+        let command_name = if read_only { "EXAMINE" } else { "SELECT" };
+        let mailbox_path = parse_select_mailbox_path(arguments, command_name)?;
         let mailboxes = self
             .store
             .ensure_imap_mailboxes(principal.account_id)
@@ -486,7 +487,6 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             )
             .await?;
         let access = if read_only { "READ-ONLY" } else { "READ-WRITE" };
-        let command_name = if read_only { "EXAMINE" } else { "SELECT" };
         writer
             .write_all(format!("{tag} OK [{access}] {command_name} completed\r\n").as_bytes())
             .await?;
@@ -698,6 +698,26 @@ fn parse_list_pattern(arguments: &str) -> Result<String> {
         bail!("LIST expects reference name and mailbox pattern");
     }
     Ok(tokens[1].clone())
+}
+
+fn parse_select_mailbox_path(
+    arguments: &str,
+    command_name: &str,
+) -> Result<lpe_domain::MailboxPath> {
+    let tokens = tokenize(arguments)?;
+    let mailbox_name = tokens
+        .first()
+        .ok_or_else(|| anyhow!("{command_name} expects a mailbox name"))?;
+    if tokens.len() > 1 {
+        if tokens[1..]
+            .iter()
+            .any(|token| token.to_ascii_uppercase().contains("QRESYNC"))
+        {
+            bail!("QRESYNC is not supported");
+        }
+        bail!("{command_name} mailbox options are not supported");
+    }
+    parse_mailbox_path(mailbox_name)
 }
 
 fn mailbox_pattern_matches(name: &str, pattern: &str) -> bool {

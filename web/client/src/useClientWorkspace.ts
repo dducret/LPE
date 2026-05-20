@@ -3,6 +3,7 @@ import { blankContact, blankDraft, blankEvent, blankJournalEntry, blankNote, bla
 import type { ClientCopy } from "./i18n";
 import type {
   ClientIdentity,
+  ClientSyncStatus,
   CollaborationOverview,
   ClientWorkspacePayload,
   ContactItem,
@@ -150,6 +151,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   const [notice, setNotice] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState("");
+  const [lastRefreshedAt, setLastRefreshedAt] = React.useState<string | null>(null);
+  const [pushConnected, setPushConnected] = React.useState(false);
   const [messageBusy, setMessageBusy] = React.useState(false);
   const [draft, setDraft] = React.useState<MessageDraft>(() => blankDraft(identity?.account_id));
   const [draftMessageId, setDraftMessageId] = React.useState<string | null>(null);
@@ -190,6 +193,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       setJournalEntries([]);
       setReminders([]);
       setTaskLists([]);
+      setLastRefreshedAt(null);
       return;
     }
 
@@ -209,6 +213,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
       setNotes(nextNotes);
       setJournalEntries(nextJournalEntries);
       setReminders(nextReminders);
+      setLastRefreshedAt(new Date().toISOString());
     } catch {
       setLoadError(copy.loadError);
     } finally {
@@ -299,11 +304,15 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
   }, [composerMailboxes, identity]);
 
   React.useEffect(() => {
-    if (!authToken) return;
+    if (!authToken) {
+      setPushConnected(false);
+      return;
+    }
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
     const socket = new WebSocket(`${protocol}://${window.location.host}/api/jmap/ws`, "jmap");
 
     socket.addEventListener("open", () => {
+      setPushConnected(true);
       socket.send(JSON.stringify({
         "@type": "WebSocketPushEnable",
         dataTypes: ["Mailbox", "Email", "CalendarEvent", "ContactCard", "Task", "Note", "JournalEntry"]
@@ -321,7 +330,8 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
         // Ignore malformed push payloads.
       }
     });
-    socket.addEventListener("error", () => undefined);
+    socket.addEventListener("error", () => setPushConnected(false));
+    socket.addEventListener("close", () => setPushConnected(false));
 
     return () => socket.close();
   }, [authToken, loadSettings, loadWorkspace]);
@@ -388,6 +398,28 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     () => contacts.filter((item) => /room|equipment|resource/i.test(`${item.role} ${item.team}`)),
     [contacts]
   );
+  const syncStatus = React.useMemo<ClientSyncStatus>(() => ({
+    lastRefreshedAt,
+    pushConnected,
+    counts: {
+      mail: mail.length,
+      calendar: events.length,
+      contacts: contacts.length,
+      tasks: tasks.length,
+      notes: notes.length,
+      journal: journalEntries.length,
+      reminders: reminders.length,
+      delegation: (collaboration?.outgoingContacts.length ?? 0)
+        + (collaboration?.outgoingCalendars.length ?? 0)
+        + (collaboration?.outgoingTaskLists.length ?? 0)
+        + (collaboration?.incomingContactCollections.length ?? 0)
+        + (collaboration?.incomingCalendarCollections.length ?? 0)
+        + (collaboration?.incomingTaskListCollections.length ?? 0)
+        + (mailboxDelegation?.outgoingMailboxes.length ?? 0)
+        + (mailboxDelegation?.incomingMailboxes.length ?? 0)
+        + (mailboxDelegation?.outgoingSenderRights.length ?? 0)
+    }
+  }), [collaboration, contacts.length, events.length, journalEntries.length, lastRefreshedAt, mail.length, mailboxDelegation, notes.length, pushConnected, reminders.length, tasks.length]);
 
   const openComposer = React.useCallback((next: Mode, item?: Message) => {
     const defaultMailboxAccountId = identity?.account_id ?? "";
@@ -1027,6 +1059,7 @@ export function useClientWorkspace(copy: ClientCopy, authToken: string | null, i
     saveJournalEntry,
     deleteJournalEntry,
     resources,
+    syncStatus,
     collaboration,
     mailboxDelegation,
     sieve,

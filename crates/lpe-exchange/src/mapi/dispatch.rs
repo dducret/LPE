@@ -2636,9 +2636,20 @@ where
                     partial_completion,
                 ));
             }
-            Some(RopId::DeleteMessages | RopId::HardDeleteMessagesExtended) => {
+            Some(
+                RopId::DeleteMessages
+                | RopId::HardDeleteMessages
+                | RopId::HardDeleteMessagesExtended,
+            ) => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
+                    _ if request.rop_id == RopId::HardDeleteMessages.as_u8() => {
+                        responses.extend_from_slice(&unsupported_rop_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                        ));
+                        continue;
+                    }
                     _ => {
                         responses.extend_from_slice(&rop_error_response(
                             request.rop_id,
@@ -2717,7 +2728,10 @@ where
                         partial_completion = true;
                         continue;
                     };
-                    let result = if request.rop_id == 0x91 || email.mailbox_role == "trash" {
+                    let result = if request.rop_id == 0x59
+                        || request.rop_id == 0x91
+                        || email.mailbox_role == "trash"
+                    {
                         store
                             .delete_jmap_email_from_mailbox(
                                 principal.account_id,
@@ -5035,12 +5049,9 @@ where
                     first_global_counter,
                 ));
             }
-            Some(RopId::HardDeleteMessages | RopId::HardDeleteMessagesAndSubfolders) => responses
-                .extend_from_slice(&rop_error_response(
-                    request.rop_id,
-                    request.response_handle_index(),
-                    0x8004_0102,
-                )),
+            Some(RopId::HardDeleteMessagesAndSubfolders) => responses.extend_from_slice(
+                &rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_0102),
+            ),
             Some(RopId::GetTransportFolder) => {
                 responses.extend_from_slice(&rop_get_transport_folder_response(&request))
             }

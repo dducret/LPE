@@ -2746,7 +2746,23 @@ async fn condstore_rejects_invalid_tokens_and_keeps_qresync_unadvertised() {
     assert!(!enable_qresync.contains("QRESYNC"));
     assert!(enable_qresync.contains("A3 OK ENABLE completed"));
 
-    let _ = send_command(&mut stream, "A4 SELECT Inbox\r\n", "A4").await;
+    let select_qresync = send_command(
+        &mut stream,
+        "A4 SELECT Inbox (QRESYNC (111 3 1:*))\r\n",
+        "A4",
+    )
+    .await;
+    assert!(select_qresync.contains("A4 NO QRESYNC is not supported"));
+
+    let examine_qresync = send_command(
+        &mut stream,
+        "A4B EXAMINE Inbox (QRESYNC (111 3 1:*))\r\n",
+        "A4B",
+    )
+    .await;
+    assert!(examine_qresync.contains("A4B NO QRESYNC is not supported"));
+
+    let _ = send_command(&mut stream, "A4C SELECT Inbox\r\n", "A4C").await;
     let invalid_changed_since = send_command(
         &mut stream,
         "A5 UID FETCH 1:* (UID FLAGS) (CHANGEDSINCE stale)\r\n",

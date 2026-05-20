@@ -1696,8 +1696,7 @@ mod tests {
         let message_id = Uuid::parse_str("11112222-3333-4444-8555-666677778888").unwrap();
         let event_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
         let task_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
-        let search_definition_id =
-            Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
+        let search_definition_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             message_id,
             crate::mapi::identity::mapi_store_id(97),

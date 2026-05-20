@@ -2497,11 +2497,16 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn message_ids(&self) -> Vec<u64> {
-        let Some(count_bytes) = self.payload.get(2..4) else {
+        let (count_offset, ids_offset) = if self.rop_id == RopId::HardDeleteMessages.as_u8() {
+            (0, 2)
+        } else {
+            (2, 4)
+        };
+        let Some(count_bytes) = self.payload.get(count_offset..count_offset + 2) else {
             return Vec::new();
         };
         let count = u16::from_le_bytes([count_bytes[0], count_bytes[1]]) as usize;
-        self.payload[4..]
+        self.payload[ids_offset..]
             .chunks_exact(8)
             .take(count)
             .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))

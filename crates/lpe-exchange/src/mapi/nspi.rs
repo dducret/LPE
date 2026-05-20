@@ -697,6 +697,12 @@ where
             &format!("failed to project address book identifiers: {error}"),
         );
     }
+    let row_limit = nspi_query_rows_count(request_type, request);
+    let entries = if let Some(limit) = row_limit {
+        entries.into_iter().take(limit).collect::<Vec<_>>()
+    } else {
+        entries
+    };
     let tags = nspi_requested_property_tags(request);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -712,6 +718,18 @@ where
     }
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
+}
+
+pub(in crate::mapi) fn nspi_query_rows_count(request_type: &str, request: &[u8]) -> Option<usize> {
+    if !request_type.eq_ignore_ascii_case("QueryRows") {
+        return None;
+    }
+    const FLAGS_BYTES: usize = 4;
+    const STAT_BYTES: usize = 36;
+    const ETABLE_COUNT_BYTES: usize = 4;
+    let count_offset = FLAGS_BYTES + STAT_BYTES + ETABLE_COUNT_BYTES;
+    let count_bytes = request.get(count_offset..count_offset + 4)?;
+    Some(u32::from_le_bytes(count_bytes.try_into().ok()?) as usize)
 }
 
 pub(in crate::mapi) async fn nspi_matches_response<S>(

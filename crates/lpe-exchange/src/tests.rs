@@ -10044,7 +10044,8 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let soft_message_id = Uuid::parse_str("9d9d9d9d-9d9d-9d9d-9d9d-9d9d9d9d9d9d").unwrap();
-    let hard_message_id = Uuid::parse_str("9e9e9e9e-9e9e-9e9e-9e9e-9e9e9e9e9e9e").unwrap();
+    let legacy_hard_message_id = Uuid::parse_str("9e9e9e9e-9e9e-9e9e-9e9e-9e9e9e9e9e9e").unwrap();
+    let extended_hard_message_id = Uuid::parse_str("9f9f9f9f-9f9f-9f9f-9f9f-9f9f9f9f9f9f").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![
@@ -10059,10 +10060,16 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
                 "Soft delete through MAPI",
             ),
             FakeStore::email(
-                &hard_message_id.to_string(),
+                &legacy_hard_message_id.to_string(),
                 &inbox_id.to_string(),
                 "inbox",
-                "Hard delete through MAPI",
+                "Legacy hard delete through MAPI",
+            ),
+            FakeStore::email(
+                &extended_hard_message_id.to_string(),
+                &inbox_id.to_string(),
+                "inbox",
+                "Extended hard delete through MAPI",
             ),
         ])),
         ..Default::default()
@@ -10096,10 +10103,19 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
     rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&test_mapi_message_id(&soft_message_id.to_string()).to_le_bytes());
     rops.extend_from_slice(&[
-        0x91, 0x00, 0x01, 0x00, 0x00, // RopHardDeleteMessages
+        0x59, 0x00, 0x01, // RopHardDeleteMessages
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(&hard_message_id.to_string()).to_le_bytes());
+    rops.extend_from_slice(
+        &test_mapi_message_id(&legacy_hard_message_id.to_string()).to_le_bytes(),
+    );
+    rops.extend_from_slice(&[
+        0x91, 0x00, 0x01, 0x00, 0x00, // RopHardDeleteMessagesExtended
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(
+        &test_mapi_message_id(&extended_hard_message_id.to_string()).to_le_bytes(),
+    );
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -10123,9 +10139,10 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
     );
     assert_eq!(
         deleted_emails.lock().unwrap().as_slice(),
-        &[hard_message_id]
+        &[legacy_hard_message_id, extended_hard_message_id]
     );
     assert!(contains_bytes(response_rops, &[0x1E, 0x01, 0, 0, 0, 0, 0]));
+    assert!(contains_bytes(response_rops, &[0x59, 0x01, 0, 0, 0, 0, 0]));
     assert!(contains_bytes(response_rops, &[0x91, 0x01, 0, 0, 0, 0, 0]));
 }
 
@@ -19098,6 +19115,50 @@ async fn mapi_over_http_query_rows_stays_in_authenticated_tenant() {
     let body = response_bytes(response).await;
     assert_eq!(body[12], 0);
     assert!(!contains_bytes(&body, &utf16z("mallory@other.test")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_query_rows_honors_requested_count() {
+    let mut bob = FakeStore::account();
+    bob.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    bob.email = "bob@example.test".to_string();
+    bob.display_name = "Bob".to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut request = Vec::new();
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&[0; 36]);
+    request.extend_from_slice(&0u32.to_le_bytes());
+    request.extend_from_slice(&1u32.to_le_bytes());
+
+    let query_headers = nspi_bound_headers(&service, "QueryRows").await;
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &query_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert_eq!(body[8], 0);
+    assert_eq!(body[9], 1);
+    let tag_count = u32::from_le_bytes(body[10..14].try_into().unwrap()) as usize;
+    let row_count_offset = 14 + tag_count * 4;
+    assert_eq!(
+        u32::from_le_bytes(
+            body[row_count_offset..row_count_offset + 4]
+                .try_into()
+                .unwrap()
+        ),
+        1
+    );
+    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(!contains_bytes(&body, &utf16z("bob@example.test")));
 }
 
 #[tokio::test]
