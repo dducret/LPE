@@ -46,7 +46,7 @@ where
             None,
         );
     };
-    let Some(session) = get_session(&session_id) else {
+    let Some(mut session) = get_session(&session_id) else {
         return execute_failure_response(request_id, 10, "MAPI session context not found", None);
     };
     if session.endpoint != endpoint
@@ -72,14 +72,6 @@ where
                 Some(session_cookie(endpoint, &session_id, false)),
             );
         }
-    };
-    let Some(mut session) = remove_session(&session_id) else {
-        return execute_failure_response(
-            request_id,
-            10,
-            "MAPI session context not found",
-            Some(session_cookie(endpoint, &session_id, false)),
-        );
     };
     if !session_matches(&session, endpoint, principal) {
         return execute_failure_response(
