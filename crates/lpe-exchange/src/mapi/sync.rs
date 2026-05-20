@@ -66,6 +66,24 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 27] = [
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
 
+const IPM_SUBTREE_MINIMAL_HIERARCHY_FOLDER_IDS: [u64; 15] = [
+    INBOX_FOLDER_ID,
+    DRAFTS_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    SENT_FOLDER_ID,
+    TRASH_FOLDER_ID,
+    CONTACTS_FOLDER_ID,
+    SUGGESTED_CONTACTS_FOLDER_ID,
+    CALENDAR_FOLDER_ID,
+    JOURNAL_FOLDER_ID,
+    NOTES_FOLDER_ID,
+    TASKS_FOLDER_ID,
+    JUNK_FOLDER_ID,
+    RSS_FEEDS_FOLDER_ID,
+    ARCHIVE_FOLDER_ID,
+    CONVERSATION_HISTORY_FOLDER_ID,
+];
+
 pub(in crate::mapi) fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x70, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -202,7 +220,7 @@ pub(in crate::mapi) fn sync_mailboxes_for(
             .filter(|mailbox| folder_ids.insert(mapi_folder_id(mailbox)))
             .cloned()
             .collect::<Vec<_>>();
-        for &special_folder_id in hierarchy_virtual_folder_ids(folder_id) {
+        for special_folder_id in hierarchy_virtual_folder_ids(folder_id) {
             if !special_folder_is_in_sync_scope(special_folder_id, folder_id) {
                 continue;
             }
@@ -221,11 +239,66 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         .collect()
 }
 
-fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> &'static [u64] {
+fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> Vec<u64> {
     if sync_root_folder_id == IPM_SUBTREE_FOLDER_ID {
-        &IPM_SUBTREE_VIRTUAL_FOLDER_IDS
+        ipm_hierarchy_virtual_folder_ids_for_experiment(
+            std::env::var("LPE_MAPI_EXPERIMENT_IPM_HIERARCHY_GROUPS")
+                .ok()
+                .as_deref(),
+        )
     } else {
-        &PRIVATE_LOGON_SPECIAL_FOLDER_IDS
+        PRIVATE_LOGON_SPECIAL_FOLDER_IDS.to_vec()
+    }
+}
+
+fn ipm_hierarchy_virtual_folder_ids_for_experiment(raw_groups: Option<&str>) -> Vec<u64> {
+    let Some(raw_groups) = raw_groups
+        .map(str::trim)
+        .filter(|groups| !groups.is_empty())
+    else {
+        return IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec();
+    };
+
+    let mut folder_ids = IPM_SUBTREE_MINIMAL_HIERARCHY_FOLDER_IDS.to_vec();
+    for group in raw_groups
+        .split([',', ';', ' '])
+        .map(str::trim)
+        .filter(|group| !group.is_empty())
+    {
+        match group {
+            "all" | "full" => return IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec(),
+            "minimal" | "base" => {}
+            "reminders" => push_unique(&mut folder_ids, REMINDERS_FOLDER_ID),
+            "tracked" | "tracked-mail-processing" => {
+                push_unique(&mut folder_ids, TRACKED_MAIL_PROCESSING_FOLDER_ID);
+            }
+            "todo" | "to-do" => push_unique(&mut folder_ids, TODO_SEARCH_FOLDER_ID),
+            "conversation" | "conversation-action-settings" => {
+                push_unique(&mut folder_ids, CONVERSATION_ACTION_SETTINGS_FOLDER_ID);
+            }
+            "contacts" | "contacts-extra" => {
+                push_unique(&mut folder_ids, QUICK_CONTACTS_FOLDER_ID);
+                push_unique(&mut folder_ids, IM_CONTACT_LIST_FOLDER_ID);
+                push_unique(&mut folder_ids, CONTACTS_SEARCH_FOLDER_ID);
+            }
+            "documents" | "document-libraries" => {
+                push_unique(&mut folder_ids, DOCUMENT_LIBRARIES_FOLDER_ID);
+            }
+            "sync-issues" => {
+                push_unique(&mut folder_ids, SYNC_ISSUES_FOLDER_ID);
+                push_unique(&mut folder_ids, CONFLICTS_FOLDER_ID);
+                push_unique(&mut folder_ids, LOCAL_FAILURES_FOLDER_ID);
+                push_unique(&mut folder_ids, SERVER_FAILURES_FOLDER_ID);
+            }
+            _ => {}
+        }
+    }
+    folder_ids
+}
+
+fn push_unique(folder_ids: &mut Vec<u64>, folder_id: u64) {
+    if !folder_ids.contains(&folder_id) {
+        folder_ids.push(folder_id);
     }
 }
 
@@ -818,5 +891,84 @@ mod tests {
                 "{role} should appear once"
             );
         }
+    }
+
+    #[test]
+    fn ipm_hierarchy_experiment_unset_keeps_full_hierarchy() {
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(None);
+
+        assert_eq!(folder_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
+    }
+
+    #[test]
+    fn ipm_hierarchy_experiment_minimal_omits_suspect_groups() {
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal"));
+
+        assert_eq!(
+            folder_ids.as_slice(),
+            IPM_SUBTREE_MINIMAL_HIERARCHY_FOLDER_IDS
+        );
+        for omitted_folder_id in [
+            REMINDERS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
+            CONTACTS_SEARCH_FOLDER_ID,
+            DOCUMENT_LIBRARIES_FOLDER_ID,
+            SYNC_ISSUES_FOLDER_ID,
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            TODO_SEARCH_FOLDER_ID,
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        ] {
+            assert!(!folder_ids.contains(&omitted_folder_id));
+        }
+    }
+
+    #[test]
+    fn ipm_hierarchy_experiment_can_add_groups_incrementally() {
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some(
+            "minimal,reminders,contacts-extra,documents,tracked,todo,conversation",
+        ));
+
+        for expected_folder_id in [
+            REMINDERS_FOLDER_ID,
+            QUICK_CONTACTS_FOLDER_ID,
+            IM_CONTACT_LIST_FOLDER_ID,
+            CONTACTS_SEARCH_FOLDER_ID,
+            DOCUMENT_LIBRARIES_FOLDER_ID,
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            TODO_SEARCH_FOLDER_ID,
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        ] {
+            assert!(folder_ids.contains(&expected_folder_id));
+        }
+        assert!(!folder_ids.contains(&SYNC_ISSUES_FOLDER_ID));
+        assert!(!folder_ids.contains(&CONFLICTS_FOLDER_ID));
+        assert!(!folder_ids.contains(&LOCAL_FAILURES_FOLDER_ID));
+        assert!(!folder_ids.contains(&SERVER_FAILURES_FOLDER_ID));
+    }
+
+    #[test]
+    fn ipm_hierarchy_experiment_sync_issues_keeps_subtree_together() {
+        let folder_ids =
+            ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal sync-issues"));
+
+        for expected_folder_id in [
+            SYNC_ISSUES_FOLDER_ID,
+            CONFLICTS_FOLDER_ID,
+            LOCAL_FAILURES_FOLDER_ID,
+            SERVER_FAILURES_FOLDER_ID,
+        ] {
+            assert!(folder_ids.contains(&expected_folder_id));
+        }
+    }
+
+    #[test]
+    fn ipm_hierarchy_experiment_all_restores_full_hierarchy() {
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal,all"));
+
+        assert_eq!(folder_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
     }
 }
