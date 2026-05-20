@@ -195,12 +195,13 @@ pub(in crate::mapi) fn sync_mailboxes_for(
     mailboxes: &[JmapMailbox],
 ) -> Vec<JmapMailbox> {
     if sync_type == 0x02 {
+        let mut folder_ids = HashSet::new();
         let mut rows = mailboxes
             .iter()
             .filter(|mailbox| mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes))
+            .filter(|mailbox| folder_ids.insert(mapi_folder_id(mailbox)))
             .cloned()
             .collect::<Vec<_>>();
-        let mut folder_ids = rows.iter().map(mapi_folder_id).collect::<HashSet<_>>();
         for &special_folder_id in hierarchy_virtual_folder_ids(folder_id) {
             if !special_folder_is_in_sync_scope(special_folder_id, folder_id) {
                 continue;
@@ -729,4 +730,44 @@ pub(in crate::mapi) fn email_matches_folder(
                 .any(|state| state.mailbox_id == mailbox.id)
                 || email.mailbox_id == mailbox.id
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mailbox(id: u128, role: &str, name: &str) -> JmapMailbox {
+        JmapMailbox {
+            id: Uuid::from_u128(id),
+            parent_id: None,
+            role: role.to_string(),
+            name: name.to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }
+    }
+
+    #[test]
+    fn hierarchy_sync_mailboxes_deduplicate_fixed_special_folder_ids() {
+        let duplicate_folder_id = crate::mapi::identity::mapi_store_id(100);
+        let first_id = Uuid::from_u128(0x11111111111111111111111111111111);
+        let second_id = Uuid::from_u128(0x22222222222222222222222222222222);
+        crate::mapi::identity::remember_mapi_identity(first_id, duplicate_folder_id);
+        crate::mapi::identity::remember_mapi_identity(second_id, duplicate_folder_id);
+        let mailboxes = vec![
+            mailbox(first_id.as_u128(), "custom", "Duplicate"),
+            mailbox(second_id.as_u128(), "custom", "Duplicate"),
+        ];
+
+        let rows = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes);
+        let duplicate_rows = rows
+            .iter()
+            .filter(|mailbox| mailbox.id == first_id || mailbox.id == second_id)
+            .count();
+
+        assert_eq!(duplicate_rows, 1);
+    }
 }

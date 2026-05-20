@@ -786,6 +786,51 @@ fn summarize_root_logon_default_folder_getprops_requests(
     getprops.join("|")
 }
 
+fn format_optional_debug_handle(handle: Option<u32>) -> String {
+    handle
+        .map(|handle| handle.to_string())
+        .unwrap_or_else(|| "none".to_string())
+}
+
+fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
+    match object {
+        None => "none",
+        Some(MapiObject::Logon) => "logon",
+        Some(MapiObject::Folder { .. }) => "folder",
+        Some(MapiObject::Message { .. }) => "message",
+        Some(MapiObject::Contact { .. }) => "contact",
+        Some(MapiObject::Event { .. }) => "event",
+        Some(MapiObject::Task { .. }) => "task",
+        Some(MapiObject::Note { .. }) => "note",
+        Some(MapiObject::JournalEntry { .. }) => "journal_entry",
+        Some(MapiObject::SearchFolderDefinition { .. }) => "search_folder_definition",
+        Some(MapiObject::PendingMessage { .. }) => "pending_message",
+        Some(MapiObject::PendingContact { .. }) => "pending_contact",
+        Some(MapiObject::PendingEvent { .. }) => "pending_event",
+        Some(MapiObject::PendingTask { .. }) => "pending_task",
+        Some(MapiObject::PendingNote { .. }) => "pending_note",
+        Some(MapiObject::PendingJournalEntry { .. }) => "pending_journal_entry",
+        Some(MapiObject::HierarchyTable { .. }) => "hierarchy_table",
+        Some(MapiObject::ContentsTable { .. }) => "contents_table",
+        Some(MapiObject::AttachmentTable { .. }) => "attachment_table",
+        Some(MapiObject::PermissionTable { .. }) => "permission_table",
+        Some(MapiObject::Attachment { .. }) => "attachment",
+        Some(MapiObject::PendingAttachment { .. }) => "pending_attachment",
+        Some(MapiObject::SavedAttachment { .. }) => "saved_attachment",
+        Some(MapiObject::AttachmentStream { .. }) => "attachment_stream",
+        Some(MapiObject::NotificationSubscription { .. }) => "notification_subscription",
+        Some(MapiObject::SynchronizationSource { .. }) => "synchronization_source",
+        Some(MapiObject::SynchronizationCollector { .. }) => "synchronization_collector",
+    }
+}
+
+fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
+    object
+        .and_then(MapiObject::folder_id)
+        .map(|folder_id| format!("0x{folder_id:016x}"))
+        .unwrap_or_else(|| "none".to_string())
+}
+
 async fn folder_properties_for_open<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -882,9 +927,9 @@ fn mapi_folder_property_tags(property_tags: &[u32]) -> Vec<u32> {
 }
 
 fn remember_root_default_folder_properties(
-    _session: &mut MapiSession,
+    session: &mut MapiSession,
     object: Option<&MapiObject>,
-    _values: &[(u32, MapiValue)],
+    values: &[(u32, MapiValue)],
 ) {
     if !matches!(
         object,
@@ -894,6 +939,14 @@ fn remember_root_default_folder_properties(
         })
     ) {
         return;
+    }
+    for (tag, value) in values {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        if is_default_folder_identification_property_tag(storage_tag) {
+            session
+                .root_default_folder_properties
+                .insert(storage_tag, value.clone());
+        }
     }
 }
 
@@ -1383,10 +1436,22 @@ where
         let mut content_sync_configure_observed = false;
         match RopId::from_u8(typed_request.rop_id()) {
             Some(RopId::Release) => {
-                if matches!(
-                    input_object(session, &handle_slots, &request),
-                    Some(MapiObject::Logon)
-                ) {
+                let released_object = input_object(session, &handle_slots, &request);
+                if session.hierarchy_sync_completed() {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        handle = %format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        object_kind = mapi_object_debug_kind(released_object),
+                        folder_id = %mapi_object_debug_folder_id(released_object),
+                        "rca debug mapi post hierarchy release"
+                    );
+                }
+                if matches!(released_object, Some(MapiObject::Logon)) {
                     session.record_logoff_after_hierarchy_completion();
                 }
                 release_handle_slot(session, &mut handle_slots, &request);
@@ -3810,6 +3875,22 @@ where
                     ));
                     continue;
                 }
+                if session.hierarchy_sync_completed() {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        requested_message_class = %message_class,
+                        response_message_class =
+                            %explicit_receive_folder_message_class(message_class),
+                        response_folder_id = %format!("0x{INBOX_FOLDER_ID:016x}"),
+                        "rca debug mapi post hierarchy get receive folder"
+                    );
+                }
                 responses.extend_from_slice(&rop_get_receive_folder_response(
                     &request,
                     explicit_receive_folder_message_class(message_class),
@@ -5757,17 +5838,14 @@ mod tests {
         );
 
         let mut cursor = Cursor::new(&response[7..]);
-        let expected_value = crate::mapi::identity::long_term_id_from_object_id(CALENDAR_FOLDER_ID)
-            .unwrap()
-            .to_vec();
         assert_eq!(
             parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
-            MapiValue::Binary(expected_value)
+            MapiValue::Binary(vec![0xAA; 24])
         );
         let MapiObject::Folder { properties, .. } = &reopened_root else {
             panic!("expected reopened root folder object");
         };
-        assert!(!properties.contains_key(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID));
+        assert!(properties.contains_key(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID));
         assert!(!properties.contains_key(&canonical_property_storage_tag(PID_TAG_DISPLAY_NAME_W)));
     }
 

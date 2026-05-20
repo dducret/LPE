@@ -6500,11 +6500,9 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
         0
     );
     let mut offset = 6;
-    assert_eq!(response_rops[offset], 1);
-    offset += 1;
-
     assert_eq!(response_rops[offset], 0);
     offset += 1;
+
     let owner_name = utf16z("Bob Store");
     assert_eq!(
         &response_rops[offset..offset + owner_name.len()],
@@ -6512,15 +6510,11 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     );
     offset += owner_name.len();
 
-    assert_eq!(response_rops[offset], 0);
-    offset += 1;
     let entry_id_len =
         u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
     assert!(entry_id_len > 0);
     offset += 2 + entry_id_len;
 
-    assert_eq!(response_rops[offset], 0);
-    offset += 1;
     let server_name = utf16z("LPE");
     assert_eq!(
         &response_rops[offset..offset + server_name.len()],
@@ -6529,30 +6523,25 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
     offset += server_name.len();
 
     for _ in 0..2 {
-        assert_eq!(response_rops[offset], 0x0A);
-        offset += 1;
-        assert_eq!(
-            u32::from_le_bytes(response_rops[offset..offset + 4].try_into().unwrap()),
-            0x8004_0102
-        );
-        offset += 4;
+        let icon_len =
+            u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()) as usize;
+        offset += 2;
+        assert!(icon_len > 22);
+        assert_eq!(&response_rops[offset..offset + 4], &[0, 0, 1, 0]);
+        assert_eq!(response_rops[offset + 6], 16);
+        assert_eq!(response_rops[offset + 7], 16);
+        offset += icon_len;
     }
 
     assert_eq!(response_rops[offset], 0);
     offset += 1;
-    assert_eq!(response_rops[offset], 0);
-    offset += 1;
 
-    assert_eq!(response_rops[offset], 0);
-    offset += 1;
     assert_eq!(
         u32::from_le_bytes(response_rops[offset..offset + 4].try_into().unwrap()),
         0
     );
     offset += 4;
 
-    assert_eq!(response_rops[offset], 0);
-    offset += 1;
     assert_eq!(
         u16::from_le_bytes(response_rops[offset..offset + 2].try_into().unwrap()),
         16
@@ -13999,7 +13988,11 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &0x65E1_0102u32.to_le_bytes()
     ));
     let mut root_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    root_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
+    let root_child_parent_key =
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+    root_child_parent_source_key
+        .extend_from_slice(&(root_child_parent_key.len() as u32).to_le_bytes());
+    root_child_parent_source_key.extend_from_slice(&root_child_parent_key);
     assert!(contains_bytes(
         &response_rops,
         &root_child_parent_source_key
@@ -14181,7 +14174,10 @@ fn mapi_hierarchy_sync_keeps_reminders_generic_until_search_folder_support() {
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
     assert_eq!(decoded.folder_changes[0].folder_type, None);
-    assert!(decoded.folder_changes[0].parent_source_key.is_empty());
+    assert_eq!(
+        decoded.folder_changes[0].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
@@ -14843,9 +14839,10 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
                 && folder.parent_source_key == decoded.folder_changes[projects].source_key
         })
         .expect("custom Archive folderChange");
-    assert!(decoded.folder_changes[projects]
-        .parent_source_key
-        .is_empty());
+    assert_eq!(
+        decoded.folder_changes[projects].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
     assert!(decoded.folder_changes[archive]
         .parent_source_key
         .eq(&decoded.folder_changes[projects].source_key));
