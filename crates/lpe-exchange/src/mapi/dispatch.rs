@@ -26,6 +26,7 @@ where
     S: ExchangeStore,
     V: Detector,
 {
+    log_session_cookie_lookup(endpoint, principal, headers, "Execute");
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return execute_failure_response(request_id, 13, "missing MAPI session cookie", None);
     };

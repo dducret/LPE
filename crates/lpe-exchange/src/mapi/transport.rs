@@ -428,6 +428,7 @@ pub(in crate::mapi) fn disconnect_response(
     request_id: &str,
     response_request_type: &str,
 ) -> Response {
+    log_session_cookie_lookup(endpoint, principal, headers, response_request_type);
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response(
             response_request_type,
@@ -934,6 +935,7 @@ pub(in crate::mapi) async fn notification_wait_response<S>(
 where
     S: ExchangeStore,
 {
+    log_session_cookie_lookup(endpoint, principal, headers, "NotificationWait");
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response(
             "NotificationWait",
@@ -1017,6 +1019,7 @@ pub(in crate::mapi) fn ping_response(
     if !body.is_empty() {
         return mapi_diagnostic_response("PING", request_id, 12, "PING request body must be empty");
     }
+    log_session_cookie_lookup(endpoint, principal, headers, "PING");
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response("PING", request_id, 13, "missing MAPI session cookie");
     };
@@ -1490,20 +1493,130 @@ pub(in crate::mapi) fn request_sequence_cookie_matches(
 }
 
 pub(in crate::mapi) fn request_named_cookie(name: &str, headers: &HeaderMap) -> Option<String> {
+    request_named_cookie_candidates(name, headers)
+        .last()
+        .cloned()
+}
+
+fn request_named_cookie_candidates(name: &str, headers: &HeaderMap) -> Vec<String> {
     headers
         .get_all("cookie")
         .iter()
         .filter_map(|value| value.to_str().ok())
-        .filter_map(|cookie| {
+        .flat_map(|cookie| {
             cookie
                 .split(';')
                 .filter_map(|part| {
                     let (key, value) = part.trim().split_once('=')?;
                     (key == name && !value.is_empty()).then(|| value.to_string())
                 })
-                .last()
+                .collect::<Vec<_>>()
         })
-        .last()
+        .collect()
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CookieValueDebug {
+    suffix: String,
+    hash: String,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct SessionCookieLookupDebug {
+    cookie_header_count: usize,
+    context_candidate_count: usize,
+    sequence_candidate_count: usize,
+    selected_context: CookieValueDebug,
+    selected_sequence: CookieValueDebug,
+    selected_session_exists: bool,
+    selected_session_endpoint_matches: bool,
+    selected_session_principal_matches: bool,
+}
+
+fn session_cookie_lookup_debug(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+) -> SessionCookieLookupDebug {
+    let context_candidates = request_named_cookie_candidates(cookie_name(endpoint), headers);
+    let sequence_candidates =
+        request_named_cookie_candidates(sequence_cookie_name(endpoint), headers);
+    let selected_context = context_candidates.last().cloned();
+    let selected_sequence = sequence_candidates.last().cloned();
+    let session = selected_context.as_deref().and_then(get_session);
+    let selected_session_exists = session.is_some();
+    let selected_session_endpoint_matches = session
+        .as_ref()
+        .is_some_and(|session| session.endpoint == endpoint);
+    let selected_session_principal_matches = session.as_ref().is_some_and(|session| {
+        session.tenant_id == principal.tenant_id
+            && session.account_id == principal.account_id
+            && session.email == principal.email
+    });
+
+    SessionCookieLookupDebug {
+        cookie_header_count: headers.get_all("cookie").iter().count(),
+        context_candidate_count: context_candidates.len(),
+        sequence_candidate_count: sequence_candidates.len(),
+        selected_context: cookie_value_debug(selected_context.as_deref()),
+        selected_sequence: cookie_value_debug(selected_sequence.as_deref()),
+        selected_session_exists,
+        selected_session_endpoint_matches,
+        selected_session_principal_matches,
+    }
+}
+
+fn cookie_value_debug(value: Option<&str>) -> CookieValueDebug {
+    let Some(value) = value else {
+        return CookieValueDebug::default();
+    };
+    CookieValueDebug {
+        suffix: cookie_value_suffix(value),
+        hash: format!("{:016x}", mapi_payload_fingerprint(value.as_bytes())),
+    }
+}
+
+fn cookie_value_suffix(value: &str) -> String {
+    let mut chars = value.chars().rev().take(8).collect::<Vec<_>>();
+    chars.reverse();
+    chars.into_iter().collect()
+}
+
+pub(in crate::mapi) fn log_session_cookie_lookup(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request_type: &str,
+) {
+    if endpoint != MapiEndpoint::Emsmdb {
+        return;
+    }
+    let summary = session_cookie_lookup_debug(endpoint, principal, headers);
+    let endpoint = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = %request_type,
+        cookie_header_count = summary.cookie_header_count,
+        mapi_context_candidate_count = summary.context_candidate_count,
+        mapi_sequence_candidate_count = summary.sequence_candidate_count,
+        selected_context_suffix = %summary.selected_context.suffix,
+        selected_context_hash = %summary.selected_context.hash,
+        selected_sequence_suffix = %summary.selected_sequence.suffix,
+        selected_sequence_hash = %summary.selected_sequence.hash,
+        selected_session_exists = summary.selected_session_exists,
+        selected_session_endpoint_matches = summary.selected_session_endpoint_matches,
+        selected_session_principal_matches = summary.selected_session_principal_matches,
+        message = "rca debug mapi session cookie lookup",
+    );
 }
 
 pub(in crate::mapi) fn session_cookie(
@@ -1609,6 +1722,15 @@ mod tests {
         }
     }
 
+    fn test_principal() -> AccountPrincipal {
+        AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "user@example.test".to_string(),
+            display_name: "User".to_string(),
+        }
+    }
+
     fn hierarchy_source(
         transfer_position: usize,
         candidate: Option<crate::mapi_mailstore::HierarchyContentCountOmissionCandidate>,
@@ -1694,6 +1816,94 @@ mod tests {
             auxiliary_buffer.len() as u32
         );
         assert!(summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn session_cookie_lookup_debug_reports_sanitized_latest_cookie_selection() {
+        let principal = test_principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let stale_id = "00000000-0000-0000-0000-000000000000";
+        let mut headers = HeaderMap::new();
+        headers.append(
+            "cookie",
+            HeaderValue::from_str(&format!("MapiContext={stale_id}; MapiSequence={stale_id}"))
+                .unwrap(),
+        );
+        headers.append(
+            "cookie",
+            HeaderValue::from_str(&format!(
+                "MapiContext={session_id}; MapiSequence={session_id}"
+            ))
+            .unwrap(),
+        );
+
+        let summary = session_cookie_lookup_debug(MapiEndpoint::Emsmdb, &principal, &headers);
+
+        assert_eq!(summary.cookie_header_count, 2);
+        assert_eq!(summary.context_candidate_count, 2);
+        assert_eq!(summary.sequence_candidate_count, 2);
+        assert_eq!(
+            summary.selected_context.suffix,
+            cookie_value_suffix(&session_id)
+        );
+        assert_eq!(
+            summary.selected_sequence.suffix,
+            cookie_value_suffix(&session_id)
+        );
+        assert_eq!(
+            summary.selected_context.hash,
+            format!("{:016x}", mapi_payload_fingerprint(session_id.as_bytes()))
+        );
+        assert_eq!(summary.selected_context.hash.len(), 16);
+        assert_ne!(summary.selected_context.hash, session_id);
+        assert_ne!(summary.selected_sequence.hash, session_id);
+        assert!(summary.selected_session_exists);
+        assert!(summary.selected_session_endpoint_matches);
+        assert!(summary.selected_session_principal_matches);
+        remove_session(&session_id);
+    }
+
+    #[test]
+    fn session_cookie_lookup_debug_reports_endpoint_and_principal_mismatch() {
+        let principal = test_principal();
+        let session_id = create_session(MapiEndpoint::Nspi, &principal);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            HeaderValue::from_str(&format!(
+                "MapiContext={session_id}; MapiSequence={session_id}"
+            ))
+            .unwrap(),
+        );
+
+        let summary = session_cookie_lookup_debug(MapiEndpoint::Emsmdb, &principal, &headers);
+
+        assert!(summary.selected_session_exists);
+        assert!(!summary.selected_session_endpoint_matches);
+        assert!(summary.selected_session_principal_matches);
+        remove_session(&session_id);
+
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let other_principal = AccountPrincipal {
+            account_id: Uuid::from_u128(0xcccccccc_cccc_cccc_cccc_cccccccccccc),
+            email: "other@example.test".to_string(),
+            ..principal
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "cookie",
+            HeaderValue::from_str(&format!(
+                "MapiContext={session_id}; MapiSequence={session_id}"
+            ))
+            .unwrap(),
+        );
+
+        let summary = session_cookie_lookup_debug(MapiEndpoint::Emsmdb, &other_principal, &headers);
+
+        assert!(summary.selected_session_exists);
+        assert!(summary.selected_session_endpoint_matches);
+        assert!(!summary.selected_session_principal_matches);
+        remove_session(&session_id);
     }
 
     #[test]
