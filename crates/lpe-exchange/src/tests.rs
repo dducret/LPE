@@ -13989,11 +13989,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &0x65E1_0102u32.to_le_bytes()
     ));
     let mut root_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    let root_child_parent_key =
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
-    root_child_parent_source_key
-        .extend_from_slice(&(root_child_parent_key.len() as u32).to_le_bytes());
-    root_child_parent_source_key.extend_from_slice(&root_child_parent_key);
+    root_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
     assert!(contains_bytes(
         &response_rops,
         &root_child_parent_source_key
@@ -14136,6 +14132,23 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
     ));
+    let decoded =
+        strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    let sync_issues = decoded
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name == "Sync Issues")
+        .expect("Sync Issues folderChange");
+    assert!(sync_issues.parent_source_key.is_empty());
+    let sync_issues_source_key = sync_issues.source_key.clone();
+    for name in ["Conflicts", "Local Failures", "Server Failures"] {
+        let folder = decoded
+            .folder_changes
+            .iter()
+            .find(|folder| folder.display_name == name)
+            .unwrap_or_else(|| panic!("{name} folderChange"));
+        assert_eq!(folder.parent_source_key, sync_issues_source_key);
+    }
 }
 
 #[test]
@@ -14174,10 +14187,7 @@ fn mapi_hierarchy_sync_keeps_reminders_generic_until_search_folder_support() {
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
     assert_eq!(decoded.folder_changes[0].folder_type, None);
-    assert_eq!(
-        decoded.folder_changes[0].parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
-    );
+    assert!(decoded.folder_changes[0].parent_source_key.is_empty());
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
@@ -14838,10 +14848,9 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
                 && folder.parent_source_key == decoded.folder_changes[projects].source_key
         })
         .expect("custom Archive folderChange");
-    assert_eq!(
-        decoded.folder_changes[projects].parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
-    );
+    assert!(decoded.folder_changes[projects]
+        .parent_source_key
+        .is_empty());
     assert!(decoded.folder_changes[archive]
         .parent_source_key
         .eq(&decoded.folder_changes[projects].source_key));
