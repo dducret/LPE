@@ -1491,9 +1491,10 @@ pub(in crate::mapi) fn request_sequence_cookie_matches(
 
 pub(in crate::mapi) fn request_named_cookie(name: &str, headers: &HeaderMap) -> Option<String> {
     headers
-        .get("cookie")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|cookie| {
+        .get_all("cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|cookie| {
             cookie
                 .split(';')
                 .filter_map(|part| {
@@ -1502,6 +1503,7 @@ pub(in crate::mapi) fn request_named_cookie(name: &str, headers: &HeaderMap) -> 
                 })
                 .last()
         })
+        .last()
 }
 
 pub(in crate::mapi) fn session_cookie(
