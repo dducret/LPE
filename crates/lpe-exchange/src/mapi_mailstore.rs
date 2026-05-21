@@ -850,35 +850,38 @@ pub(crate) fn log_hierarchy_get_buffer_payload_summary(
     }
 
     match decode_hierarchy_transfer_debug_summary(transfer_buffer) {
-        Ok(summary) => tracing::info!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            request_type = "Execute",
-            request_rop_id = "0x4e",
-            sync_type = format_args!("0x{sync_type:02x}"),
-            folder_id = format_args!("0x{folder_id:016x}"),
-            transfer_status,
-            transfer_buffer_bytes = transfer_buffer.len(),
-            marker_count = summary.marker_tags.len(),
-            marker_sequence = %format_marker_tags(&summary.marker_tags),
-            fast_transfer_property_count = summary.property_count,
-            stream_end_marker_seen = summary.stream_end_marker_seen,
-            final_state_idset_given_bytes = summary.final_state_idset_given_len,
-            final_state_cnset_seen_bytes = summary.final_state_cnset_seen_len,
-            final_state_expected_property_order_ok =
-                summary.final_state_expected_property_order_ok,
-            folder_change_count = summary.folder_change_count,
-            zero_parent_count = summary.zero_length_parent_source_key_count,
-            nonzero_parent_count = summary.nonzero_parent_source_key_count,
-            first_folder_name = %summary.first_folder_name(),
-            last_folder_name = %summary.last_folder_name(),
-            final_state_idset_given_includes_all_expected_folder_source_key_counters =
-                summary.final_state_idset_given_includes_all_expected_folder_source_counters,
-            final_state_cnset_seen_includes_all_expected_folder_change_counters =
-                summary.final_state_cnset_seen_includes_all_expected_folder_change_counters,
-            "rca debug mapi hierarchy get buffer payload summary"
-        ),
+        Ok(summary) => {
+            tracing::info!(
+                rca_debug = true,
+                adapter = "mapi",
+                endpoint = "emsmdb",
+                request_type = "Execute",
+                request_rop_id = "0x4e",
+                sync_type = format_args!("0x{sync_type:02x}"),
+                folder_id = format_args!("0x{folder_id:016x}"),
+                transfer_status,
+                transfer_buffer_bytes = transfer_buffer.len(),
+                marker_count = summary.marker_tags.len(),
+                marker_sequence = %format_marker_tags(&summary.marker_tags),
+                fast_transfer_property_count = summary.property_count,
+                stream_end_marker_seen = summary.stream_end_marker_seen,
+                final_state_idset_given_bytes = summary.final_state_idset_given_len,
+                final_state_cnset_seen_bytes = summary.final_state_cnset_seen_len,
+                final_state_expected_property_order_ok =
+                    summary.final_state_expected_property_order_ok,
+                folder_change_count = summary.folder_change_count,
+                zero_parent_count = summary.zero_length_parent_source_key_count,
+                nonzero_parent_count = summary.nonzero_parent_source_key_count,
+                first_folder_name = %summary.first_folder_name(),
+                last_folder_name = %summary.last_folder_name(),
+                final_state_idset_given_includes_all_expected_folder_source_key_counters =
+                    summary.final_state_idset_given_includes_all_expected_folder_source_counters,
+                final_state_cnset_seen_includes_all_expected_folder_change_counters =
+                    summary.final_state_cnset_seen_includes_all_expected_folder_change_counters,
+                "rca debug mapi hierarchy get buffer payload summary"
+            );
+            log_hierarchy_semantic_validation(sync_type, folder_id, transfer_status, &summary);
+        }
         Err(error) => tracing::warn!(
             rca_debug = true,
             adapter = "mapi",
@@ -894,6 +897,45 @@ pub(crate) fn log_hierarchy_get_buffer_payload_summary(
             "rca debug mapi hierarchy get buffer payload summary"
         ),
     }
+}
+
+fn log_hierarchy_semantic_validation(
+    sync_type: u8,
+    folder_id: u64,
+    transfer_status: &str,
+    summary: &HierarchyTransferDebugSummary,
+) {
+    let validation = hierarchy_semantic_validation(folder_id, summary);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_type = "Execute",
+        request_rop_id = "0x4e",
+        sync_type = format_args!("0x{sync_type:02x}"),
+        folder_id = format_args!("0x{folder_id:016x}"),
+        transfer_status,
+        completed = transfer_status == "0x0003",
+        semantic_flags = %validation.semantic_flags,
+        sync_root_source_counter = validation.sync_root_source_counter,
+        sync_root_row_present = validation.sync_root_row_present,
+        sync_root_counter_in_final_idset = validation.sync_root_counter_in_final_idset,
+        sync_root_counter_in_final_cnset = validation.sync_root_counter_in_final_cnset,
+        top_level_row_count = validation.top_level_row_count,
+        nested_row_count = validation.nested_row_count,
+        rows_without_folder_id = validation.rows_without_folder_id,
+        rows_missing_core_property_count = validation.rows_missing_core_property_count,
+        rows_with_content_counts_present = validation.rows_with_content_counts_present,
+        rows_with_folder_type_present = validation.rows_with_folder_type_present,
+        rows_with_access_present = validation.rows_with_access_present,
+        idset_missing_source_counters = %format_counter_list(&validation.idset_missing_source_counters),
+        idset_extra_source_counters = %format_counter_list(&validation.idset_extra_source_counters),
+        cnset_missing_change_counters = %format_counter_list(&validation.cnset_missing_change_counters),
+        cnset_extra_change_counters = %format_counter_list(&validation.cnset_extra_change_counters),
+        top_level_row_names = %validation.top_level_row_names,
+        rows_missing_core_property_names = %validation.rows_missing_core_property_names,
+        "rca debug mapi hierarchy semantic validation"
+    );
 }
 
 fn log_hierarchy_final_state_debug(
@@ -936,6 +978,170 @@ fn hierarchy_property_filter_mode(
     } else {
         "only-specified"
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct HierarchySemanticValidation {
+    sync_root_source_counter: u64,
+    sync_root_row_present: bool,
+    sync_root_counter_in_final_idset: bool,
+    sync_root_counter_in_final_cnset: bool,
+    top_level_row_count: usize,
+    nested_row_count: usize,
+    rows_without_folder_id: usize,
+    rows_missing_core_property_count: usize,
+    rows_with_content_counts_present: usize,
+    rows_with_folder_type_present: usize,
+    rows_with_access_present: usize,
+    idset_missing_source_counters: Vec<u64>,
+    idset_extra_source_counters: Vec<u64>,
+    cnset_missing_change_counters: Vec<u64>,
+    cnset_extra_change_counters: Vec<u64>,
+    top_level_row_names: String,
+    rows_missing_core_property_names: String,
+    semantic_flags: String,
+}
+
+fn hierarchy_semantic_validation(
+    sync_root_folder_id: u64,
+    summary: &HierarchyTransferDebugSummary,
+) -> HierarchySemanticValidation {
+    let sync_root_source_counter =
+        crate::mapi::identity::global_counter_from_store_id(sync_root_folder_id)
+            .unwrap_or_else(|| change_number_for_store_id(sync_root_folder_id));
+    let expected_source_counters = summary
+        .rows
+        .iter()
+        .filter_map(|row| row.source_counter)
+        .collect::<Vec<_>>();
+    let expected_change_counters = summary
+        .rows
+        .iter()
+        .filter_map(|row| row.change_counter)
+        .collect::<Vec<_>>();
+    let top_level_rows = summary
+        .rows
+        .iter()
+        .filter(|row| row.parent_source_key_len == 0)
+        .collect::<Vec<_>>();
+    let rows_missing_core_properties = summary
+        .rows
+        .iter()
+        .filter(|row| !row.missing_core_property_tags.is_empty())
+        .collect::<Vec<_>>();
+
+    let idset_missing_source_counters = counter_difference(
+        &expected_source_counters,
+        &summary.final_state_idset_given_counters,
+    );
+    let idset_extra_source_counters = counter_difference(
+        &summary.final_state_idset_given_counters,
+        &expected_source_counters,
+    );
+    let cnset_missing_change_counters = counter_difference(
+        &expected_change_counters,
+        &summary.final_state_cnset_seen_counters,
+    );
+    let cnset_extra_change_counters = counter_difference(
+        &summary.final_state_cnset_seen_counters,
+        &expected_change_counters,
+    );
+    let mut semantic_flags = Vec::new();
+    if !summary.stream_end_marker_seen {
+        semantic_flags.push("missing_stream_end");
+    }
+    if !summary.final_state_present {
+        semantic_flags.push("missing_final_state");
+    }
+    if !summary.final_state_expected_property_order_ok {
+        semantic_flags.push("final_state_order");
+    }
+    if !idset_missing_source_counters.is_empty() {
+        semantic_flags.push("idset_missing_source");
+    }
+    if !cnset_missing_change_counters.is_empty() {
+        semantic_flags.push("cnset_missing_change");
+    }
+    if !rows_missing_core_properties.is_empty() {
+        semantic_flags.push("row_missing_core");
+    }
+    if summary.parent_before_child_violations > 0 {
+        semantic_flags.push("parent_before_child");
+    }
+    if top_level_rows.is_empty() {
+        semantic_flags.push("no_top_level_rows");
+    }
+
+    HierarchySemanticValidation {
+        sync_root_source_counter,
+        sync_root_row_present: expected_source_counters.contains(&sync_root_source_counter),
+        sync_root_counter_in_final_idset: summary
+            .final_state_idset_given_counters
+            .contains(&sync_root_source_counter),
+        sync_root_counter_in_final_cnset: summary
+            .final_state_cnset_seen_counters
+            .contains(&sync_root_source_counter),
+        top_level_row_count: top_level_rows.len(),
+        nested_row_count: summary.rows.len().saturating_sub(top_level_rows.len()),
+        rows_without_folder_id: summary
+            .rows
+            .iter()
+            .filter(|row| row.folder_id.is_none())
+            .count(),
+        rows_missing_core_property_count: rows_missing_core_properties.len(),
+        rows_with_content_counts_present: summary
+            .rows
+            .iter()
+            .filter(|row| row.content_count.is_some() || row.content_unread_count.is_some())
+            .count(),
+        rows_with_folder_type_present: summary
+            .rows
+            .iter()
+            .filter(|row| row.folder_type.is_some())
+            .count(),
+        rows_with_access_present: summary
+            .rows
+            .iter()
+            .filter(|row| row.access.is_some())
+            .count(),
+        idset_missing_source_counters,
+        idset_extra_source_counters,
+        cnset_missing_change_counters,
+        cnset_extra_change_counters,
+        top_level_row_names: top_level_rows
+            .iter()
+            .map(|row| row.display_name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        rows_missing_core_property_names: rows_missing_core_properties
+            .iter()
+            .map(|row| row.display_name.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        semantic_flags: if semantic_flags.is_empty() {
+            "ok".to_string()
+        } else {
+            semantic_flags.join(",")
+        },
+    }
+}
+
+fn counter_difference(left: &[u64], right: &[u64]) -> Vec<u64> {
+    let right = right.iter().copied().collect::<BTreeSet<_>>();
+    left.iter()
+        .copied()
+        .collect::<BTreeSet<_>>()
+        .difference(&right)
+        .copied()
+        .collect()
+}
+
+fn format_counter_list(counters: &[u64]) -> String {
+    counters
+        .iter()
+        .map(|counter| counter.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -3045,6 +3251,30 @@ mod tests {
             &summary.rows[0].property_tags
         ));
         assert!(summary.rows[0].missing_core_property_tags.is_empty());
+
+        let validation =
+            hierarchy_semantic_validation(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &summary);
+        assert_eq!(validation.semantic_flags, "ok");
+        assert_eq!(
+            validation.sync_root_source_counter,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_COUNTER
+        );
+        assert!(!validation.sync_root_row_present);
+        assert!(!validation.sync_root_counter_in_final_idset);
+        assert!(!validation.sync_root_counter_in_final_cnset);
+        assert_eq!(validation.top_level_row_count, 1);
+        assert_eq!(validation.nested_row_count, 0);
+        assert_eq!(validation.rows_without_folder_id, 1);
+        assert_eq!(validation.rows_missing_core_property_count, 0);
+        assert_eq!(validation.rows_with_content_counts_present, 0);
+        assert_eq!(validation.rows_with_folder_type_present, 1);
+        assert_eq!(validation.rows_with_access_present, 1);
+        assert!(validation.idset_missing_source_counters.is_empty());
+        assert!(validation.idset_extra_source_counters.is_empty());
+        assert!(validation.cnset_missing_change_counters.is_empty());
+        assert!(validation.cnset_extra_change_counters.is_empty());
+        assert_eq!(validation.top_level_row_names, "Inbox");
+        assert!(validation.rows_missing_core_property_names.is_empty());
     }
 
     #[test]
@@ -3097,6 +3327,20 @@ mod tests {
         assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
         assert_eq!(summary.first_folder_name(), "Inbox");
         assert_eq!(summary.last_folder_name(), "Server Failures");
+
+        let validation =
+            hierarchy_semantic_validation(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &summary);
+        assert_eq!(validation.semantic_flags, "ok");
+        assert_eq!(validation.top_level_row_count, 16);
+        assert_eq!(validation.nested_row_count, 3);
+        assert_eq!(validation.rows_without_folder_id, expected_folder_count);
+        assert_eq!(validation.rows_missing_core_property_count, 0);
+        assert!(validation
+            .top_level_row_names
+            .starts_with("Inbox,Drafts,Outbox"));
+        assert!(validation
+            .top_level_row_names
+            .contains("Conversation History"));
     }
 
     #[test]
