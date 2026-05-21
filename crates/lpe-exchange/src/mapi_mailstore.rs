@@ -798,6 +798,10 @@ pub(crate) fn log_hierarchy_transfer_debug(
                 folder_id = format_args!("0x{folder_id:016x}"),
                 transfer_buffer_bytes = transfer_buffer.len(),
                 hierarchy_decode_status = "ok",
+                marker_count = summary.marker_tags.len(),
+                marker_sequence = %format_marker_tags(&summary.marker_tags),
+                fast_transfer_property_count = summary.property_count,
+                stream_end_marker_seen = summary.stream_end_marker_seen,
                 folder_change_count = summary.folder_change_count,
                 final_state_present = summary.final_state_present,
                 parent_before_child_violations = summary.parent_before_child_violations,
@@ -807,6 +811,8 @@ pub(crate) fn log_hierarchy_transfer_debug(
                 final_state_property_tags = %format_property_tags(&summary.final_state_property_tags),
                 final_state_property_names = %format_property_tag_names(&summary.final_state_property_tags),
                 final_state_property_lengths = %format_usize_list(&summary.final_state_property_lengths),
+                final_state_expected_property_order_ok =
+                    summary.final_state_expected_property_order_ok,
                 final_state_idset_given = %summary.final_state_idset_given_summary.as_deref().unwrap_or_default(),
                 final_state_cnset_seen = %summary.final_state_cnset_seen_summary.as_deref().unwrap_or_default(),
                 emitted_property_tags = %format_property_tags(&summary.emitted_property_tags),
@@ -854,8 +860,14 @@ pub(crate) fn log_hierarchy_get_buffer_payload_summary(
             folder_id = format_args!("0x{folder_id:016x}"),
             transfer_status,
             transfer_buffer_bytes = transfer_buffer.len(),
+            marker_count = summary.marker_tags.len(),
+            marker_sequence = %format_marker_tags(&summary.marker_tags),
+            fast_transfer_property_count = summary.property_count,
+            stream_end_marker_seen = summary.stream_end_marker_seen,
             final_state_idset_given_bytes = summary.final_state_idset_given_len,
             final_state_cnset_seen_bytes = summary.final_state_cnset_seen_len,
+            final_state_expected_property_order_ok =
+                summary.final_state_expected_property_order_ok,
             folder_change_count = summary.folder_change_count,
             zero_parent_count = summary.zero_length_parent_source_key_count,
             nonzero_parent_count = summary.nonzero_parent_source_key_count,
@@ -904,6 +916,7 @@ fn log_hierarchy_final_state_debug(
         final_state_folder_change_count = summary.folder_change_count,
         final_metatag_idset_given_counter_count = summary.final_state_idset_given_counters.len(),
         final_metatag_cnset_seen_counter_count = summary.final_state_cnset_seen_counters.len(),
+        final_state_expected_property_order_ok = summary.final_state_expected_property_order_ok,
         final_metatag_idset_given_includes_all_expected_folder_source_key_counters =
             summary.final_state_idset_given_includes_all_expected_folder_source_counters,
         final_metatag_cnset_seen_includes_all_expected_folder_change_counters =
@@ -927,6 +940,9 @@ fn hierarchy_property_filter_mode(
 
 #[derive(Debug, Default, PartialEq, Eq)]
 struct HierarchyTransferDebugSummary {
+    marker_tags: Vec<u32>,
+    property_count: usize,
+    stream_end_marker_seen: bool,
     folder_change_count: usize,
     final_state_present: bool,
     parent_before_child_violations: usize,
@@ -942,6 +958,7 @@ struct HierarchyTransferDebugSummary {
     final_state_cnset_seen_summary: Option<String>,
     final_state_idset_given_counters: Vec<u64>,
     final_state_cnset_seen_counters: Vec<u64>,
+    final_state_expected_property_order_ok: bool,
     final_state_idset_given_includes_all_expected_folder_source_counters: bool,
     final_state_cnset_seen_includes_all_expected_folder_change_counters: bool,
     emitted_property_tags: Vec<u32>,
@@ -1036,6 +1053,7 @@ fn decode_hierarchy_transfer_debug_summary(
     while offset < bytes.len() {
         let tag = read_debug_u32(bytes, offset)?;
         if hierarchy_debug_marker(tag) {
+            summary.marker_tags.push(tag);
             match tag {
                 INCR_SYNC_CHG => {
                     if let Some(folder) = current_folder.take() {
@@ -1057,6 +1075,7 @@ fn decode_hierarchy_transfer_debug_summary(
                     if let Some(folder) = current_folder.take() {
                         finish_hierarchy_debug_folder(folder, &mut seen_source_keys, &mut summary);
                     }
+                    summary.stream_end_marker_seen = true;
                     offset += 4;
                     if offset != bytes.len() {
                         return Err("trailing bytes after IncrSyncEnd".into());
@@ -1071,6 +1090,7 @@ fn decode_hierarchy_transfer_debug_summary(
 
         let property = parse_debug_fast_transfer_property(bytes, offset)?;
         offset = property.next_offset;
+        summary.property_count += 1;
         emitted_property_tags.insert(property.tag);
 
         if in_final_state && current_folder.is_none() {
@@ -1160,6 +1180,8 @@ fn collect_final_state_debug_property(
 }
 
 fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDebugSummary) {
+    summary.final_state_expected_property_order_ok = summary.final_state_property_tags.as_slice()
+        == [META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN].as_slice();
     let source_counters = summary
         .rows
         .iter()
@@ -1214,6 +1236,19 @@ fn finish_hierarchy_debug_folder(
     }
     let predecessor_change_list = folder.predecessor_change_list.unwrap_or_default();
     let missing_core_property_tags = missing_hierarchy_core_property_tags(&folder.property_tags);
+    let parent_source_key_index =
+        property_position(&folder.property_tags, PID_TAG_PARENT_SOURCE_KEY);
+    let source_key_index = property_position(&folder.property_tags, PID_TAG_SOURCE_KEY);
+    let last_modification_time_index =
+        property_position(&folder.property_tags, PID_TAG_LAST_MODIFICATION_TIME);
+    let change_key_index = property_position(&folder.property_tags, PID_TAG_CHANGE_KEY);
+    let predecessor_change_list_index =
+        property_position(&folder.property_tags, PID_TAG_PREDECESSOR_CHANGE_LIST);
+    let display_name_index = property_position(&folder.property_tags, PID_TAG_DISPLAY_NAME_W);
+    let container_class_index = property_position(&folder.property_tags, PID_TAG_CONTAINER_CLASS_W);
+    let subfolders_index = property_position(&folder.property_tags, PID_TAG_SUBFOLDERS);
+    let identity_properties_before_display_name =
+        hierarchy_identity_properties_before_display_name(&folder.property_tags);
     let row = HierarchyTransferRowDebug {
         row_index: summary.folder_change_count,
         display_name: folder.display_name.unwrap_or_default(),
@@ -1278,6 +1313,20 @@ fn finish_hierarchy_debug_folder(
         source_key_hex = %row.source_key_hex,
         parent_source_key_hex = %row.parent_source_key_hex,
         change_key_hex = %row.change_key_hex,
+        property_count = row.property_tags.len(),
+        first_property_tag = %row.property_tags.first().map(|tag| format!("0x{tag:08x}")).unwrap_or_default(),
+        first_property_name = row.property_tags.first().map(|tag| property_tag_debug_name(*tag)).unwrap_or_default(),
+        last_property_tag = %row.property_tags.last().map(|tag| format!("0x{tag:08x}")).unwrap_or_default(),
+        last_property_name = row.property_tags.last().map(|tag| property_tag_debug_name(*tag)).unwrap_or_default(),
+        parent_source_key_property_index = parent_source_key_index,
+        source_key_property_index = source_key_index,
+        last_modification_time_property_index = last_modification_time_index,
+        change_key_property_index = change_key_index,
+        predecessor_change_list_property_index = predecessor_change_list_index,
+        display_name_property_index = display_name_index,
+        container_class_property_index = container_class_index,
+        subfolders_property_index = subfolders_index,
+        identity_properties_before_display_name,
         emitted_property_tags = %format_property_tags(&row.property_tags),
         emitted_property_names = %format_property_tag_names(&row.property_tags),
         missing_core_property_tags = %format_property_tags(&row.missing_core_property_tags),
@@ -1301,6 +1350,33 @@ fn missing_hierarchy_core_property_tags(property_tags: &[u32]) -> Vec<u32> {
     .into_iter()
     .filter(|tag| !property_tags.contains(tag))
     .collect()
+}
+
+fn property_position(property_tags: &[u32], property_tag: u32) -> usize {
+    property_tags
+        .iter()
+        .position(|tag| *tag == property_tag)
+        .map(|index| index + 1)
+        .unwrap_or_default()
+}
+
+fn hierarchy_identity_properties_before_display_name(property_tags: &[u32]) -> bool {
+    let display_name = property_position(property_tags, PID_TAG_DISPLAY_NAME_W);
+    if display_name == 0 {
+        return false;
+    }
+    [
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+    ]
+    .into_iter()
+    .all(|tag| {
+        let position = property_position(property_tags, tag);
+        position != 0 && position < display_name
+    })
 }
 
 fn decode_debug_i32(bytes: &[u8]) -> Option<i32> {
@@ -1391,6 +1467,16 @@ fn hierarchy_debug_marker(tag: u32) -> bool {
     )
 }
 
+fn fast_transfer_marker_debug_name(tag: u32) -> &'static str {
+    match tag {
+        INCR_SYNC_CHG => "IncrSyncChg",
+        INCR_SYNC_STATE_BEGIN => "IncrSyncStateBegin",
+        INCR_SYNC_STATE_END => "IncrSyncStateEnd",
+        INCR_SYNC_END => "IncrSyncEnd",
+        _ => "unknown",
+    }
+}
+
 fn parse_debug_fast_transfer_property(
     bytes: &[u8],
     offset: usize,
@@ -1443,6 +1529,13 @@ fn format_usize_list(values: &[usize]) -> String {
 fn format_property_tags(tags: &[u32]) -> String {
     tags.iter()
         .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_marker_tags(tags: &[u32]) -> String {
+    tags.iter()
+        .map(|tag| format!("{}:0x{tag:08x}", fast_transfer_marker_debug_name(*tag)))
         .collect::<Vec<_>>()
         .join(",")
 }
@@ -2903,6 +2996,11 @@ mod tests {
 
         assert_eq!(summary.folder_change_count, 1);
         assert!(summary.final_state_present);
+        assert_eq!(
+            format_marker_tags(&summary.marker_tags),
+            "IncrSyncChg:0x40120003,IncrSyncStateBegin:0x403a0003,IncrSyncStateEnd:0x403b0003,IncrSyncEnd:0x40140003"
+        );
+        assert!(summary.stream_end_marker_seen);
         assert_eq!(summary.parent_before_child_violations, 0);
         assert_eq!(summary.zero_length_parent_source_key_count, 1);
         assert_eq!(summary.nonzero_parent_source_key_count, 0);
@@ -2912,6 +3010,7 @@ mod tests {
             summary.final_state_property_tags,
             vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
         );
+        assert!(summary.final_state_expected_property_order_ok);
         assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
         assert_eq!(summary.final_state_idset_given_len, 30);
         assert_eq!(summary.final_state_cnset_seen_len, 30);
@@ -2942,6 +3041,9 @@ mod tests {
         assert_eq!(summary.rows[0].folder_id, None);
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 0);
+        assert!(hierarchy_identity_properties_before_display_name(
+            &summary.rows[0].property_tags
+        ));
         assert!(summary.rows[0].missing_core_property_tags.is_empty());
     }
 

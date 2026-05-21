@@ -4487,6 +4487,8 @@ where
                             transfer_position,
                         );
                         let completed = *transfer_position >= transfer_buffer.len();
+                        let response_debug =
+                            summarize_fast_transfer_get_buffer_response(&response, completed);
                         if completed && *sync_type == 0x02 {
                             completed_hierarchy_sync_root = Some(*folder_id);
                         }
@@ -4521,6 +4523,29 @@ where
                                 (*transfer_position).saturating_sub(previous_transfer_position),
                             transfer_completed = completed,
                             transfer_status = if completed { "0x0003" } else { "0x0001" },
+                            get_buffer_response_bytes = response.len(),
+                            get_buffer_response_header_bytes = response_debug.header_bytes,
+                            get_buffer_response_rop_id = %response_debug.rop_id,
+                            get_buffer_response_rop_id_matches = response_debug.rop_id_matches,
+                            get_buffer_response_handle_index = response_debug.handle_index,
+                            get_buffer_return_value = %response_debug.return_value,
+                            get_buffer_transfer_status_wire = %response_debug.transfer_status,
+                            get_buffer_transfer_status_matches_completed =
+                                response_debug.transfer_status_matches_completed,
+                            get_buffer_in_progress_count = response_debug.in_progress_count,
+                            get_buffer_total_step_count = response_debug.total_step_count,
+                            get_buffer_reserved_byte = response_debug.reserved_byte,
+                            get_buffer_reserved_zero = response_debug.reserved_zero,
+                            get_buffer_transfer_buffer_size_wire =
+                                response_debug.transfer_buffer_size,
+                            get_buffer_transfer_payload_bytes = response_debug.transfer_payload_bytes,
+                            get_buffer_transfer_buffer_size_matches_payload =
+                                response_debug.transfer_buffer_size_matches_payload,
+                            get_buffer_transfer_payload_preview_hex =
+                                %response_debug.transfer_payload_preview_hex,
+                            get_buffer_transfer_payload_tail_hex =
+                                %response_debug.transfer_payload_tail_hex,
+                            get_buffer_response_parse_error = %response_debug.parse_error,
                             "rca debug mapi fast transfer get buffer"
                         );
                         mapi_mailstore::log_hierarchy_get_buffer_payload_summary(
@@ -5812,6 +5837,91 @@ fn sync_property_filter_mode(sync_flags: u16, requested_property_tags: &[u32]) -
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct FastTransferGetBufferResponseDebug {
+    header_bytes: usize,
+    rop_id: String,
+    rop_id_matches: bool,
+    handle_index: u8,
+    return_value: String,
+    transfer_status: String,
+    transfer_status_matches_completed: bool,
+    in_progress_count: u16,
+    total_step_count: u16,
+    reserved_byte: u8,
+    reserved_zero: bool,
+    transfer_buffer_size: u16,
+    transfer_payload_bytes: usize,
+    transfer_buffer_size_matches_payload: bool,
+    transfer_payload_preview_hex: String,
+    transfer_payload_tail_hex: String,
+    parse_error: String,
+}
+
+fn summarize_fast_transfer_get_buffer_response(
+    response: &[u8],
+    completed: bool,
+) -> FastTransferGetBufferResponseDebug {
+    const HEADER_BYTES: usize = 15;
+    if response.len() < HEADER_BYTES {
+        return FastTransferGetBufferResponseDebug {
+            header_bytes: HEADER_BYTES,
+            rop_id: response
+                .first()
+                .map(|value| format!("0x{value:02x}"))
+                .unwrap_or_default(),
+            rop_id_matches: response.first() == Some(&0x4e),
+            handle_index: response.get(1).copied().unwrap_or_default(),
+            return_value: String::new(),
+            transfer_status: String::new(),
+            transfer_status_matches_completed: false,
+            in_progress_count: 0,
+            total_step_count: 0,
+            reserved_byte: 0,
+            reserved_zero: false,
+            transfer_buffer_size: 0,
+            transfer_payload_bytes: 0,
+            transfer_buffer_size_matches_payload: false,
+            transfer_payload_preview_hex: String::new(),
+            transfer_payload_tail_hex: String::new(),
+            parse_error: "truncated_get_buffer_response_header".to_string(),
+        };
+    }
+
+    let return_value = u32::from_le_bytes(response[2..6].try_into().unwrap());
+    let transfer_status = u16::from_le_bytes(response[6..8].try_into().unwrap());
+    let in_progress_count = u16::from_le_bytes(response[8..10].try_into().unwrap());
+    let total_step_count = u16::from_le_bytes(response[10..12].try_into().unwrap());
+    let reserved_byte = response[12];
+    let transfer_buffer_size = u16::from_le_bytes(response[13..15].try_into().unwrap());
+    let transfer_payload = &response[HEADER_BYTES..];
+    let tail_start = transfer_payload.len().saturating_sub(16);
+
+    FastTransferGetBufferResponseDebug {
+        header_bytes: HEADER_BYTES,
+        rop_id: format!("0x{:02x}", response[0]),
+        rop_id_matches: response[0] == 0x4e,
+        handle_index: response[1],
+        return_value: format!("0x{return_value:08x}"),
+        transfer_status: format!("0x{transfer_status:04x}"),
+        transfer_status_matches_completed: matches!(
+            (completed, transfer_status),
+            (true, 0x0003) | (false, 0x0001)
+        ),
+        in_progress_count,
+        total_step_count,
+        reserved_byte,
+        reserved_zero: reserved_byte == 0,
+        transfer_buffer_size,
+        transfer_payload_bytes: transfer_payload.len(),
+        transfer_buffer_size_matches_payload: transfer_buffer_size as usize
+            == transfer_payload.len(),
+        transfer_payload_preview_hex: hex_preview(transfer_payload, 32),
+        transfer_payload_tail_hex: hex_preview(&transfer_payload[tail_start..], 16),
+        parse_error: String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -5844,6 +5954,35 @@ mod tests {
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
         assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn get_buffer_response_debug_exposes_wire_framing() {
+        let mut response = vec![0x4e, 0x03];
+        response.extend_from_slice(&0u32.to_le_bytes());
+        response.extend_from_slice(&0x0003u16.to_le_bytes());
+        response.extend_from_slice(&2u16.to_le_bytes());
+        response.extend_from_slice(&2u16.to_le_bytes());
+        response.push(0);
+        response.extend_from_slice(&4u16.to_le_bytes());
+        response.extend_from_slice(&[0x40, 0x12, 0x00, 0x03]);
+
+        let debug = summarize_fast_transfer_get_buffer_response(&response, true);
+
+        assert_eq!(debug.rop_id, "0x4e");
+        assert!(debug.rop_id_matches);
+        assert_eq!(debug.handle_index, 3);
+        assert_eq!(debug.return_value, "0x00000000");
+        assert_eq!(debug.transfer_status, "0x0003");
+        assert!(debug.transfer_status_matches_completed);
+        assert_eq!(debug.in_progress_count, 2);
+        assert_eq!(debug.total_step_count, 2);
+        assert!(debug.reserved_zero);
+        assert_eq!(debug.transfer_buffer_size, 4);
+        assert_eq!(debug.transfer_payload_bytes, 4);
+        assert!(debug.transfer_buffer_size_matches_payload);
+        assert_eq!(debug.transfer_payload_preview_hex, "40120003");
+        assert!(debug.parse_error.is_empty());
     }
 
     #[test]
