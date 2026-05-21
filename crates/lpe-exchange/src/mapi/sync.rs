@@ -36,7 +36,7 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 14] = [
     FREEBUSY_DATA_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 27] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 26] = [
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
     OUTBOX_FOLDER_ID,
@@ -51,7 +51,6 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 27] = [
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
-    REMINDERS_FOLDER_ID,
     DOCUMENT_LIBRARIES_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
     CONFLICTS_FOLDER_ID,
@@ -217,6 +216,7 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         let mut rows = mailboxes
             .iter()
             .filter(|mailbox| mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes))
+            .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
             .filter(|mailbox| folder_ids.insert(mapi_folder_id(mailbox)))
             .cloned()
             .collect::<Vec<_>>();
@@ -278,7 +278,7 @@ fn ipm_hierarchy_virtual_folder_ids_for_experiment(
         match group {
             "all" | "full" => return IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec(),
             "minimal" | "base" => {}
-            "reminders" => push_unique(&mut folder_ids, REMINDERS_FOLDER_ID),
+            "reminders" => {}
             "tracked" | "tracked-mail-processing" => {
                 push_unique(&mut folder_ids, TRACKED_MAIL_PROCESSING_FOLDER_ID);
             }
@@ -418,7 +418,6 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | JOURNAL_FOLDER_ID
                 | NOTES_FOLDER_ID
                 | TASKS_FOLDER_ID
-                | REMINDERS_FOLDER_ID
                 | DOCUMENT_LIBRARIES_FOLDER_ID
                 | SYNC_ISSUES_FOLDER_ID
                 | CONFLICTS_FOLDER_ID
@@ -954,6 +953,27 @@ mod tests {
     }
 
     #[test]
+    fn ipm_hierarchy_experiment_does_not_emit_reminders_folder_row_yet() {
+        let mailboxes = vec![mailbox(
+            0x44444444444444444444444444444444,
+            "reminders",
+            "Reminders",
+        )];
+
+        assert!(
+            !ipm_hierarchy_virtual_folder_ids_for_experiment(Some("all"), false)
+                .contains(&REMINDERS_FOLDER_ID)
+        );
+        assert!(
+            !ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal,reminders"), false)
+                .contains(&REMINDERS_FOLDER_ID)
+        );
+        assert!(sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
+            .iter()
+            .all(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID));
+    }
+
+    #[test]
     fn ipm_hierarchy_experiment_can_add_groups_incrementally() {
         let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(
             Some("minimal,reminders,contacts-extra,documents,tracked,todo,conversation"),
@@ -961,7 +981,6 @@ mod tests {
         );
 
         for expected_folder_id in [
-            REMINDERS_FOLDER_ID,
             QUICK_CONTACTS_FOLDER_ID,
             IM_CONTACT_LIST_FOLDER_ID,
             CONTACTS_SEARCH_FOLDER_ID,
