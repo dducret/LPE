@@ -190,6 +190,8 @@ Current investigation focus:
 
 The sync-root `PidTagParentSourceKey` experiment is no longer active. Direct children of the configured hierarchy sync root keep a zero-length `PidTagParentSourceKey`; only deeper descendants carry the real parent folder source key.
 
+The active guarded hierarchy payload isolation experiment is `LPE_MAPI_EXPERIMENT_MINIMAL_IPM_HIERARCHY=1`. When set, IPM hierarchy sync emits only the minimum default folder set first: Inbox, Drafts, Outbox, Sent Items, Deleted Items, Contacts, Suggested Contacts, Calendar, Journal, Notes, Tasks, Junk Email, RSS Feeds, Archive, and Conversation History. Leave the flag unset for normal 27-folder behavior. After the minimum pass, widen the same build with `LPE_MAPI_EXPERIMENT_IPM_HIERARCHY_GROUPS`, using comma-, semicolon-, or space-separated groups: `reminders`, `tracked`, `todo`, `conversation`, `contacts-extra`, `documents`, and `sync-issues`. The `sync-issues` group keeps Sync Issues, Conflicts, Local Failures, and Server Failures together. `all` or `full` restores the normal 27-folder set even when the minimum flag is enabled.
+
 Current Outlook lab matrix:
 
 | ParentSourceKey mode | Hierarchy count mode | Outlook evidence |

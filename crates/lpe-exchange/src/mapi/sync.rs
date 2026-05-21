@@ -245,17 +245,27 @@ fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> Vec<u64> {
             std::env::var("LPE_MAPI_EXPERIMENT_IPM_HIERARCHY_GROUPS")
                 .ok()
                 .as_deref(),
+            std::env::var("LPE_MAPI_EXPERIMENT_MINIMAL_IPM_HIERARCHY")
+                .ok()
+                .as_deref()
+                .is_some_and(env_flag_enabled),
         )
     } else {
         PRIVATE_LOGON_SPECIAL_FOLDER_IDS.to_vec()
     }
 }
 
-fn ipm_hierarchy_virtual_folder_ids_for_experiment(raw_groups: Option<&str>) -> Vec<u64> {
+fn ipm_hierarchy_virtual_folder_ids_for_experiment(
+    raw_groups: Option<&str>,
+    minimal_first_enabled: bool,
+) -> Vec<u64> {
     let Some(raw_groups) = raw_groups
         .map(str::trim)
         .filter(|groups| !groups.is_empty())
     else {
+        if minimal_first_enabled {
+            return IPM_SUBTREE_MINIMAL_HIERARCHY_FOLDER_IDS.to_vec();
+        }
         return IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec();
     };
 
@@ -294,6 +304,13 @@ fn ipm_hierarchy_virtual_folder_ids_for_experiment(raw_groups: Option<&str>) -> 
         }
     }
     folder_ids
+}
+
+fn env_flag_enabled(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on" | "minimal"
+    )
 }
 
 fn push_unique(folder_ids: &mut Vec<u64>, folder_id: u64) {
@@ -895,14 +912,24 @@ mod tests {
 
     #[test]
     fn ipm_hierarchy_experiment_unset_keeps_full_hierarchy() {
-        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(None);
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(None, false);
 
         assert_eq!(folder_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
     }
 
     #[test]
+    fn ipm_hierarchy_experiment_guard_limits_to_minimal_default_set() {
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(None, true);
+
+        assert_eq!(
+            folder_ids.as_slice(),
+            IPM_SUBTREE_MINIMAL_HIERARCHY_FOLDER_IDS
+        );
+    }
+
+    #[test]
     fn ipm_hierarchy_experiment_minimal_omits_suspect_groups() {
-        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal"));
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal"), false);
 
         assert_eq!(
             folder_ids.as_slice(),
@@ -928,9 +955,10 @@ mod tests {
 
     #[test]
     fn ipm_hierarchy_experiment_can_add_groups_incrementally() {
-        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some(
-            "minimal,reminders,contacts-extra,documents,tracked,todo,conversation",
-        ));
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(
+            Some("minimal,reminders,contacts-extra,documents,tracked,todo,conversation"),
+            false,
+        );
 
         for expected_folder_id in [
             REMINDERS_FOLDER_ID,
@@ -953,7 +981,7 @@ mod tests {
     #[test]
     fn ipm_hierarchy_experiment_sync_issues_keeps_subtree_together() {
         let folder_ids =
-            ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal sync-issues"));
+            ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal sync-issues"), false);
 
         for expected_folder_id in [
             SYNC_ISSUES_FOLDER_ID,
@@ -967,8 +995,18 @@ mod tests {
 
     #[test]
     fn ipm_hierarchy_experiment_all_restores_full_hierarchy() {
-        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal,all"));
+        let folder_ids = ipm_hierarchy_virtual_folder_ids_for_experiment(Some("minimal,all"), true);
 
         assert_eq!(folder_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
+    }
+
+    #[test]
+    fn ipm_hierarchy_experiment_flag_parser_accepts_deploy_values() {
+        for enabled_value in ["1", "true", "yes", "on", "minimal"] {
+            assert!(env_flag_enabled(enabled_value));
+        }
+        for disabled_value in ["", "0", "false", "off", "no"] {
+            assert!(!env_flag_enabled(disabled_value));
+        }
     }
 }
