@@ -4893,6 +4893,7 @@ mod tests {
         assert!(details.contains("provider_uid_matches_nspi=true"));
         assert!(details.contains("r4=0x00000001"));
         assert!(details.contains("dn_null_terminated=true"));
+        assert!(details.contains("private=true"));
         assert!(details.contains("bit_count=32"));
         assert!(details.contains("length_matches_directory=true"));
     }

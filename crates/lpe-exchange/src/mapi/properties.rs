@@ -384,7 +384,7 @@ pub(in crate::mapi) fn logon_property_value(
             Some(MapiValue::Binary(server_status_icon()))
         }
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
-        PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
+        PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
@@ -4318,5 +4318,20 @@ mod tests {
                     + u32::from_le_bytes(value[18..22].try_into().unwrap()) as usize
             );
         }
+    }
+
+    #[test]
+    fn logon_projects_private_mailbox_store_flag() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_PRIVATE),
+            Some(MapiValue::Bool(true))
+        );
     }
 }
