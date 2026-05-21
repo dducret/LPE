@@ -454,7 +454,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 computed_content_count = content_count,
                 computed_unread_count = content_unread_count,
                 content_count_source,
-                hierarchy_count_properties_always_included = true,
+                content_count_excluded =
+                    property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT),
+                content_unread_count_excluded =
+                    property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT),
                 folder_type_forced_by_experiment = folder_type_forced,
                 access_forced_by_experiment = access_forced,
                 aggregate_email_count = aggregate_emails.len(),
@@ -491,12 +494,16 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 write_i64(&mut buffer, parent_folder_id as i64);
             }
             write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
-            write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
-            write_i32_property(
-                &mut buffer,
-                PID_TAG_CONTENT_UNREAD_COUNT,
-                content_unread_count,
-            );
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
+                write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
+            }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT) {
+                write_i32_property(
+                    &mut buffer,
+                    PID_TAG_CONTENT_UNREAD_COUNT,
+                    content_unread_count,
+                );
+            }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE)
                 || folder_type_forced
             {
@@ -3134,7 +3141,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_sync_includes_excluded_count_properties_by_default() {
+    fn hierarchy_sync_honors_excluded_count_properties() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -3179,12 +3186,12 @@ mod tests {
         let summary =
             decode_hierarchy_transfer_debug_summary(&buffer).expect("hierarchy transfer debug");
         let row = summary.rows.first().expect("folder row");
-        assert_eq!(row.content_count, Some(1));
-        assert_eq!(row.content_unread_count, Some(1));
+        assert_eq!(row.content_count, None);
+        assert_eq!(row.content_unread_count, None);
     }
 
     #[test]
-    fn hierarchy_sync_excluded_count_properties_do_not_force_other_exclusions() {
+    fn hierarchy_sync_excluded_count_properties_do_not_force_other_properties() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -3229,10 +3236,11 @@ mod tests {
         let summary =
             decode_hierarchy_transfer_debug_summary(&buffer).expect("hierarchy transfer debug");
         let row = summary.rows.first().expect("folder row");
-        assert_eq!(row.content_count, Some(1));
-        assert_eq!(row.content_unread_count, Some(1));
+        assert_eq!(row.content_count, None);
+        assert_eq!(row.content_unread_count, None);
         assert_eq!(row.folder_type, None);
         assert_eq!(row.access, None);
+        assert_eq!(row.subfolders, Some(false));
     }
 
     #[test]

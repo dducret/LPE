@@ -192,6 +192,8 @@ The sync-root `PidTagParentSourceKey` experiment is no longer active. Direct chi
 
 The guarded hierarchy payload isolation experiment is retired. `LPE_MAPI_EXPERIMENT_MINIMAL_IPM_HIERARCHY` and `LPE_MAPI_EXPERIMENT_IPM_HIERARCHY_GROUPS` no longer narrow runtime MAPI/HTTP hierarchy sync. The 2026-05-21 trace with the minimum set plus the `sync-issues` group reached the post-hierarchy default-folder probes but still disconnected before content sync, so authenticated Outlook sessions now always receive the normal 26-folder IPM subtree projection. `Reminders` is not emitted as a normal hierarchy folder row, but `PidTagRemOnlineEntryId` resolves to the fixed Reminders search-folder LTID and direct `OpenFolder` exposes the computed canonical projection.
 
+The 2026-05-21 15:14 trace confirmed the normal 26-folder projection now has internally consistent final state, but Outlook disconnected immediately after hierarchy sync. The same trace also showed `PidTagContentCount` and `PidTagContentUnreadCount` still emitted even though Outlook excluded both in `RopSynchronizationConfigure`; hierarchy sync now honors those exclusions instead of treating count properties as mandatory default payload.
+
 Current Outlook lab matrix:
 
 | ParentSourceKey mode | Hierarchy count mode | Outlook evidence |
