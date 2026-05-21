@@ -141,11 +141,6 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
-        PID_LID_NOTE_COLOR_TAG,
-        PID_LID_NOTE_HEIGHT_TAG,
-        PID_LID_NOTE_WIDTH_TAG,
-        PID_LID_NOTE_X_TAG,
-        PID_LID_NOTE_Y_TAG,
     ]
 }
 
@@ -871,7 +866,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
                     None if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID => {
                         default_message_property_tags()
                     }
-                    None if *folder_id == REMINDERS_FOLDER_ID => default_event_property_tags(),
+                    None if *folder_id == REMINDERS_FOLDER_ID => default_message_property_tags(),
                     None if *folder_id == NOTES_FOLDER_ID => default_note_property_tags(),
                     None if *folder_id == JOURNAL_FOLDER_ID => {
                         default_journal_entry_property_tags()
@@ -1790,6 +1785,13 @@ pub(in crate::mapi) fn table_position_and_count(
                         .into_iter()
                         .filter(|task| restriction_matches_task(restriction.as_ref(), &task.task))
                         .count()
+                    + snapshot
+                        .reminder_messages()
+                        .into_iter()
+                        .filter(|message| {
+                            restriction_matches_email(restriction.as_ref(), &message.email)
+                        })
+                        .count()
             } else if *folder_id == JOURNAL_FOLDER_ID {
                 snapshot
                     .journal_entries_for_folder(*folder_id)
@@ -1952,10 +1954,16 @@ pub(in crate::mapi) fn table_row_keys(
                 let mut task_rows = snapshot.reminder_tasks();
                 task_rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
                 sort_tasks(&mut task_rows, sort_orders);
+                let mut message_rows = snapshot.reminder_messages();
+                message_rows.retain(|message| {
+                    restriction_matches_email(restriction.as_ref(), &message.email)
+                });
+                sort_mapi_messages(&mut message_rows, sort_orders);
                 return event_rows
                     .into_iter()
                     .map(|event| event.id)
                     .chain(task_rows.into_iter().map(|task| task.id))
+                    .chain(message_rows.into_iter().map(|message| message.id))
                     .collect();
             }
             if *folder_id == JOURNAL_FOLDER_ID {

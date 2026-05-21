@@ -942,6 +942,9 @@ fn remember_root_default_folder_properties(
     }
     for (tag, value) in values {
         let storage_tag = canonical_property_storage_tag(*tag);
+        if storage_tag == PID_TAG_REM_ONLINE_ENTRY_ID && !reminders_experiment_enabled() {
+            continue;
+        }
         if is_default_folder_identification_property_tag(storage_tag) {
             session
                 .root_default_folder_properties
@@ -1032,9 +1035,58 @@ fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
         PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(JOURNAL_FOLDER_ID),
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
-        PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
+        PID_TAG_REM_ONLINE_ENTRY_ID if reminders_experiment_enabled() => Some(REMINDERS_FOLDER_ID),
         _ => None,
     }
+}
+
+fn root_default_folder_set_property_problems(
+    object: Option<&MapiObject>,
+    values: &[(u32, MapiValue)],
+) -> Vec<(usize, u32, u32)> {
+    if !matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        })
+    ) {
+        return Vec::new();
+    }
+    values
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (tag, value))| {
+            let storage_tag = canonical_property_storage_tag(*tag);
+            let expected_folder_id = default_folder_entry_id_expected_folder_id(storage_tag)?;
+            let MapiValue::Binary(bytes) = value else {
+                return Some((index, *tag, 0x8004_0102));
+            };
+            match crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes) {
+                Some(folder_id) if folder_id == expected_folder_id => None,
+                _ => Some((index, *tag, 0x8004_0102)),
+            }
+        })
+        .collect()
+}
+
+fn root_default_folder_safe_property_values(
+    object: Option<&MapiObject>,
+    values: Vec<(u32, MapiValue)>,
+) -> Vec<(u32, MapiValue)> {
+    if !matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        })
+    ) {
+        return values;
+    }
+    values
+        .into_iter()
+        .filter(|(tag, _)| !is_default_folder_identification_property_tag(*tag))
+        .collect()
 }
 
 fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
@@ -1458,6 +1510,14 @@ where
             }
             Some(RopId::OpenFolder) => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
+                if folder_id == REMINDERS_FOLDER_ID && !reminders_experiment_enabled() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x02,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
                 if folder_row_for_id(folder_id, mailboxes).is_none()
                     && snapshot.collaboration_folder_for_id(folder_id).is_none()
                     && !is_advertised_special_folder(folder_id)
@@ -1879,6 +1939,17 @@ where
                             .await
                         }
                         Some(MapiObject::Folder { folder_id, .. }) => {
+                            let object = input_object(session, &handle_slots, &request).cloned();
+                            let problems =
+                                root_default_folder_set_property_problems(object.as_ref(), &values);
+                            if !problems.is_empty() {
+                                responses.extend_from_slice(&rop_set_properties_problem_response(
+                                    &request, &problems,
+                                ));
+                                continue;
+                            }
+                            let values =
+                                root_default_folder_safe_property_values(object.as_ref(), values);
                             let stored_values = mapi_folder_property_values(folder_id, &values);
                             if let Err(error) = store
                                 .store_mapi_folder_properties(principal.account_id, &stored_values)
@@ -1901,7 +1972,6 @@ where
                                     "rca debug mapi folder property persist failed"
                                 );
                             }
-                            let object = input_object(session, &handle_slots, &request).cloned();
                             remember_root_default_folder_properties(
                                 session,
                                 object.as_ref(),

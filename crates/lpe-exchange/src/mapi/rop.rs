@@ -540,6 +540,21 @@ pub(in crate::mapi) fn rop_set_properties_response(request: &RopRequest) -> Vec<
     response
 }
 
+pub(in crate::mapi) fn rop_set_properties_problem_response(
+    request: &RopRequest,
+    problems: &[(usize, u32, u32)],
+) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(problems.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for (index, property_tag, error_code) in problems.iter().take(u16::MAX as usize) {
+        response.extend_from_slice(&(*index as u16).to_le_bytes());
+        write_u32(&mut response, *property_tag);
+        write_u32(&mut response, *error_code);
+    }
+    response
+}
+
 pub(in crate::mapi) fn rop_delete_properties_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![request.rop_id, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -617,12 +632,28 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
     let mut response = vec![0x07, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let columns = request.property_tags();
+    let unsupported_tags = unsupported_specific_property_tags(
+        object, principal, mailboxes, emails, snapshot, &columns,
+    );
     let row = match object {
         Some(MapiObject::Logon) => {
             log_get_properties_specific_debug(
                 request, object, principal, &columns, mailboxes, emails, snapshot,
             );
-            write_logon_property_row(&mut response, principal, &columns);
+            if unsupported_tags.is_empty() {
+                write_logon_property_row(&mut response, principal, &columns);
+            } else {
+                write_flagged_property_row(
+                    &mut response,
+                    object,
+                    principal,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &columns,
+                    &unsupported_tags,
+                );
+            }
             return response;
         }
         Some(MapiObject::Message {
@@ -793,8 +824,85 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
     log_get_properties_specific_debug(
         request, object, principal, &columns, mailboxes, emails, snapshot,
     );
-    write_standard_property_row(&mut response, &row);
+    if unsupported_tags.is_empty() {
+        write_standard_property_row(&mut response, &row);
+    } else {
+        write_flagged_property_row(
+            &mut response,
+            object,
+            principal,
+            mailboxes,
+            emails,
+            snapshot,
+            &columns,
+            &unsupported_tags,
+        );
+    }
     response
+}
+
+fn unsupported_specific_property_tags(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+) -> Vec<u32> {
+    columns
+        .iter()
+        .copied()
+        .filter(|tag| {
+            property_is_unsupported_for_object(object, principal, *tag)
+                || fallback_default_specific_property(
+                    object, principal, mailboxes, emails, snapshot, *tag,
+                )
+        })
+        .collect()
+}
+
+fn fallback_default_specific_property(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    tag: u32,
+) -> bool {
+    if !matches!(
+        object,
+        Some(MapiObject::Logon) | Some(MapiObject::Folder { .. }) | None
+    ) {
+        return false;
+    }
+    let encoded = serialize_object_property(object, principal, mailboxes, emails, snapshot, tag);
+    let mut default_value = Vec::new();
+    write_property_default(&mut default_value, tag);
+    encoded == default_value && !modeled_zero_or_default_property(object, tag)
+}
+
+fn write_flagged_property_row(
+    response: &mut Vec<u8>,
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+    unsupported_tags: &[u32],
+) {
+    response.push(1);
+    for tag in columns {
+        if unsupported_tags.contains(tag) {
+            response.push(0x0A);
+            write_u32(response, 0x8004_0102);
+        } else {
+            response.push(0);
+            response.extend_from_slice(&serialize_object_property(
+                object, principal, mailboxes, emails, snapshot, *tag,
+            ));
+        }
+    }
 }
 
 fn log_get_properties_specific_debug(
@@ -885,8 +993,17 @@ fn property_is_unsupported_for_object(
 }
 
 fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bool {
+    let storage_tag = canonical_property_storage_tag(tag);
     match object {
         Some(MapiObject::Logon) => matches!(tag, PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE),
+        Some(MapiObject::Folder { .. }) | None => matches!(
+            storage_tag,
+            PID_TAG_CONTENT_COUNT
+                | PID_TAG_CONTENT_UNREAD_COUNT
+                | PID_TAG_SUBFOLDERS
+                | PID_TAG_PARENT_FOLDER_ID
+                | PID_TAG_PARENT_SOURCE_KEY
+        ),
         _ => false,
     }
 }

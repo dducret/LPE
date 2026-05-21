@@ -368,6 +368,12 @@ const FOLDER_IPM_SENTMAIL_VALID: u32 = 0x0000_0010;
 const FOLDER_VIEWS_VALID: u32 = 0x0000_0020;
 const FOLDER_COMMON_VIEWS_VALID: u32 = 0x0000_0040;
 
+pub(in crate::mapi) fn reminders_experiment_enabled() -> bool {
+    std::env::var("LPE_MAPI_EXPERIMENT_REMINDERS_ENABLED")
+        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+        .unwrap_or(false)
+}
+
 pub(in crate::mapi) fn logon_property_value(
     principal: &AccountPrincipal,
     property_tag: u32,
@@ -440,6 +446,18 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
     _mailbox_guid: Uuid,
     property_tag: u32,
 ) -> Option<MapiValue> {
+    special_folder_identification_property_value_with_reminders(
+        _mailbox_guid,
+        property_tag,
+        reminders_experiment_enabled(),
+    )
+}
+
+fn special_folder_identification_property_value_with_reminders(
+    _mailbox_guid: Uuid,
+    property_tag: u32,
+    reminders_enabled: bool,
+) -> Option<MapiValue> {
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(special_folder_long_term_id(CALENDAR_FOLDER_ID)),
@@ -447,7 +465,9 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
         PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(special_folder_long_term_id(JOURNAL_FOLDER_ID)),
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(special_folder_long_term_id(NOTES_FOLDER_ID)),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(special_folder_long_term_id(TASKS_FOLDER_ID)),
-        PID_TAG_REM_ONLINE_ENTRY_ID => Some(special_folder_long_term_id(REMINDERS_FOLDER_ID)),
+        PID_TAG_REM_ONLINE_ENTRY_ID if reminders_enabled => {
+            Some(special_folder_long_term_id(REMINDERS_FOLDER_ID))
+        }
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => Some(MapiValue::Binary(
             additional_ren_entry_ids_ex(_mailbox_guid),
         )),
@@ -3418,7 +3438,6 @@ mod tests {
             (PID_TAG_IPM_JOURNAL_ENTRY_ID, JOURNAL_FOLDER_ID),
             (PID_TAG_IPM_NOTE_ENTRY_ID, NOTES_FOLDER_ID),
             (PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
-            (PID_TAG_REM_ONLINE_ENTRY_ID, REMINDERS_FOLDER_ID),
         ] {
             let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id)
                 .unwrap()
@@ -3433,6 +3452,30 @@ mod tests {
                 Some(folder_id)
             );
         }
+        assert_eq!(
+            special_folder_identification_property_value(Uuid::nil(), PID_TAG_REM_ONLINE_ENTRY_ID),
+            None
+        );
+        assert_eq!(
+            special_folder_identification_property_value_with_reminders(
+                Uuid::nil(),
+                PID_TAG_REM_ONLINE_ENTRY_ID,
+                false
+            ),
+            None
+        );
+        let reminder_entry_id =
+            crate::mapi::identity::long_term_id_from_object_id(REMINDERS_FOLDER_ID)
+                .unwrap()
+                .to_vec();
+        assert_eq!(
+            special_folder_identification_property_value_with_reminders(
+                Uuid::nil(),
+                PID_TAG_REM_ONLINE_ENTRY_ID,
+                true
+            ),
+            Some(MapiValue::Binary(reminder_entry_id))
+        );
     }
 
     #[test]
