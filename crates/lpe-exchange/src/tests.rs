@@ -15320,9 +15320,12 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         let counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
             .expect("stable folder counter");
         assert!(
-            strict_replguid_globset_contains_counter(&decoded.idset_given, &globcnt_bytes(counter))
-                .expect("hierarchy final IDSET"),
-            "final hierarchy state should include hidden stable folder 0x{folder_id:016x}"
+            !strict_replguid_globset_contains_counter(
+                &decoded.idset_given,
+                &globcnt_bytes(counter)
+            )
+            .expect("hierarchy final IDSET"),
+            "final hierarchy state should not acknowledge hidden stable folder 0x{folder_id:016x}"
         );
     }
     let sync_issues = decoded
