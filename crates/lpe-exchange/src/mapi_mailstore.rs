@@ -918,9 +918,16 @@ fn log_hierarchy_semantic_validation(
         completed = transfer_status == "0x0003",
         semantic_flags = %validation.semantic_flags,
         sync_root_source_counter = validation.sync_root_source_counter,
+        sync_root_change_counter = validation.sync_root_change_counter,
         sync_root_row_present = validation.sync_root_row_present,
         sync_root_counter_in_final_idset = validation.sync_root_counter_in_final_idset,
         sync_root_counter_in_final_cnset = validation.sync_root_counter_in_final_cnset,
+        root_inclusive_idset_given_bytes = validation.root_inclusive_idset_given_len,
+        root_inclusive_cnset_seen_bytes = validation.root_inclusive_cnset_seen_len,
+        root_inclusive_idset_given_delta_bytes = validation.root_inclusive_idset_given_delta_bytes,
+        root_inclusive_cnset_seen_delta_bytes = validation.root_inclusive_cnset_seen_delta_bytes,
+        root_inclusive_idset_given = %validation.root_inclusive_idset_given_summary,
+        root_inclusive_cnset_seen = %validation.root_inclusive_cnset_seen_summary,
         top_level_row_count = validation.top_level_row_count,
         nested_row_count = validation.nested_row_count,
         rows_without_folder_id = validation.rows_without_folder_id,
@@ -983,9 +990,16 @@ fn hierarchy_property_filter_mode(
 #[derive(Debug, PartialEq, Eq)]
 struct HierarchySemanticValidation {
     sync_root_source_counter: u64,
+    sync_root_change_counter: u64,
     sync_root_row_present: bool,
     sync_root_counter_in_final_idset: bool,
     sync_root_counter_in_final_cnset: bool,
+    root_inclusive_idset_given_len: usize,
+    root_inclusive_cnset_seen_len: usize,
+    root_inclusive_idset_given_delta_bytes: isize,
+    root_inclusive_cnset_seen_delta_bytes: isize,
+    root_inclusive_idset_given_summary: String,
+    root_inclusive_cnset_seen_summary: String,
     top_level_row_count: usize,
     nested_row_count: usize,
     rows_without_folder_id: usize,
@@ -1009,6 +1023,7 @@ fn hierarchy_semantic_validation(
     let sync_root_source_counter =
         crate::mapi::identity::global_counter_from_store_id(sync_root_folder_id)
             .unwrap_or_else(|| change_number_for_store_id(sync_root_folder_id));
+    let sync_root_change_counter = change_number_for_store_id(sync_root_folder_id);
     let expected_source_counters = summary
         .rows
         .iter()
@@ -1046,6 +1061,14 @@ fn hierarchy_semantic_validation(
         &summary.final_state_cnset_seen_counters,
         &expected_change_counters,
     );
+    let root_inclusive_idset_given = root_inclusive_idset(
+        &summary.final_state_idset_given_counters,
+        sync_root_source_counter,
+    );
+    let root_inclusive_cnset_seen = root_inclusive_idset(
+        &summary.final_state_cnset_seen_counters,
+        sync_root_change_counter,
+    );
     let mut semantic_flags = Vec::new();
     if !summary.stream_end_marker_seen {
         semantic_flags.push("missing_stream_end");
@@ -1074,13 +1097,26 @@ fn hierarchy_semantic_validation(
 
     HierarchySemanticValidation {
         sync_root_source_counter,
+        sync_root_change_counter,
         sync_root_row_present: expected_source_counters.contains(&sync_root_source_counter),
         sync_root_counter_in_final_idset: summary
             .final_state_idset_given_counters
             .contains(&sync_root_source_counter),
         sync_root_counter_in_final_cnset: summary
             .final_state_cnset_seen_counters
-            .contains(&sync_root_source_counter),
+            .contains(&sync_root_change_counter),
+        root_inclusive_idset_given_len: root_inclusive_idset_given.len(),
+        root_inclusive_cnset_seen_len: root_inclusive_cnset_seen.len(),
+        root_inclusive_idset_given_delta_bytes: root_inclusive_idset_given.len() as isize
+            - summary.final_state_idset_given_len as isize,
+        root_inclusive_cnset_seen_delta_bytes: root_inclusive_cnset_seen.len() as isize
+            - summary.final_state_cnset_seen_len as isize,
+        root_inclusive_idset_given_summary: format_replguid_globset_debug(
+            &root_inclusive_idset_given,
+        ),
+        root_inclusive_cnset_seen_summary: format_replguid_globset_debug(
+            &root_inclusive_cnset_seen,
+        ),
         top_level_row_count: top_level_rows.len(),
         nested_row_count: summary.rows.len().saturating_sub(top_level_rows.len()),
         rows_without_folder_id: summary
@@ -1124,6 +1160,12 @@ fn hierarchy_semantic_validation(
             semantic_flags.join(",")
         },
     }
+}
+
+fn root_inclusive_idset(existing_counters: &[u64], root_counter: u64) -> Vec<u8> {
+    let mut counters = existing_counters.to_vec();
+    counters.push(root_counter);
+    replguid_idset_from_counters(&counters)
 }
 
 fn counter_difference(left: &[u64], right: &[u64]) -> Vec<u64> {
@@ -3259,9 +3301,21 @@ mod tests {
             validation.sync_root_source_counter,
             crate::mapi::identity::IPM_SUBTREE_FOLDER_COUNTER
         );
+        assert_eq!(
+            validation.sync_root_change_counter,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_COUNTER
+        );
         assert!(!validation.sync_root_row_present);
         assert!(!validation.sync_root_counter_in_final_idset);
         assert!(!validation.sync_root_counter_in_final_cnset);
+        assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
+        assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
+        assert!(validation
+            .root_inclusive_idset_given_summary
+            .contains("ranges=4-5"));
+        assert!(validation
+            .root_inclusive_cnset_seen_summary
+            .contains("ranges=4,42"));
         assert_eq!(validation.top_level_row_count, 1);
         assert_eq!(validation.nested_row_count, 0);
         assert_eq!(validation.rows_without_folder_id, 1);
@@ -3335,6 +3389,11 @@ mod tests {
         assert_eq!(validation.nested_row_count, 3);
         assert_eq!(validation.rows_without_folder_id, expected_folder_count);
         assert_eq!(validation.rows_missing_core_property_count, 0);
+        assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
+        assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
+        assert!(validation
+            .root_inclusive_idset_given_summary
+            .contains("ranges=4-8"));
         assert!(validation
             .top_level_row_names
             .starts_with("Inbox,Drafts,Outbox"));
