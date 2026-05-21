@@ -314,6 +314,11 @@ struct RopResponseDebugSummary {
     handle_count: usize,
     handle_table_summary: String,
     extended: bool,
+    buffer_layout: String,
+    buffer_size_word: String,
+    response_payload_bytes: usize,
+    handle_table_bytes: usize,
+    frames: String,
     parse_error: String,
 }
 
@@ -386,6 +391,32 @@ fn log_execute_rop_debug(
         response_rop_buffer_bytes = response_rop_buffer.len(),
         message = message,
     );
+
+    if endpoint == "emsmdb" && hierarchy_sync_batch_needs_response_framing(&request.ids) {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_ids = %request.ids_csv,
+            response_rop_ids = %response.ids_csv,
+            response_rop_results_best_effort = %response.results_csv,
+            response_rop_buffer_layout = %response.buffer_layout,
+            response_rop_buffer_size_word = %response.buffer_size_word,
+            response_rop_payload_bytes = response.response_payload_bytes,
+            response_handle_table_bytes = response.handle_table_bytes,
+            response_handle_count = response.handle_count,
+            output_handle_table_summary = %response.handle_table_summary,
+            response_rop_frame_count = response.count,
+            response_rop_frames = %response.frames,
+            response_rop_parse_error = %response.parse_error,
+            "rca debug mapi execute response framing"
+        );
+    }
 
     if endpoint == "emsmdb"
         && (post_hierarchy_observation.first_execute
@@ -1459,12 +1490,18 @@ fn summarize_response_rop_buffer(
 ) -> RopResponseDebugSummary {
     let mut summary = RopResponseDebugSummary {
         extended: is_rpc_header_ext_rop_buffer(rop_buffer),
+        buffer_layout: rop_buffer_layout_name(rop_buffer).to_string(),
+        buffer_size_word: rop_buffer_size_word(rop_buffer)
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "invalid".to_string()),
         ..RopResponseDebugSummary::default()
     };
     let Some((responses, handle_table)) = split_rop_buffer(rop_buffer) else {
         summary.parse_error = "invalid ROP buffer".to_string();
         return summary;
     };
+    summary.response_payload_bytes = responses.len();
+    summary.handle_table_bytes = handle_table.len();
     let handle_summary = summarize_handle_table(handle_table, &mut summary.parse_error);
     summary.handle_count = handle_summary.0;
     summary.handle_table_summary = handle_summary.1;
@@ -1472,10 +1509,14 @@ fn summarize_response_rop_buffer(
     let mut offset = 0usize;
     let mut ids = Vec::new();
     let mut results = Vec::new();
-    for expected_rop_id in request_rop_ids.iter().copied().take(MAX_ROP_DEBUG_ENTRIES) {
-        if rop_has_no_response(expected_rop_id) {
-            continue;
-        }
+    let expected_ids = request_rop_ids
+        .iter()
+        .copied()
+        .filter(|rop_id| !rop_has_no_response(*rop_id))
+        .take(MAX_ROP_DEBUG_ENTRIES)
+        .collect::<Vec<_>>();
+    let mut frames = Vec::new();
+    for (expected_index, expected_rop_id) in expected_ids.iter().copied().enumerate() {
         let Some(found) = responses.get(offset..).and_then(|remaining| {
             remaining
                 .iter()
@@ -1486,22 +1527,103 @@ fn summarize_response_rop_buffer(
         offset += found;
         let rop_id = responses[offset];
         ids.push(rop_id);
-        if let Some(error_code) = read_response_error_code(responses, offset) {
+        let error_code = read_response_error_code(responses, offset);
+        if let Some(error_code) = error_code {
             results.push(format!("{}:{error_code:#010x}", rop_id_hex(rop_id)));
         } else {
             results.push(format!("{}:truncated", rop_id_hex(rop_id)));
         }
+        frames.push(summarize_response_rop_frame(
+            responses,
+            offset,
+            error_code,
+            expected_ids.get(expected_index + 1).copied(),
+        ));
         offset = offset.saturating_add(6);
     }
 
     summary.count = ids.len();
     summary.ids_csv = rop_ids_csv(&ids);
     summary.results_csv = results.join(",");
+    summary.frames = frames.join("|");
     summary
 }
 
 fn rop_has_no_response(rop_id: u8) -> bool {
     matches!(rop_id, 0x01)
+}
+
+fn hierarchy_sync_batch_needs_response_framing(request_rop_ids: &[u8]) -> bool {
+    request_rop_ids.contains(&0x70) || request_rop_ids.contains(&0x4E)
+}
+
+fn summarize_response_rop_frame(
+    responses: &[u8],
+    start: usize,
+    error_code: Option<u32>,
+    next_expected_rop_id: Option<u8>,
+) -> String {
+    let end = next_expected_rop_id
+        .and_then(|rop_id| {
+            responses.get(start + 1..).and_then(|remaining| {
+                remaining
+                    .iter()
+                    .position(|candidate| *candidate == rop_id)
+                    .map(|found| start + 1 + found)
+            })
+        })
+        .unwrap_or(responses.len());
+    let rop_id = responses.get(start).copied().unwrap_or_default();
+    let output_handle_index = responses
+        .get(start + 1)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "truncated".to_string());
+    let result = error_code
+        .map(|code| format!("{code:#010x}"))
+        .unwrap_or_else(|| "truncated".to_string());
+    let preview_end = end.min(start.saturating_add(16));
+    let preview = responses
+        .get(start..preview_end)
+        .map(|bytes| bytes_to_hex(bytes))
+        .unwrap_or_default();
+    format!(
+        "{}@{}..{}:len={}:out={}:rv={}:preview={}",
+        rop_id_hex(rop_id),
+        start,
+        end,
+        end.saturating_sub(start),
+        output_handle_index,
+        result,
+        preview
+    )
+}
+
+fn rop_buffer_size_word(rop_buffer: &[u8]) -> Option<u16> {
+    let payload = rpc_header_ext_payload(rop_buffer).unwrap_or(rop_buffer);
+    let bytes = payload.get(..2)?;
+    Some(u16::from_le_bytes(bytes.try_into().ok()?))
+}
+
+fn rop_buffer_layout_name(rop_buffer: &[u8]) -> &'static str {
+    let Some((responses, _handle_table)) = split_rop_buffer(rop_buffer) else {
+        return "invalid";
+    };
+    let Some(size_word) = rop_buffer_size_word(rop_buffer).map(usize::from) else {
+        return "invalid";
+    };
+    if is_rpc_header_ext_rop_buffer(rop_buffer) {
+        if size_word == responses.len().saturating_add(2) {
+            "rpc_header_ext_spec"
+        } else {
+            "rpc_header_ext_unknown"
+        }
+    } else if size_word == responses.len().saturating_add(2) {
+        "spec"
+    } else if size_word == responses.len() {
+        "legacy"
+    } else {
+        "unknown"
+    }
 }
 
 fn summarize_logon_response_rop(
@@ -6095,6 +6217,48 @@ mod tests {
         assert_eq!(response_summary.results_csv, "0x7f:0x00000000");
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
+        let mut responses = Vec::new();
+        for rop_id in [0x02, 0x70, 0x75, 0x77, 0x75, 0x77] {
+            responses.push(rop_id);
+            responses.push(1);
+            responses.extend_from_slice(&0u32.to_le_bytes());
+        }
+        responses.push(0x4E);
+        responses.push(2);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.extend_from_slice(&0x0003u16.to_le_bytes());
+        responses.extend_from_slice(&1u16.to_le_bytes());
+        responses.extend_from_slice(&1u16.to_le_bytes());
+        responses.push(0);
+        responses.extend_from_slice(&4u16.to_le_bytes());
+        responses.extend_from_slice(&[0x03, 0x00, 0x14, 0x40]);
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[1, 4, 3]));
+        let response_summary = summarize_response_rop_buffer(
+            &response_buffer,
+            &[0x02, 0x70, 0x75, 0x77, 0x75, 0x77, 0x4E],
+        );
+
+        assert_eq!(response_summary.buffer_layout, "rpc_header_ext_spec");
+        assert_eq!(response_summary.response_payload_bytes, 55);
+        assert_eq!(response_summary.handle_table_bytes, 12);
+        assert_eq!(response_summary.count, 7);
+        assert_eq!(
+            response_summary.results_csv,
+            "0x02:0x00000000,0x70:0x00000000,0x75:0x00000000,0x77:0x00000000,0x75:0x00000000,0x77:0x00000000,0x4e:0x00000000"
+        );
+        assert!(response_summary
+            .frames
+            .contains("0x02@0..6:len=6:out=1:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x4e@36..55:len=19:out=2:rv=0x00000000"));
         assert!(response_summary.parse_error.is_empty());
     }
 
