@@ -1023,6 +1023,32 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                existing.owner_account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(existing.owner_account_id),
+            None,
+            "calendar_event",
+            event_id,
+            "updated",
+            modseq,
+            &[existing.owner_account_id],
+            serde_json::json!({
+                "collectionId": existing.collection_id,
+                "objectUid": existing.uid,
+                "reminderChanged": true,
+            }),
+        )
+        .await?;
+
         Self::emit_collaboration_change(
             &mut tx,
             &tenant_id,

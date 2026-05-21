@@ -476,7 +476,7 @@ CREATE TABLE local_ai_settings (
 CREATE TABLE account_sync_state (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights')),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules')),
     current_modseq BIGINT NOT NULL DEFAULT 1 CHECK (current_modseq > 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, category),
@@ -1265,7 +1265,9 @@ CREATE TABLE mail_change_log (
         'calendar_grant',
         'task_list_grant',
         'mailbox_delegation_grant',
-        'sender_right'
+        'sender_right',
+        'search_folder_definition',
+        'sieve_script'
     )),
     object_id UUID NOT NULL,
     object_uid TEXT,
@@ -1336,7 +1338,9 @@ CREATE TABLE mail_change_log (
                 'calendar_grant',
                 'task_list_grant',
                 'mailbox_delegation_grant',
-                'sender_right'
+                'sender_right',
+                'search_folder_definition',
+                'sieve_script'
             )
             AND account_id IS NOT NULL
             AND mailbox_id IS NULL
@@ -1373,7 +1377,9 @@ CREATE INDEX mail_change_log_collaboration_idx
         'calendar_grant',
         'task_list_grant',
         'mailbox_delegation_grant',
-        'sender_right'
+        'sender_right',
+        'search_folder_definition',
+        'sieve_script'
     );
 
 CREATE INDEX mail_change_log_principals_gin_idx
@@ -1419,7 +1425,9 @@ CREATE TABLE tombstones (
         'calendar_grant',
         'task_list_grant',
         'mailbox_delegation_grant',
-        'sender_right'
+        'sender_right',
+        'search_folder_definition',
+        'sieve_script'
     )),
     object_id UUID NOT NULL,
     object_uid TEXT,
@@ -1475,7 +1483,9 @@ CREATE TABLE tombstones (
                 'calendar_grant',
                 'task_list_grant',
                 'mailbox_delegation_grant',
-                'sender_right'
+                'sender_right',
+                'search_folder_definition',
+                'sieve_script'
             )
             AND account_id IS NOT NULL
             AND mailbox_id IS NULL
@@ -1517,7 +1527,9 @@ CREATE INDEX tombstones_collaboration_idx
         'calendar_grant',
         'task_list_grant',
         'mailbox_delegation_grant',
-        'sender_right'
+        'sender_right',
+        'search_folder_definition',
+        'sieve_script'
     );
 
 CREATE INDEX tombstones_retention_idx
@@ -1532,7 +1544,7 @@ CREATE TRIGGER tombstones_append_only_update_guard
 CREATE TABLE canonical_change_journal (
     sequence BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id UUID NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights')),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules')),
     principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

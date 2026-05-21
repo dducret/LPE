@@ -383,6 +383,30 @@ impl Storage {
         }
         changed_task_list_ids.sort();
         changed_task_list_ids.dedup();
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner_account_id,
+                CanonicalChangeCategory::Tasks.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            "task",
+            task_id,
+            "updated",
+            modseq,
+            &[owner_account_id],
+            serde_json::json!({
+                "collectionId": task_list_id,
+                "objectUid": task_id.to_string(),
+            }),
+        )
+        .await?;
         Self::emit_task_access_change(
             &mut tx,
             &tenant_id,
@@ -448,6 +472,32 @@ impl Storage {
         .bind(reminder_set)
         .bind(reminder_at.as_deref())
         .execute(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                existing.owner_account_id,
+                CanonicalChangeCategory::Tasks.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(existing.owner_account_id),
+            None,
+            "task",
+            task_id,
+            "updated",
+            modseq,
+            &[existing.owner_account_id],
+            serde_json::json!({
+                "collectionId": existing.task_list_id,
+                "objectUid": task_id.to_string(),
+                "reminderChanged": true,
+            }),
+        )
         .await?;
 
         Self::emit_collaboration_change(
@@ -881,6 +931,30 @@ impl Storage {
         .bind(input.sort_order)
         .fetch_one(&mut *tx)
         .await?;
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                CanonicalChangeCategory::Tasks.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            None,
+            "task_list",
+            row.id,
+            "created",
+            modseq,
+            &[input.account_id],
+            serde_json::json!({
+                "collectionId": row.id,
+                "name": row.name.clone(),
+            }),
+        )
+        .await?;
         Self::emit_task_access_change(&mut tx, &tenant_id, input.account_id, &[], &[]).await?;
         tx.commit().await?;
 
@@ -933,6 +1007,30 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow!("task list not found"))?;
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                CanonicalChangeCategory::Tasks.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            None,
+            "task_list",
+            input.task_list_id,
+            "updated",
+            modseq,
+            &[input.account_id],
+            serde_json::json!({
+                "collectionId": input.task_list_id,
+                "name": row.name.clone(),
+            }),
+        )
+        .await?;
         Self::emit_task_access_change(
             &mut tx,
             &tenant_id,

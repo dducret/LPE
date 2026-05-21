@@ -3,9 +3,9 @@ use std::{env, str::FromStr};
 use anyhow::{Context, Result};
 use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput,
-    UpsertJournalEntryInput,
+    NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery,
+    SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput, UpsertJournalEntryInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -147,6 +147,18 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "MAPI cross-protocol interoperability gate",
             exercise_mapi_cross_protocol_interoperability_gate(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "canonical identity allocation beyond MAPI",
+            exercise_canonical_identity_allocation(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "canonical search-folder and rule replay",
+            exercise_canonical_search_folder_and_rule_replay(&storage, pool, &fixture).await,
         );
 
         collect(
@@ -621,6 +633,35 @@ async fn exercise_admin_path(storage: &Storage) -> Result<()> {
         .await
         .context("create_account")?;
 
+    let canonical_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM accounts a
+        JOIN account_email_addresses address
+          ON address.tenant_id = a.tenant_id
+         AND address.account_id = a.id
+         AND address.email = a.primary_email
+         AND address.is_primary = TRUE
+        JOIN account_identities identity
+          ON identity.tenant_id = address.tenant_id
+         AND identity.account_id = address.account_id
+         AND identity.email_address_id = address.id
+         AND identity.is_default = TRUE
+         AND identity.may_send = TRUE
+        WHERE a.tenant_id = $1
+          AND a.primary_email = $2
+        "#,
+    )
+    .bind(PLATFORM_TENANT_ID)
+    .bind(&account_email)
+    .fetch_one(storage.pool())
+    .await
+    .context("count canonical account identity rows after account creation")?;
+    anyhow::ensure!(
+        canonical_identity_count == 1,
+        "account creation must allocate one canonical primary address and default send identity"
+    );
+
     storage
         .append_audit_event(
             PLATFORM_TENANT_ID,
@@ -662,6 +703,7 @@ async fn seed_mailbox_fixture(pool: &PgPool) -> Result<RuntimeFixture> {
     let tenant_id = Uuid::new_v4();
     let domain_id = Uuid::new_v4();
     let account_id = Uuid::new_v4();
+    let address_id = Uuid::new_v4();
     let inbox_id = Uuid::new_v4();
     let domain_name = format!("runtime-{unique}.example.test");
     let account_email = format!("alice@{domain_name}");
@@ -705,6 +747,39 @@ async fn seed_mailbox_fixture(pool: &PgPool) -> Result<RuntimeFixture> {
     .execute(pool)
     .await
     .context("seed runtime account")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_email_addresses (
+            id, tenant_id, account_id, domain_id, email, address_kind, is_primary
+        )
+        VALUES ($1, $2, $3, $4, $5, 'primary', TRUE)
+        "#,
+    )
+    .bind(address_id)
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(domain_id)
+    .bind(&account_email)
+    .execute(pool)
+    .await
+    .context("seed runtime primary account address")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_identities (
+            id, tenant_id, account_id, email_address_id, display_name, may_send, is_default
+        )
+        VALUES ($1, $2, $3, $4, 'Alice Drift', TRUE, TRUE)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(address_id)
+    .execute(pool)
+    .await
+    .context("seed runtime default account identity")?;
 
     sqlx::query(
         r#"
@@ -2499,6 +2574,324 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     anyhow::ensure!(
         updated_jmap.unread && updated_jmap.flagged && updated_jmap.bcc.is_empty(),
         "JMAP projection must reflect MAPI flag mutation while still hiding protected Bcc"
+    );
+
+    Ok(())
+}
+
+async fn exercise_canonical_identity_allocation(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let default_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM account_email_addresses address
+        JOIN account_identities identity
+          ON identity.tenant_id = address.tenant_id
+         AND identity.account_id = address.account_id
+         AND identity.email_address_id = address.id
+         AND identity.is_default = TRUE
+         AND identity.may_send = TRUE
+        WHERE address.tenant_id = $1
+          AND address.account_id = $2
+          AND address.email = $3
+          AND address.is_primary = TRUE
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(&fixture.account_email)
+    .fetch_one(pool)
+    .await
+    .context("count fixture primary address/default identity")?;
+    anyhow::ensure!(
+        default_identity_count == 1,
+        "fixture account must have exactly one canonical default send identity"
+    );
+
+    let alias_address_id = Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO account_email_addresses (
+            id, tenant_id, account_id, domain_id, email, address_kind, is_primary
+        )
+        SELECT $1, tenant_id, id, primary_domain_id, $4, 'reply_to', FALSE
+        FROM accounts
+        WHERE tenant_id = $2 AND id = $3
+        "#,
+    )
+    .bind(alias_address_id)
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(format!(
+        "reply-{}@{}",
+        Uuid::new_v4().simple(),
+        fixture
+            .account_email
+            .split('@')
+            .nth(1)
+            .unwrap_or("example.test")
+    ))
+    .execute(pool)
+    .await
+    .context("seed secondary canonical account address")?;
+
+    expect_constraint_failure(
+        "account_identities reject a second default identity for the same account",
+        sqlx::query(
+            r#"
+            INSERT INTO account_identities (
+                id, tenant_id, account_id, email_address_id, display_name, may_send, is_default
+            )
+            VALUES ($1, $2, $3, $4, 'Second Default', TRUE, TRUE)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(alias_address_id)
+        .execute(pool)
+        .await,
+    )?;
+
+    let grantee_id = Uuid::new_v4();
+    let grantee_address_id = Uuid::new_v4();
+    let domain = fixture
+        .account_email
+        .split('@')
+        .nth(1)
+        .context("fixture email missing domain")?;
+    let grantee_email = format!("delegate-{}@{domain}", Uuid::new_v4().simple());
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        SELECT $1, tenant_id, primary_domain_id, $3, 'Delegate Drift'
+        FROM accounts
+        WHERE tenant_id = $2 AND id = $4
+        "#,
+    )
+    .bind(grantee_id)
+    .bind(fixture.tenant_id)
+    .bind(&grantee_email)
+    .bind(fixture.account_id)
+    .execute(pool)
+    .await
+    .context("seed delegate account")?;
+    sqlx::query(
+        r#"
+        INSERT INTO account_email_addresses (
+            id, tenant_id, account_id, domain_id, email, address_kind, is_primary
+        )
+        SELECT $1, tenant_id, id, primary_domain_id, primary_email, 'primary', TRUE
+        FROM accounts
+        WHERE tenant_id = $2 AND id = $3
+        "#,
+    )
+    .bind(grantee_address_id)
+    .bind(fixture.tenant_id)
+    .bind(grantee_id)
+    .execute(pool)
+    .await
+    .context("seed delegate primary address")?;
+    sqlx::query(
+        r#"
+        INSERT INTO account_identities (
+            id, tenant_id, account_id, email_address_id, display_name, may_send, is_default
+        )
+        VALUES ($1, $2, $3, $4, 'Delegate Drift', TRUE, TRUE)
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.tenant_id)
+    .bind(grantee_id)
+    .bind(grantee_address_id)
+    .execute(pool)
+    .await
+    .context("seed delegate default identity")?;
+
+    storage
+        .upsert_sender_delegation_grant(
+            SenderDelegationGrantInput {
+                owner_account_id: fixture.account_id,
+                grantee_email: grantee_email.clone(),
+                sender_right: SenderDelegationRight::SendOnBehalf,
+            },
+            audit(
+                "alice@example.test",
+                "identity.delegate",
+                "runtime drift sender identity",
+            ),
+        )
+        .await
+        .context("grant canonical send-on-behalf right")?;
+
+    let identities = storage
+        .fetch_sender_identities(grantee_id, fixture.account_id)
+        .await
+        .context("fetch delegated sender identities")?;
+    anyhow::ensure!(
+        identities.iter().any(|identity| {
+            identity.owner_account_id == fixture.account_id
+                && identity.email == fixture.account_email
+                && identity.authorization_kind == "send_on_behalf"
+                && identity.sender_address.as_deref() == Some(grantee_email.as_str())
+        }),
+        "delegated sender identity projection must come from canonical sender_rights and account rows"
+    );
+
+    let mapi_identity_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mapi_object_identities
+        WHERE tenant_id = $1
+          AND account_id IN ($2, $3)
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(grantee_id)
+    .fetch_one(pool)
+    .await
+    .context("count MAPI identities after non-MAPI sender projection")?;
+    anyhow::ensure!(
+        mapi_identity_count == 0,
+        "canonical sender identity allocation must not create MAPI identity rows"
+    );
+
+    Ok(())
+}
+
+async fn exercise_canonical_search_folder_and_rule_replay(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    storage
+        .ensure_imap_mailboxes(fixture.account_id)
+        .await
+        .context("ensure canonical mailboxes and search-folder definitions")?;
+
+    let search_folder = sqlx::query(
+        r#"
+        SELECT sf.id, COUNT(log.cursor) AS change_count
+        FROM search_folders sf
+        LEFT JOIN mail_change_log log
+          ON log.tenant_id = sf.tenant_id
+         AND log.account_id = sf.account_id
+         AND log.object_kind = 'search_folder_definition'
+         AND log.object_id = sf.id
+        WHERE sf.tenant_id = $1
+          AND sf.account_id = $2
+          AND sf.role = 'reminders'
+          AND sf.is_builtin = TRUE
+        GROUP BY sf.id
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load canonical reminders search-folder definition and change row")?;
+    anyhow::ensure!(
+        search_folder.try_get::<i64, _>("change_count")? >= 1,
+        "search-folder definitions must write canonical object change rows"
+    );
+
+    let script_name = format!("runtime-rule-{}", Uuid::new_v4().simple());
+    storage
+        .put_sieve_script(
+            fixture.account_id,
+            &script_name,
+            r#"require ["fileinto"];
+if header :contains "Subject" "runtime-rule" {
+    keep;
+}"#,
+            false,
+            audit(
+                "alice@example.test",
+                "rule.create",
+                "runtime drift canonical rule",
+            ),
+        )
+        .await
+        .context("create canonical Sieve rule script")?;
+
+    let script_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM sieve_scripts
+        WHERE tenant_id = $1 AND account_id = $2 AND name = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(&script_name)
+    .fetch_one(pool)
+    .await
+    .context("load canonical Sieve script id")?;
+
+    let rule_change_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'sieve_script'
+          AND object_id = $3
+          AND change_kind = 'created'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(script_id)
+    .fetch_one(pool)
+    .await
+    .context("count canonical Sieve rule create changes")?;
+    anyhow::ensure!(
+        rule_change_count == 1,
+        "Sieve rule creation must write one canonical rule change"
+    );
+
+    storage
+        .delete_sieve_script(
+            fixture.account_id,
+            &script_name,
+            audit(
+                "alice@example.test",
+                "rule.delete",
+                "runtime drift canonical rule delete",
+            ),
+        )
+        .await
+        .context("delete canonical Sieve rule script")?;
+
+    let tombstone_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM tombstones tombstone
+        JOIN mail_change_log log
+          ON log.tenant_id = tombstone.tenant_id
+         AND log.cursor = tombstone.change_cursor
+         AND log.object_kind = tombstone.object_kind
+         AND log.object_id = tombstone.object_id
+        WHERE tombstone.tenant_id = $1
+          AND tombstone.account_id = $2
+          AND tombstone.object_kind = 'sieve_script'
+          AND tombstone.object_id = $3
+          AND log.change_kind = 'destroyed'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(script_id)
+    .fetch_one(pool)
+    .await
+    .context("count canonical Sieve rule tombstones")?;
+    anyhow::ensure!(
+        tombstone_count == 1,
+        "Sieve rule deletion must write a canonical tombstone joined to its change row"
     );
 
     Ok(())

@@ -14,9 +14,10 @@ use crate::{
     submission,
     submission::{AttachmentUploadInput, SubmittedRecipientInput},
     util::{canonical_system_mailbox_display_name, system_mailbox_role_for_display_name},
-    AccountQuotaRow, ActiveSyncDeviceRow, ActiveSyncSyncStateRow, AuditEntryInput, ImapEmailRow,
-    JmapEmailRecipientRow, JmapEmailRow, JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow,
-    MessageBccRecipientRecordRow, SearchFolderRow, Storage,
+    AccountQuotaRow, ActiveSyncDeviceRow, ActiveSyncSyncStateRow, AuditEntryInput,
+    CanonicalChangeCategory, ImapEmailRow, JmapEmailRecipientRow, JmapEmailRow,
+    JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow, MessageBccRecipientRecordRow,
+    SearchFolderRow, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -939,7 +940,7 @@ impl Storage {
         account_id: Uuid,
     ) -> Result<()> {
         for definition in exchange_builtin_search_folder_definitions() {
-            sqlx::query(
+            let changed = sqlx::query(
                 r#"
                 INSERT INTO search_folders (
                     id, tenant_id, account_id, role, display_name, definition_kind,
@@ -956,6 +957,13 @@ impl Storage {
                     restriction_json = EXCLUDED.restriction_json,
                     excluded_folder_roles = EXCLUDED.excluded_folder_roles,
                     updated_at = NOW()
+                WHERE search_folders.display_name IS DISTINCT FROM EXCLUDED.display_name
+                   OR search_folders.definition_kind IS DISTINCT FROM EXCLUDED.definition_kind
+                   OR search_folders.result_object_kind IS DISTINCT FROM EXCLUDED.result_object_kind
+                   OR search_folders.scope_json IS DISTINCT FROM EXCLUDED.scope_json
+                   OR search_folders.restriction_json IS DISTINCT FROM EXCLUDED.restriction_json
+                   OR search_folders.excluded_folder_roles IS DISTINCT FROM EXCLUDED.excluded_folder_roles
+                RETURNING id, (xmax = 0) AS inserted
                 "#,
             )
             .bind(Uuid::new_v4())
@@ -967,8 +975,49 @@ impl Storage {
             .bind(definition.scope_json)
             .bind(definition.restriction_json)
             .bind(definition.excluded_folder_roles)
-            .execute(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await?;
+
+            if let Some(row) = changed {
+                let search_folder_id: Uuid = row.try_get("id")?;
+                let change_kind = if row.try_get::<bool, _>("inserted")? {
+                    "created"
+                } else {
+                    "updated"
+                };
+                let modseq = self
+                    .allocate_account_modseq_in_tx(
+                        tx,
+                        tenant_id,
+                        account_id,
+                        CanonicalChangeCategory::Search.as_str(),
+                    )
+                    .await?;
+                Self::insert_mail_change_log_in_tx(
+                    tx,
+                    tenant_id,
+                    Some(account_id),
+                    None,
+                    "search_folder_definition",
+                    search_folder_id,
+                    change_kind,
+                    modseq,
+                    &[account_id],
+                    serde_json::json!({
+                        "role": definition.role,
+                        "definitionKind": "exchange_builtin",
+                        "resultObjectKind": definition.result_object_kind
+                    }),
+                )
+                .await?;
+                Self::emit_account_scoped_change(
+                    tx,
+                    tenant_id,
+                    CanonicalChangeCategory::Search,
+                    account_id,
+                )
+                .await?;
+            }
         }
         Ok(())
     }

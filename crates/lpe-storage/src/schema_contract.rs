@@ -15,6 +15,10 @@ const TASKS_STORAGE: &str = include_str!("tasks.rs");
 const WORKSPACE_STORAGE: &str = include_str!("workspace.rs");
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
+const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests.rs");
+const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
+const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
+const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -42,6 +46,15 @@ fn assert_contains_before(haystack: &str, first: &str, second: &str, message: &s
         .find(second)
         .unwrap_or_else(|| panic!("{message}: missing {second}"));
     assert!(first_index < second_index, "{message}");
+}
+
+fn assert_source_contains_all(name: &str, source: &str, needles: &[&str]) {
+    for needle in needles {
+        assert!(
+            source.contains(needle),
+            "{name} is missing expected canonical adapter coverage: {needle}"
+        );
+    }
 }
 
 fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
@@ -320,10 +333,69 @@ fn collaboration_changes_and_tombstones_are_object_level() {
         "'task_list_grant'",
         "'mailbox_delegation_grant'",
         "'sender_right'",
-        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights'))",
+        "'search_folder_definition'",
+        "'sieve_script'",
+        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules'))",
         "affected_principal_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
         "principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
     ]);
+}
+
+#[test]
+fn collaboration_mutations_write_object_level_change_rows() {
+    for (label, source, signature, object_kind) in [
+        (
+            "contact upsert",
+            WORKSPACE_STORAGE,
+            "pub(crate) async fn upsert_client_contact_in_book_role",
+            "\"contact\"",
+        ),
+        (
+            "calendar event upsert",
+            WORKSPACE_STORAGE,
+            "pub async fn upsert_client_event",
+            "\"calendar_event\"",
+        ),
+        (
+            "task upsert",
+            TASKS_STORAGE,
+            "pub async fn upsert_client_task",
+            "\"task\"",
+        ),
+        (
+            "task reminder update",
+            TASKS_STORAGE,
+            "pub async fn update_accessible_task_reminder",
+            "\"task\"",
+        ),
+        (
+            "calendar reminder update",
+            COLLABORATION_STORAGE,
+            "pub async fn update_accessible_event_reminder",
+            "\"calendar_event\"",
+        ),
+        (
+            "task list create",
+            TASKS_STORAGE,
+            "pub async fn create_task_list",
+            "\"task_list\"",
+        ),
+        (
+            "task list update",
+            TASKS_STORAGE,
+            "pub async fn update_task_list",
+            "\"task_list\"",
+        ),
+    ] {
+        let body = function_body(source, signature);
+        assert!(
+            body.contains("allocate_account_modseq_in_tx")
+                && body.contains("insert_mail_change_log_in_tx")
+                && body.contains(object_kind)
+                && body.contains("emit_"),
+            "{label} must append an object-level change row before notifying clients"
+        );
+    }
 }
 
 #[test]
@@ -884,6 +956,45 @@ fn mailbox_identity_runtime_uses_generated_normalized_lookup_keys() {
 }
 
 #[test]
+fn account_creation_allocates_canonical_send_identity_rows() {
+    let identities = table_definition("account_identities");
+    for required in [
+        "email_address_id UUID NOT NULL",
+        "may_send BOOLEAN NOT NULL DEFAULT TRUE",
+        "is_default BOOLEAN NOT NULL DEFAULT FALSE",
+        "CHECK ((NOT is_default) OR may_send)",
+        "FOREIGN KEY (tenant_id, account_id, email_address_id)",
+        "REFERENCES account_email_addresses (tenant_id, account_id, id)",
+        "CREATE UNIQUE INDEX account_identities_default_idx",
+    ] {
+        assert!(
+            identities.contains(required) || SCHEMA.contains(required),
+            "account_identities must enforce canonical send identity allocation: {required}"
+        );
+    }
+    assert!(
+        ADMIN_STORAGE.contains("INSERT INTO account_email_addresses")
+            && ADMIN_STORAGE.contains("address_kind, is_primary")
+            && ADMIN_STORAGE.contains("INSERT INTO account_identities")
+            && ADMIN_STORAGE.contains("may_send, is_default")
+            && SUBMISSION_STORAGE.contains("FROM sender_rights")
+            && SUBMISSION_STORAGE.contains("sender_identity_id("),
+        "account creation must allocate canonical primary address/default identity rows while sender projection remains derived from canonical rights"
+    );
+    for forbidden in [
+        "CREATE TABLE ews_identities",
+        "CREATE TABLE mapi_send_identities",
+        "CREATE TABLE activesync_identities",
+        "CREATE TABLE protocol_identities",
+    ] {
+        assert!(
+            !SCHEMA.contains(forbidden),
+            "send identities must not be allocated in protocol-local tables: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn admin_workspace_and_pst_use_v2_mailbox_membership_schema() {
     assert_schema_contains_all(&[
         "retention_days INTEGER NOT NULL DEFAULT 365 CHECK (retention_days >= 0)",
@@ -982,6 +1093,94 @@ fn search_folder_schema_persists_exchange_builtin_definitions() {
             "protocol bootstrap must persist the built-in {role} search folder definition"
         );
     }
+    assert!(
+        PROTOCOLS_STORAGE.contains("\"search_folder_definition\"")
+            && PROTOCOLS_STORAGE.contains("CanonicalChangeCategory::Search")
+            && PROTOCOLS_STORAGE.contains("insert_mail_change_log_in_tx")
+            && PROTOCOLS_STORAGE.contains("emit_account_scoped_change"),
+        "search-folder definition bootstrap must write canonical object changes instead of MAPI-local FAI state"
+    );
+}
+
+#[test]
+fn mailbox_rules_are_canonical_sieve_scripts_with_replay() {
+    assert_schema_contains_all(&[
+        "CREATE TABLE sieve_scripts",
+        "CREATE UNIQUE INDEX sieve_scripts_active_account_idx",
+        "'sieve_script'",
+        "'rules'",
+    ]);
+    assert!(
+        ADMIN_STORAGE.contains("\"sieve_script\"")
+            && ADMIN_STORAGE.contains("CanonicalChangeCategory::Rules")
+            && ADMIN_STORAGE.contains("insert_mail_change_log_in_tx")
+            && ADMIN_STORAGE.contains("insert_collaboration_tombstone_in_tx")
+            && ADMIN_STORAGE.contains("emit_account_scoped_change"),
+        "Sieve script mutations must be canonical rule changes with replay tombstones"
+    );
+    for forbidden in [
+        "CREATE TABLE ews_rules",
+        "CREATE TABLE mapi_rules",
+        "CREATE TABLE exchange_rules",
+        "CREATE TABLE deferred_action_messages",
+    ] {
+        assert!(
+            !SCHEMA.contains(forbidden),
+            "rules must not be stored in an Exchange-only table: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
+    assert_source_contains_all(
+        "Exchange/MAPI tests",
+        EXCHANGE_TESTS,
+        &[
+            "mapi_over_http_contact_crud_uses_canonical_contacts",
+            "mapi_over_http_calendar_crud_uses_canonical_events",
+            "mapi_over_http_task_crud_uses_canonical_tasks",
+            "mapi_over_http_common_views_content_sync_exports_search_folder_fai_definitions",
+            "SearchFolderDefinition",
+            "mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc",
+            "mapi_over_http_non_empty_modify_rules_is_terminal_without_canonical_side_effects",
+            "imported_emails.lock().unwrap().is_empty()",
+        ],
+    );
+    assert_source_contains_all(
+        "JMAP tests",
+        JMAP_TESTS,
+        &[
+            "mailbox_and_email_changes_return_existing_ids_from_initial_state",
+            "email_changes_use_durable_log_ids_when_state_has_cursor",
+            "collaboration_changes_use_durable_log_ids_when_state_has_cursor",
+            "task_query_changes_tracks_sort_order_and_updates",
+            "identity_changes_tracks_sender_identity_projection",
+            "email_submission_changes_use_durable_log_ids_when_state_has_cursor",
+            "vacation_response_set_writes_canonical_active_sieve_script",
+        ],
+    );
+    assert_source_contains_all(
+        "IMAP tests",
+        IMAP_TESTS,
+        &[
+            "store_and_uid_store_update_only_canonical_supported_flags",
+            "append_copy_move_and_expunge_preserve_canonical_uid_state",
+            "search_and_uid_search_use_canonical_visible_fields_without_bcc",
+            "acl_commands_project_canonical_mailbox_and_sender_delegation",
+        ],
+    );
+    assert_source_contains_all(
+        "ActiveSync tests",
+        ACTIVESYNC_TESTS,
+        &[
+            "move_items_moves_message_between_canonical_mail_folders",
+            "sync_add_command_saves_draft_through_canonical_storage",
+            "send_mail_uses_canonical_submission_model",
+            "search_queries_canonical_mail_projection",
+            "sync_contact_and_calendar_mutations_update_canonical_models",
+        ],
+    );
 }
 
 #[test]

@@ -114,6 +114,12 @@ must write the canonical active Sieve vacation script instead of maintaining an
 EWS-local automatic-replies table. `sieve_vacation_responses` owns vacation
 auto-reply suppression state keyed by account, sender, and vacation response
 content.
+Mailbox filtering rules are canonical `sieve_scripts` state. Protocol adapters
+that expose rule-like behavior must project to or from Sieve-backed rule state
+and must not add EWS-only, MAPI-only, or deferred-action-message rule stores.
+Sieve script create, update, activation, rename, and delete paths write
+canonical rule change rows; deletes write tombstones before removing the live
+script.
 
 UID allocation must update the mailbox row and insert membership rows in the
 same transaction. Expunge removes the live membership row only after writing a
@@ -161,7 +167,7 @@ Schema v2 uses counters plus append-only logs.
 
 | Table | Scope | Use |
 | --- | --- | --- |
-| `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, notes, journal, rights |
+| `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, notes, journal, rights, search, rules |
 | `mailboxes.modseq` | mailbox | IMAP `HIGHESTMODSEQ`, QRESYNC, mailbox-scoped refresh |
 | `mail_change_log` | object | JMAP changes, push replay, MAPI ICS manifests, DAV sync, ActiveSync deltas |
 | `tombstones` | deleted object | JMAP destroyed ids, IMAP expunge, MAPI ICS deletes, ActiveSync deletes |
@@ -194,6 +200,12 @@ task-list grant rows through their durable `collectionId` summary. Item-level
 visibility changes still fall back because one grant row can affect many child
 objects. This fallback is compatibility behavior, not a protocol-local
 canonical store.
+Search-folder definitions and mailbox rule definitions also replay through the
+same durable object log. Built-in Exchange-compatible search folders are stored
+as `search_folders` rows with `object_kind = 'search_folder_definition'` change
+rows; Sieve-backed mailbox rules use `object_kind = 'sieve_script'` change rows
+and tombstones. These rows are canonical LPE state, not Exchange FAI message
+stores or protocol-owned rule tables.
 
 Protocol adapters store only cursor rows:
 
@@ -476,10 +488,11 @@ include inactive rows with explicit statuses.
 
 Object-level change logs and tombstones cover mailbox and collaboration
 objects. Custom mailbox deletes, collaboration grants, mailbox delegation
-grants, sender rights, contacts, calendars, events, task lists, and tasks must
-write canonical change rows and tombstones so JMAP, DAV, EWS, MAPI,
-ActiveSync, and web push can remove visibility after revocation or deletion
-without maintaining protocol-local rights tables.
+grants, sender rights, search-folder definitions, Sieve-backed rules, contacts,
+calendars, events, task lists, and tasks must write canonical change rows and
+tombstones so JMAP, DAV, EWS, MAPI, ActiveSync, and web push can remove
+visibility after revocation or deletion without maintaining protocol-local
+rights, search, or rule tables.
 Grant and sender-right upsert/delete paths write object-level
 `mail_change_log` rows before emitting rights journals. Collection grant rows
 include `collectionId` summary data so `AddressBook/changes`,
@@ -555,6 +568,7 @@ collaboration, rights, or user-visible state.
 
 - `mailboxes`
 - `mailbox_subscriptions`
+- `search_folders`
 - `storage_pools`
 - `blobs`
 - `blob_placements`

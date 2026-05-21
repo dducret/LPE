@@ -348,6 +348,31 @@ impl Storage {
         .fetch_one(&mut *tx)
         .await?;
 
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                CanonicalChangeCategory::Contacts.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            None,
+            "contact",
+            contact_id,
+            "updated",
+            modseq,
+            &[input.account_id],
+            serde_json::json!({
+                "collectionId": contact_book_id,
+                "objectUid": contact_id.to_string(),
+            }),
+        )
+        .await?;
+
         Self::emit_collaboration_change(
             &mut tx,
             &tenant_id,
@@ -442,6 +467,31 @@ impl Storage {
         .bind(input.attendees_json.trim())
         .bind(input.notes.trim())
         .fetch_one(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            None,
+            "calendar_event",
+            event_id,
+            "updated",
+            modseq,
+            &[input.account_id],
+            serde_json::json!({
+                "collectionId": calendar_id,
+                "objectUid": row.uid.clone(),
+            }),
+        )
         .await?;
 
         Self::emit_collaboration_change(

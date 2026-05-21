@@ -10,11 +10,11 @@ use crate::{
     normalize_domain_name, normalize_email, normalize_gal_visibility, permission_summary,
     permissions_from_storage, validate_sieve_script_content, validate_sieve_script_name,
     AccountRow, AdminDashboard, AliasRecord, AliasRow, AntispamSettings, AuditEntryInput,
-    AuditEvent, AuditRow, DashboardUpdate, DomainRecord, DomainRow, EmailTraceResult,
-    EmailTraceRow, EmailTraceSearchInput, FilterRule, HealthResponse, LocalAiSettings,
-    MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, NewAccount, NewAlias, NewDomain,
-    NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats, ProtocolStatus,
-    PstTransferJobRecord, PstTransferJobRow, SecuritySettings, ServerAdministrator,
+    AuditEvent, AuditRow, CanonicalChangeCategory, DashboardUpdate, DomainRecord, DomainRow,
+    EmailTraceResult, EmailTraceRow, EmailTraceSearchInput, FilterRule, HealthResponse,
+    LocalAiSettings, MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, NewAccount, NewAlias,
+    NewDomain, NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats,
+    ProtocolStatus, PstTransferJobRecord, PstTransferJobRow, SecuritySettings, ServerAdministrator,
     ServerAdministratorRow, ServerSettings, SieveScriptDocument, SieveScriptSummary, Storage,
     StorageOverview, UpdateAccount, UpdateDomain, MAX_SIEVE_SCRIPTS_PER_ACCOUNT,
     PLATFORM_TENANT_ID,
@@ -355,6 +355,39 @@ impl Storage {
             .bind(normalize_directory_kind(&input.directory_kind)?)
             .bind(&tenant_id)
             .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO account_email_addresses (
+                    id, tenant_id, account_id, domain_id, email, address_kind, is_primary
+                )
+                SELECT $1, tenant_id, id, primary_domain_id, primary_email, 'primary', TRUE
+                FROM accounts
+                WHERE tenant_id = $2 AND id = $3
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(account_id)
+            .execute(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO account_identities (
+                    id, tenant_id, account_id, email_address_id, display_name, may_send, is_default
+                )
+                SELECT $1, tenant_id, account_id, id, $4, TRUE, TRUE
+                FROM account_email_addresses
+                WHERE tenant_id = $2 AND account_id = $3 AND is_primary = TRUE
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(display_name)
             .execute(&mut *tx)
             .await?;
 
@@ -896,9 +929,11 @@ impl Storage {
                 is_active = EXCLUDED.is_active OR sieve_scripts.is_active,
                 updated_at = NOW()
             RETURNING
+                id,
                 name,
                 content,
                 is_active,
+                (xmax = 0) AS inserted,
                 to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
             "#,
         )
@@ -909,6 +944,44 @@ impl Storage {
         .bind(&content)
         .bind(activate)
         .fetch_one(&mut *tx)
+        .await?;
+
+        let script_id: Uuid = row.try_get("id")?;
+        let change_kind = if row.try_get::<bool, _>("inserted")? {
+            "created"
+        } else {
+            "updated"
+        };
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                CanonicalChangeCategory::Rules.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "sieve_script",
+            script_id,
+            change_kind,
+            modseq,
+            &[account_id],
+            serde_json::json!({
+                "name": name,
+                "isActive": row.try_get::<bool, _>("is_active")?,
+            }),
+        )
+        .await?;
+        Self::emit_account_scoped_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Rules,
+            account_id,
+        )
         .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
@@ -932,9 +1005,9 @@ impl Storage {
         let name = validate_sieve_script_name(name)?;
         let mut tx = self.pool.begin().await?;
 
-        let active = sqlx::query_scalar::<_, bool>(
+        let script = sqlx::query(
             r#"
-            SELECT is_active
+            SELECT id, is_active
             FROM sieve_scripts
             WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
             LIMIT 1
@@ -946,10 +1019,25 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow!("sieve script not found"))?;
+        let script_id: Uuid = script.try_get("id")?;
+        let active: bool = script.try_get("is_active")?;
 
         if active {
             bail!("cannot delete the active sieve script");
         }
+
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Rules,
+            account_id,
+            None,
+            "sieve_script",
+            script_id,
+            Some(&name),
+            &[account_id],
+        )
+        .await?;
 
         sqlx::query(
             r#"
@@ -963,6 +1051,13 @@ impl Storage {
         .execute(&mut *tx)
         .await?;
 
+        Self::emit_account_scoped_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Rules,
+            account_id,
+        )
+        .await?;
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(())
@@ -985,6 +1080,7 @@ impl Storage {
             SET name = $4, updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
             RETURNING
+                id,
                 name,
                 is_active,
                 octet_length(content)::BIGINT AS size_octets,
@@ -998,6 +1094,40 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow!("sieve script not found"))?;
+
+        let script_id: Uuid = row.try_get("id")?;
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                CanonicalChangeCategory::Rules.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "sieve_script",
+            script_id,
+            "updated",
+            modseq,
+            &[account_id],
+            serde_json::json!({
+                "name": new_name,
+                "previousName": old_name,
+                "isActive": row.try_get::<bool, _>("is_active")?,
+            }),
+        )
+        .await?;
+        Self::emit_account_scoped_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Rules,
+            account_id,
+        )
+        .await?;
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
@@ -1018,17 +1148,28 @@ impl Storage {
     ) -> Result<Option<String>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let mut tx = self.pool.begin().await?;
-        sqlx::query(
+        let deactivated = sqlx::query(
             r#"
             UPDATE sieve_scripts
             SET is_active = FALSE, updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND is_active = TRUE
+            RETURNING id, name
             "#,
         )
         .bind(&tenant_id)
         .bind(account_id)
-        .execute(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
+
+        let mut changed_scripts = deactivated
+            .into_iter()
+            .map(|row| {
+                Ok::<_, anyhow::Error>((
+                    row.try_get::<Uuid, _>("id")?,
+                    row.try_get::<String, _>("name")?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         let active_name = if let Some(name) = name {
             let name = validate_sieve_script_name(name)?;
@@ -1037,7 +1178,7 @@ impl Storage {
                 UPDATE sieve_scripts
                 SET is_active = TRUE, updated_at = NOW()
                 WHERE tenant_id = $1 AND account_id = $2 AND lower(name) = lower($3)
-                RETURNING name
+                RETURNING id, name
                 "#,
             )
             .bind(&tenant_id)
@@ -1046,11 +1187,52 @@ impl Storage {
             .fetch_optional(&mut *tx)
             .await?
             .ok_or_else(|| anyhow!("sieve script not found"))?;
-            Some(updated.try_get("name")?)
+            let active_id: Uuid = updated.try_get("id")?;
+            let active_name: String = updated.try_get("name")?;
+            changed_scripts.push((active_id, active_name.clone()));
+            Some(active_name)
         } else {
             None
         };
 
+        changed_scripts.sort_by_key(|(_, script_name)| script_name.clone());
+        changed_scripts.dedup_by_key(|(script_id, _)| *script_id);
+        let has_rule_changes = !changed_scripts.is_empty();
+        for (script_id, script_name) in changed_scripts {
+            let modseq = self
+                .allocate_account_modseq_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    account_id,
+                    CanonicalChangeCategory::Rules.as_str(),
+                )
+                .await?;
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                None,
+                "sieve_script",
+                script_id,
+                "updated",
+                modseq,
+                &[account_id],
+                serde_json::json!({
+                    "name": script_name,
+                    "activeScriptChanged": true,
+                }),
+            )
+            .await?;
+        }
+        if has_rule_changes {
+            Self::emit_account_scoped_change(
+                &mut tx,
+                &tenant_id,
+                CanonicalChangeCategory::Rules,
+                account_id,
+            )
+            .await?;
+        }
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         tx.commit().await?;
         Ok(active_name)

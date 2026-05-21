@@ -15,6 +15,8 @@ pub enum CanonicalChangeCategory {
     Notes,
     Journal,
     Rights,
+    Search,
+    Rules,
 }
 
 impl CanonicalChangeCategory {
@@ -27,6 +29,8 @@ impl CanonicalChangeCategory {
             Self::Notes => "notes",
             Self::Journal => "journal",
             Self::Rights => "rights",
+            Self::Search => "search",
+            Self::Rules => "rules",
         }
     }
 
@@ -39,6 +43,8 @@ impl CanonicalChangeCategory {
             "notes" => Some(Self::Notes),
             "journal" => Some(Self::Journal),
             "rights" => Some(Self::Rights),
+            "search" => Some(Self::Search),
+            "rules" => Some(Self::Rules),
             _ => None,
         }
     }
@@ -436,6 +442,15 @@ impl Storage {
             &principal_account_ids,
         )
         .await
+    }
+
+    pub(crate) async fn emit_account_scoped_change(
+        tx: &mut sqlx::Transaction<'_, Postgres>,
+        tenant_id: &Uuid,
+        category: CanonicalChangeCategory,
+        account_id: Uuid,
+    ) -> Result<()> {
+        Self::emit_canonical_change(tx, tenant_id, category, &[account_id], &[account_id]).await
     }
 
     pub(crate) async fn insert_collaboration_tombstone_in_tx(
