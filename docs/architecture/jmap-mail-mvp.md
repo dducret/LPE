@@ -21,6 +21,10 @@
   - `Mailbox/get`
   - `Mailbox/changes`
   - `Mailbox/query`
+  - `Mailbox/queryChanges`
+  - `Mailbox/set`
+  - `Mailbox/import`
+  - `Mailbox/copy`
   - `Email/get`
   - `Email/query`
   - `Email/changes`
@@ -29,7 +33,25 @@
   - `Email/copy`
   - `Email/import`
   - `EmailSubmission/set`
+  - `EmailSubmission/import`
+  - `EmailSubmission/copy`
   - `Blob/copy`
+  - `Blob/get`
+  - `Blob/query`
+  - `Blob/changes`
+  - `Blob/queryChanges`
+  - `Blob/set`
+  - `Blob/import`
+  - `Thread/set`
+  - `Thread/import`
+  - `Thread/copy`
+  - `Identity/get`
+  - `Identity/query`
+  - `Identity/changes`
+  - `Identity/queryChanges`
+  - `Identity/set`
+  - `Identity/import`
+  - `Identity/copy`
 - Push:
   - WebSocket at `/api/jmap/ws`
   - event stream at `/api/jmap/events?types={types}&closeafter={closeafter}`
@@ -59,6 +81,7 @@
 - Safety:
   - `Bcc` must not appear in standard search or user-facing projections
   - no JMAP-specific mailbox state engine
+  - no `MAPI` session or subsystem objects are modeled in JMAP
   - no direct `SMTP`
 
 ## Reference Table/List

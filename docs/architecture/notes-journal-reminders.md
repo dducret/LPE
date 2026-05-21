@@ -72,17 +72,32 @@ are:
 - `Note/changes`
 - `Note/queryChanges`
 - `Note/set`
+- `Note/import`
+- `Note/copy`
 - `JournalEntry/get`
 - `JournalEntry/query`
 - `JournalEntry/changes`
 - `JournalEntry/queryChanges`
 - `JournalEntry/set`
+- `JournalEntry/import`
+- `JournalEntry/copy`
+- `Reminder/get`
 - `Reminder/query`
+- `Reminder/changes`
+- `Reminder/queryChanges`
+- `Reminder/set`
+- `Reminder/import`
+- `Reminder/copy`
 
 These methods are private LPE extensions. They must not be advertised as
 standard JMAP Mail support, and they must not represent Notes or Journal entries
 as JMAP `Mailbox` or `Email` objects. Reminder results remain computed from
-canonical reminder-bearing objects.
+canonical reminder-bearing objects. Note and Journal import/copy methods are
+canonical create-style writes using the same payloads as each object's `set`
+create branch. Reminder mutation, import, and copy methods update reminder
+metadata on the canonical source object. Supported sources are canonical tasks,
+calendar events, and mail follow-up rows; reminders themselves remain computed
+and do not have a separate reminder table.
 
 Notes and Journal writes allocate account/category modseqs in `account_sync_state`,
 append object-level `mail_change_log` rows, and write tombstones for deletes.

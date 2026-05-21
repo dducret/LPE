@@ -10,14 +10,14 @@ use axum::{
 };
 use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest, Validator};
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuthenticatedAccount, ClientTask, ClientTaskList,
-    CollaborationCollection, JmapEmail, JmapEmailSubmission, JmapMailbox, JmapUploadBlob,
-    MailboxAccountAccess, SenderIdentity, Storage,
+    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount, ClientTask,
+    ClientTaskList, CollaborationCollection, JmapEmail, JmapEmailSubmission, JmapMailbox,
+    JmapUploadBlob, MailboxAccountAccess, SenderIdentity, Storage,
 };
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     convert::Infallible,
     sync::{Arc, OnceLock},
 };
@@ -27,8 +27,8 @@ use uuid::Uuid;
 use crate::{
     convert::format_addresses,
     error::{
-        http_error, jmap_problem, method_error, method_error_from_error, JMAP_PROBLEM_LIMIT,
-        JMAP_PROBLEM_UNKNOWN_CAPABILITY,
+        http_error, jmap_problem, method_error, method_error_from_error, set_error,
+        JMAP_PROBLEM_LIMIT, JMAP_PROBLEM_UNKNOWN_CAPABILITY,
     },
     eventsource::EventSourceQuery,
     parse::parse_uuid,
@@ -37,10 +37,12 @@ use crate::{
     },
     session,
     state::{
-        changes_response_from_durable_with_cursor, changes_response_with_cursor, encode_state,
-        encode_state_with_cursor, state_cursor, DurableObjectChange, StateEntry,
+        changes_response_from_durable_with_cursor, changes_response_with_cursor,
+        decode_query_state, encode_query_state, encode_query_state_reference, encode_state,
+        encode_state_with_cursor, query_changes_response_from_diff, query_diff_for_kind,
+        query_position, state_cursor, validate_query_state_token, DurableObjectChange, StateEntry,
     },
-    store::JmapStore,
+    store::{JmapShareInput, JmapStore},
     upload::{message_rfc822_bytes, JmapBlobId},
 };
 
@@ -364,6 +366,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             self.handle_mailbox_set(account, arguments, &mut created_ids)
                                 .await
                         }
+                        "Mailbox/import" | "Mailbox/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "Mailbox",
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Email/query" => self.handle_email_query(account, arguments).await,
                         "Email/queryChanges" => {
                             self.handle_email_query_changes(account, arguments).await
@@ -399,6 +410,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         "EmailSubmission/set" => {
                             self.handle_email_submission_set(account, arguments, &mut created_ids)
                                 .await
+                        }
+                        "EmailSubmission/import" | "EmailSubmission/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "EmailSubmission",
+                                &method_name,
+                            )
+                            .await
                         }
                         "AddressBook/get" => self.handle_address_book_get(account, arguments).await,
                         "AddressBook/query" => {
@@ -452,7 +472,28 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         "TaskList/changes" => {
                             self.handle_task_list_changes(account, arguments).await
                         }
-                        "TaskList/set" => self.handle_task_list_set(account, arguments).await,
+                        "TaskList/set" => {
+                            self.handle_task_list_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "TaskList/query" => {
+                            self.handle_canonical_query(account, arguments, "TaskList")
+                                .await
+                        }
+                        "TaskList/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "TaskList")
+                                .await
+                        }
+                        "TaskList/import" | "TaskList/copy" => {
+                            self.handle_canonical_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                "TaskList",
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Task/get" => self.handle_task_get(account, arguments).await,
                         "Task/query" => self.handle_task_query(account, arguments).await,
                         "Task/queryChanges" => {
@@ -463,6 +504,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             self.handle_task_set(account, arguments, &mut created_ids)
                                 .await
                         }
+                        "Task/import" | "Task/copy" => {
+                            self.handle_canonical_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                "Task",
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Note/get" => self.handle_note_get(account, arguments).await,
                         "Note/query" => self.handle_note_query(account, arguments).await,
                         "Note/queryChanges" => {
@@ -472,6 +523,16 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         "Note/set" => {
                             self.handle_note_set(account, arguments, &mut created_ids)
                                 .await
+                        }
+                        "Note/import" | "Note/copy" => {
+                            self.handle_canonical_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                "Note",
+                                &method_name,
+                            )
+                            .await
                         }
                         "JournalEntry/get" => {
                             self.handle_journal_entry_get(account, arguments).await
@@ -490,10 +551,62 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             self.handle_journal_entry_set(account, arguments, &mut created_ids)
                                 .await
                         }
+                        "JournalEntry/import" | "JournalEntry/copy" => {
+                            self.handle_canonical_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                "JournalEntry",
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Reminder/query" => self.handle_reminder_query(account, arguments).await,
+                        "Reminder/get" => {
+                            self.handle_canonical_get(account, arguments, "Reminder")
+                                .await
+                        }
+                        "Reminder/changes" => {
+                            self.handle_canonical_changes(account, arguments, "Reminder")
+                                .await
+                        }
+                        "Reminder/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "Reminder")
+                                .await
+                        }
+                        "Reminder/set" => {
+                            self.handle_reminder_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Reminder/import" | "Reminder/copy" => {
+                            self.handle_reminder_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Identity/get" => self.handle_identity_get(account, arguments).await,
                         "Identity/changes" => {
                             self.handle_identity_changes(account, arguments).await
+                        }
+                        "Identity/query" => {
+                            self.handle_canonical_query(account, arguments, "Identity")
+                                .await
+                        }
+                        "Identity/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "Identity")
+                                .await
+                        }
+                        "Identity/set" | "Identity/import" | "Identity/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "Identity",
+                                &method_name,
+                            )
+                            .await
                         }
                         "Thread/query" => self.handle_thread_query(account, arguments).await,
                         "Thread/queryChanges" => {
@@ -501,6 +614,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         }
                         "Thread/get" => self.handle_thread_get(account, arguments).await,
                         "Thread/changes" => self.handle_thread_changes(account, arguments).await,
+                        "Thread/set" | "Thread/import" | "Thread/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "Thread",
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Quota/get" => self.handle_quota_get(account, arguments).await,
                         "SearchSnippet/get" => {
                             self.handle_search_snippet_get(account, arguments).await
@@ -510,6 +632,27 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 .await
                         }
                         "Blob/get" => self.handle_blob_get(account, arguments, &created_ids).await,
+                        "Blob/query" => {
+                            self.handle_canonical_query(account, arguments, "Blob")
+                                .await
+                        }
+                        "Blob/changes" => {
+                            self.handle_canonical_changes(account, arguments, "Blob")
+                                .await
+                        }
+                        "Blob/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "Blob")
+                                .await
+                        }
+                        "Blob/set" | "Blob/import" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "Blob",
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Blob/lookup" => {
                             self.handle_blob_lookup(
                                 account,
@@ -522,6 +665,95 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         "Blob/copy" => {
                             self.handle_blob_copy(account, arguments, &created_ids)
                                 .await
+                        }
+                        "AddressBook/set" | "AddressBook/import" | "AddressBook/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "AddressBook",
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "ContactCard/import" | "ContactCard/copy" => {
+                            self.handle_canonical_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                "ContactCard",
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "Calendar/set" | "Calendar/import" | "Calendar/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "Calendar",
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "CalendarEvent/import" | "CalendarEvent/copy" => {
+                            self.handle_canonical_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                "CalendarEvent",
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "Share/get" => self.handle_canonical_get(account, arguments, "Share").await,
+                        "Share/query" => {
+                            self.handle_canonical_query(account, arguments, "Share")
+                                .await
+                        }
+                        "Share/changes" => {
+                            self.handle_canonical_changes(account, arguments, "Share")
+                                .await
+                        }
+                        "Share/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "Share")
+                                .await
+                        }
+                        "Share/set" => {
+                            self.handle_share_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Share/import" | "Share/copy" => {
+                            self.handle_share_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "DurableChange/get" => {
+                            self.handle_canonical_get(account, arguments, "DurableChange")
+                                .await
+                        }
+                        "DurableChange/query" => {
+                            self.handle_canonical_query(account, arguments, "DurableChange")
+                                .await
+                        }
+                        "DurableChange/changes" => {
+                            self.handle_canonical_changes(account, arguments, "DurableChange")
+                                .await
+                        }
+                        "DurableChange/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "DurableChange")
+                                .await
+                        }
+                        "DurableChange/set" | "DurableChange/import" | "DurableChange/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "DurableChange",
+                                &method_name,
+                            )
+                            .await
                         }
                         "VacationResponse/get" => {
                             self.handle_vacation_response_get(account, arguments).await
@@ -927,6 +1159,924 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         }
     }
 
+    pub(crate) async fn handle_canonical_get(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        data_type: &str,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let ids = string_ids_from_arguments(&arguments, "ids");
+        let properties = property_names_from_arguments(&arguments);
+        let ids_set = ids
+            .as_ref()
+            .map(|ids| ids.iter().cloned().collect::<HashSet<_>>());
+        let list = self
+            .canonical_objects(account, account_id, data_type)
+            .await?
+            .into_iter()
+            .filter(|object| {
+                ids_set
+                    .as_ref()
+                    .map(|ids| {
+                        object
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|id| ids.contains(id))
+                    })
+                    .unwrap_or(true)
+            })
+            .map(|object| project_get_properties(object, properties.as_ref()))
+            .collect::<Vec<_>>();
+        let not_found = ids
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|id| {
+                !list
+                    .iter()
+                    .any(|object| object.get("id").and_then(Value::as_str) == Some(id.as_str()))
+            })
+            .map(Value::String)
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "state": self.canonical_object_state(account, account_id, data_type).await?,
+            "list": list,
+            "notFound": not_found,
+        }))
+    }
+
+    pub(crate) async fn handle_canonical_query(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        data_type: &str,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let mut all_ids = self
+            .canonical_objects(account, account_id, data_type)
+            .await?
+            .into_iter()
+            .filter_map(|object| object.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect::<Vec<_>>();
+        all_ids.sort();
+        let position = query_position(
+            &all_ids,
+            arguments.get("position").and_then(Value::as_i64),
+            arguments.get("anchor").and_then(Value::as_str),
+            arguments.get("anchorOffset").and_then(Value::as_i64),
+        )?;
+        let limit = arguments
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_GET_LIMIT)
+            .min(MAX_QUERY_LIMIT) as usize;
+        let ids = all_ids
+            .iter()
+            .skip(position)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let total = all_ids.len();
+        let method_name = format!("{data_type}/query");
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, data_type)
+            .await?
+            .unwrap_or(0);
+        let query_state = match self
+            .store
+            .save_jmap_query_state(account_id, &method_name, None, None, cursor, &all_ids)
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                &method_name,
+                None,
+                None,
+                state_id,
+                cursor,
+            )?,
+            None => encode_query_state(account_id, &method_name, None, None, all_ids)?,
+        };
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "queryState": query_state,
+            "canCalculateChanges": true,
+            "position": position,
+            "ids": ids,
+            "total": total,
+        }))
+    }
+
+    pub(crate) async fn handle_canonical_query_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        data_type: &str,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let since_query_state = arguments
+            .get("sinceQueryState")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("sinceQueryState is required"))?
+            .to_string();
+        let mut ids = self
+            .canonical_query_ids(account, account_id, data_type, &arguments)
+            .await?;
+        ids.sort();
+        let total = ids.len() as u64;
+        let method_name = canonical_query_state_method(data_type);
+        let filter_state = canonical_query_filter(data_type, &arguments);
+        let previous = decode_query_state(&since_query_state)?;
+        validate_query_state_token(
+            account_id,
+            &method_name,
+            filter_state.as_ref(),
+            None,
+            &previous,
+        )?;
+        let mut previous_cursor = previous.cursor.unwrap_or(0);
+        let previous_ids =
+            if let Some(state_id) = previous.state_id.as_deref().map(parse_uuid).transpose()? {
+                let stored = self
+                    .store
+                    .fetch_jmap_query_state(
+                        account_id,
+                        &method_name,
+                        state_id,
+                        filter_state.clone(),
+                        None,
+                    )
+                    .await?
+                    .ok_or_else(|| anyhow!("queryState is no longer available"))?;
+                previous_cursor = stored.last_change_sequence;
+                stored.snapshot_ids
+            } else {
+                previous.ids.clone()
+            };
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, data_type)
+            .await?
+            .unwrap_or(0);
+        let diff = query_diff_for_kind(
+            &method_name,
+            &previous_ids,
+            &ids,
+            arguments.get("maxChanges").and_then(Value::as_u64),
+        );
+        let next_cursor = if diff.has_more_changes {
+            previous_cursor
+        } else {
+            cursor
+        };
+        let next_query_state = match self
+            .store
+            .save_jmap_query_state(
+                account_id,
+                &method_name,
+                filter_state.clone(),
+                None,
+                next_cursor,
+                &diff.query_state_ids,
+            )
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                &method_name,
+                filter_state.clone(),
+                None,
+                state_id,
+                next_cursor,
+            )?,
+            None => encode_query_state(
+                account_id,
+                &method_name,
+                filter_state.clone(),
+                None,
+                diff.query_state_ids.clone(),
+            )?,
+        };
+        query_changes_response_from_diff(
+            account_id,
+            &method_name,
+            since_query_state,
+            filter_state,
+            None,
+            previous,
+            next_query_state,
+            total,
+            diff,
+        )
+    }
+
+    pub(crate) async fn handle_canonical_changes(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        data_type: &str,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let since_state = arguments
+            .get("sinceState")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("sinceState is required"))?;
+        let max_changes = arguments.get("maxChanges").and_then(Value::as_u64);
+        let entries = self
+            .canonical_objects(account, account_id, data_type)
+            .await?
+            .into_iter()
+            .filter_map(|object| {
+                let id = object.get("id")?.as_str()?.to_string();
+                Some(StateEntry {
+                    id,
+                    fingerprint: opaque_state_fingerprint(&object.to_string()),
+                })
+            })
+            .collect::<Vec<_>>();
+        if matches!(data_type, "Share" | "Reminder") {
+            return self
+                .string_object_changes_response(
+                    account_id,
+                    data_type,
+                    since_state,
+                    max_changes,
+                    entries,
+                )
+                .await;
+        }
+        self.object_changes_response(account_id, data_type, since_state, max_changes, entries)
+            .await
+    }
+
+    pub(crate) async fn string_object_changes_response(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        since_state: &str,
+        max_changes: Option<u64>,
+        entries: Vec<StateEntry>,
+    ) -> Result<Value> {
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, data_type)
+            .await?;
+        if let Some(after_cursor) = state_cursor(account_id, data_type, since_state)? {
+            if let Some(changes) = self
+                .store
+                .replay_jmap_string_object_changes(
+                    account_id,
+                    data_type,
+                    after_cursor,
+                    crate::store::MAX_JMAP_MAIL_OBJECT_REPLAY_ROWS,
+                )
+                .await?
+            {
+                return changes_response_from_durable_with_cursor(
+                    account_id,
+                    data_type,
+                    since_state,
+                    max_changes,
+                    entries,
+                    cursor,
+                    changes
+                        .into_iter()
+                        .map(|change| DurableObjectChange {
+                            id: change.object_id,
+                        })
+                        .collect(),
+                );
+            }
+        }
+        changes_response_with_cursor(
+            account_id,
+            data_type,
+            since_state,
+            max_changes,
+            entries,
+            cursor,
+        )
+    }
+
+    pub(crate) async fn handle_reminder_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let old_state = self
+            .canonical_object_state(account, account_id, "Reminder")
+            .await?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.get("create").and_then(Value::as_object) {
+            for (creation_id, value) in create {
+                match self
+                    .apply_reminder_mutation(account, account_id, value, true, creation_id)
+                    .await
+                {
+                    Ok(id) => {
+                        created_ids.insert(creation_id.clone(), id.clone());
+                        created.insert(creation_id.clone(), json!({"id": id}));
+                    }
+                    Err(error) => {
+                        not_created.insert(creation_id.clone(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+        if let Some(update) = arguments.get("update").and_then(Value::as_object) {
+            for (id, value) in update {
+                let mut object = value.clone();
+                if let Value::Object(map) = &mut object {
+                    let (source_type, source_id) = parse_reminder_id(id)?;
+                    map.entry("sourceType")
+                        .or_insert_with(|| Value::String(source_type));
+                    map.entry("sourceId")
+                        .or_insert_with(|| Value::String(source_id.to_string()));
+                }
+                match self
+                    .apply_reminder_mutation(account, account_id, &object, true, id)
+                    .await
+                {
+                    Ok(_) => {
+                        updated.insert(id.clone(), Value::Object(Map::new()));
+                    }
+                    Err(error) => {
+                        not_updated.insert(id.clone(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+        if let Some(ids) = arguments.get("destroy").and_then(Value::as_array) {
+            for value in ids {
+                let Some(id) = value.as_str() else {
+                    continue;
+                };
+                let (source_type, source_id) = match parse_reminder_id(id) {
+                    Ok(parsed) => parsed,
+                    Err(error) => {
+                        not_destroyed.insert(id.to_string(), set_error(&error.to_string()));
+                        continue;
+                    }
+                };
+                let object = json!({
+                    "sourceType": source_type,
+                    "sourceId": source_id.to_string(),
+                    "reminderSet": false,
+                });
+                match self
+                    .apply_reminder_mutation(account, account_id, &object, false, id)
+                    .await
+                {
+                    Ok(_) => destroyed.push(Value::String(id.to_string())),
+                    Err(error) => {
+                        not_destroyed.insert(id.to_string(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": self.canonical_object_state(account, account_id, "Reminder").await?,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    pub(crate) async fn handle_reminder_import_or_copy(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+        method_name: &str,
+    ) -> Result<Value> {
+        let mut set_arguments = Map::new();
+        if let Some(account_id) = arguments.get("accountId").cloned() {
+            set_arguments.insert("accountId".to_string(), account_id);
+        }
+        let create = arguments
+            .get("create")
+            .or_else(|| arguments.get("emails"))
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        set_arguments.insert("create".to_string(), create);
+        let mut response = self
+            .handle_reminder_set(account, Value::Object(set_arguments), created_ids)
+            .await?;
+        if let Value::Object(map) = &mut response {
+            map.insert("method".to_string(), Value::String(method_name.to_string()));
+        }
+        Ok(response)
+    }
+
+    async fn apply_reminder_mutation(
+        &self,
+        account: &AuthenticatedAccount,
+        account_id: Uuid,
+        value: &Value,
+        default_set: bool,
+        audit_subject: &str,
+    ) -> Result<String> {
+        let source_type = value
+            .get("sourceType")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("sourceType is required"))?;
+        let source_id = value
+            .get("sourceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("sourceId is required"))
+            .and_then(parse_uuid)?;
+        let reminder_set = value
+            .get("reminderSet")
+            .and_then(Value::as_bool)
+            .unwrap_or(default_set);
+        let reminder_at = value
+            .get("reminderAt")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let dismissed_at = value
+            .get("dismissedAt")
+            .or_else(|| value.get("reminderDismissedAt"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        match source_type {
+            "task" => {
+                self.store
+                    .update_jmap_task_reminder(
+                        account_id,
+                        source_id,
+                        Some(reminder_set),
+                        reminder_at,
+                    )
+                    .await?;
+            }
+            "calendar" => {
+                self.store
+                    .update_jmap_event_reminder(
+                        account_id,
+                        source_id,
+                        Some(reminder_set),
+                        reminder_at,
+                    )
+                    .await?;
+            }
+            "mail" => {
+                self.store
+                    .update_jmap_mail_reminder(
+                        account_id,
+                        source_id,
+                        Some(reminder_set),
+                        reminder_at,
+                        dismissed_at,
+                        AuditEntryInput {
+                            actor: account.email.clone(),
+                            action: "jmap-reminder-update".to_string(),
+                            subject: audit_subject.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+            _ => bail!("unsupported reminder sourceType"),
+        }
+        Ok(format!("{source_type}:{source_id}"))
+    }
+
+    pub(crate) async fn handle_share_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let old_state = self
+            .canonical_object_state(account, account_id, "Share")
+            .await?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.get("create").and_then(Value::as_object) {
+            for (creation_id, value) in create {
+                match parse_share_input(account_id, value).and_then(|input| {
+                    Ok((
+                        input,
+                        share_audit(account, "jmap-share-upsert", creation_id),
+                    ))
+                }) {
+                    Ok((input, audit)) => match self.store.upsert_jmap_share(input, audit).await {
+                        Ok(share) => {
+                            let id = share
+                                .get("id")
+                                .and_then(Value::as_str)
+                                .unwrap_or(creation_id)
+                                .to_string();
+                            created_ids.insert(creation_id.clone(), id.clone());
+                            created.insert(creation_id.clone(), share);
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id.clone(), set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id.clone(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+        if let Some(update) = arguments.get("update").and_then(Value::as_object) {
+            for (id, value) in update {
+                let mut object = self
+                    .canonical_objects(account, account_id, "Share")
+                    .await?
+                    .into_iter()
+                    .find(|share| share.get("id").and_then(Value::as_str) == Some(id.as_str()))
+                    .unwrap_or_else(|| json!({}));
+                if let (Value::Object(base), Value::Object(patch)) = (&mut object, value) {
+                    for (key, value) in patch {
+                        base.insert(key.clone(), value.clone());
+                    }
+                }
+                match parse_share_input(account_id, &object) {
+                    Ok(input) => match self
+                        .store
+                        .upsert_jmap_share(input, share_audit(account, "jmap-share-upsert", id))
+                        .await
+                    {
+                        Ok(_) => {
+                            updated.insert(id.clone(), Value::Object(Map::new()));
+                        }
+                        Err(error) => {
+                            not_updated.insert(id.clone(), set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_updated.insert(id.clone(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+        if let Some(ids) = arguments.get("destroy").and_then(Value::as_array) {
+            let shares = self.canonical_objects(account, account_id, "Share").await?;
+            for value in ids {
+                let Some(id) = value.as_str() else {
+                    continue;
+                };
+                let Some(share) = shares
+                    .iter()
+                    .find(|share| share.get("id").and_then(Value::as_str) == Some(id))
+                    .cloned()
+                else {
+                    not_destroyed.insert(id.to_string(), set_error("share not found"));
+                    continue;
+                };
+                match self
+                    .store
+                    .delete_jmap_share(share, share_audit(account, "jmap-share-delete", id))
+                    .await
+                {
+                    Ok(()) => destroyed.push(Value::String(id.to_string())),
+                    Err(error) => {
+                        not_destroyed.insert(id.to_string(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": self.canonical_object_state(account, account_id, "Share").await?,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    pub(crate) async fn handle_share_import_or_copy(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+        method_name: &str,
+    ) -> Result<Value> {
+        let mut set_arguments = Map::new();
+        if let Some(account_id) = arguments.get("accountId").cloned() {
+            set_arguments.insert("accountId".to_string(), account_id);
+        }
+        set_arguments.insert(
+            "create".to_string(),
+            arguments
+                .get("create")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        );
+        let mut response = self
+            .handle_share_set(account, Value::Object(set_arguments), created_ids)
+            .await?;
+        if let Value::Object(map) = &mut response {
+            map.insert("method".to_string(), Value::String(method_name.to_string()));
+        }
+        Ok(response)
+    }
+
+    pub(crate) async fn handle_canonical_import_or_copy(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+        data_type: &str,
+        method_name: &str,
+    ) -> Result<Value> {
+        let mut set_arguments = Map::new();
+        if let Some(account_id) = arguments.get("accountId").cloned() {
+            set_arguments.insert("accountId".to_string(), account_id);
+        }
+        set_arguments.insert(
+            "create".to_string(),
+            arguments
+                .get("create")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        );
+        let mut response = match data_type {
+            "ContactCard" => {
+                self.handle_contact_set(account, Value::Object(set_arguments), created_ids)
+                    .await?
+            }
+            "CalendarEvent" => {
+                self.handle_calendar_event_set(account, Value::Object(set_arguments), created_ids)
+                    .await?
+            }
+            "TaskList" => {
+                self.handle_task_list_set(account, Value::Object(set_arguments), created_ids)
+                    .await?
+            }
+            "Task" => {
+                self.handle_task_set(account, Value::Object(set_arguments), created_ids)
+                    .await?
+            }
+            "Note" => {
+                self.handle_note_set(account, Value::Object(set_arguments), created_ids)
+                    .await?
+            }
+            "JournalEntry" => {
+                self.handle_journal_entry_set(account, Value::Object(set_arguments), created_ids)
+                    .await?
+            }
+            _ => {
+                return self
+                    .handle_canonical_unsupported_write(account, arguments, data_type, method_name)
+                    .await;
+            }
+        };
+        if let Value::Object(map) = &mut response {
+            map.insert("method".to_string(), Value::String(method_name.to_string()));
+        }
+        Ok(response)
+    }
+
+    pub(crate) async fn handle_canonical_unsupported_write(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        data_type: &str,
+        method_name: &str,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let old_state = self
+            .canonical_object_state(account, account_id, data_type)
+            .await?;
+        let mut not_created = Map::new();
+        let mut not_updated = Map::new();
+        let mut not_destroyed = Map::new();
+        for id in canonical_create_ids(&arguments) {
+            not_created.insert(
+                id,
+                json!({
+                    "type": "forbidden",
+                    "description": format!("{method_name} is not a canonical write surface for {data_type}"),
+                }),
+            );
+        }
+        if method_name.ends_with("/set") {
+            for id in object_keys(&arguments, "update") {
+                not_updated.insert(
+                    id,
+                    json!({
+                        "type": "forbidden",
+                        "description": format!("{method_name} is not a canonical write surface for {data_type}"),
+                    }),
+                );
+            }
+            for id in string_ids_from_arguments(&arguments, "destroy").unwrap_or_default() {
+                not_destroyed.insert(
+                    id,
+                    json!({
+                        "type": "forbidden",
+                        "description": format!("{method_name} is not a canonical write surface for {data_type}"),
+                    }),
+                );
+            }
+        }
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": self.canonical_object_state(account, account_id, data_type).await?,
+            "created": {},
+            "notCreated": Value::Object(not_created),
+            "updated": {},
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": [],
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    pub(crate) async fn canonical_object_state(
+        &self,
+        account: &AuthenticatedAccount,
+        account_id: Uuid,
+        data_type: &str,
+    ) -> Result<String> {
+        match data_type {
+            "Identity" => {
+                self.identity_object_state(account.account_id, account_id)
+                    .await
+            }
+            "EmailSubmission" => self.email_submission_object_state(account_id).await,
+            "Mailbox" => {
+                let access = self
+                    .requested_account_access(account, Some(&account_id.to_string()))
+                    .await?;
+                self.mailbox_object_state(&access).await
+            }
+            "Email" | "Thread" => {
+                let access = self
+                    .requested_account_access(account, Some(&account_id.to_string()))
+                    .await?;
+                self.mail_object_state(&access, data_type).await
+            }
+            "Blob" | "DurableChange" => {
+                let entries = self
+                    .canonical_objects(account, account_id, data_type)
+                    .await?
+                    .into_iter()
+                    .filter_map(|object| {
+                        let id = object.get("id")?.as_str()?.to_string();
+                        Some(StateEntry {
+                            id,
+                            fingerprint: opaque_state_fingerprint(&object.to_string()),
+                        })
+                    })
+                    .collect();
+                encode_state(account_id, data_type, entries)
+            }
+            "Share" | "Reminder" => {
+                let entries = self
+                    .canonical_objects(account, account_id, data_type)
+                    .await?
+                    .into_iter()
+                    .filter_map(|object| {
+                        let id = object.get("id")?.as_str()?.to_string();
+                        Some(StateEntry {
+                            id,
+                            fingerprint: opaque_state_fingerprint(&object.to_string()),
+                        })
+                    })
+                    .collect();
+                let cursor = self
+                    .store
+                    .fetch_jmap_object_change_cursor(account_id, data_type)
+                    .await?;
+                encode_state_with_cursor(account_id, data_type, entries, cursor)
+            }
+            _ => self.object_state(account_id, data_type).await,
+        }
+    }
+
+    async fn canonical_objects(
+        &self,
+        account: &AuthenticatedAccount,
+        account_id: Uuid,
+        data_type: &str,
+    ) -> Result<Vec<Value>> {
+        match data_type {
+            "Identity" => Ok(self
+                .store
+                .fetch_sender_identities(account.account_id, account_id)
+                .await?
+                .into_iter()
+                .map(serde_json::to_value)
+                .collect::<std::result::Result<Vec<_>, _>>()?),
+            "Reminder" => Ok(self
+                .store
+                .query_jmap_reminders(
+                    account_id,
+                    lpe_storage::ReminderQuery {
+                        include_inactive: true,
+                    },
+                )
+                .await?
+                .into_iter()
+                .map(|reminder| {
+                    let id = format!("{}:{}", reminder.source_type, reminder.source_id);
+                    let mut object = serde_json::to_value(reminder)?;
+                    if let Value::Object(map) = &mut object {
+                        map.insert("id".to_string(), Value::String(id));
+                        map.insert("@type".to_string(), Value::String("Reminder".to_string()));
+                    }
+                    Ok(object)
+                })
+                .collect::<Result<Vec<_>>>()?),
+            "Share" => self.store.fetch_jmap_shares(account_id).await,
+            "DurableChange" => {
+                let cursor = self.store.fetch_canonical_change_cursor(account_id).await?;
+                Ok(vec![json!({
+                    "id": "canonical",
+                    "@type": "DurableChange",
+                    "scope": "account",
+                    "cursor": cursor,
+                    "isAppendOnly": true,
+                    "mayRead": true,
+                    "mayWrite": false,
+                    "categories": [
+                        {"id": "mail", "objectTypes": ["Mailbox", "Email", "Thread", "EmailSubmission", "Blob"]},
+                        {"id": "contacts", "objectTypes": ["AddressBook", "ContactCard"]},
+                        {"id": "calendar", "objectTypes": ["Calendar", "CalendarEvent"]},
+                        {"id": "tasks", "objectTypes": ["TaskList", "Task", "Reminder"]},
+                        {"id": "notes", "objectTypes": ["Note"]},
+                        {"id": "journal", "objectTypes": ["JournalEntry"]},
+                        {"id": "rights", "objectTypes": ["Identity", "Share"]},
+                        {"id": "search", "objectTypes": []},
+                        {"id": "rules", "objectTypes": []}
+                    ],
+                })])
+            }
+            "Blob" => Ok(Vec::new()),
+            _ => Ok(self
+                .object_state_entries(account_id, data_type)
+                .await?
+                .into_iter()
+                .map(|entry| json!({"id": entry.id}))
+                .collect()),
+        }
+    }
+
+    async fn canonical_query_ids(
+        &self,
+        account: &AuthenticatedAccount,
+        account_id: Uuid,
+        data_type: &str,
+        arguments: &Value,
+    ) -> Result<Vec<String>> {
+        if data_type == "Reminder" {
+            return Ok(self
+                .store
+                .query_jmap_reminders(
+                    account_id,
+                    lpe_storage::ReminderQuery {
+                        include_inactive: arguments
+                            .get("includeInactive")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    },
+                )
+                .await?
+                .into_iter()
+                .map(|reminder| format!("{}:{}", reminder.source_type, reminder.source_id))
+                .collect());
+        }
+        Ok(self
+            .canonical_objects(account, account_id, data_type)
+            .await?
+            .into_iter()
+            .filter_map(|object| object.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect())
+    }
+
     pub(crate) async fn handle_upload(
         &self,
         authorization: Option<&str>,
@@ -1061,6 +2211,156 @@ pub(crate) fn api_request_exceeds_call_limit(request: &JmapApiRequest) -> bool {
     request.method_calls.len() > MAX_CALLS_IN_REQUEST as usize
 }
 
+fn requested_account_id_from_arguments(
+    arguments: &Value,
+    account: &AuthenticatedAccount,
+) -> Result<Uuid> {
+    session::requested_account_id(arguments.get("accountId").and_then(Value::as_str), account)
+}
+
+fn string_ids_from_arguments(arguments: &Value, field: &str) -> Option<Vec<String>> {
+    arguments.get(field).and_then(Value::as_array).map(|ids| {
+        ids.iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    })
+}
+
+fn property_names_from_arguments(arguments: &Value) -> Option<HashSet<String>> {
+    arguments
+        .get("properties")
+        .and_then(Value::as_array)
+        .map(|properties| {
+            properties
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<HashSet<_>>()
+        })
+}
+
+fn project_get_properties(object: Value, properties: Option<&HashSet<String>>) -> Value {
+    let Some(properties) = properties else {
+        return object;
+    };
+    let Value::Object(map) = object else {
+        return object;
+    };
+    let mut projected = Map::new();
+    if let Some(id) = map.get("id") {
+        projected.insert("id".to_string(), id.clone());
+    }
+    for property in properties {
+        if property == "id" {
+            continue;
+        }
+        if let Some(value) = map.get(property) {
+            projected.insert(property.clone(), value.clone());
+        }
+    }
+    Value::Object(projected)
+}
+
+fn object_keys(arguments: &Value, field: &str) -> Vec<String> {
+    arguments
+        .get(field)
+        .and_then(Value::as_object)
+        .map(|objects| objects.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+fn canonical_create_ids(arguments: &Value) -> Vec<String> {
+    let ids = object_keys(arguments, "create");
+    if ids.is_empty() {
+        object_keys(arguments, "emails")
+    } else {
+        ids
+    }
+}
+
+fn parse_reminder_id(id: &str) -> Result<(String, Uuid)> {
+    let (source_type, source_id) = id
+        .split_once(':')
+        .ok_or_else(|| anyhow!("reminder id must be sourceType:sourceId"))?;
+    Ok((source_type.to_string(), parse_uuid(source_id)?))
+}
+
+fn parse_share_input(owner_account_id: Uuid, value: &Value) -> Result<JmapShareInput> {
+    let share_type = value
+        .get("type")
+        .or_else(|| value.get("shareType"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("share type is required"))?;
+    let rights = value.get("rights").and_then(Value::as_object);
+    Ok(JmapShareInput {
+        owner_account_id,
+        share_type: share_type.to_string(),
+        grantee_email: value
+            .get("granteeEmail")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("granteeEmail is required"))?
+            .to_string(),
+        task_list_id: value
+            .get("taskListId")
+            .and_then(Value::as_str)
+            .map(parse_uuid)
+            .transpose()?,
+        sender_right: value
+            .get("senderRight")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        may_read: rights
+            .and_then(|rights| rights.get("mayRead"))
+            .or_else(|| value.get("mayRead"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        may_write: rights
+            .and_then(|rights| rights.get("mayWrite"))
+            .or_else(|| value.get("mayWrite"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        may_delete: rights
+            .and_then(|rights| rights.get("mayDelete"))
+            .or_else(|| value.get("mayDelete"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        may_share: rights
+            .and_then(|rights| rights.get("mayShare"))
+            .or_else(|| value.get("mayShare"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+fn share_audit(account: &AuthenticatedAccount, action: &str, subject: &str) -> AuditEntryInput {
+    AuditEntryInput {
+        actor: account.email.clone(),
+        action: action.to_string(),
+        subject: subject.to_string(),
+    }
+}
+
+fn canonical_query_state_method(data_type: &str) -> String {
+    match data_type {
+        "Reminder" => "Reminder".to_string(),
+        _ => format!("{data_type}/query"),
+    }
+}
+
+fn canonical_query_filter(data_type: &str, arguments: &Value) -> Option<Value> {
+    if data_type == "Reminder" {
+        Some(json!({
+            "includeInactive": arguments
+                .get("includeInactive")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        }))
+    } else {
+        None
+    }
+}
+
 pub(crate) fn validate_declared_capabilities(request: &JmapApiRequest) -> Result<()> {
     for capability in &request.using_capabilities {
         if !is_supported_capability(capability) {
@@ -1093,6 +2393,8 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Mailbox/queryChanges"
         | "Mailbox/changes"
         | "Mailbox/set"
+        | "Mailbox/import"
+        | "Mailbox/copy"
         | "Email/query"
         | "Email/queryChanges"
         | "Email/get"
@@ -1104,6 +2406,9 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Thread/queryChanges"
         | "Thread/get"
         | "Thread/changes"
+        | "Thread/set"
+        | "Thread/import"
+        | "Thread/copy"
         | "Quota/get"
         | "SearchSnippet/get" => Some(JMAP_MAIL_CAPABILITY),
         "EmailSubmission/get"
@@ -1111,40 +2416,94 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "EmailSubmission/query"
         | "EmailSubmission/queryChanges"
         | "EmailSubmission/set"
+        | "EmailSubmission/import"
+        | "EmailSubmission/copy"
         | "Identity/get"
-        | "Identity/changes" => Some(JMAP_SUBMISSION_CAPABILITY),
+        | "Identity/query"
+        | "Identity/queryChanges"
+        | "Identity/changes"
+        | "Identity/set"
+        | "Identity/import"
+        | "Identity/copy" => Some(JMAP_SUBMISSION_CAPABILITY),
         "AddressBook/get"
         | "AddressBook/query"
         | "AddressBook/queryChanges"
         | "AddressBook/changes"
+        | "AddressBook/set"
+        | "AddressBook/import"
+        | "AddressBook/copy"
         | "ContactCard/get"
         | "ContactCard/query"
         | "ContactCard/queryChanges"
         | "ContactCard/changes"
-        | "ContactCard/set" => Some(JMAP_CONTACTS_CAPABILITY),
+        | "ContactCard/set"
+        | "ContactCard/import"
+        | "ContactCard/copy" => Some(JMAP_CONTACTS_CAPABILITY),
         "Calendar/get"
         | "Calendar/query"
         | "Calendar/queryChanges"
         | "Calendar/changes"
+        | "Calendar/set"
+        | "Calendar/import"
+        | "Calendar/copy"
         | "CalendarEvent/get"
         | "CalendarEvent/query"
         | "CalendarEvent/queryChanges"
         | "CalendarEvent/changes"
-        | "CalendarEvent/set" => Some(JMAP_CALENDARS_CAPABILITY),
-        "TaskList/get" | "TaskList/changes" | "TaskList/set" | "Task/get" | "Task/query"
-        | "Task/queryChanges" | "Task/changes" | "Task/set" => Some(JMAP_TASKS_CAPABILITY),
+        | "CalendarEvent/set"
+        | "CalendarEvent/import"
+        | "CalendarEvent/copy" => Some(JMAP_CALENDARS_CAPABILITY),
+        "TaskList/get"
+        | "TaskList/query"
+        | "TaskList/queryChanges"
+        | "TaskList/changes"
+        | "TaskList/set"
+        | "TaskList/import"
+        | "TaskList/copy"
+        | "Task/get"
+        | "Task/query"
+        | "Task/queryChanges"
+        | "Task/changes"
+        | "Task/set"
+        | "Task/import"
+        | "Task/copy" => Some(JMAP_TASKS_CAPABILITY),
         "Note/get"
         | "Note/query"
         | "Note/queryChanges"
         | "Note/changes"
         | "Note/set"
+        | "Note/import"
+        | "Note/copy"
         | "JournalEntry/get"
         | "JournalEntry/query"
         | "JournalEntry/queryChanges"
         | "JournalEntry/changes"
         | "JournalEntry/set"
-        | "Reminder/query" => Some(JMAP_LPE_OUTLOOK_CAPABILITY),
-        "Blob/upload" | "Blob/get" | "Blob/lookup" => Some(JMAP_BLOB_CAPABILITY),
+        | "JournalEntry/import"
+        | "JournalEntry/copy"
+        | "Reminder/get"
+        | "Reminder/query"
+        | "Reminder/queryChanges"
+        | "Reminder/changes"
+        | "Reminder/set"
+        | "Reminder/import"
+        | "Reminder/copy"
+        | "Share/get"
+        | "Share/query"
+        | "Share/queryChanges"
+        | "Share/changes"
+        | "Share/set"
+        | "Share/import"
+        | "Share/copy"
+        | "DurableChange/get"
+        | "DurableChange/query"
+        | "DurableChange/queryChanges"
+        | "DurableChange/changes"
+        | "DurableChange/set"
+        | "DurableChange/import"
+        | "DurableChange/copy" => Some(JMAP_LPE_OUTLOOK_CAPABILITY),
+        "Blob/upload" | "Blob/get" | "Blob/query" | "Blob/queryChanges" | "Blob/changes"
+        | "Blob/set" | "Blob/import" | "Blob/lookup" => Some(JMAP_BLOB_CAPABILITY),
         "Blob/copy" => Some(JMAP_CORE_CAPABILITY),
         "VacationResponse/get" | "VacationResponse/set" => Some(JMAP_VACATION_RESPONSE_CAPABILITY),
         _ => None,
@@ -1237,6 +2596,11 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "CalendarEvent/get"
         | "TaskList/get"
         | "Task/get"
+        | "Note/get"
+        | "JournalEntry/get"
+        | "Reminder/get"
+        | "Share/get"
+        | "DurableChange/get"
         | "Blob/get"
         | "VacationResponse/get" => object_array_len(arguments, "ids"),
         "SearchSnippet/get" => object_array_len(arguments, "emailIds"),
@@ -1245,12 +2609,55 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Email/set"
         | "EmailSubmission/set"
         | "ContactCard/set"
+        | "AddressBook/set"
+        | "Calendar/set"
         | "CalendarEvent/set"
         | "TaskList/set"
         | "Task/set"
+        | "Note/set"
+        | "JournalEntry/set"
+        | "Reminder/set"
+        | "Identity/set"
+        | "Thread/set"
+        | "Blob/set"
+        | "Share/set"
+        | "DurableChange/set"
         | "VacationResponse/set" => set_object_count(arguments),
-        "Email/copy" => object_map_len(arguments, "create"),
-        "Email/import" => object_map_len(arguments, "emails"),
+        "Email/copy"
+        | "Mailbox/copy"
+        | "Thread/copy"
+        | "EmailSubmission/copy"
+        | "AddressBook/copy"
+        | "ContactCard/copy"
+        | "Calendar/copy"
+        | "CalendarEvent/copy"
+        | "TaskList/copy"
+        | "Task/copy"
+        | "Note/copy"
+        | "JournalEntry/copy"
+        | "Reminder/copy"
+        | "Identity/copy"
+        | "Share/copy"
+        | "DurableChange/copy" => object_map_len(arguments, "create"),
+        "Email/import"
+        | "Mailbox/import"
+        | "Thread/import"
+        | "EmailSubmission/import"
+        | "AddressBook/import"
+        | "ContactCard/import"
+        | "Calendar/import"
+        | "CalendarEvent/import"
+        | "TaskList/import"
+        | "Task/import"
+        | "Note/import"
+        | "JournalEntry/import"
+        | "Reminder/import"
+        | "Identity/import"
+        | "Blob/import"
+        | "Share/import"
+        | "DurableChange/import" => {
+            object_map_len(arguments, "emails").or_else(|| object_map_len(arguments, "create"))
+        }
         "Blob/upload" => object_map_len(arguments, "create"),
         "Blob/copy" => object_array_len(arguments, "blobIds"),
         _ => None,

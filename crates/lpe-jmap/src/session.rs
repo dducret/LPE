@@ -196,6 +196,8 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "notes": true,
                 "journal": true,
                 "reminders": true,
+                "sharing": true,
+                "durableChanges": true,
             }),
         ),
         (JMAP_VACATION_RESPONSE_CAPABILITY.to_string(), json!({})),

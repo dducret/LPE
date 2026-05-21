@@ -2735,7 +2735,7 @@ async fn exercise_canonical_identity_allocation(
         identities.iter().any(|identity| {
             identity.owner_account_id == fixture.account_id
                 && identity.email == fixture.account_email
-                && identity.authorization_kind == "send_on_behalf"
+                && identity.authorization_kind == "send-on-behalf"
                 && identity.sender_address.as_deref() == Some(grantee_email.as_str())
         }),
         "delegated sender identity projection must come from canonical sender_rights and account rows"

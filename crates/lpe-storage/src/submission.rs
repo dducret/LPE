@@ -1120,43 +1120,98 @@ impl Storage {
         principal_account_id: Uuid,
         target_account_id: Uuid,
     ) -> Result<Vec<SenderIdentity>> {
-        let access = self
-            .require_mailbox_account_access(principal_account_id, target_account_id)
-            .await?;
+        let tenant_id = self.tenant_id_for_account_id(target_account_id).await?;
         let principal = self.account_identity_for_id(principal_account_id).await?;
+        let target = self.account_identity_for_id(target_account_id).await?;
+        let rights = sqlx::query(
+            r#"
+            SELECT
+                EXISTS(
+                    SELECT 1
+                    FROM sender_rights
+                    WHERE tenant_id = $1
+                      AND owner_account_id = $2
+                      AND grantee_account_id = $3
+                      AND sender_right = 'send_as'
+                      AND identity_id IS NULL
+                ) AS may_send_as,
+                EXISTS(
+                    SELECT 1
+                    FROM sender_rights
+                    WHERE tenant_id = $1
+                      AND owner_account_id = $2
+                      AND grantee_account_id = $3
+                      AND sender_right = 'send_on_behalf'
+                      AND identity_id IS NULL
+                ) AS may_send_on_behalf
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(target_account_id)
+        .bind(principal_account_id)
+        .fetch_one(&self.pool)
+        .await?;
+        let may_send_as: bool = rights.try_get("may_send_as")?;
+        let may_send_on_behalf: bool = rights.try_get("may_send_on_behalf")?;
+
+        let access =
+            if principal_account_id == target_account_id || (!may_send_as && !may_send_on_behalf) {
+                Some(
+                    self.require_mailbox_account_access(principal_account_id, target_account_id)
+                        .await?,
+                )
+            } else {
+                self.require_mailbox_account_access(principal_account_id, target_account_id)
+                    .await
+                    .ok()
+            };
+        let is_owned = principal_account_id == target_account_id
+            || access.as_ref().is_some_and(|access| access.is_owned);
+        let email = access
+            .as_ref()
+            .map(|access| access.email.clone())
+            .unwrap_or_else(|| target.email.clone());
+        let display_name = access
+            .as_ref()
+            .map(|access| access.display_name.clone())
+            .unwrap_or_else(|| target.display_name.clone());
 
         let mut identities = Vec::new();
-        if access.is_owned {
+        if is_owned {
             identities.push(SenderIdentity {
                 id: sender_identity_id(SenderAuthorizationKind::SelfSend, target_account_id),
                 owner_account_id: target_account_id,
-                email: access.email.clone(),
-                display_name: access.display_name.clone(),
+                email: email.clone(),
+                display_name: display_name.clone(),
                 authorization_kind: SenderAuthorizationKind::SelfSend.as_str().to_string(),
                 sender_address: None,
                 sender_display: None,
             });
         } else {
-            if access.may_send_as {
+            if may_send_as || access.as_ref().is_some_and(|access| access.may_send_as) {
                 identities.push(SenderIdentity {
                     id: sender_identity_id(SenderAuthorizationKind::SendAs, target_account_id),
                     owner_account_id: target_account_id,
-                    email: access.email.clone(),
-                    display_name: access.display_name.clone(),
+                    email: email.clone(),
+                    display_name: display_name.clone(),
                     authorization_kind: SenderAuthorizationKind::SendAs.as_str().to_string(),
                     sender_address: None,
                     sender_display: None,
                 });
             }
-            if access.may_send_on_behalf {
+            if may_send_on_behalf
+                || access
+                    .as_ref()
+                    .is_some_and(|access| access.may_send_on_behalf)
+            {
                 identities.push(SenderIdentity {
                     id: sender_identity_id(
                         SenderAuthorizationKind::SendOnBehalf,
                         target_account_id,
                     ),
                     owner_account_id: target_account_id,
-                    email: access.email,
-                    display_name: access.display_name,
+                    email,
+                    display_name,
                     authorization_kind: SenderAuthorizationKind::SendOnBehalf.as_str().to_string(),
                     sender_address: Some(principal.email),
                     sender_display: Some(principal.display_name),

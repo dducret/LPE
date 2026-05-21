@@ -17,7 +17,7 @@ use crate::{
     AccountQuotaRow, ActiveSyncDeviceRow, ActiveSyncSyncStateRow, AuditEntryInput,
     CanonicalChangeCategory, ImapEmailRow, JmapEmailRecipientRow, JmapEmailRow,
     JmapEmailSubmissionRow, JmapMailboxRow, JmapUploadBlobRow, MessageBccRecipientRecordRow,
-    SearchFolderRow, Storage,
+    SearchFolderRow, Storage, DEFAULT_TASK_LIST_ROLE,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -353,6 +353,13 @@ pub struct JmapMailObjectChange {
     pub change_kind: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct JmapStringObjectChange {
+    pub cursor: i64,
+    pub object_id: String,
+    pub change_kind: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct JmapEmailSubmission {
     pub id: Uuid,
@@ -664,15 +671,119 @@ impl Storage {
         for row in rows {
             let object_kind: String = row.try_get("object_kind")?;
             let summary_json: Value = row.try_get("summary_json")?;
-            let Some(replay_object_id) = jmap_replay_object_id(
+            if let Some(replay_object_id) = jmap_replay_object_id(
                 data_type,
                 &object_kind,
                 row.try_get("object_id")?,
                 &summary_json,
-            ) else {
+            ) {
+                changes.push(JmapMailObjectChange {
+                    cursor: row.try_get("cursor")?,
+                    object_id: replay_object_id,
+                    change_kind: jmap_change_kind(&row.try_get::<String, _>("change_kind")?),
+                });
+                continue;
+            }
+
+            let Some(replay_object_ids) = self
+                .expand_jmap_dependency_change(
+                    &tenant_id,
+                    data_type,
+                    &object_kind,
+                    row.try_get("object_id")?,
+                    &summary_json,
+                )
+                .await?
+            else {
                 return Ok(None);
             };
-            changes.push(JmapMailObjectChange {
+            let change_kind = jmap_change_kind(&row.try_get::<String, _>("change_kind")?);
+            for replay_object_id in replay_object_ids {
+                changes.push(JmapMailObjectChange {
+                    cursor: row.try_get("cursor")?,
+                    object_id: replay_object_id,
+                    change_kind: change_kind.clone(),
+                });
+            }
+        }
+
+        Ok(Some(changes))
+    }
+
+    pub async fn replay_jmap_string_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapStringObjectChange>>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let Some(object_kinds) = jmap_object_replay_kinds(data_type) else {
+            return Ok(None);
+        };
+        let earliest_retained_cursor = sqlx::query_scalar::<_, Option<i64>>(
+            r#"
+            SELECT MIN(cursor)
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND object_kind = ANY($3)
+              AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(object_kinds.clone())
+        .fetch_one(&self.pool)
+        .await?;
+        if after_cursor > 0
+            && earliest_retained_cursor.is_some_and(|cursor| after_cursor < cursor - 1)
+        {
+            return Ok(None);
+        }
+
+        let rows = sqlx::query(
+            r#"
+            SELECT cursor, object_kind, object_id, change_kind, summary_json
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND cursor > $2
+              AND object_kind = ANY($4)
+              AND (account_id = $3 OR affected_principal_ids @> ARRAY[$3]::uuid[])
+              AND (retained_until IS NULL OR retained_until > NOW())
+            ORDER BY cursor ASC
+            LIMIT $5
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(after_cursor)
+        .bind(account_id)
+        .bind(object_kinds)
+        .bind((max_rows + 1) as i64)
+        .fetch_all(&self.pool)
+        .await?;
+        if rows.len() > max_rows as usize {
+            return Ok(None);
+        }
+
+        let mut changes = Vec::new();
+        for row in rows {
+            let object_kind: String = row.try_get("object_kind")?;
+            let summary_json: Value = row.try_get("summary_json")?;
+            let object_id = row.try_get("object_id")?;
+            let Some(replay_object_id) = self
+                .jmap_string_replay_object_id(
+                    &tenant_id,
+                    data_type,
+                    &object_kind,
+                    object_id,
+                    &summary_json,
+                )
+                .await?
+            else {
+                continue;
+            };
+            changes.push(JmapStringObjectChange {
                 cursor: row.try_get("cursor")?,
                 object_id: replay_object_id,
                 change_kind: jmap_change_kind(&row.try_get::<String, _>("change_kind")?),
@@ -680,6 +791,151 @@ impl Storage {
         }
 
         Ok(Some(changes))
+    }
+
+    async fn expand_jmap_dependency_change(
+        &self,
+        tenant_id: &Uuid,
+        data_type: &str,
+        object_kind: &str,
+        object_id: Uuid,
+        summary_json: &Value,
+    ) -> Result<Option<Vec<Uuid>>> {
+        let collection_id = match object_kind {
+            "contact_book" | "calendar" | "task_list" => object_id,
+            "contact_book_grant" | "calendar_grant" | "task_list_grant" => {
+                let Some(collection_id) = summary_json
+                    .get("collectionId")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                else {
+                    return Ok(None);
+                };
+                collection_id
+            }
+            _ => return Ok(None),
+        };
+
+        let rows = match (data_type, object_kind) {
+            ("ContactCard", "contact_book" | "contact_book_grant") => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                    SELECT id
+                    FROM contacts
+                    WHERE tenant_id = $1
+                      AND contact_book_id = $2
+                    ORDER BY id ASC
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(collection_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            ("CalendarEvent", "calendar" | "calendar_grant") => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                    SELECT id
+                    FROM calendar_events
+                    WHERE tenant_id = $1
+                      AND calendar_id = $2
+                    ORDER BY id ASC
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(collection_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            ("Task", "task_list" | "task_list_grant") => {
+                sqlx::query_scalar::<_, Uuid>(
+                    r#"
+                    SELECT id
+                    FROM tasks
+                    WHERE tenant_id = $1
+                      AND task_list_id = $2
+                    ORDER BY id ASC
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(collection_id)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(rows))
+    }
+
+    async fn jmap_string_replay_object_id(
+        &self,
+        tenant_id: &Uuid,
+        data_type: &str,
+        object_kind: &str,
+        object_id: Uuid,
+        summary_json: &Value,
+    ) -> Result<Option<String>> {
+        match (data_type, object_kind) {
+            ("Share", "mailbox_delegation_grant") => Ok(Some(format!("mailbox:{object_id}"))),
+            ("Share", "sender_right") => Ok(Some(format!("sender:{object_id}"))),
+            ("Share", "contact_book_grant") => Ok(Some(format!("contacts:{object_id}"))),
+            ("Share", "calendar_grant") => Ok(Some(format!("calendar:{object_id}"))),
+            ("Share", "task_list_grant") => {
+                let share_type = if let Some(collection_id) = summary_json
+                    .get("collectionId")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                {
+                    self.task_share_type_for_collection(tenant_id, collection_id)
+                        .await?
+                } else {
+                    "taskList"
+                };
+                Ok(Some(format!("{share_type}:{object_id}")))
+            }
+            ("Reminder", "task") if summary_json_reminder_changed(summary_json) => {
+                Ok(Some(format!("task:{object_id}")))
+            }
+            ("Reminder", "calendar_event") if summary_json_reminder_changed(summary_json) => {
+                Ok(Some(format!("calendar:{object_id}")))
+            }
+            ("Reminder", "mailbox_message") if summary_json_reminder_changed(summary_json) => {
+                let Some(message_id) = summary_json
+                    .get("messageId")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                else {
+                    return Ok(None);
+                };
+                Ok(Some(format!("mail:{message_id}")))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    async fn task_share_type_for_collection(
+        &self,
+        tenant_id: &Uuid,
+        task_list_id: Uuid,
+    ) -> Result<&'static str> {
+        let role = sqlx::query_scalar::<_, Option<String>>(
+            r#"
+            SELECT role
+            FROM task_lists
+            WHERE tenant_id = $1
+              AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(task_list_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(if role.as_deref() == Some(DEFAULT_TASK_LIST_ROLE) {
+            "tasks"
+        } else {
+            "taskList"
+        })
     }
 
     pub async fn save_jmap_query_state(
@@ -4787,8 +5043,23 @@ fn jmap_object_replay_kinds(data_type: &str) -> Option<Vec<&'static str>> {
         "Note" => Some(vec!["note"]),
         "JournalEntry" => Some(vec!["journal_entry"]),
         "EmailSubmission" => Some(vec!["submission"]),
+        "Share" => Some(vec![
+            "mailbox_delegation_grant",
+            "sender_right",
+            "contact_book_grant",
+            "calendar_grant",
+            "task_list_grant",
+        ]),
+        "Reminder" => Some(vec!["task", "calendar_event", "mailbox_message"]),
         _ => None,
     }
+}
+
+fn summary_json_reminder_changed(summary_json: &Value) -> bool {
+    summary_json
+        .get("reminderChanged")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -4848,6 +5119,20 @@ mod tests {
         assert_eq!(
             jmap_object_replay_kinds("EmailSubmission").unwrap(),
             vec!["submission"]
+        );
+        assert_eq!(
+            jmap_object_replay_kinds("Share").unwrap(),
+            vec![
+                "mailbox_delegation_grant",
+                "sender_right",
+                "contact_book_grant",
+                "calendar_grant",
+                "task_list_grant"
+            ]
+        );
+        assert_eq!(
+            jmap_object_replay_kinds("Reminder").unwrap(),
+            vec!["task", "calendar_event", "mailbox_message"]
         );
     }
 

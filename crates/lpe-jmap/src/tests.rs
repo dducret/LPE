@@ -1,9 +1,14 @@
 use lpe_storage::{
     AuthenticatedAccount, ClientNote, ClientReminder, ClientTask, JmapEmail, JmapEmailQuery,
-    JmapMailbox, JmapUploadBlob, JournalEntry, SieveScriptDocument, SubmitMessageInput,
+    JmapMailbox, JmapUploadBlob, JournalEntry, SieveScriptDocument, Storage, SubmitMessageInput,
     SubmittedMessage,
 };
 use serde_json::{json, Value};
+use sqlx::{
+    postgres::{PgConnectOptions, PgPoolOptions},
+    PgPool,
+};
+use std::str::FromStr;
 use uuid::Uuid;
 
 use super::*;
@@ -14,7 +19,7 @@ use crate::{
     },
     store::{JmapPushListener, JmapStore},
 };
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_storage::mail::parse_rfc822_message;
 use lpe_storage::{
@@ -24,15 +29,18 @@ use lpe_storage::{
     ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights, CreateTaskListInput,
     JmapEmailAddress, JmapEmailMailboxState, JmapEmailSubmission, JmapImportedEmailInput,
     JmapMailObjectChange, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapStoredQueryState, MailboxAccountAccess, SavedDraftMessage, SenderIdentity,
-    UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
-    UpsertClientTaskInput, UpsertJournalEntryInput,
+    JmapStoredQueryState, JmapStringObjectChange, MailboxAccountAccess, SavedDraftMessage,
+    SenderIdentity, UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
 };
 use std::{
     collections::{HashMap, HashSet},
+    env,
     sync::{Arc, Mutex},
     time::Instant,
 };
+
+const STORAGE_SCHEMA_SQL: &str = include_str!("../../lpe-storage/sql/schema.sql");
 
 #[derive(Clone, Default)]
 struct FakeStore {
@@ -51,6 +59,7 @@ struct FakeStore {
     notes: Arc<Mutex<Vec<ClientNote>>>,
     journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
+    shares: Arc<Mutex<Vec<Value>>>,
     uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
     raw_message_blobs: Arc<Mutex<HashMap<Uuid, JmapUploadBlob>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
@@ -65,6 +74,7 @@ struct FakeStore {
     canonical_change_replay: CanonicalChangeReplay,
     jmap_mail_object_changes: Arc<Mutex<Option<Vec<JmapMailObjectChange>>>>,
     jmap_object_changes: Arc<Mutex<Option<Vec<JmapMailObjectChange>>>>,
+    jmap_string_object_changes: Arc<Mutex<Option<Vec<JmapStringObjectChange>>>>,
     persist_query_states: bool,
     query_states: Arc<Mutex<HashMap<Uuid, JmapStoredQueryState>>>,
 }
@@ -752,11 +762,15 @@ impl JmapStore for FakeStore {
         _account_id: Uuid,
         _data_type: &str,
     ) -> Result<Option<i64>> {
-        Ok(if self.jmap_object_changes.lock().unwrap().is_some() {
-            self.canonical_change_cursor
-        } else {
-            None
-        })
+        Ok(
+            if self.jmap_object_changes.lock().unwrap().is_some()
+                || self.jmap_string_object_changes.lock().unwrap().is_some()
+            {
+                self.canonical_change_cursor
+            } else {
+                None
+            },
+        )
     }
 
     async fn replay_jmap_mail_object_changes(
@@ -777,6 +791,16 @@ impl JmapStore for FakeStore {
         _max_rows: u64,
     ) -> Result<Option<Vec<JmapMailObjectChange>>> {
         Ok(self.jmap_object_changes.lock().unwrap().clone())
+    }
+
+    async fn replay_jmap_string_object_changes(
+        &self,
+        _account_id: Uuid,
+        _data_type: &str,
+        _after_cursor: i64,
+        _max_rows: u64,
+    ) -> Result<Option<Vec<JmapStringObjectChange>>> {
+        Ok(self.jmap_string_object_changes.lock().unwrap().clone())
     }
 
     async fn save_jmap_query_state(
@@ -1812,6 +1836,150 @@ impl JmapStore for FakeStore {
             .cloned()
             .collect())
     }
+
+    async fn update_jmap_task_reminder(
+        &self,
+        _principal_account_id: Uuid,
+        task_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        update_fake_reminder(&self.reminders, "task", task_id, reminder_set, reminder_at)
+    }
+
+    async fn update_jmap_event_reminder(
+        &self,
+        _principal_account_id: Uuid,
+        event_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        update_fake_reminder(
+            &self.reminders,
+            "calendar",
+            event_id,
+            reminder_set,
+            reminder_at,
+        )
+    }
+
+    async fn update_jmap_mail_reminder(
+        &self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        _audit: AuditEntryInput,
+    ) -> Result<()> {
+        update_fake_reminder(
+            &self.reminders,
+            "mail",
+            message_id,
+            reminder_set,
+            reminder_at,
+        )?;
+        if let Some(dismissed_at) = reminder_dismissed_at {
+            if let Some(reminder) =
+                self.reminders.lock().unwrap().iter_mut().find(|reminder| {
+                    reminder.source_type == "mail" && reminder.source_id == message_id
+                })
+            {
+                reminder.dismissed_at = Some(dismissed_at);
+            }
+        }
+        Ok(())
+    }
+
+    async fn fetch_jmap_shares(&self, _account_id: Uuid) -> Result<Vec<Value>> {
+        Ok(self.shares.lock().unwrap().clone())
+    }
+
+    async fn upsert_jmap_share(
+        &self,
+        input: crate::store::JmapShareInput,
+        _audit: AuditEntryInput,
+    ) -> Result<Value> {
+        let grant_id = Uuid::new_v4();
+        let id = format!("{}:{grant_id}", input.share_type);
+        let account = Self::account();
+        let grantee_account_id = Uuid::new_v4();
+        let share = json!({
+            "id": id,
+            "@type": "Share",
+            "type": input.share_type,
+            "grantId": grant_id.to_string(),
+            "ownerAccountId": input.owner_account_id.to_string(),
+            "ownerEmail": account.email,
+            "ownerDisplayName": account.display_name,
+            "granteeAccountId": grantee_account_id.to_string(),
+            "granteeEmail": input.grantee_email,
+            "granteeDisplayName": "Shared User",
+            "taskListId": input.task_list_id.map(|id| id.to_string()),
+            "senderRight": input.sender_right,
+            "rights": {
+                "mayRead": input.may_read,
+                "mayWrite": input.may_write,
+                "mayDelete": input.may_delete,
+                "mayShare": input.may_share,
+                "maySend": input.sender_right.is_some(),
+                "maySendAs": input.sender_right.as_deref() == Some("send_as"),
+                "maySendOnBehalf": input.sender_right.as_deref() == Some("send_on_behalf")
+            },
+            "created": "2026-05-21T08:00:00Z",
+            "updated": "2026-05-21T08:00:00Z"
+        });
+        self.shares.lock().unwrap().push(share.clone());
+        Ok(share)
+    }
+
+    async fn delete_jmap_share(&self, share: Value, _audit: AuditEntryInput) -> Result<()> {
+        let id = share
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("share id is required"))?
+            .to_string();
+        self.shares
+            .lock()
+            .unwrap()
+            .retain(|share| share.get("id").and_then(Value::as_str) != Some(id.as_str()));
+        Ok(())
+    }
+}
+
+fn update_fake_reminder(
+    reminders: &Arc<Mutex<Vec<ClientReminder>>>,
+    source_type: &str,
+    source_id: Uuid,
+    reminder_set: Option<bool>,
+    reminder_at: Option<String>,
+) -> Result<()> {
+    let mut reminders = reminders.lock().unwrap();
+    if reminder_set == Some(false) {
+        reminders.retain(|reminder| {
+            !(reminder.source_type == source_type && reminder.source_id == source_id)
+        });
+        return Ok(());
+    }
+    let reminder_at = reminder_at.unwrap_or_else(|| "2026-05-21T08:45:00Z".to_string());
+    if let Some(reminder) = reminders
+        .iter_mut()
+        .find(|reminder| reminder.source_type == source_type && reminder.source_id == source_id)
+    {
+        reminder.reminder_at = reminder_at;
+    } else {
+        reminders.push(ClientReminder {
+            source_type: source_type.to_string(),
+            source_id,
+            title: "Reminder".to_string(),
+            due_at: None,
+            reminder_at,
+            dismissed_at: None,
+            completed_at: None,
+            status: "pending".to_string(),
+        });
+    }
+    Ok(())
 }
 
 #[tokio::test]
@@ -7442,6 +7610,1336 @@ async fn get_methods_treat_explicit_empty_ids_as_empty_selection() {
     }
 }
 
+#[tokio::test]
+async fn canonical_jmap_object_families_expose_full_method_matrix_without_mapi_session_objects() {
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox()],
+        emails: vec![FakeStore::inbox_email()],
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::contact_collection()])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::calendar_collection()])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+        events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+        task_lists: Arc::new(Mutex::new(vec![FakeStore::default_task_list()])),
+        tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+        notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+        journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
+        reminders: Arc::new(Mutex::new(vec![FakeStore::reminder()])),
+        ..Default::default()
+    });
+    let using = vec![
+        JMAP_CORE_CAPABILITY.to_string(),
+        JMAP_MAIL_CAPABILITY.to_string(),
+        JMAP_SUBMISSION_CAPABILITY.to_string(),
+        JMAP_BLOB_CAPABILITY.to_string(),
+        JMAP_CONTACTS_CAPABILITY.to_string(),
+        JMAP_CALENDARS_CAPABILITY.to_string(),
+        JMAP_TASKS_CAPABILITY.to_string(),
+        JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+    ];
+    let families = [
+        "Mailbox",
+        "Email",
+        "Thread",
+        "EmailSubmission",
+        "Blob",
+        "AddressBook",
+        "ContactCard",
+        "Calendar",
+        "CalendarEvent",
+        "TaskList",
+        "Task",
+        "Note",
+        "JournalEntry",
+        "Reminder",
+        "Identity",
+        "Share",
+        "DurableChange",
+    ];
+
+    for family in families {
+        let first = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(format!("{family}/get"), json!({"ids": []}), "get".into()),
+                        JmapMethodCall(format!("{family}/query"), json!({}), "query".into()),
+                        JmapMethodCall(format!("{family}/set"), json!({}), "set".into()),
+                        JmapMethodCall(
+                            format!("{family}/import"),
+                            import_arguments_for_family(family),
+                            "import".into(),
+                        ),
+                        JmapMethodCall(
+                            format!("{family}/copy"),
+                            copy_arguments_for_family(family),
+                            "copy".into(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+
+        let response_names = first
+            .method_responses
+            .iter()
+            .map(|response| response.0.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            response_names,
+            vec![
+                format!("{family}/get"),
+                format!("{family}/query"),
+                format!("{family}/set"),
+                format!("{family}/import"),
+                format!("{family}/copy"),
+            ]
+        );
+        let state = match first.method_responses[0].1["state"].as_str() {
+            Some(state) => state.to_string(),
+            None => service
+                .canonical_object_state(
+                    &FakeStore::account(),
+                    FakeStore::account().account_id,
+                    family,
+                )
+                .await
+                .unwrap(),
+        };
+        let query_state = first.method_responses[1].1["queryState"].as_str().unwrap();
+
+        let second = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            format!("{family}/changes"),
+                            json!({"sinceState": state}),
+                            "changes".into(),
+                        ),
+                        JmapMethodCall(
+                            format!("{family}/queryChanges"),
+                            json!({"sinceQueryState": query_state}),
+                            "queryChanges".into(),
+                        ),
+                    ],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            second
+                .method_responses
+                .iter()
+                .map(|response| response.0.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                format!("{family}/changes"),
+                format!("{family}/queryChanges")
+            ]
+        );
+    }
+
+    for forbidden in ["MapiSession/get", "MapiSubsystem/get", "SessionObject/get"] {
+        let response = service
+            .handle_api_request(
+                Some("Bearer token"),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![JmapMethodCall(
+                        forbidden.to_string(),
+                        json!({}),
+                        "m".into(),
+                    )],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.method_responses[0].0, "error");
+        assert_eq!(response.method_responses[0].1["type"], "unknownMethod");
+    }
+}
+
+fn import_arguments_for_family(family: &str) -> Value {
+    if family == "Email" {
+        json!({"emails": {}})
+    } else {
+        json!({"create": {}})
+    }
+}
+
+fn copy_arguments_for_family(family: &str) -> Value {
+    match family {
+        "Email" => {
+            json!({"fromAccountId": FakeStore::account().account_id.to_string(), "create": {}})
+        }
+        "Blob" => json!({
+            "fromAccountId": FakeStore::account().account_id.to_string(),
+            "accountId": FakeStore::account().account_id.to_string(),
+            "blobIds": []
+        }),
+        _ => json!({"create": {}}),
+    }
+}
+
+struct StorageJmapFixture {
+    admin_pool: PgPool,
+    pool: PgPool,
+    schema_name: String,
+    account_id: Uuid,
+    grantee_email: String,
+    token: String,
+}
+
+impl StorageJmapFixture {
+    async fn cleanup(self) -> Result<()> {
+        self.pool.close().await;
+        sqlx::query(&format!(
+            "DROP SCHEMA IF EXISTS {} CASCADE",
+            self.schema_name
+        ))
+        .execute(&self.admin_pool)
+        .await
+        .with_context(|| format!("drop isolated JMAP test schema {}", self.schema_name))?;
+        self.admin_pool.close().await;
+        Ok(())
+    }
+}
+
+async fn storage_jmap_fixture() -> Result<Option<StorageJmapFixture>> {
+    let Some(database_url) = env::var("TEST_DATABASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("skipping storage-backed JMAP integration test; TEST_DATABASE_URL is not set");
+        return Ok(None);
+    };
+
+    let schema_name = format!("lpe_jmap_storage_{}", Uuid::new_v4().simple());
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(PgConnectOptions::from_str(&database_url)?)
+        .await
+        .context("connect to TEST_DATABASE_URL for storage-backed JMAP integration test")?;
+
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+        .execute(&admin_pool)
+        .await
+        .context("ensure pg_trgm is available before applying schema.sql")?;
+    sqlx::query(&format!("CREATE SCHEMA {schema_name}"))
+        .execute(&admin_pool)
+        .await
+        .with_context(|| format!("create isolated JMAP test schema {schema_name}"))?;
+
+    let search_path = format!("{schema_name},public");
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            PgConnectOptions::from_str(&database_url)?.options([("search_path", &search_path)]),
+        )
+        .await
+        .with_context(|| format!("connect with search_path={search_path}"))?;
+
+    sqlx::raw_sql(STORAGE_SCHEMA_SQL)
+        .execute(&pool)
+        .await
+        .context("apply crates/lpe-storage/sql/schema.sql")?;
+
+    let unique = Uuid::new_v4().simple().to_string();
+    let tenant_id = Uuid::new_v4();
+    let domain_id = Uuid::new_v4();
+    let account_id = Uuid::new_v4();
+    let grantee_account_id = Uuid::new_v4();
+    let address_id = Uuid::new_v4();
+    let grantee_address_id = Uuid::new_v4();
+    let identity_id = Uuid::new_v4();
+    let grantee_identity_id = Uuid::new_v4();
+    let inbox_id = Uuid::new_v4();
+    let domain_name = format!("jmap-storage-{unique}.example.test");
+    let account_email = format!("alice@{domain_name}");
+    let grantee_email = format!("bob@{domain_name}");
+    let token = format!("jmap-storage-token-{unique}");
+
+    sqlx::query(
+        r#"
+        INSERT INTO tenants (id, slug, display_name)
+        VALUES ($1, $2, $3)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(format!("jmap-storage-{unique}"))
+    .bind("JMAP Storage Tenant")
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage tenant")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO domains (id, tenant_id, name, default_quota_mb)
+        VALUES ($1, $2, $3, 4096)
+        "#,
+    )
+    .bind(domain_id)
+    .bind(tenant_id)
+    .bind(&domain_name)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage domain")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES
+            ($1, $2, $3, $4, 'Alice Storage'),
+            ($5, $2, $3, $6, 'Bob Storage')
+        "#,
+    )
+    .bind(account_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .bind(&account_email)
+    .bind(grantee_account_id)
+    .bind(&grantee_email)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage account")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_email_addresses (
+            id, tenant_id, account_id, domain_id, email, address_kind, is_primary
+        )
+        VALUES
+            ($1, $2, $3, $4, $5, 'primary', TRUE),
+            ($6, $2, $7, $4, $8, 'primary', TRUE)
+        "#,
+    )
+    .bind(address_id)
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(domain_id)
+    .bind(&account_email)
+    .bind(grantee_address_id)
+    .bind(grantee_account_id)
+    .bind(&grantee_email)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage account address")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_identities (
+            id, tenant_id, account_id, email_address_id, display_name, may_send, is_default
+        )
+        VALUES
+            ($1, $2, $3, $4, 'Alice Storage', TRUE, TRUE),
+            ($5, $2, $6, $7, 'Bob Storage', TRUE, TRUE)
+        "#,
+    )
+    .bind(identity_id)
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(address_id)
+    .bind(grantee_identity_id)
+    .bind(grantee_account_id)
+    .bind(grantee_address_id)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage account identity")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_credentials (tenant_id, account_email, password_hash, status)
+        VALUES ($1, $2, 'not-used-by-session-test', 'active')
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(&account_email)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage account credentials")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO account_sessions (id, tenant_id, token, account_email, expires_at)
+        VALUES ($1, $2, $3, $4, NOW() + INTERVAL '1 hour')
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(tenant_id)
+    .bind(&token)
+    .bind(&account_email)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage account session")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO mailboxes (
+            id, tenant_id, account_id, role, display_name, sort_order, uid_validity
+        )
+        VALUES ($1, $2, $3, 'inbox', 'Inbox', 0, 1)
+        "#,
+    )
+    .bind(inbox_id)
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&pool)
+    .await
+    .context("seed JMAP storage inbox mailbox")?;
+
+    Ok(Some(StorageJmapFixture {
+        admin_pool,
+        pool,
+        schema_name,
+        account_id,
+        grantee_email,
+        token,
+    }))
+}
+
+#[tokio::test]
+async fn storage_backed_jmap_import_copy_get_changes_and_query_changes_round_trip() -> Result<()> {
+    let Some(fixture) = storage_jmap_fixture().await? else {
+        return Ok(());
+    };
+    let result = async {
+        let service = JmapService::new(Storage::new(fixture.pool.clone()));
+        let account_id = fixture.account_id.to_string();
+        let authorization = format!("Bearer {}", fixture.token);
+        let using = vec![
+            JMAP_CONTACTS_CAPABILITY.to_string(),
+            JMAP_CALENDARS_CAPABILITY.to_string(),
+            JMAP_TASKS_CAPABILITY.to_string(),
+            JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+        ];
+
+        let initial = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "contact-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "contact-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "event-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "event-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "TaskList/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "task-list-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "TaskList/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "task-list-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "task-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "task-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Note/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "note-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Note/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "note-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "JournalEntry/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "journal-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "JournalEntry/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "journal-query".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let state = |index: usize| {
+            initial.method_responses[index].1["state"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let query_state = |index: usize| {
+            initial.method_responses[index].1["queryState"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let contact_state = state(0);
+        let contact_query_state = query_state(1);
+        let event_state = state(2);
+        let event_query_state = query_state(3);
+        let task_list_state = state(4);
+        let task_list_query_state = query_state(5);
+        let task_state = state(6);
+        let task_query_state = query_state(7);
+        let note_state = state(8);
+        let note_query_state = query_state(9);
+        let journal_state = state(10);
+        let journal_query_state = query_state(11);
+
+        let writes = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/import".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {
+                                    "contactA": {
+                                        "kind": "individual",
+                                        "name": {"full": "Storage Contact"},
+                                        "emails": {"main": {"address": "storage-contact@example.test"}},
+                                        "phones": {"main": {"number": "+41220000000"}},
+                                        "addressBookIds": {"default": true}
+                                    }
+                                }
+                            }),
+                            "contact-import".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/copy".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "fromAccountId": account_id,
+                                "create": {
+                                    "eventA": {
+                                        "@type": "Event",
+                                        "uid": "storage-event-fixture",
+                                        "title": "Storage Event",
+                                        "start": "2026-05-21T09:00:00",
+                                        "duration": "PT30M",
+                                        "calendarIds": {"default": true}
+                                    }
+                                }
+                            }),
+                            "event-copy".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "TaskList/import".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {"taskListA": {"name": "Storage Tasks", "sortOrder": 10}}
+                            }),
+                            "task-list-import".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/copy".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "fromAccountId": account_id,
+                                "create": {
+                                    "taskA": {
+                                        "@type": "Task",
+                                        "title": "Storage Task",
+                                        "description": "Persisted through JMAP storage-backed test",
+                                        "status": "needs-action"
+                                    }
+                                }
+                            }),
+                            "task-copy".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Note/import".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {
+                                    "noteA": {
+                                        "title": "Storage Note",
+                                        "bodyText": "Persisted note body",
+                                        "color": "yellow"
+                                    }
+                                }
+                            }),
+                            "note-import".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "JournalEntry/copy".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "fromAccountId": account_id,
+                                "create": {
+                                    "journalA": {
+                                        "subject": "Storage Journal",
+                                        "bodyText": "Persisted journal body",
+                                        "entryType": "phone-call"
+                                    }
+                                }
+                            }),
+                            "journal-copy".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+
+        for creation_id in [
+            "contactA",
+            "eventA",
+            "taskListA",
+            "taskA",
+            "noteA",
+            "journalA",
+        ] {
+            if !writes.created_ids.contains_key(creation_id) {
+                bail!(
+                    "storage-backed JMAP write did not create {creation_id}: {}",
+                    serde_json::to_string(&writes.method_responses)?
+                );
+            }
+        }
+        for response in &writes.method_responses {
+            assert_eq!(response.1["notCreated"], json!({}));
+        }
+
+        let get = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [writes.created_ids["contactA"].clone()],
+                                "properties": ["id", "name", "emails"]
+                            }),
+                            "contact-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [writes.created_ids["eventA"].clone()],
+                                "properties": ["id", "uid", "title", "calendarIds"]
+                            }),
+                            "event-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "TaskList/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [writes.created_ids["taskListA"].clone()],
+                                "properties": ["id", "name", "myRights"]
+                            }),
+                            "task-list-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [writes.created_ids["taskA"].clone()],
+                                "properties": ["id", "title", "status"]
+                            }),
+                            "task-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Note/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [writes.created_ids["noteA"].clone()],
+                                "properties": ["id", "title", "bodyText"]
+                            }),
+                            "note-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "JournalEntry/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [writes.created_ids["journalA"].clone()],
+                                "properties": ["id", "subject", "entryType"]
+                            }),
+                            "journal-get".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+
+        assert_eq!(get.method_responses[0].1["list"][0]["name"]["full"], "Storage Contact");
+        assert_eq!(get.method_responses[1].1["list"][0]["uid"], "storage-event-fixture");
+        assert_eq!(get.method_responses[2].1["list"][0]["name"], "Storage Tasks");
+        assert_eq!(get.method_responses[3].1["list"][0]["title"], "Storage Task");
+        assert_eq!(get.method_responses[4].1["list"][0]["title"], "Storage Note");
+        assert_eq!(get.method_responses[5].1["list"][0]["subject"], "Storage Journal");
+
+        let changes = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using,
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "ContactCard/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": contact_state}),
+                            "contact-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "ContactCard/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": contact_query_state}),
+                            "contact-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": event_state}),
+                            "event-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": event_query_state}),
+                            "event-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "TaskList/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": task_list_state}),
+                            "task-list-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "TaskList/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": task_list_query_state}),
+                            "task-list-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": task_state}),
+                            "task-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Task/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": task_query_state}),
+                            "task-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Note/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": note_state}),
+                            "note-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Note/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": note_query_state}),
+                            "note-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "JournalEntry/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": journal_state}),
+                            "journal-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "JournalEntry/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": journal_query_state}),
+                            "journal-query-changes".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+
+        for (response_index, creation_id) in [
+            (0, "contactA"),
+            (2, "eventA"),
+            (4, "taskListA"),
+            (6, "taskA"),
+            (8, "noteA"),
+            (10, "journalA"),
+        ] {
+            assert!(changes.method_responses[response_index].1["created"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|id| id == &Value::String(writes.created_ids[creation_id].clone())));
+        }
+        for (response_index, creation_id) in [
+            (1, "contactA"),
+            (3, "eventA"),
+            (5, "taskListA"),
+            (7, "taskA"),
+            (9, "noteA"),
+            (11, "journalA"),
+        ] {
+            assert!(changes.method_responses[response_index].1["added"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["id"] == Value::String(writes.created_ids[creation_id].clone())));
+        }
+
+        let storage_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                (SELECT count(*) FROM contacts WHERE owner_account_id = $1)
+              + (SELECT count(*) FROM calendar_events WHERE owner_account_id = $1)
+              + (SELECT count(*) FROM tasks WHERE owner_account_id = $1)
+              + (SELECT count(*) FROM notes WHERE owner_account_id = $1)
+              + (SELECT count(*) FROM journal_entries WHERE owner_account_id = $1)
+            "#,
+        )
+        .bind(fixture.account_id)
+        .fetch_one(&fixture.pool)
+        .await?;
+        assert_eq!(storage_count, 5);
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    fixture.cleanup().await?;
+    result
+}
+
+#[tokio::test]
+async fn storage_backed_private_share_reminder_and_durable_change_round_trip() -> Result<()> {
+    let Some(fixture) = storage_jmap_fixture().await? else {
+        return Ok(());
+    };
+    let result = async {
+        let service = JmapService::new(Storage::new(fixture.pool.clone()));
+        let account_id = fixture.account_id.to_string();
+        let authorization = format!("Bearer {}", fixture.token);
+        let using = vec![
+            JMAP_TASKS_CAPABILITY.to_string(),
+            JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+        ];
+
+        let initial = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Share/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "share-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Share/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "share-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "reminder-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "reminder-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "DurableChange/get".to_string(),
+                            json!({"accountId": account_id, "ids": ["canonical"]}),
+                            "durable-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "DurableChange/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "durable-query".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let share_state = initial.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let share_query_state = initial.method_responses[1].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let reminder_state = initial.method_responses[2].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let reminder_query_state = initial.method_responses[3].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(initial.method_responses[4].1["list"][0]["@type"], "DurableChange");
+        assert_eq!(initial.method_responses[5].1["ids"], json!(["canonical"]));
+
+        let task = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![JmapMethodCall(
+                        "Task/copy".to_string(),
+                        json!({
+                            "accountId": account_id,
+                            "fromAccountId": account_id,
+                            "create": {
+                                "taskA": {
+                                    "@type": "Task",
+                                    "title": "Storage Reminder Source",
+                                    "status": "needs-action"
+                                }
+                            }
+                        }),
+                        "task-copy".to_string(),
+                    )],
+                },
+            )
+            .await?;
+        let task_id = task.created_ids["taskA"].clone();
+
+        let writes = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Share/import".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {
+                                    "shareA": {
+                                        "type": "contacts",
+                                        "granteeEmail": fixture.grantee_email.clone(),
+                                        "rights": {"mayRead": true, "mayWrite": true}
+                                    }
+                                }
+                            }),
+                            "share-import".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/import".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {
+                                    "reminderA": {
+                                        "sourceType": "task",
+                                        "sourceId": task_id,
+                                        "reminderAt": "2026-05-21T08:45:00Z"
+                                    }
+                                }
+                            }),
+                            "reminder-import".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let share_id = writes.created_ids["shareA"].clone();
+        let reminder_id = writes.created_ids["reminderA"].clone();
+        assert!(share_id.starts_with("contacts:"));
+        assert!(reminder_id.starts_with("task:"));
+
+        let get = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Share/get".to_string(),
+                            json!({"accountId": account_id, "ids": [share_id]}),
+                            "share-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/get".to_string(),
+                            json!({"accountId": account_id, "ids": [reminder_id]}),
+                            "reminder-get".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        assert_eq!(get.method_responses[0].1["list"][0]["@type"], "Share");
+        assert_eq!(get.method_responses[0].1["list"][0]["type"], "contacts");
+        assert_eq!(
+            get.method_responses[0].1["list"][0]["rights"]["mayWrite"],
+            true
+        );
+        assert_eq!(get.method_responses[1].1["list"][0]["@type"], "Reminder");
+        assert_eq!(get.method_responses[1].1["list"][0]["sourceType"], "task");
+
+        let changes = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using,
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Share/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": share_state}),
+                            "share-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Share/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": share_query_state}),
+                            "share-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": reminder_state}),
+                            "reminder-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": reminder_query_state}),
+                            "reminder-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "DurableChange/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": initial.method_responses[4].1["state"]}),
+                            "durable-changes".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+
+        assert!(changes.method_responses[0].1["created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(writes.created_ids["shareA"].clone())));
+        assert!(changes.method_responses[1].1["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == Value::String(writes.created_ids["shareA"].clone())));
+        assert!(changes.method_responses[2].1["created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(writes.created_ids["reminderA"].clone())));
+        assert!(changes.method_responses[3].1["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == Value::String(writes.created_ids["reminderA"].clone())));
+        assert!(changes.method_responses[4].1["updated"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String("canonical".to_string())));
+
+        let persisted = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT
+                (SELECT count(*) FROM contact_book_grants WHERE owner_account_id = $1)
+              + (SELECT count(*) FROM tasks WHERE owner_account_id = $1 AND reminder_set)
+            "#,
+        )
+        .bind(fixture.account_id)
+        .fetch_one(&fixture.pool)
+        .await?;
+        assert_eq!(persisted, 2);
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    fixture.cleanup().await?;
+    result
+}
+
+#[tokio::test]
+async fn canonical_import_and_copy_persist_create_payloads_for_writable_families() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        task_lists: Arc::new(Mutex::new(vec![FakeStore::default_task_list()])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+    let account_id = FakeStore::account().account_id.to_string();
+    let task_list_id = FakeStore::default_task_list().id.to_string();
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_CALENDARS_CAPABILITY.to_string(),
+                    JMAP_TASKS_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "ContactCard/import".to_string(),
+                        json!({
+                            "create": {
+                                "contactA": {
+                                    "kind": "individual",
+                                    "name": {"full": "Import Contact"},
+                                    "emails": {"main": {"address": "import@example.test"}}
+                                }
+                            }
+                        }),
+                        "contact".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "ContactCard/copy".to_string(),
+                        json!({
+                            "fromAccountId": account_id,
+                            "create": {
+                                "contactB": {
+                                    "kind": "individual",
+                                    "name": {"full": "Copied Contact"},
+                                    "emails": {"main": {"address": "copied-contact@example.test"}},
+                                    "phones": {"main": {"number": "+15550100"}}
+                                }
+                            }
+                        }),
+                        "contact-copy".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "CalendarEvent/copy".to_string(),
+                        json!({
+                            "fromAccountId": account_id,
+                            "create": {
+                                "eventA": {
+                                    "@type": "Event",
+                                    "title": "Copied event",
+                                    "start": "2026-05-21T09:00:00",
+                                    "duration": "PT30M"
+                                }
+                            }
+                        }),
+                        "event".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "CalendarEvent/import".to_string(),
+                        json!({
+                            "create": {
+                                "eventB": {
+                                    "@type": "Event",
+                                    "uid": "imported-event-fixture",
+                                    "title": "Imported event",
+                                    "start": "2026-05-22T10:15:00",
+                                    "duration": "PT45M",
+                                    "locations": {"main": {"name": "Interop Room"}},
+                                    "participants": {
+                                        "owner": {
+                                            "name": "Alice",
+                                            "email": "alice@example.test",
+                                            "roles": {"owner": true}
+                                        },
+                                        "p1": {
+                                            "name": "Bob",
+                                            "email": "bob@example.test",
+                                            "roles": {"attendee": true},
+                                            "participationStatus": "accepted",
+                                            "expectReply": true
+                                        }
+                                    },
+                                    "calendarIds": {"default": true}
+                                }
+                            }
+                        }),
+                        "event-import".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "TaskList/import".to_string(),
+                        json!({"create": {"taskListA": {"name": "Imported Tasks"}}}),
+                        "taskList".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "TaskList/copy".to_string(),
+                        json!({
+                            "fromAccountId": account_id,
+                            "create": {"taskListB": {"name": "Copied Tasks", "sortOrder": 25}}
+                        }),
+                        "taskList-copy".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Task/copy".to_string(),
+                        json!({
+                            "fromAccountId": account_id,
+                            "create": {
+                                "taskA": {
+                                    "@type": "Task",
+                                    "taskListId": task_list_id,
+                                    "title": "Copied task"
+                                }
+                            }
+                        }),
+                        "task".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Task/import".to_string(),
+                        json!({
+                            "create": {
+                                "taskB": {
+                                    "@type": "Task",
+                                    "taskListId": task_list_id,
+                                    "title": "Imported task",
+                                    "description": "Imported from interop fixture",
+                                    "status": "in-progress",
+                                    "due": "2026-05-23T12:00:00Z"
+                                }
+                            }
+                        }),
+                        "task-import".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Note/import".to_string(),
+                        json!({"create": {"noteA": {"title": "Imported note", "bodyText": "Body"}}}),
+                        "note".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Note/copy".to_string(),
+                        json!({
+                            "fromAccountId": account_id,
+                            "create": {
+                                "noteB": {
+                                    "title": "Copied note",
+                                    "bodyText": "Copied body",
+                                    "color": "blue",
+                                    "categoriesJson": "[\"interop\"]"
+                                }
+                            }
+                        }),
+                        "note-copy".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/copy".to_string(),
+                        json!({
+                            "fromAccountId": account_id,
+                            "create": {
+                                "journalA": {
+                                    "subject": "Copied journal",
+                                    "bodyText": "Journal body",
+                                    "entryType": "phone-call"
+                                }
+                            }
+                        }),
+                        "journal".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/import".to_string(),
+                        json!({
+                            "create": {
+                                "journalB": {
+                                    "subject": "Imported journal",
+                                    "bodyText": "Imported journal body",
+                                    "entryType": "meeting",
+                                    "messageClass": "IPM.Activity",
+                                    "startsAt": "2026-05-24T09:00:00Z",
+                                    "endsAt": "2026-05-24T09:30:00Z",
+                                    "companiesJson": "[\"Contoso\"]",
+                                    "contactsJson": "[\"Bob Example\"]"
+                                }
+                            }
+                        }),
+                        "journal-import".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    for method in &response.method_responses {
+        assert_eq!(method.1["notCreated"], json!({}));
+    }
+    for creation_id in [
+        "contactA",
+        "contactB",
+        "eventA",
+        "eventB",
+        "taskListA",
+        "taskListB",
+        "taskA",
+        "taskB",
+        "noteA",
+        "noteB",
+        "journalA",
+        "journalB",
+    ] {
+        assert!(response.created_ids.contains_key(creation_id));
+    }
+    assert_eq!(store.contacts.lock().unwrap().len(), 2);
+    assert_eq!(store.contacts.lock().unwrap()[0].name, "Import Contact");
+    assert!(store
+        .contacts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|contact| contact.name == "Copied Contact"));
+    assert_eq!(store.events.lock().unwrap().len(), 2);
+    assert_eq!(store.events.lock().unwrap()[0].title, "Copied event");
+    assert!(store
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|event| event.uid == "imported-event-fixture"));
+    assert_eq!(store.task_lists.lock().unwrap().len(), 3);
+    assert_eq!(store.tasks.lock().unwrap().len(), 2);
+    assert_eq!(store.tasks.lock().unwrap()[0].title, "Copied task");
+    assert!(store
+        .tasks
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|task| task.title == "Imported task"));
+    assert_eq!(store.notes.lock().unwrap().len(), 2);
+    assert_eq!(store.notes.lock().unwrap()[0].title, "Imported note");
+    assert!(store
+        .notes
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|note| note.title == "Copied note"));
+    assert_eq!(store.journal_entries.lock().unwrap().len(), 2);
+    assert_eq!(
+        store.journal_entries.lock().unwrap()[0].subject,
+        "Copied journal"
+    );
+    assert!(store
+        .journal_entries
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|entry| entry.subject == "Imported journal"));
+}
+
 #[test]
 fn api_request_concurrency_permits_match_advertised_limit() {
     let permits = (0..MAX_CONCURRENT_REQUESTS)
@@ -7586,6 +9084,258 @@ async fn jmap_tester_style_big_three_batch_has_stable_json_shapes() {
 }
 
 #[tokio::test]
+async fn jmap_tester_style_owned_family_get_fixtures_cover_object_payloads() {
+    let account_id = FakeStore::account().account_id.to_string();
+    let upload_id = "upload:88888888-8888-8888-8888-888888888888";
+    let share_id = "mailbox:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: vec![FakeStore::inbox_mailbox(), FakeStore::draft_mailbox()],
+        emails: vec![FakeStore::inbox_email(), FakeStore::draft_email()],
+        email_submissions: vec![FakeStore::email_submission()],
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact()])),
+        events: Arc::new(Mutex::new(vec![FakeStore::event()])),
+        task_lists: Arc::new(Mutex::new(vec![FakeStore::default_task_list()])),
+        tasks: Arc::new(Mutex::new(vec![FakeStore::task()])),
+        notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
+        journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
+        reminders: Arc::new(Mutex::new(vec![FakeStore::reminder()])),
+        shares: Arc::new(Mutex::new(vec![json!({
+            "id": share_id,
+            "@type": "Share",
+            "type": "mailbox",
+            "grantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "ownerAccountId": account_id,
+            "ownerEmail": "alice@example.test",
+            "granteeEmail": "bob@example.test",
+            "rights": {"mayRead": true, "mayWrite": true}
+        })])),
+        uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+            id: Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap(),
+            account_id: FakeStore::account().account_id,
+            media_type: "text/plain".to_string(),
+            octet_size: 13,
+            blob_bytes: b"fixture text".to_vec(),
+        }])),
+        canonical_change_cursor: Some(101),
+        ..Default::default()
+    });
+    let using = vec![
+        JMAP_CORE_CAPABILITY.to_string(),
+        JMAP_MAIL_CAPABILITY.to_string(),
+        JMAP_SUBMISSION_CAPABILITY.to_string(),
+        JMAP_BLOB_CAPABILITY.to_string(),
+        JMAP_CONTACTS_CAPABILITY.to_string(),
+        JMAP_CALENDARS_CAPABILITY.to_string(),
+        JMAP_TASKS_CAPABILITY.to_string(),
+        JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+    ];
+
+    let first = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: using.clone(),
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Mailbox/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::inbox_mailbox().id.to_string()],
+                            "properties": ["id", "name", "role", "myRights"]
+                        }),
+                        "mailbox".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Email/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::inbox_email().id.to_string()],
+                            "properties": ["id", "threadId", "mailboxIds", "subject"]
+                        }),
+                        "email".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Thread/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::inbox_email().thread_id.to_string()],
+                            "properties": ["id", "emailIds"]
+                        }),
+                        "thread".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "EmailSubmission/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::email_submission().id.to_string()],
+                            "properties": ["id", "emailId", "identityId", "envelope", "deliveryStatus"]
+                        }),
+                        "submission".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Blob/get".to_string(),
+                        json!({
+                            "ids": [upload_id],
+                            "properties": ["size", "data:asText"]
+                        }),
+                        "blob".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "AddressBook/get".to_string(),
+                        json!({"ids": ["default"], "properties": ["id", "name", "myRights"]}),
+                        "addressbook".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "ContactCard/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::contact().id.to_string()],
+                            "properties": ["id", "kind", "name", "emails", "addressBookIds"]
+                        }),
+                        "contact".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Calendar/get".to_string(),
+                        json!({"ids": ["default"], "properties": ["id", "name", "myRights"]}),
+                        "calendar".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "CalendarEvent/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::event().id.to_string()],
+                            "properties": ["id", "uid", "title", "start", "participants", "calendarIds"]
+                        }),
+                        "event".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "TaskList/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::default_task_list().id.to_string()],
+                            "properties": ["id", "name", "role", "myRights"]
+                        }),
+                        "taskList".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Task/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::task().id.to_string()],
+                            "properties": ["id", "taskListId", "title", "status", "due"]
+                        }),
+                        "task".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Note/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::note().id.to_string()],
+                            "properties": ["id", "title", "bodyText", "color"]
+                        }),
+                        "note".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "JournalEntry/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::journal_entry().id.to_string()],
+                            "properties": ["id", "subject", "entryType", "messageClass"]
+                        }),
+                        "journal".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Reminder/get".to_string(),
+                        json!({
+                            "ids": [format!("task:{}", FakeStore::task().id)],
+                            "properties": ["id", "sourceType", "sourceId", "title", "reminderAt"]
+                        }),
+                        "reminder".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Identity/get".to_string(),
+                        json!({
+                            "ids": [FakeStore::sender_identity().id],
+                            "properties": ["id", "name", "email", "mayDelete"]
+                        }),
+                        "identity".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "DurableChange/get".to_string(),
+                        json!({
+                            "ids": ["canonical"],
+                            "properties": ["id", "cursor", "categories"]
+                        }),
+                        "durable".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(first.method_responses.len(), 16);
+    assert!(first
+        .method_responses
+        .iter()
+        .all(|response| response.1["list"].as_array().unwrap().len() == 1));
+    assert_eq!(first.method_responses[0].1["list"][0]["role"], "inbox");
+    assert_eq!(
+        first.method_responses[1].1["list"][0]["subject"],
+        "Inbox subject"
+    );
+    assert_eq!(
+        first.method_responses[4].1["list"][0]["data:asText"],
+        "fixture text"
+    );
+    assert_eq!(
+        first.method_responses[6].1["list"][0]["name"]["full"],
+        "Bob Example"
+    );
+    assert_eq!(first.method_responses[8].1["list"][0]["title"], "Standup");
+    assert_eq!(
+        first.method_responses[10].1["list"][0]["title"],
+        "Prepare release"
+    );
+    assert_eq!(
+        first.method_responses[11].1["list"][0]["title"],
+        "Sticky note"
+    );
+    assert_eq!(
+        first.method_responses[12].1["list"][0]["subject"],
+        "Customer call"
+    );
+    assert_eq!(
+        first.method_responses[13].1["list"][0]["sourceType"],
+        "task"
+    );
+    assert_eq!(first.method_responses[15].1["list"][0]["cursor"], 101);
+
+    let second = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: using,
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Share/get".to_string(),
+                        json!({
+                            "ids": [share_id],
+                            "properties": ["id", "@type", "type", "rights"]
+                        }),
+                        "share".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Share/query".to_string(),
+                        json!({"position": 0, "limit": 10}),
+                        "share-query".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(second.method_responses[0].1["list"][0]["@type"], "Share");
+    assert_eq!(
+        second.method_responses[0].1["list"][0]["rights"]["mayWrite"],
+        true
+    );
+    assert_eq!(second.method_responses[1].1["ids"], json!([share_id]));
+}
+
+#[tokio::test]
 async fn big_three_batches_resolve_query_get_result_references() {
     let account_id = FakeStore::account().account_id.to_string();
     let service = JmapService::new(FakeStore {
@@ -7677,6 +9427,118 @@ async fn big_three_batches_resolve_query_get_result_references() {
     );
     assert_eq!(response.method_responses[6].0, "error");
     assert_eq!(response.method_responses[6].1["type"], "resultReference");
+}
+
+#[tokio::test]
+async fn canonical_end_to_end_batch_chains_import_query_and_get_result_references() {
+    let account_id = FakeStore::account().account_id.to_string();
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        task_lists: Arc::new(Mutex::new(vec![FakeStore::default_task_list()])),
+        shares: Arc::new(Mutex::new(Vec::new())),
+        ..Default::default()
+    });
+    let request: JmapApiRequest = serde_json::from_value(json!({
+        "using": [
+            JMAP_CORE_CAPABILITY,
+            JMAP_CONTACTS_CAPABILITY,
+            JMAP_TASKS_CAPABILITY,
+            JMAP_LPE_OUTLOOK_CAPABILITY
+        ],
+        "methodCalls": [
+            ["ContactCard/import", {
+                "accountId": account_id,
+                "create": {
+                    "contactA": {
+                        "kind": "individual",
+                        "name": {"full": "Batch Contact"},
+                        "emails": {"main": {"address": "batch-contact@example.test"}}
+                    }
+                }
+            }, "contact-import"],
+            ["ContactCard/query", {"accountId": account_id}, "contact-query"],
+            ["ContactCard/get", {
+                "accountId": account_id,
+                "#ids": {"resultOf": "contact-query", "name": "ContactCard/query", "path": "/ids"},
+                "properties": ["id", "name", "emails"]
+            }, "contact-get"],
+            ["Task/import", {
+                "accountId": account_id,
+                "create": {
+                    "taskA": {
+                        "@type": "Task",
+                        "title": "Batch Task",
+                        "status": "needs-action"
+                    }
+                }
+            }, "task-import"],
+            ["Task/query", {"accountId": account_id}, "task-query"],
+            ["Task/get", {
+                "accountId": account_id,
+                "#ids": {"resultOf": "task-query", "name": "Task/query", "path": "/ids"},
+                "properties": ["id", "title", "status"]
+            }, "task-get"],
+            ["Note/import", {
+                "accountId": account_id,
+                "create": {
+                    "noteA": {
+                        "title": "Batch Note",
+                        "bodyText": "Batch note body"
+                    }
+                }
+            }, "note-import"],
+            ["Note/query", {"accountId": account_id}, "note-query"],
+            ["Note/get", {
+                "accountId": account_id,
+                "#ids": {"resultOf": "note-query", "name": "Note/query", "path": "/ids"},
+                "properties": ["id", "title", "bodyText"]
+            }, "note-get"],
+            ["Share/import", {
+                "accountId": account_id,
+                "create": {
+                    "shareA": {
+                        "type": "contacts",
+                        "granteeEmail": "batch-share@example.test",
+                        "rights": {"mayRead": true, "mayWrite": true}
+                    }
+                }
+            }, "share-import"],
+            ["Share/query", {"accountId": account_id}, "share-query"],
+            ["Share/get", {
+                "accountId": account_id,
+                "#ids": {"resultOf": "share-query", "name": "Share/query", "path": "/ids"},
+                "properties": ["id", "type", "rights"]
+            }, "share-get"]
+        ]
+    }))
+    .unwrap();
+
+    let response = service
+        .handle_api_request(Some("Bearer token"), request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses.len(), 12);
+    assert_eq!(
+        response.method_responses[2].1["list"][0]["name"]["full"],
+        "Batch Contact"
+    );
+    assert_eq!(
+        response.method_responses[5].1["list"][0]["title"],
+        "Batch Task"
+    );
+    assert_eq!(
+        response.method_responses[8].1["list"][0]["title"],
+        "Batch Note"
+    );
+    assert_eq!(
+        response.method_responses[11].1["list"][0]["type"],
+        "contacts"
+    );
+    assert_eq!(
+        response.method_responses[11].1["list"][0]["rights"]["mayWrite"],
+        true
+    );
 }
 
 #[tokio::test]
@@ -7983,6 +9845,17 @@ async fn session_exposes_contacts_and_calendars_capabilities() {
         session.primary_accounts[JMAP_VACATION_RESPONSE_CAPABILITY],
         FakeStore::account().account_id.to_string()
     );
+
+    let outlook = &session.capabilities[JMAP_LPE_OUTLOOK_CAPABILITY];
+    assert_eq!(outlook["notes"], true);
+    assert_eq!(outlook["journal"], true);
+    assert_eq!(outlook["reminders"], true);
+    assert_eq!(outlook["sharing"], true);
+    assert_eq!(outlook["durableChanges"], true);
+    let session_json = serde_json::to_string(&session).unwrap();
+    for forbidden in ["MapiSession", "MapiSubsystem", "SessionObject"] {
+        assert!(!session_json.contains(forbidden));
+    }
 }
 
 #[tokio::test]
@@ -9343,6 +11216,73 @@ async fn collaboration_changes_use_durable_log_ids_when_state_has_cursor() {
 }
 
 #[tokio::test]
+async fn object_changes_with_cursor_do_not_diff_unlogged_current_state() {
+    let account_id = FakeStore::account().account_id;
+    let logged_contact_id = FakeStore::contact().id;
+    let unlogged_contact_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
+    let mut logged_contact = FakeStore::contact();
+    logged_contact.name = "Logged Contact".to_string();
+    let unlogged_contact = ClientContact {
+        id: unlogged_contact_id,
+        address_book_id: "default".to_string(),
+        name: "Unlogged Contact".to_string(),
+        role: String::new(),
+        email: "unlogged@example.test".to_string(),
+        phone: String::new(),
+        team: String::new(),
+        notes: String::new(),
+    };
+    let prior_state = encode_state_with_cursor(
+        account_id,
+        "ContactCard",
+        vec![
+            StateEntry {
+                id: logged_contact_id.to_string(),
+                fingerprint: "old-logged".to_string(),
+            },
+            StateEntry {
+                id: unlogged_contact_id.to_string(),
+                fingerprint: "old-unlogged".to_string(),
+            },
+        ],
+        Some(41),
+    )
+    .unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contacts: Arc::new(Mutex::new(vec![logged_contact, unlogged_contact])),
+        canonical_change_cursor: Some(42),
+        jmap_object_changes: Arc::new(Mutex::new(Some(vec![JmapMailObjectChange {
+            cursor: 42,
+            object_id: logged_contact_id,
+            change_kind: "updated".to_string(),
+        }]))),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CONTACTS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "ContactCard/changes".to_string(),
+                    json!({"sinceState": prior_state}),
+                    "cc".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["updated"],
+        json!([logged_contact_id.to_string()])
+    );
+}
+
+#[tokio::test]
 async fn contact_and_calendar_query_changes_report_reorders() {
     let contact_id = FakeStore::contact().id;
     let later_contact_id = Uuid::parse_str("13131313-1313-1313-1313-131313131313").unwrap();
@@ -9882,6 +11822,755 @@ async fn private_outlook_methods_use_canonical_note_journal_and_reminder_store()
         Value::String("task".to_string())
     );
     assert_eq!(store.notes.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn reminder_writes_update_canonical_source_metadata() {
+    let task_id = FakeStore::task().id;
+    let event_id = FakeStore::event().id;
+    let mail_id = FakeStore::inbox_email().id;
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        reminders: Arc::new(Mutex::new(Vec::new())),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Reminder/set".to_string(),
+                        json!({
+                            "create": {
+                                "taskReminder": {
+                                    "sourceType": "task",
+                                    "sourceId": task_id.to_string(),
+                                    "reminderAt": "2026-05-21T08:45:00Z"
+                                }
+                            }
+                        }),
+                        "set".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Reminder/import".to_string(),
+                        json!({
+                            "create": {
+                                "eventReminder": {
+                                    "sourceType": "calendar",
+                                    "sourceId": event_id.to_string(),
+                                    "reminderAt": "2026-05-22T08:45:00Z"
+                                }
+                            }
+                        }),
+                        "import".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Reminder/copy".to_string(),
+                        json!({
+                            "create": {
+                                "mailReminder": {
+                                    "sourceType": "mail",
+                                    "sourceId": mail_id.to_string(),
+                                    "reminderAt": "2026-05-23T08:45:00Z"
+                                }
+                            }
+                        }),
+                        "copy".to_string(),
+                    ),
+                    JmapMethodCall("Reminder/query".to_string(), json!({}), "query".to_string()),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        response.method_responses[0].1["created"]["taskReminder"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("task:")
+    );
+    assert!(
+        response.method_responses[1].1["created"]["eventReminder"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("calendar:")
+    );
+    assert!(
+        response.method_responses[2].1["created"]["mailReminder"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("mail:")
+    );
+    assert_eq!(response.method_responses[3].1["total"], 3);
+
+    let destroy = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Reminder/set".to_string(),
+                    json!({"destroy": [format!("task:{task_id}")]}),
+                    "destroy".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        destroy.method_responses[0].1["destroyed"],
+        json!([format!("task:{task_id}")])
+    );
+}
+
+#[tokio::test]
+async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        shares: Arc::new(Mutex::new(Vec::new())),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Share/set".to_string(),
+                        json!({
+                            "create": {
+                                "mailboxShare": {
+                                    "type": "mailbox",
+                                    "granteeEmail": "bob@example.test",
+                                    "mayWrite": true
+                                }
+                            }
+                        }),
+                        "set".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Share/import".to_string(),
+                        json!({
+                            "create": {
+                                "contactsShare": {
+                                    "type": "contacts",
+                                    "granteeEmail": "carol@example.test",
+                                    "rights": {"mayRead": true, "mayWrite": true}
+                                }
+                            }
+                        }),
+                        "import".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Share/copy".to_string(),
+                        json!({
+                            "create": {
+                                "senderShare": {
+                                    "type": "sender",
+                                    "granteeEmail": "dave@example.test",
+                                    "senderRight": "send_as"
+                                }
+                            }
+                        }),
+                        "copy".to_string(),
+                    ),
+                    JmapMethodCall("Share/query".to_string(), json!({}), "query".to_string()),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    let mailbox_share_id = response.method_responses[0].1["created"]["mailboxShare"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(mailbox_share_id.starts_with("mailbox:"));
+    assert_eq!(
+        response.method_responses[0].1["created"]["mailboxShare"]["@type"],
+        "Share"
+    );
+    assert_eq!(
+        response.method_responses[0].1["created"]["mailboxShare"]["rights"]["mayRead"],
+        true
+    );
+    assert_eq!(
+        response.method_responses[0].1["created"]["mailboxShare"]["rights"]["mayWrite"],
+        true
+    );
+    assert!(
+        response.method_responses[1].1["created"]["contactsShare"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("contacts:")
+    );
+    assert!(
+        response.method_responses[2].1["created"]["senderShare"]["id"]
+            .as_str()
+            .unwrap()
+            .starts_with("sender:")
+    );
+    assert_eq!(
+        response.method_responses[2].1["created"]["senderShare"]["rights"]["maySendAs"],
+        true
+    );
+    assert_eq!(response.method_responses[3].1["total"], 3);
+
+    let get = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Share/get".to_string(),
+                    json!({"ids": [mailbox_share_id.clone()]}),
+                    "get".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let share = &get.method_responses[0].1["list"][0];
+    assert_eq!(share["@type"], "Share");
+    assert_eq!(share["type"], "mailbox");
+    assert!(share["grantId"].as_str().is_some());
+    assert!(share["ownerAccountId"].as_str().is_some());
+    assert!(share["granteeAccountId"].as_str().is_some());
+    assert!(share["rights"].get("mayRead").is_some());
+
+    let destroy = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Share/set".to_string(),
+                    json!({"destroy": [mailbox_share_id]}),
+                    "destroy".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        destroy.method_responses[0].1["destroyed"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn durable_change_get_returns_append_only_object_specific_payload() {
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        canonical_change_cursor: Some(42),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "DurableChange/get".to_string(),
+                    json!({}),
+                    "get".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let durable_change = &response.method_responses[0].1["list"][0];
+    assert_eq!(durable_change["@type"], "DurableChange");
+    assert_eq!(durable_change["id"], "canonical");
+    assert_eq!(durable_change["cursor"], 42);
+    assert_eq!(durable_change["isAppendOnly"], true);
+    assert_eq!(durable_change["mayRead"], true);
+    assert_eq!(durable_change["mayWrite"], false);
+    assert!(durable_change["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|category| category["id"] == "rights"
+            && category["objectTypes"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Share"))));
+    assert!(!durable_change.to_string().contains("MapiSession"));
+    assert!(!durable_change.to_string().contains("MapiSubsystem"));
+}
+
+#[tokio::test]
+async fn canonical_private_get_and_query_follow_jmap_interop_semantics() {
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        canonical_change_cursor: Some(42),
+        shares: Arc::new(Mutex::new(vec![
+            json!({
+                "id": "sender:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "@type": "Share",
+                "type": "sender",
+                "grantId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "rights": {"maySend": true}
+            }),
+            json!({
+                "id": "mailbox:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "@type": "Share",
+                "type": "mailbox",
+                "grantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "rights": {"mayRead": true}
+            }),
+        ])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "DurableChange/get".to_string(),
+                        json!({
+                            "ids": ["canonical", "missing"],
+                            "properties": ["cursor"]
+                        }),
+                        "get".to_string(),
+                    ),
+                    JmapMethodCall("Share/query".to_string(), json!({}), "query".to_string()),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["list"],
+        json!([{"id": "canonical", "cursor": 42}])
+    );
+    assert_eq!(
+        response.method_responses[0].1["notFound"],
+        json!(["missing"])
+    );
+    assert_eq!(
+        response.method_responses[1].1["ids"],
+        json!([
+            "mailbox:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "sender:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ])
+    );
+}
+
+#[tokio::test]
+async fn canonical_private_query_changes_use_persisted_query_snapshots() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        canonical_change_cursor: Some(72),
+        persist_query_states: true,
+        shares: Arc::new(Mutex::new(vec![json!({
+            "id": "mailbox:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "@type": "Share",
+            "type": "mailbox",
+            "grantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            "rights": {"mayRead": true}
+        })])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let initial = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Share/query".to_string(),
+                    json!({}),
+                    "query".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let query_state = initial.method_responses[0].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let decoded = decode_query_state(&query_state).unwrap();
+    assert!(decoded.state_id.is_some());
+    assert!(decoded.ids.is_empty());
+
+    store.shares.lock().unwrap().push(json!({
+        "id": "sender:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "@type": "Share",
+        "type": "sender",
+        "grantId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        "rights": {"maySend": true}
+    }));
+
+    let changes = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Share/queryChanges".to_string(),
+                    json!({"sinceQueryState": query_state}),
+                    "changes".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        changes.method_responses[0].1["added"][0]["id"],
+        "sender:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    );
+    let next_state = decode_query_state(
+        changes.method_responses[0].1["newQueryState"]
+            .as_str()
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(next_state.state_id.is_some());
+    assert!(next_state.ids.is_empty());
+}
+
+#[tokio::test]
+async fn reminder_query_changes_use_persisted_query_snapshots_and_filter() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        canonical_change_cursor: Some(82),
+        persist_query_states: true,
+        reminders: Arc::new(Mutex::new(vec![FakeStore::reminder()])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let initial = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Reminder/query".to_string(),
+                    json!({"includeInactive": false}),
+                    "query".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(initial.method_responses[0].1["canCalculateChanges"], true);
+    let query_state = initial.method_responses[0].1["queryState"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(decode_query_state(&query_state).unwrap().state_id.is_some());
+
+    store.reminders.lock().unwrap().push(ClientReminder {
+        source_type: "mail".to_string(),
+        source_id: FakeStore::inbox_email().id,
+        title: "Mail reminder".to_string(),
+        due_at: None,
+        reminder_at: "2026-05-21T08:45:00Z".to_string(),
+        dismissed_at: None,
+        completed_at: None,
+        status: "pending".to_string(),
+    });
+
+    let changes = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Reminder/queryChanges".to_string(),
+                    json!({"sinceQueryState": query_state, "includeInactive": false}),
+                    "changes".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        changes.method_responses[0].1["added"][0]["id"],
+        format!("mail:{}", FakeStore::inbox_email().id)
+    );
+}
+
+#[tokio::test]
+async fn unsupported_canonical_set_reports_operation_specific_errors() {
+    let thread_id = FakeStore::draft_email().thread_id.to_string();
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        emails: vec![FakeStore::draft_email()],
+        canonical_change_cursor: Some(52),
+        persist_query_states: true,
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_MAIL_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "Thread/set".to_string(),
+                    json!({
+                        "create": {"newThread": {}},
+                        "update": {thread_id.clone(): {"ignored": true}},
+                        "destroy": [thread_id.clone()]
+                    }),
+                    "set".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let payload = &response.method_responses[0].1;
+    assert_eq!(payload["notCreated"]["newThread"]["type"], "forbidden");
+    assert_eq!(
+        payload["notUpdated"][thread_id.as_str()]["type"],
+        "forbidden"
+    );
+    assert_eq!(
+        payload["notDestroyed"][thread_id.as_str()]["type"],
+        "forbidden"
+    );
+    assert_eq!(payload["created"], json!({}));
+    assert_eq!(payload["updated"], json!({}));
+    assert_eq!(payload["destroyed"], json!([]));
+}
+
+#[tokio::test]
+async fn negative_interop_fixtures_reject_invalid_payloads_and_forbidden_writes() {
+    let thread_id = FakeStore::draft_email().thread_id.to_string();
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        emails: vec![FakeStore::draft_email()],
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_MAIL_CAPABILITY.to_string(),
+                    JMAP_CONTACTS_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "ContactCard/import".to_string(),
+                        json!({"create": {"badContact": {"emails": {"main": {"address": "bad@example.test"}}}}}),
+                        "bad-contact".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Share/import".to_string(),
+                        json!({"create": {"badShare": {"type": "contacts", "rights": {"mayRead": true}}}}),
+                        "bad-share".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Reminder/copy".to_string(),
+                        json!({"create": {"badReminder": {"sourceType": "task", "reminderAt": "2026-05-21T08:45:00Z"}}}),
+                        "bad-reminder".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Thread/import".to_string(),
+                        json!({"create": {"newThread": {"id": thread_id}}}),
+                        "thread-import".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "DurableChange/set".to_string(),
+                        json!({
+                            "create": {"newCursor": {}},
+                            "update": {"canonical": {"cursor": 1}},
+                            "destroy": ["canonical"]
+                        }),
+                        "durable-set".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "DurableChange/import".to_string(),
+                        json!({"create": {"newCursor": {}}}),
+                        "durable-import".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "DurableChange/copy".to_string(),
+                        json!({"create": {"newCursor": {}}}),
+                        "durable-copy".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.method_responses[0].1["notCreated"]["badContact"]["type"],
+        "invalidProperties"
+    );
+    assert_eq!(
+        response.method_responses[1].1["notCreated"]["badShare"]["type"],
+        "invalidProperties"
+    );
+    assert_eq!(
+        response.method_responses[2].1["notCreated"]["badReminder"]["type"],
+        "invalidProperties"
+    );
+    assert_eq!(
+        response.method_responses[3].1["notCreated"]["newThread"]["type"],
+        "forbidden"
+    );
+    assert_eq!(
+        response.method_responses[4].1["notCreated"]["newCursor"]["type"],
+        "forbidden"
+    );
+    assert_eq!(
+        response.method_responses[4].1["notUpdated"]["canonical"]["type"],
+        "forbidden"
+    );
+    assert_eq!(
+        response.method_responses[4].1["notDestroyed"]["canonical"]["type"],
+        "forbidden"
+    );
+    assert_eq!(
+        response.method_responses[5].1["notCreated"]["newCursor"]["type"],
+        "forbidden"
+    );
+    assert_eq!(
+        response.method_responses[6].1["notCreated"]["newCursor"]["type"],
+        "forbidden"
+    );
+}
+
+#[tokio::test]
+async fn share_and_reminder_changes_use_string_id_durable_replay() {
+    let account_id = FakeStore::account().account_id;
+    let share_id = "mailbox:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    let unlogged_share_id = "sender:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    let reminder_id = format!("task:{}", FakeStore::task().id);
+    let mail_reminder_id = format!("mail:{}", FakeStore::inbox_email().id);
+    let share_state = encode_state_with_cursor(
+        account_id,
+        "Share",
+        vec![
+            StateEntry {
+                id: share_id.to_string(),
+                fingerprint: "old-share".to_string(),
+            },
+            StateEntry {
+                id: unlogged_share_id.to_string(),
+                fingerprint: "old-unlogged-share".to_string(),
+            },
+        ],
+        Some(61),
+    )
+    .unwrap();
+    let reminder_state = encode_state_with_cursor(
+        account_id,
+        "Reminder",
+        vec![
+            StateEntry {
+                id: reminder_id.clone(),
+                fingerprint: "old-reminder".to_string(),
+            },
+            StateEntry {
+                id: mail_reminder_id.clone(),
+                fingerprint: "old-unlogged-reminder".to_string(),
+            },
+        ],
+        Some(61),
+    )
+    .unwrap();
+    let mut reminder = FakeStore::reminder();
+    reminder.reminder_at = "2026-04-21T08:50:00Z".to_string();
+    let mail_reminder = ClientReminder {
+        source_type: "mail".to_string(),
+        source_id: FakeStore::inbox_email().id,
+        title: "Mail reminder".to_string(),
+        due_at: None,
+        reminder_at: "2026-04-22T08:45:00Z".to_string(),
+        dismissed_at: None,
+        completed_at: None,
+        status: "pending".to_string(),
+    };
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        canonical_change_cursor: Some(62),
+        shares: Arc::new(Mutex::new(vec![
+            json!({
+                "id": share_id,
+                "@type": "Share",
+                "type": "mailbox",
+                "grantId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                "rights": {"mayRead": true, "mayWrite": true}
+            }),
+            json!({
+                "id": unlogged_share_id,
+                "@type": "Share",
+                "type": "sender",
+                "grantId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                "rights": {"maySend": true}
+            }),
+        ])),
+        reminders: Arc::new(Mutex::new(vec![reminder, mail_reminder])),
+        jmap_string_object_changes: Arc::new(Mutex::new(Some(vec![
+            JmapStringObjectChange {
+                cursor: 62,
+                object_id: share_id.to_string(),
+                change_kind: "updated".to_string(),
+            },
+            JmapStringObjectChange {
+                cursor: 62,
+                object_id: reminder_id.clone(),
+                change_kind: "updated".to_string(),
+            },
+        ]))),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Share/changes".to_string(),
+                        json!({"sinceState": share_state}),
+                        "share".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Reminder/changes".to_string(),
+                        json!({"sinceState": reminder_state}),
+                        "reminder".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].1["updated"], json!([share_id]));
+    assert_eq!(
+        response.method_responses[1].1["updated"],
+        json!([reminder_id])
+    );
 }
 
 #[tokio::test]

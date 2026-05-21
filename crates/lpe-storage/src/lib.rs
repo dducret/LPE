@@ -56,8 +56,8 @@ pub use crate::protocols::{
     ActiveSyncSyncState, ImapEmail, ImapMailboxState, ImapMimePart, JmapEmail, JmapEmailAddress,
     JmapEmailFollowupUpdate, JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
-    SearchFolderDefinition,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
+    JmapThreadQuery, JmapUploadBlob, SearchFolderDefinition,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::submission::{

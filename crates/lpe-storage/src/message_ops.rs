@@ -607,6 +607,9 @@ impl Storage {
         {
             bail!("invalid follow-up flag value");
         }
+        let reminder_changed = update.reminder_set.is_some()
+            || update.reminder_at.is_some()
+            || update.reminder_dismissed_at.is_some();
 
         let mut tx = self.pool.begin().await?;
         let modseq = self
@@ -720,7 +723,8 @@ impl Storage {
                 serde_json::json!({
                     "messageId": message_id,
                     "threadId": row.try_get::<Uuid, _>("thread_id")?,
-                    "imapUid": row.try_get::<i64, _>("imap_uid")?
+                    "imapUid": row.try_get::<i64, _>("imap_uid")?,
+                    "reminderChanged": reminder_changed
                 }),
             )
             .await?;

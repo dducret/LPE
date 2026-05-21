@@ -85,6 +85,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         &self,
         account: &AuthenticatedAccount,
         arguments: Value,
+        created_ids: &mut HashMap<String, String>,
     ) -> Result<Value> {
         let arguments: TaskListSetArguments = serde_json::from_value(arguments)?;
         let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
@@ -102,6 +103,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 match parse_task_list_create(account_id, value) {
                     Ok(input) => match self.store.create_jmap_task_list(input).await {
                         Ok(task_list) => {
+                            created_ids.insert(creation_id.clone(), task_list.id.to_string());
                             created
                                 .insert(creation_id, task_list_to_value(&task_list, &properties));
                         }

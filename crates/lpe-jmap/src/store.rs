@@ -3,18 +3,33 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
     CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay,
     CanonicalPushChangeSet, ClientNote, ClientReminder, ClientTask, ClientTaskList,
-    CollaborationCollection, CreateTaskListInput, JmapEmail, JmapEmailQuery, JmapEmailSubmission,
+    CollaborationCollection, CollaborationGrantInput, CollaborationResourceKind,
+    CreateTaskListInput, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapThreadQuery, JmapUploadBlob,
-    JournalEntry, MailboxAccountAccess, ReminderQuery, SavedDraftMessage, SenderIdentity,
-    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpdateTaskListInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertJournalEntryInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
+    JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
+    MailboxDelegationGrantInput, ReminderQuery, SavedDraftMessage, SenderDelegationGrantInput,
+    SenderDelegationRight, SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, TaskListGrantInput, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
 };
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 pub(crate) const MAX_JMAP_MAIL_OBJECT_REPLAY_ROWS: u64 = 4096;
+
+#[derive(Debug, Clone)]
+pub struct JmapShareInput {
+    pub owner_account_id: Uuid,
+    pub share_type: String,
+    pub grantee_email: String,
+    pub task_list_id: Option<Uuid>,
+    pub sender_right: Option<String>,
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_delete: bool,
+    pub may_share: bool,
+}
 
 #[allow(async_fn_in_trait)]
 pub trait JmapPushListener: Send {
@@ -63,6 +78,16 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         after_cursor: i64,
         max_rows: u64,
     ) -> Result<Option<Vec<JmapMailObjectChange>>> {
+        let _ = (account_id, data_type, after_cursor, max_rows);
+        Ok(None)
+    }
+    async fn replay_jmap_string_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapStringObjectChange>>> {
         let _ = (account_id, data_type, after_cursor, max_rows);
         Ok(None)
     }
@@ -330,6 +355,61 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         account_id: Uuid,
         query: ReminderQuery,
     ) -> Result<Vec<ClientReminder>>;
+    async fn update_jmap_task_reminder(
+        &self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        let _ = (principal_account_id, task_id, reminder_set, reminder_at);
+        Ok(())
+    }
+    async fn update_jmap_event_reminder(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        let _ = (principal_account_id, event_id, reminder_set, reminder_at);
+        Ok(())
+    }
+    async fn update_jmap_mail_reminder(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let _ = (
+            account_id,
+            message_id,
+            reminder_set,
+            reminder_at,
+            reminder_dismissed_at,
+            audit,
+        );
+        Ok(())
+    }
+    async fn fetch_jmap_shares(&self, account_id: Uuid) -> Result<Vec<Value>> {
+        let _ = account_id;
+        Ok(Vec::new())
+    }
+    async fn upsert_jmap_share(
+        &self,
+        input: JmapShareInput,
+        audit: AuditEntryInput,
+    ) -> Result<Value> {
+        let _ = (input, audit);
+        Ok(Value::Null)
+    }
+    async fn delete_jmap_share(&self, share: Value, audit: AuditEntryInput) -> Result<()> {
+        let _ = (share, audit);
+        Ok(())
+    }
 }
 
 impl JmapPushListener for CanonicalChangeListener {
@@ -393,6 +473,17 @@ impl JmapStore for Storage {
         max_rows: u64,
     ) -> Result<Option<Vec<JmapMailObjectChange>>> {
         self.replay_jmap_object_changes(account_id, data_type, after_cursor, max_rows)
+            .await
+    }
+
+    async fn replay_jmap_string_object_changes(
+        &self,
+        account_id: Uuid,
+        data_type: &str,
+        after_cursor: i64,
+        max_rows: u64,
+    ) -> Result<Option<Vec<JmapStringObjectChange>>> {
+        self.replay_jmap_string_object_changes(account_id, data_type, after_cursor, max_rows)
             .await
     }
 
@@ -860,5 +951,347 @@ impl JmapStore for Storage {
         query: ReminderQuery,
     ) -> Result<Vec<ClientReminder>> {
         self.query_client_reminders(account_id, query).await
+    }
+
+    async fn update_jmap_task_reminder(
+        &self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        self.update_accessible_task_reminder(
+            principal_account_id,
+            task_id,
+            reminder_set,
+            reminder_at,
+        )
+        .await
+    }
+
+    async fn update_jmap_event_reminder(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        self.update_accessible_event_reminder(
+            principal_account_id,
+            event_id,
+            reminder_set,
+            reminder_at,
+        )
+        .await
+    }
+
+    async fn update_jmap_mail_reminder(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        self.update_jmap_email_followup_flags(
+            account_id,
+            message_id,
+            JmapEmailFollowupUpdate {
+                reminder_set,
+                reminder_at,
+                reminder_dismissed_at,
+                ..Default::default()
+            },
+            audit,
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn fetch_jmap_shares(&self, account_id: Uuid) -> Result<Vec<Value>> {
+        let mut shares = Vec::new();
+        for grant in self
+            .fetch_outgoing_mailbox_delegation_grants(account_id)
+            .await?
+        {
+            shares.push(project_share("mailbox", serde_json::to_value(grant)?)?);
+        }
+        for grant in self
+            .fetch_outgoing_sender_delegation_grants(account_id)
+            .await?
+        {
+            shares.push(project_share("sender", serde_json::to_value(grant)?)?);
+        }
+        for kind in [
+            lpe_storage::CollaborationResourceKind::Contacts,
+            lpe_storage::CollaborationResourceKind::Calendar,
+            lpe_storage::CollaborationResourceKind::Tasks,
+        ] {
+            let share_type = kind.as_str();
+            for grant in self
+                .fetch_outgoing_collaboration_grants(account_id, kind)
+                .await?
+            {
+                shares.push(project_share(share_type, serde_json::to_value(grant)?)?);
+            }
+        }
+        for grant in self.fetch_outgoing_task_list_grants(account_id).await? {
+            shares.push(project_share("taskList", serde_json::to_value(grant)?)?);
+        }
+        Ok(shares)
+    }
+
+    async fn upsert_jmap_share(
+        &self,
+        input: JmapShareInput,
+        audit: AuditEntryInput,
+    ) -> Result<Value> {
+        let share_type = input.share_type.as_str();
+        let value = match share_type {
+            "mailbox" => serde_json::to_value(
+                self.upsert_mailbox_delegation_grant(
+                    MailboxDelegationGrantInput {
+                        owner_account_id: input.owner_account_id,
+                        grantee_email: input.grantee_email,
+                        may_write: input.may_write,
+                    },
+                    audit,
+                )
+                .await?,
+            )?,
+            "sender" => serde_json::to_value(
+                self.upsert_sender_delegation_grant(
+                    SenderDelegationGrantInput {
+                        owner_account_id: input.owner_account_id,
+                        grantee_email: input.grantee_email,
+                        sender_right: parse_sender_right(input.sender_right.as_deref())?,
+                    },
+                    audit,
+                )
+                .await?,
+            )?,
+            "contacts" | "calendar" | "tasks" => serde_json::to_value(
+                self.upsert_collaboration_grant(
+                    CollaborationGrantInput {
+                        kind: parse_collaboration_kind(share_type)?,
+                        owner_account_id: input.owner_account_id,
+                        grantee_email: input.grantee_email,
+                        may_read: input.may_read,
+                        may_write: input.may_write,
+                        may_delete: input.may_delete,
+                        may_share: input.may_share,
+                    },
+                    audit,
+                )
+                .await?,
+            )?,
+            "taskList" => serde_json::to_value(
+                self.upsert_task_list_grant(
+                    TaskListGrantInput {
+                        owner_account_id: input.owner_account_id,
+                        task_list_id: input
+                            .task_list_id
+                            .ok_or_else(|| anyhow::anyhow!("taskListId is required"))?,
+                        grantee_email: input.grantee_email,
+                        may_read: input.may_read,
+                        may_write: input.may_write,
+                        may_delete: input.may_delete,
+                        may_share: input.may_share,
+                    },
+                    audit,
+                )
+                .await?,
+            )?,
+            _ => anyhow::bail!("unsupported share type"),
+        };
+        project_share(share_type, value)
+    }
+
+    async fn delete_jmap_share(&self, share: Value, audit: AuditEntryInput) -> Result<()> {
+        let share_type = share_type(&share)?;
+        let owner_account_id = share_uuid(&share, "ownerAccountId")?;
+        let grantee_account_id = share_uuid(&share, "granteeAccountId")?;
+        match share_type {
+            "mailbox" => {
+                self.delete_mailbox_delegation_grant(owner_account_id, grantee_account_id, audit)
+                    .await
+            }
+            "sender" => {
+                self.delete_sender_delegation_grant(
+                    owner_account_id,
+                    grantee_account_id,
+                    parse_sender_right(share.get("senderRight").and_then(Value::as_str))?,
+                    audit,
+                )
+                .await
+            }
+            "contacts" | "calendar" | "tasks" => {
+                self.delete_collaboration_grant(
+                    owner_account_id,
+                    parse_collaboration_kind(share_type)?,
+                    grantee_account_id,
+                    audit,
+                )
+                .await
+            }
+            "taskList" => {
+                self.delete_task_list_grant(
+                    owner_account_id,
+                    share_uuid(&share, "taskListId")?,
+                    grantee_account_id,
+                    audit,
+                )
+                .await
+            }
+            _ => anyhow::bail!("unsupported share type"),
+        }
+    }
+}
+
+fn project_share(share_type: &str, value: Value) -> Result<Value> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("share projection must be an object"))?;
+    let grant_id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("share projection is missing id"))?
+        .to_string();
+    let mut projected = Map::new();
+    projected.insert(
+        "id".to_string(),
+        Value::String(format!("{share_type}:{grant_id}")),
+    );
+    projected.insert("@type".to_string(), Value::String("Share".to_string()));
+    projected.insert("type".to_string(), Value::String(share_type.to_string()));
+    projected.insert("grantId".to_string(), Value::String(grant_id));
+    copy_share_field(object, &mut projected, "ownerAccountId");
+    copy_share_field(object, &mut projected, "ownerEmail");
+    copy_share_field(object, &mut projected, "ownerDisplayName");
+    copy_share_field(object, &mut projected, "granteeAccountId");
+    copy_share_field(object, &mut projected, "granteeEmail");
+    copy_share_field(object, &mut projected, "granteeDisplayName");
+    copy_share_field_as(object, &mut projected, "createdAt", "created");
+    copy_share_field_as(object, &mut projected, "updatedAt", "updated");
+    match share_type {
+        "mailbox" => {
+            projected.insert(
+                "rights".to_string(),
+                json!({
+                    "mayRead": true,
+                    "mayWrite": object.get("mayWrite").and_then(Value::as_bool).unwrap_or(false),
+                    "mayDelete": false,
+                    "mayShare": false,
+                    "maySend": false
+                }),
+            );
+        }
+        "sender" => {
+            let sender_right = object
+                .get("senderRight")
+                .and_then(Value::as_str)
+                .unwrap_or("send_on_behalf");
+            projected.insert(
+                "senderRight".to_string(),
+                Value::String(sender_right.to_string()),
+            );
+            projected.insert(
+                "rights".to_string(),
+                json!({
+                    "mayRead": false,
+                    "mayWrite": false,
+                    "mayDelete": false,
+                    "mayShare": false,
+                    "maySend": true,
+                    "maySendAs": sender_right == "send_as",
+                    "maySendOnBehalf": sender_right == "send_on_behalf"
+                }),
+            );
+        }
+        "contacts" | "calendar" | "tasks" => {
+            projected.insert(
+                "rights".to_string(),
+                share_rights(object).unwrap_or_else(default_share_rights),
+            );
+        }
+        "taskList" => {
+            copy_share_field(object, &mut projected, "taskListId");
+            copy_share_field(object, &mut projected, "taskListName");
+            projected.insert(
+                "rights".to_string(),
+                share_rights(object).unwrap_or_else(default_share_rights),
+            );
+        }
+        _ => anyhow::bail!("unsupported share type"),
+    }
+    Ok(Value::Object(projected))
+}
+
+fn copy_share_field(source: &Map<String, Value>, target: &mut Map<String, Value>, field: &str) {
+    copy_share_field_as(source, target, field, field);
+}
+
+fn copy_share_field_as(
+    source: &Map<String, Value>,
+    target: &mut Map<String, Value>,
+    source_field: &str,
+    target_field: &str,
+) {
+    if let Some(value) = source.get(source_field).filter(|value| !value.is_null()) {
+        target.insert(target_field.to_string(), value.clone());
+    }
+}
+
+fn share_rights(object: &Map<String, Value>) -> Option<Value> {
+    object.get("rights").cloned().or_else(|| {
+        Some(json!({
+            "mayRead": object.get("mayRead")?.as_bool()?,
+            "mayWrite": object.get("mayWrite").and_then(Value::as_bool).unwrap_or(false),
+            "mayDelete": object.get("mayDelete").and_then(Value::as_bool).unwrap_or(false),
+            "mayShare": object.get("mayShare").and_then(Value::as_bool).unwrap_or(false)
+        }))
+    })
+}
+
+fn default_share_rights() -> Value {
+    json!({
+        "mayRead": true,
+        "mayWrite": false,
+        "mayDelete": false,
+        "mayShare": false
+    })
+}
+
+fn share_type(share: &Value) -> Result<&str> {
+    share
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("share type is required"))
+}
+
+fn share_uuid(share: &Value, field: &str) -> Result<Uuid> {
+    share
+        .get(field)
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("{field} is required"))?
+        .parse()
+        .map_err(Into::into)
+}
+
+fn parse_collaboration_kind(value: &str) -> Result<CollaborationResourceKind> {
+    match value {
+        "contacts" => Ok(CollaborationResourceKind::Contacts),
+        "calendar" => Ok(CollaborationResourceKind::Calendar),
+        "tasks" => Ok(CollaborationResourceKind::Tasks),
+        _ => anyhow::bail!("unsupported collaboration share type"),
+    }
+}
+
+fn parse_sender_right(value: Option<&str>) -> Result<SenderDelegationRight> {
+    match value.unwrap_or("send_on_behalf") {
+        "send_as" => Ok(SenderDelegationRight::SendAs),
+        "send_on_behalf" => Ok(SenderDelegationRight::SendOnBehalf),
+        _ => anyhow::bail!("unsupported sender right"),
     }
 }

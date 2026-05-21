@@ -89,7 +89,7 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "uid TEXT NOT NULL CHECK (btrim(uid) <> '')",
         "sequence INTEGER NOT NULL DEFAULT 0 CHECK (sequence >= 0)",
         "organizer_json JSONB NOT NULL DEFAULT '{}'::jsonb",
-        "attendees_json JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "attendees_json JSONB NOT NULL DEFAULT '{}'::jsonb",
         "recurrence_rule TEXT",
         "recurrence_exceptions_json JSONB NOT NULL DEFAULT '[]'::jsonb",
         "time_zone TEXT NOT NULL DEFAULT ''",

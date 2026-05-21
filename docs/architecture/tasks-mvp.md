@@ -35,7 +35,8 @@
   - `/api/mail/workspace` includes tasks
 - JMAP Tasks:
   - exposes canonical task lists and tasks
-  - supports `TaskList/get`, `TaskList/set`, `Task/get`, `Task/query`, `Task/changes`, `Task/queryChanges`, `Task/set`
+  - supports `TaskList/get`, `TaskList/query`, `TaskList/changes`, `TaskList/queryChanges`, `TaskList/set`, `TaskList/import`, `TaskList/copy`, `Task/get`, `Task/query`, `Task/changes`, `Task/queryChanges`, `Task/set`, `Task/import`, and `Task/copy`
+  - treats `TaskList/import`, `TaskList/copy`, `Task/import`, and `Task/copy` as canonical create-style writes using the same payloads as each object's `set` create branch
   - uses canonical `updated_at` and `sort_order`
 - DAV `VTODO`:
   - exposes task collections at `/dav/calendars/me/tasks-{task-list-id}/`

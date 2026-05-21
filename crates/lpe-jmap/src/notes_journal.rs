@@ -16,7 +16,9 @@ use crate::{
         JournalEntryQueryFilter, JournalEntrySetArguments, NoteGetArguments, NoteQueryArguments,
         NoteQueryFilter, NoteSetArguments, QueryChangesArguments, ReminderQueryArguments,
     },
-    state::{query_changes_response, query_position},
+    state::{
+        encode_query_state, encode_query_state_reference, query_changes_response, query_position,
+    },
     JmapService, DEFAULT_GET_LIMIT, MAX_QUERY_LIMIT,
 };
 
@@ -534,17 +536,42 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .take(limit)
             .map(reminder_to_value)
             .collect::<Vec<_>>();
+        let filter_state =
+            Some(json!({"includeInactive": arguments.include_inactive.unwrap_or(false)}));
+        let cursor = self
+            .store
+            .fetch_jmap_object_change_cursor(account_id, "Reminder")
+            .await?
+            .unwrap_or(0);
+        let query_state = match self
+            .store
+            .save_jmap_query_state(
+                account_id,
+                "Reminder",
+                filter_state.clone(),
+                None,
+                cursor,
+                &all_ids,
+            )
+            .await?
+        {
+            Some(state_id) => encode_query_state_reference(
+                account_id,
+                "Reminder",
+                filter_state.clone(),
+                None,
+                state_id,
+                cursor,
+            )?,
+            None => {
+                encode_query_state(account_id, "Reminder", filter_state.clone(), None, all_ids)?
+            }
+        };
 
         Ok(json!({
             "accountId": account_id.to_string(),
-            "queryState": crate::encode_query_state(
-                account_id,
-                "Reminder",
-                Some(json!({"includeInactive": arguments.include_inactive.unwrap_or(false)})),
-                None,
-                all_ids,
-            )?,
-            "canCalculateChanges": false,
+            "queryState": query_state,
+            "canCalculateChanges": true,
             "position": position,
             "list": list,
             "total": reminders.len(),

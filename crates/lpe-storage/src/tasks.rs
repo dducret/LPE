@@ -907,7 +907,7 @@ impl Storage {
         let row = sqlx::query_as::<_, ClientTaskListRow>(
             r#"
             INSERT INTO task_lists (id, tenant_id, owner_account_id, display_name, role, sort_order)
-            VALUES ($1, $2, $3, $4, NULL, $5)
+            VALUES ($1, $2, $3, $4, 'custom', $5)
             RETURNING
                 id,
                 owner_account_id,

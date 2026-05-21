@@ -21,4 +21,5 @@ tokio-stream.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+sqlx.workspace = true
 

@@ -415,8 +415,8 @@ impl Storage {
                 $12,
                 CASE
                     WHEN NULLIF($14, '') IS NOT NULL THEN $14::jsonb
-                    WHEN NULLIF($13, '') IS NOT NULL THEN jsonb_build_array(jsonb_build_object('email', $13::text))
-                    ELSE '[]'::jsonb
+                    WHEN NULLIF($13, '') IS NOT NULL THEN jsonb_build_object('attendees', jsonb_build_array(jsonb_build_object('email', $13::text)))
+                    ELSE '{}'::jsonb
                 END,
                 $15,
                 jsonb_build_object('attendees', $13::text)

@@ -29,6 +29,40 @@ ALTER TABLE public.calendar_events
   ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS reminder_dismissed_at TIMESTAMPTZ;
 
+DO $$
+DECLARE
+  row RECORD;
+BEGIN
+  FOR row IN
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    WHERE n.nspname = 'public'
+      AND r.relname = 'calendar_events'
+      AND c.contype = 'c'
+      AND pg_get_constraintdef(c.oid) LIKE '%attendees_json%'
+  LOOP
+    EXECUTE format('ALTER TABLE public.calendar_events DROP CONSTRAINT %I', row.conname);
+  END LOOP;
+END $$;
+
+UPDATE public.calendar_events
+SET attendees_json = CASE
+    WHEN attendees_json IS NULL THEN '{}'::jsonb
+    WHEN jsonb_typeof(attendees_json) = 'array' THEN jsonb_build_object('attendees', attendees_json)
+    WHEN jsonb_typeof(attendees_json) = 'object' THEN attendees_json
+    ELSE '{}'::jsonb
+  END;
+
+ALTER TABLE public.calendar_events
+  ALTER COLUMN attendees_json SET DEFAULT '{}'::jsonb,
+  ALTER COLUMN attendees_json SET NOT NULL;
+
+ALTER TABLE public.calendar_events
+  ADD CONSTRAINT calendar_events_attendees_json_object_check
+  CHECK (jsonb_typeof(attendees_json) = 'object');
+
 ALTER TABLE public.tasks
   ADD COLUMN IF NOT EXISTS reminder_set BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
