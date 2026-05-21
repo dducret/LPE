@@ -4441,6 +4441,7 @@ where
                 mapi_mailstore::log_hierarchy_transfer_debug(
                     sync_type,
                     sync_flags,
+                    sync_extra_flags,
                     folder_id,
                     &sync_property_tags,
                     &transfer_buffer,

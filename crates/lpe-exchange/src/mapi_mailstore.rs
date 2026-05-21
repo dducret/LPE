@@ -64,6 +64,7 @@ const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
 const SYNC_TYPE_CONTENTS: u8 = MapiSyncType::Contents.as_u8();
 const SYNC_TYPE_HIERARCHY: u8 = MapiSyncType::Hierarchy.as_u8();
+const SYNC_FLAG_NO_FOREIGN_IDENTIFIERS: u16 = 0x0100;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_END_COMMAND: u8 = 0x00;
@@ -779,6 +780,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
 pub(crate) fn log_hierarchy_transfer_debug(
     sync_type: u8,
     sync_flags: u16,
+    sync_extra_flags: u32,
     folder_id: u64,
     requested_property_tags: &[u32],
     transfer_buffer: &[u8],
@@ -821,6 +823,14 @@ pub(crate) fn log_hierarchy_transfer_debug(
                 "rca debug mapi hierarchy transfer stream"
             );
             log_hierarchy_final_state_debug(sync_type, folder_id, &summary);
+            log_hierarchy_microsoft_payload_comparison(
+                sync_type,
+                sync_flags,
+                sync_extra_flags,
+                folder_id,
+                requested_property_tags,
+                &summary,
+            );
         }
         Err(error) => tracing::warn!(
             rca_debug = true,
@@ -974,6 +984,73 @@ fn log_hierarchy_final_state_debug(
     );
 }
 
+fn log_hierarchy_microsoft_payload_comparison(
+    sync_type: u8,
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    folder_id: u64,
+    requested_property_tags: &[u32],
+    summary: &HierarchyTransferDebugSummary,
+) {
+    let comparison = hierarchy_microsoft_payload_comparison(
+        sync_flags,
+        sync_extra_flags,
+        requested_property_tags,
+        summary,
+    );
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_rop_id = "0x70",
+        sync_type = format_args!("0x{sync_type:02x}"),
+        folder_id = format_args!("0x{folder_id:016x}"),
+        exchange_folder_change_required_missing_row_count =
+            comparison.required_missing_row_names.len(),
+        exchange_folder_change_required_missing_rows =
+            %comparison.required_missing_row_names.join(","),
+        exchange_folder_id_expected_by_eid = comparison.folder_id_expected_by_eid,
+        exchange_folder_id_presence_mismatch_count =
+            comparison.folder_id_presence_mismatch_rows.len(),
+        exchange_folder_id_presence_mismatch_rows =
+            %comparison.folder_id_presence_mismatch_rows.join(","),
+        exchange_parent_folder_id_expected_by_no_foreign_identifiers =
+            comparison.parent_folder_id_expected_by_no_foreign_identifiers,
+        exchange_parent_folder_id_recommended_by_eid =
+            comparison.parent_folder_id_recommended_by_eid,
+        exchange_parent_folder_id_missing_required_count =
+            comparison.parent_folder_id_missing_required_rows.len(),
+        exchange_parent_folder_id_missing_required_rows =
+            %comparison.parent_folder_id_missing_required_rows.join(","),
+        exchange_optional_property_tags = %format_property_tags(&comparison.optional_property_tags),
+        exchange_optional_property_names =
+            %format_property_tag_names(&comparison.optional_property_tags),
+        exchange_requested_excluded_property_present_tags =
+            %format_property_tags(&comparison.requested_excluded_property_present_tags),
+        exchange_requested_excluded_property_present_names =
+            %format_property_tag_names(&comparison.requested_excluded_property_present_tags),
+        exchange_final_state_exact_property_sequence =
+            comparison.final_state_exact_property_sequence,
+        exchange_final_state_missing_property_tags =
+            %format_property_tags(&comparison.final_state_missing_property_tags),
+        exchange_final_state_missing_property_names =
+            %format_property_tag_names(&comparison.final_state_missing_property_tags),
+        exchange_final_state_extra_property_tags =
+            %format_property_tags(&comparison.final_state_extra_property_tags),
+        exchange_final_state_extra_property_names =
+            %format_property_tag_names(&comparison.final_state_extra_property_tags),
+        exchange_final_state_idset_missing_source_counters =
+            %format_counter_list(&comparison.final_state_idset_missing_source_counters),
+        exchange_final_state_idset_extra_source_counters =
+            %format_counter_list(&comparison.final_state_idset_extra_source_counters),
+        exchange_final_state_cnset_missing_change_counters =
+            %format_counter_list(&comparison.final_state_cnset_missing_change_counters),
+        exchange_final_state_cnset_extra_change_counters =
+            %format_counter_list(&comparison.final_state_cnset_extra_change_counters),
+        "rca debug mapi hierarchy microsoft payload comparison"
+    );
+}
+
 fn hierarchy_property_filter_mode(
     sync_flags: u16,
     requested_property_tags: &[u32],
@@ -985,6 +1062,143 @@ fn hierarchy_property_filter_mode(
     } else {
         "only-specified"
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct HierarchyMicrosoftPayloadComparison {
+    required_missing_row_names: Vec<String>,
+    folder_id_expected_by_eid: bool,
+    folder_id_presence_mismatch_rows: Vec<String>,
+    parent_folder_id_expected_by_no_foreign_identifiers: bool,
+    parent_folder_id_recommended_by_eid: bool,
+    parent_folder_id_missing_required_rows: Vec<String>,
+    optional_property_tags: Vec<u32>,
+    requested_excluded_property_present_tags: Vec<u32>,
+    final_state_exact_property_sequence: bool,
+    final_state_missing_property_tags: Vec<u32>,
+    final_state_extra_property_tags: Vec<u32>,
+    final_state_idset_missing_source_counters: Vec<u64>,
+    final_state_idset_extra_source_counters: Vec<u64>,
+    final_state_cnset_missing_change_counters: Vec<u64>,
+    final_state_cnset_extra_change_counters: Vec<u64>,
+}
+
+fn hierarchy_microsoft_payload_comparison(
+    sync_flags: u16,
+    sync_extra_flags: u32,
+    requested_property_tags: &[u32],
+    summary: &HierarchyTransferDebugSummary,
+) -> HierarchyMicrosoftPayloadComparison {
+    let folder_id_expected_by_eid = sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0;
+    let parent_folder_id_expected_by_no_foreign_identifiers =
+        sync_flags & SYNC_FLAG_NO_FOREIGN_IDENTIFIERS != 0;
+    let parent_folder_id_recommended_by_eid = folder_id_expected_by_eid;
+    let required_tags = microsoft_folder_change_required_tags();
+    let mut optional_property_tags = BTreeSet::new();
+    let mut requested_excluded_property_present_tags = BTreeSet::new();
+    let mut required_missing_row_names = Vec::new();
+    let mut folder_id_presence_mismatch_rows = Vec::new();
+    let mut parent_folder_id_missing_required_rows = Vec::new();
+
+    for row in &summary.rows {
+        if !required_tags
+            .iter()
+            .all(|required| row.property_tags.contains(required))
+        {
+            required_missing_row_names.push(row.display_name.clone());
+        }
+
+        if row.property_tags.contains(&PID_TAG_FOLDER_ID) != folder_id_expected_by_eid {
+            folder_id_presence_mismatch_rows.push(row.display_name.clone());
+        }
+
+        if parent_folder_id_expected_by_no_foreign_identifiers
+            && !row.property_tags.contains(&PID_TAG_PARENT_FOLDER_ID)
+        {
+            parent_folder_id_missing_required_rows.push(row.display_name.clone());
+        }
+
+        for tag in &row.property_tags {
+            if !required_tags.contains(tag)
+                && *tag != PID_TAG_FOLDER_ID
+                && *tag != PID_TAG_PARENT_FOLDER_ID
+            {
+                optional_property_tags.insert(*tag);
+            }
+            if requested_property_tags.contains(tag)
+                && hierarchy_property_filter_mode(sync_flags, requested_property_tags) == "exclude"
+            {
+                requested_excluded_property_present_tags.insert(*tag);
+            }
+        }
+    }
+
+    let expected_final_state_tags = [META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN];
+    let final_state_missing_property_tags = expected_final_state_tags
+        .iter()
+        .copied()
+        .filter(|tag| !summary.final_state_property_tags.contains(tag))
+        .collect::<Vec<_>>();
+    let final_state_extra_property_tags = summary
+        .final_state_property_tags
+        .iter()
+        .copied()
+        .filter(|tag| !expected_final_state_tags.contains(tag))
+        .collect::<Vec<_>>();
+    let expected_source_counters = summary
+        .rows
+        .iter()
+        .filter_map(|row| row.source_counter)
+        .collect::<Vec<_>>();
+    let expected_change_counters = summary
+        .rows
+        .iter()
+        .filter_map(|row| row.change_counter)
+        .collect::<Vec<_>>();
+
+    HierarchyMicrosoftPayloadComparison {
+        required_missing_row_names,
+        folder_id_expected_by_eid,
+        folder_id_presence_mismatch_rows,
+        parent_folder_id_expected_by_no_foreign_identifiers,
+        parent_folder_id_recommended_by_eid,
+        parent_folder_id_missing_required_rows,
+        optional_property_tags: optional_property_tags.into_iter().collect(),
+        requested_excluded_property_present_tags: requested_excluded_property_present_tags
+            .into_iter()
+            .collect(),
+        final_state_exact_property_sequence: summary.final_state_property_tags.as_slice()
+            == expected_final_state_tags.as_slice(),
+        final_state_missing_property_tags,
+        final_state_extra_property_tags,
+        final_state_idset_missing_source_counters: counter_difference(
+            &expected_source_counters,
+            &summary.final_state_idset_given_counters,
+        ),
+        final_state_idset_extra_source_counters: counter_difference(
+            &summary.final_state_idset_given_counters,
+            &expected_source_counters,
+        ),
+        final_state_cnset_missing_change_counters: counter_difference(
+            &expected_change_counters,
+            &summary.final_state_cnset_seen_counters,
+        ),
+        final_state_cnset_extra_change_counters: counter_difference(
+            &summary.final_state_cnset_seen_counters,
+            &expected_change_counters,
+        ),
+    }
+}
+
+fn microsoft_folder_change_required_tags() -> [u32; 6] {
+    [
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_DISPLAY_NAME_W,
+    ]
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -3329,6 +3543,81 @@ mod tests {
         assert!(validation.cnset_extra_change_counters.is_empty());
         assert_eq!(validation.top_level_row_names, "Inbox");
         assert!(validation.rows_missing_core_property_names.is_empty());
+    }
+
+    #[test]
+    fn hierarchy_microsoft_payload_comparison_matches_documented_folder_change_rules() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let requested_property_tags = [PID_TAG_CONTENT_COUNT, PID_TAG_CONTENT_UNREAD_COUNT];
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_HIERARCHY,
+            SYNC_FLAG_NO_FOREIGN_IDENTIFIERS,
+            0,
+            &requested_property_tags,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            &[mailbox],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+        let comparison = hierarchy_microsoft_payload_comparison(
+            SYNC_FLAG_NO_FOREIGN_IDENTIFIERS,
+            0,
+            &requested_property_tags,
+            &summary,
+        );
+
+        assert!(comparison.required_missing_row_names.is_empty());
+        assert!(!comparison.folder_id_expected_by_eid);
+        assert!(comparison.folder_id_presence_mismatch_rows.is_empty());
+        assert!(comparison.parent_folder_id_expected_by_no_foreign_identifiers);
+        assert!(!comparison.parent_folder_id_recommended_by_eid);
+        assert!(comparison.parent_folder_id_missing_required_rows.is_empty());
+        assert!(comparison
+            .optional_property_tags
+            .contains(&PID_TAG_CONTAINER_CLASS_W));
+        assert!(comparison
+            .optional_property_tags
+            .contains(&PID_TAG_SUBFOLDERS));
+        assert!(!comparison
+            .optional_property_tags
+            .contains(&PID_TAG_PARENT_SOURCE_KEY));
+        assert!(comparison
+            .requested_excluded_property_present_tags
+            .is_empty());
+        assert!(comparison.final_state_exact_property_sequence);
+        assert!(comparison.final_state_missing_property_tags.is_empty());
+        assert!(comparison.final_state_extra_property_tags.is_empty());
+        assert!(comparison
+            .final_state_idset_missing_source_counters
+            .is_empty());
+        assert!(comparison
+            .final_state_idset_extra_source_counters
+            .is_empty());
+        assert!(comparison
+            .final_state_cnset_missing_change_counters
+            .is_empty());
+        assert!(comparison
+            .final_state_cnset_extra_change_counters
+            .is_empty());
     }
 
     #[test]
