@@ -36,7 +36,7 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 14] = [
     FREEBUSY_DATA_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 26] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 19] = [
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
     OUTBOX_FOLDER_ID,
@@ -44,23 +44,16 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 26] = [
     TRASH_FOLDER_ID,
     CONTACTS_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID,
-    QUICK_CONTACTS_FOLDER_ID,
-    IM_CONTACT_LIST_FOLDER_ID,
-    CONTACTS_SEARCH_FOLDER_ID,
     CALENDAR_FOLDER_ID,
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
-    DOCUMENT_LIBRARIES_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
     CONFLICTS_FOLDER_ID,
     LOCAL_FAILURES_FOLDER_ID,
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    TRACKED_MAIL_PROCESSING_FOLDER_ID,
-    TODO_SEARCH_FOLDER_ID,
-    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
@@ -840,22 +833,12 @@ mod tests {
     fn hierarchy_sync_mailboxes_deduplicate_outlook_special_roles() {
         let roles = [
             ("suggested_contacts", SUGGESTED_CONTACTS_FOLDER_ID),
-            ("quick_contacts", QUICK_CONTACTS_FOLDER_ID),
-            ("im_contact_list", IM_CONTACT_LIST_FOLDER_ID),
-            ("contacts_search", CONTACTS_SEARCH_FOLDER_ID),
-            ("document_libraries", DOCUMENT_LIBRARIES_FOLDER_ID),
             ("sync_issues", SYNC_ISSUES_FOLDER_ID),
             ("conflicts", CONFLICTS_FOLDER_ID),
             ("local_failures", LOCAL_FAILURES_FOLDER_ID),
             ("server_failures", SERVER_FAILURES_FOLDER_ID),
             ("junk", JUNK_FOLDER_ID),
             ("rss_feeds", RSS_FEEDS_FOLDER_ID),
-            ("tracked_mail_processing", TRACKED_MAIL_PROCESSING_FOLDER_ID),
-            ("todo_search", TODO_SEARCH_FOLDER_ID),
-            (
-                "conversation_action_settings",
-                CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
-            ),
             ("archive", ARCHIVE_FOLDER_ID),
             ("conversation_history", CONVERSATION_HISTORY_FOLDER_ID),
         ];
@@ -899,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn ipm_hierarchy_runtime_uses_full_outlook_folder_projection() {
+    fn ipm_hierarchy_runtime_uses_outlook_safe_folder_projection() {
         std::env::set_var("LPE_MAPI_EXPERIMENT_MINIMAL_IPM_HIERARCHY", "1");
         std::env::set_var(
             "LPE_MAPI_EXPERIMENT_IPM_HIERARCHY_GROUPS",

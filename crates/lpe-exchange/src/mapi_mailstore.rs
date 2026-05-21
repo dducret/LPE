@@ -64,7 +64,6 @@ const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
 const SYNC_TYPE_CONTENTS: u8 = MapiSyncType::Contents.as_u8();
 const SYNC_TYPE_HIERARCHY: u8 = MapiSyncType::Hierarchy.as_u8();
-const HIERARCHY_FINAL_STATE_EXPECTED_FOLDER_COUNTER_COUNT: usize = 26;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_END_COMMAND: u8 = 0x00;
@@ -901,8 +900,7 @@ fn log_hierarchy_final_state_debug(
         final_metatag_cnset_seen = %summary.final_state_cnset_seen_summary.as_deref().unwrap_or_default(),
         final_metatag_idset_given_bytes = summary.final_state_idset_given_len,
         final_metatag_cnset_seen_bytes = summary.final_state_cnset_seen_len,
-        final_state_expected_folder_counter_count =
-            HIERARCHY_FINAL_STATE_EXPECTED_FOLDER_COUNTER_COUNT,
+        final_state_expected_folder_counter_count = summary.folder_change_count,
         final_state_folder_change_count = summary.folder_change_count,
         final_metatag_idset_given_counter_count = summary.final_state_idset_given_counters.len(),
         final_metatag_cnset_seen_counter_count = summary.final_state_cnset_seen_counters.len(),
@@ -1173,10 +1171,10 @@ fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDebugSummary)
         .filter_map(|row| row.change_counter)
         .collect::<Vec<_>>();
     summary.final_state_idset_given_includes_all_expected_folder_source_counters =
-        source_counters.len() == HIERARCHY_FINAL_STATE_EXPECTED_FOLDER_COUNTER_COUNT
+        source_counters.len() == summary.folder_change_count
             && counters_include_all(&summary.final_state_idset_given_counters, &source_counters);
     summary.final_state_cnset_seen_includes_all_expected_folder_change_counters =
-        change_counters.len() == HIERARCHY_FINAL_STATE_EXPECTED_FOLDER_COUNTER_COUNT
+        change_counters.len() == summary.folder_change_count
             && counters_include_all(&summary.final_state_cnset_seen_counters, &change_counters);
 }
 
@@ -2919,8 +2917,8 @@ mod tests {
         assert_eq!(summary.final_state_cnset_seen_len, 30);
         assert_eq!(summary.final_state_idset_given_counters, vec![5]);
         assert_eq!(summary.final_state_cnset_seen_counters, vec![42]);
-        assert!(!summary.final_state_idset_given_includes_all_expected_folder_source_counters);
-        assert!(!summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
+        assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
+        assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
         assert_eq!(summary.first_folder_name(), "Inbox");
         assert_eq!(summary.last_folder_name(), "Inbox");
         assert!(summary
@@ -2948,7 +2946,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_transfer_debug_summary_tracks_full_ipm_final_state_counters() {
+    fn hierarchy_transfer_debug_summary_tracks_emitted_ipm_final_state_counters() {
         let folder_ids = [
             crate::mapi::identity::INBOX_FOLDER_ID,
             crate::mapi::identity::DRAFTS_FOLDER_ID,
@@ -2957,26 +2955,20 @@ mod tests {
             crate::mapi::identity::TRASH_FOLDER_ID,
             crate::mapi::identity::CONTACTS_FOLDER_ID,
             crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
-            crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
-            crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
-            crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
             crate::mapi::identity::CALENDAR_FOLDER_ID,
             crate::mapi::identity::JOURNAL_FOLDER_ID,
             crate::mapi::identity::NOTES_FOLDER_ID,
             crate::mapi::identity::TASKS_FOLDER_ID,
-            crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_ID,
             crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
             crate::mapi::identity::CONFLICTS_FOLDER_ID,
             crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
             crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
             crate::mapi::identity::JUNK_FOLDER_ID,
             crate::mapi::identity::RSS_FEEDS_FOLDER_ID,
-            crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID,
-            crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
-            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
             crate::mapi::identity::ARCHIVE_FOLDER_ID,
             crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
         ];
+        let expected_folder_count = folder_ids.len();
         let mailboxes = folder_ids
             .into_iter()
             .map(|folder_id| virtual_special_mailbox(folder_id).expect("virtual folder"))
@@ -2996,11 +2988,8 @@ mod tests {
 
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
 
-        assert_eq!(
-            summary.folder_change_count,
-            HIERARCHY_FINAL_STATE_EXPECTED_FOLDER_COUNTER_COUNT
-        );
-        assert_eq!(summary.zero_length_parent_source_key_count, 23);
+        assert_eq!(summary.folder_change_count, expected_folder_count);
+        assert_eq!(summary.zero_length_parent_source_key_count, 16);
         assert_eq!(summary.nonzero_parent_source_key_count, 3);
         assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
         assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);

@@ -2800,7 +2800,8 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 26;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
+const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 14;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
@@ -15462,7 +15463,7 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
     assert_eq!(response_rops[8], 0x04);
     assert_eq!(
         u32::from_le_bytes(response_rops[14..18].try_into().unwrap()),
-        OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT
+        OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT
     );
     let query_offset = 8 + 10 + 7;
     assert_eq!(response_rops[query_offset], 0x15);
@@ -15472,7 +15473,7 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
                 .try_into()
                 .unwrap()
         ),
-        OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT as u16
+        OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT as u16
     );
 
     for (name, class, folder_id) in [
