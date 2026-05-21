@@ -938,6 +938,40 @@ fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeReque
     }
 }
 
+fn log_set_properties_specific_debug(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    probe: &SetPropertiesProbeRequest,
+) {
+    let root_default_folder_values_stripped = matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        })
+    ) && !probe.default_folder_entry_id_values.is_empty();
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = %rop_id_hex(request.rop_id),
+        input_handle_index = request.input_handle_index().unwrap_or(0),
+        response_handle_index = request.response_handle_index(),
+        object_kind = mapi_object_debug_kind(object),
+        folder_id = %mapi_object_debug_folder_id(object),
+        property_tag_count = probe.property_tags.len(),
+        property_tags = %format_debug_property_tags(&probe.property_tags),
+        property_value_shapes = %probe.property_value_shapes,
+        default_folder_entry_id_values = %probe.default_folder_entry_id_values,
+        root_default_folder_values_stripped = root_default_folder_values_stripped,
+        parse_error = %probe.parse_error,
+        "rca debug mapi set properties specific"
+    );
+}
+
 fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> String {
     values
         .iter()
@@ -1559,6 +1593,15 @@ fn rop_has_no_response(rop_id: u8) -> bool {
 fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static str> {
     if request_rop_ids.contains(&0x70) || request_rop_ids.contains(&0x4E) {
         return Some("hierarchy_sync");
+    }
+    if request_rop_ids
+        .iter()
+        .all(|rop_id| matches!(*rop_id, 0x0A | 0x79))
+        && request_rop_ids
+            .iter()
+            .any(|rop_id| matches!(*rop_id, 0x0A | 0x79))
+    {
+        return Some("setprops");
     }
     if request_rop_ids
         .iter()
@@ -2204,8 +2247,16 @@ where
             }
             Some(RopId::SetProperties | RopId::SetPropertiesNoReplicate) => {
                 echo_input_handle_table = true;
+                let set_properties_object = input_object(session, &handle_slots, &request).cloned();
+                let set_properties_probe = set_properties_probe_request(&request);
+                log_set_properties_specific_debug(
+                    principal,
+                    &request,
+                    set_properties_object.as_ref(),
+                    &set_properties_probe,
+                );
                 let set_result = match request.property_values() {
-                    Ok(values) => match input_object(session, &handle_slots, &request).cloned() {
+                    Ok(values) => match set_properties_object {
                         Some(
                             object @ (MapiObject::Message { .. }
                             | MapiObject::Contact { .. }
@@ -2219,8 +2270,7 @@ where
                             )
                             .await
                         }
-                        Some(MapiObject::Folder { .. }) => {
-                            let object = input_object(session, &handle_slots, &request).cloned();
+                        object @ Some(MapiObject::Folder { .. }) => {
                             let problems = folder_set_property_problems(object.as_ref(), &values);
                             if !problems.is_empty() {
                                 responses.extend_from_slice(&rop_set_properties_problem_response(
@@ -6290,6 +6340,8 @@ mod tests {
             execute_response_framing_context(&[0x02, 0x70, 0x4E]),
             Some("hierarchy_sync")
         );
+        assert_eq!(execute_response_framing_context(&[0x0A]), Some("setprops"));
+        assert_eq!(execute_response_framing_context(&[0x79]), Some("setprops"));
         assert_eq!(execute_response_framing_context(&[0x02, 0x07]), None);
     }
 
