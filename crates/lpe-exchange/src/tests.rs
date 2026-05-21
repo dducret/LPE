@@ -23,7 +23,14 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    mapi::{permissions::MapiFolderPermission, MapiEndpoint},
+    mapi::{
+        permissions::MapiFolderPermission,
+        properties::{
+            MapiNamedProperty, MapiNamedPropertyKind, FIRST_NAMED_PROPERTY_ID,
+            MAX_NAMED_PROPERTY_ID,
+        },
+        MapiEndpoint,
+    },
     mapi_mailstore,
     mapi_store::MapiStore,
     service::{
@@ -34,9 +41,9 @@ use crate::{
     store::{
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
         ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
-        MapiContentTableSortField, MapiIdentityLookupRecord, MapiIdentityObjectKind,
-        MapiIdentityRecord, MapiIdentityRequest, MapiNotificationPoll, MapiSyncChangeSet,
-        MapiSyncCheckpoint,
+        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
+        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
     },
 };
 
@@ -170,6 +177,8 @@ struct FakeStore {
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
+    mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
+    mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
@@ -182,6 +191,27 @@ struct FakeStore {
     omit_principal_from_directory: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
+}
+
+type FakeMapiCustomPropertyKey = (Uuid, MapiCustomPropertyObjectKind, Uuid, u32, u16);
+
+#[derive(Default)]
+struct FakeMapiNamedProperties {
+    by_property: HashMap<(Uuid, MapiNamedProperty), u16>,
+    by_id: HashMap<(Uuid, u16), MapiNamedProperty>,
+}
+
+const FAKE_PS_INTERNET_HEADERS_GUID: [u8; 16] = [
+    0x86, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+
+fn fake_normalize_mapi_named_property(mut property: MapiNamedProperty) -> MapiNamedProperty {
+    if property.guid == FAKE_PS_INTERNET_HEADERS_GUID {
+        if let MapiNamedPropertyKind::Name(name) = property.kind {
+            property.kind = MapiNamedPropertyKind::Name(name.to_ascii_lowercase());
+        }
+    }
+    property
 }
 
 const PID_TAG_BODY_W: u32 = 0x1000_001F;
@@ -622,6 +652,201 @@ impl ExchangeStore for FakeStore {
             })
             .collect::<Vec<_>>();
         Box::pin(async move { Ok(records) })
+    }
+
+    fn fetch_or_allocate_mapi_named_property_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        properties: &'a [MapiNamedProperty],
+        create: bool,
+    ) -> StoreFuture<'a, Vec<Option<MapiNamedPropertyMapping>>> {
+        Box::pin(async move {
+            let mut store = self.mapi_named_properties.lock().unwrap();
+            let mut mappings = Vec::with_capacity(properties.len());
+            for property in properties {
+                let property = fake_normalize_mapi_named_property(property.clone());
+                if let Some(property_id) = store.by_property.get(&(account_id, property.clone())) {
+                    mappings.push(Some(MapiNamedPropertyMapping {
+                        property_id: *property_id,
+                        property,
+                    }));
+                    continue;
+                }
+                if !create {
+                    mappings.push(None);
+                    continue;
+                }
+
+                let mut property_id = FIRST_NAMED_PROPERTY_ID;
+                while store.by_id.contains_key(&(account_id, property_id))
+                    && property_id < MAX_NAMED_PROPERTY_ID
+                {
+                    property_id = property_id.saturating_add(1);
+                }
+                if property_id > MAX_NAMED_PROPERTY_ID
+                    || store.by_id.contains_key(&(account_id, property_id))
+                {
+                    return Err(anyhow::anyhow!("MAPI named property id space exhausted"));
+                }
+                store
+                    .by_property
+                    .insert((account_id, property.clone()), property_id);
+                store
+                    .by_id
+                    .insert((account_id, property_id), property.clone());
+                mappings.push(Some(MapiNamedPropertyMapping {
+                    property_id,
+                    property,
+                }));
+            }
+            Ok(mappings)
+        })
+    }
+
+    fn fetch_mapi_named_properties_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        property_ids: &'a [u16],
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
+        Box::pin(async move {
+            let store = self.mapi_named_properties.lock().unwrap();
+            Ok(property_ids
+                .iter()
+                .filter_map(|property_id| {
+                    store
+                        .by_id
+                        .get(&(account_id, *property_id))
+                        .map(|property| MapiNamedPropertyMapping {
+                            property_id: *property_id,
+                            property: property.clone(),
+                        })
+                })
+                .collect())
+        })
+    }
+
+    fn fetch_mapi_named_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        guid: Option<[u8; 16]>,
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
+        Box::pin(async move {
+            let store = self.mapi_named_properties.lock().unwrap();
+            let mut mappings = store
+                .by_id
+                .iter()
+                .filter_map(|((mapped_account_id, property_id), property)| {
+                    if *mapped_account_id != account_id
+                        || guid.is_some_and(|guid| property.guid != guid)
+                    {
+                        return None;
+                    }
+                    Some(MapiNamedPropertyMapping {
+                        property_id: *property_id,
+                        property: property.clone(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            mappings.sort_by_key(|mapping| mapping.property_id);
+            Ok(mappings)
+        })
+    }
+
+    fn upsert_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        values: &'a [MapiCustomPropertyValue],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let mut stored = self.mapi_custom_property_values.lock().unwrap();
+            for value in values {
+                stored.insert(
+                    (
+                        account_id,
+                        object_kind,
+                        canonical_id,
+                        value.property_tag,
+                        value.property_type,
+                    ),
+                    value.property_value.clone(),
+                );
+            }
+            Ok(())
+        })
+    }
+
+    fn fetch_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>> {
+        Box::pin(async move {
+            let mut values = self
+                .mapi_custom_property_values
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(
+                    |(
+                        (
+                            stored_account_id,
+                            stored_object_kind,
+                            stored_canonical_id,
+                            property_tag,
+                            property_type,
+                        ),
+                        property_value,
+                    )| {
+                        if *stored_account_id == account_id
+                            && *stored_object_kind == object_kind
+                            && *stored_canonical_id == canonical_id
+                            && property_tags.contains(property_tag)
+                        {
+                            Some(MapiCustomPropertyValue {
+                                property_tag: *property_tag,
+                                property_type: *property_type,
+                                property_value: property_value.clone(),
+                            })
+                        } else {
+                            None
+                        }
+                    },
+                )
+                .collect::<Vec<_>>();
+            values.sort_by_key(|value| value.property_tag);
+            Ok(values)
+        })
+    }
+
+    fn delete_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.mapi_custom_property_values.lock().unwrap().retain(
+                |(
+                    stored_account_id,
+                    stored_object_kind,
+                    stored_canonical_id,
+                    property_tag,
+                    _property_type,
+                ),
+                 _property_value| {
+                    !(*stored_account_id == account_id
+                        && *stored_object_kind == object_kind
+                        && *stored_canonical_id == canonical_id
+                        && property_tags.contains(property_tag))
+                },
+            );
+            Ok(())
+        })
     }
 
     fn fetch_mapi_sync_checkpoint<'a>(
@@ -1988,6 +2213,73 @@ impl ExchangeStore for FakeStore {
 
         Box::pin(async move { Ok(submitted) })
     }
+}
+
+#[tokio::test]
+async fn fake_store_custom_property_values_survive_restart_style_clone() {
+    let store = FakeStore::default();
+    let restarted = store.clone();
+    let account_id = FakeStore::account().account_id;
+    let canonical_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let first_tag = 0x8001_001F;
+    let second_tag = 0x8002_0102;
+
+    store
+        .upsert_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Contact,
+            canonical_id,
+            &[
+                MapiCustomPropertyValue {
+                    property_tag: first_tag,
+                    property_type: 0x001F,
+                    property_value: utf16z("persisted custom value"),
+                },
+                MapiCustomPropertyValue {
+                    property_tag: second_tag,
+                    property_type: 0x0102,
+                    property_value: vec![3, 0, 0xAA, 0xBB, 0xCC],
+                },
+            ],
+        )
+        .await
+        .unwrap();
+
+    let fetched = restarted
+        .fetch_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Contact,
+            canonical_id,
+            &[second_tag, first_tag],
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetched.len(), 2);
+    assert_eq!(fetched[0].property_tag, first_tag);
+    assert_eq!(fetched[0].property_value, utf16z("persisted custom value"));
+    assert_eq!(fetched[1].property_tag, second_tag);
+    assert_eq!(fetched[1].property_value, vec![3, 0, 0xAA, 0xBB, 0xCC]);
+
+    restarted
+        .delete_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Contact,
+            canonical_id,
+            &[first_tag],
+        )
+        .await
+        .unwrap();
+    let fetched = store
+        .fetch_mapi_custom_property_values(
+            account_id,
+            MapiCustomPropertyObjectKind::Contact,
+            canonical_id,
+            &[first_tag, second_tag],
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetched.len(), 1);
+    assert_eq!(fetched[0].property_tag, second_tag);
 }
 
 fn bearer_headers() -> HeaderMap {
@@ -4353,6 +4645,103 @@ async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
         .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     assert!(contacts.lock().unwrap().is_empty());
     assert_eq!(deleted_contacts.lock().unwrap().as_slice(), &[contact_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_custom_named_property_round_trips_on_supported_object() {
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            "RCA Contact",
+            "rca@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let custom_tag = 0x8001_001F;
+    let mut custom_values = Vec::new();
+    append_mapi_utf16_property(&mut custom_values, custom_tag, "opaque outlook value");
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &custom_values);
+    append_rop_get_properties_specific(&mut rops, 2, &[custom_tag]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("opaque outlook value")
+    ));
+
+    let mut delete_rops = Vec::new();
+    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut delete_rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    delete_rops.extend_from_slice(&[0x0B, 0x00, 0x02]);
+    delete_rops.extend_from_slice(&1u16.to_le_bytes());
+    delete_rops.extend_from_slice(&custom_tag.to_le_bytes());
+    append_rop_get_properties_specific(&mut delete_rops, 2, &[custom_tag]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0B, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("opaque outlook value")
+    ));
 }
 
 #[tokio::test]
@@ -8967,6 +9356,114 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     assert!(contains_bytes(&response_rops, &utf16z("x-lpe-test")));
     assert!(contains_bytes(
         &response_rops,
+        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x01, 0x80]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_named_property_mapping_survives_restart_style_session() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let ps_internet_headers_guid = FAKE_PS_INTERNET_HEADERS_GUID;
+    let named_header = utf16z("X-LPE-Restart");
+
+    let first_service = ExchangeService::new(store.clone());
+    let first_connect = first_service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let first_cookie = first_connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let mut first_rops = vec![
+        0xFE, 0x00, 0x00, 0x01, // RopLogon
+    ];
+    first_rops.extend_from_slice(&0u32.to_le_bytes());
+    first_rops.extend_from_slice(&0u32.to_le_bytes());
+    first_rops.extend_from_slice(&0u16.to_le_bytes());
+    first_rops.extend_from_slice(&[
+        0x56, 0x00, 0x00, 0x02, // RopGetPropertyIdsFromNames, create missing
+    ]);
+    first_rops.extend_from_slice(&1u16.to_le_bytes());
+    first_rops.push(0x01);
+    first_rops.extend_from_slice(&ps_internet_headers_guid);
+    first_rops.push(named_header.len() as u8);
+    first_rops.extend_from_slice(&named_header);
+
+    let mut first_headers = mapi_headers("Execute");
+    first_headers.insert("cookie", HeaderValue::from_str(&first_cookie).unwrap());
+    let first_response = first_service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &first_headers,
+            &execute_body(&rop_buffer(&first_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let first_response_rops = response_rops_from_execute_response(first_response).await;
+    assert!(contains_bytes(
+        &first_response_rops,
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x01, 0x80]
+    ));
+
+    let restarted_service = ExchangeService::new(store);
+    let restarted_connect = restarted_service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let restarted_cookie = restarted_connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+    let mut restarted_rops = vec![
+        0xFE, 0x00, 0x00, 0x01, // RopLogon
+    ];
+    restarted_rops.extend_from_slice(&0u32.to_le_bytes());
+    restarted_rops.extend_from_slice(&0u32.to_le_bytes());
+    restarted_rops.extend_from_slice(&0u16.to_le_bytes());
+    restarted_rops.extend_from_slice(&[
+        0x55, 0x00, 0x00, // RopGetNamesFromPropertyIds
+    ]);
+    restarted_rops.extend_from_slice(&1u16.to_le_bytes());
+    restarted_rops.extend_from_slice(&0x8001u16.to_le_bytes());
+    restarted_rops.extend_from_slice(&[
+        0x5F, 0x00, 0x00, 0x00, 0x00, // RopQueryNamedProperties
+    ]);
+
+    let mut restarted_headers = mapi_headers("Execute");
+    restarted_headers.insert("cookie", HeaderValue::from_str(&restarted_cookie).unwrap());
+    let restarted_response = restarted_service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &restarted_headers,
+            &execute_body(&rop_buffer(&restarted_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(restarted_response.status(), StatusCode::OK);
+    let restarted_response_rops = response_rops_from_execute_response(restarted_response).await;
+    assert!(contains_bytes(
+        &restarted_response_rops,
+        &utf16z("x-lpe-restart")
+    ));
+    assert!(contains_bytes(
+        &restarted_response_rops,
         &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x01, 0x80]
     ));
 }

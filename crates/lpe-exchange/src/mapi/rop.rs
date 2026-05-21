@@ -621,6 +621,7 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
     response
 }
 
+#[allow(dead_code)]
 pub(in crate::mapi) fn rop_get_properties_specific_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -629,12 +630,33 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
+    rop_get_properties_specific_response_with_custom(
+        request,
+        object,
+        principal,
+        mailboxes,
+        emails,
+        snapshot,
+        &HashMap::new(),
+    )
+}
+
+pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    custom_values: &HashMap<u32, Vec<u8>>,
+) -> Vec<u8> {
     let mut response = vec![0x07, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let columns = request.property_tags();
-    let unsupported_tags = unsupported_specific_property_tags(
+    let mut unsupported_tags = unsupported_specific_property_tags(
         object, principal, mailboxes, emails, snapshot, &columns,
     );
+    unsupported_tags.retain(|tag| !custom_values.contains_key(tag));
     let row = match object {
         Some(MapiObject::Logon) => {
             log_get_properties_specific_debug(
@@ -660,7 +682,7 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
             folder_id,
             message_id,
         }) => {
-            let Some(email) =
+            let Some(_email) =
                 message_for_id(*folder_id, *message_id, mailboxes, emails).or_else(|| {
                     search_folder_message_for_id(snapshot, *folder_id, *message_id)
                         .map(|message| &message.email)
@@ -672,7 +694,15 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
                     0x8004_010F,
                 );
             };
-            serialize_message_row(email, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::PendingMessage { properties, .. }) => {
             serialize_pending_message_row(principal, properties, &columns)
@@ -681,14 +711,22 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
             folder_id,
             contact_id,
         }) => {
-            let Some(contact) = snapshot.contact_for_id(*folder_id, *contact_id) else {
+            let Some(_contact) = snapshot.contact_for_id(*folder_id, *contact_id) else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_contact_row(&contact.contact, contact.id, contact.folder_id, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::PendingContact { properties, .. }) => {
             serialize_pending_contact_row(principal, properties, &columns)
@@ -697,14 +735,22 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
             folder_id,
             event_id,
         }) => {
-            let Some(event) = snapshot.event_for_id(*folder_id, *event_id) else {
+            let Some(_event) = snapshot.event_for_id(*folder_id, *event_id) else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_event_row(&event.event, event.id, event.folder_id, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::PendingEvent { properties, .. }) => {
             serialize_pending_event_row(principal, properties, &columns)
@@ -719,37 +765,61 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
             serialize_pending_journal_entry_row(principal, properties, &columns)
         }
         Some(MapiObject::Task { folder_id, task_id }) => {
-            let Some(task) = snapshot.task_for_id(*folder_id, *task_id) else {
+            let Some(_task) = snapshot.task_for_id(*folder_id, *task_id) else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_task_row(&task.task, task.id, task.folder_id, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::Note { folder_id, note_id }) => {
-            let Some(note) = snapshot.note_for_id(*folder_id, *note_id) else {
+            let Some(_note) = snapshot.note_for_id(*folder_id, *note_id) else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_note_row(&note.note, note.id, note.folder_id, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::JournalEntry {
             folder_id,
             journal_entry_id,
         }) => {
-            let Some(entry) = snapshot.journal_entry_for_id(*folder_id, *journal_entry_id) else {
+            let Some(_entry) = snapshot.journal_entry_for_id(*folder_id, *journal_entry_id) else {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_journal_entry_row(&entry.entry, entry.id, entry.folder_id, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::SearchFolderDefinition { definition_id, .. }) => {
             let Some(message) = snapshot.search_folder_definition_message_for_id(*definition_id)
@@ -839,6 +909,28 @@ pub(in crate::mapi) fn rop_get_properties_specific_response(
         );
     }
     response
+}
+
+fn serialize_object_property_row_with_custom(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+    custom_values: &HashMap<u32, Vec<u8>>,
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for tag in columns {
+        if let Some(value) = custom_values.get(tag) {
+            row.extend_from_slice(value);
+        } else {
+            row.extend_from_slice(&serialize_object_property(
+                object, principal, mailboxes, emails, snapshot, *tag,
+            ));
+        }
+    }
+    row
 }
 
 fn unsupported_specific_property_tags(

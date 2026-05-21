@@ -15,6 +15,7 @@ const TASKS_STORAGE: &str = include_str!("tasks.rs");
 const WORKSPACE_STORAGE: &str = include_str!("workspace.rs");
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
+const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
 const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests.rs");
 const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
@@ -517,7 +518,7 @@ fn mapi_named_properties_and_custom_values_are_durable() {
         "property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295)",
         "property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535)",
         "property_value BYTEA NOT NULL",
-        "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag)",
+        "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag, property_type)",
     ] {
         assert!(
             values.contains(required),
@@ -530,6 +531,29 @@ fn mapi_named_properties_and_custom_values_are_durable() {
         "CREATE UNIQUE INDEX mapi_named_properties_name_idx",
         "CREATE INDEX mapi_custom_property_values_object_idx",
     ]);
+}
+
+#[test]
+fn mapi_property_store_runtime_sql_matches_durable_schema() {
+    assert_source_contains_all(
+        "lpe-exchange store",
+        EXCHANGE_STORE,
+        &[
+            "fn fetch_or_allocate_mapi_named_property_ids",
+            "fn fetch_mapi_named_properties_by_ids",
+            "fn fetch_mapi_named_properties",
+            "FROM mapi_named_properties",
+            "INSERT INTO mapi_named_properties",
+            "is_unique_violation",
+            "fn upsert_mapi_custom_property_values",
+            "fn fetch_mapi_custom_property_values",
+            "fn delete_mapi_custom_property_values",
+            "INSERT INTO mapi_custom_property_values",
+            "ON CONFLICT (\n                        tenant_id,\n                        account_id,\n                        object_kind,\n                        canonical_id,\n                        property_tag,\n                        property_type",
+            "SELECT property_tag, property_type, property_value",
+            "DELETE FROM mapi_custom_property_values",
+        ],
+    );
 }
 
 #[test]

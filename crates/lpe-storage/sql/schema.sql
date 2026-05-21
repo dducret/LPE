@@ -1763,7 +1763,7 @@ CREATE TABLE mapi_custom_property_values (
     property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535),
     property_value BYTEA NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag),
+    PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag, property_type),
     FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 

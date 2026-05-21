@@ -9,7 +9,7 @@ use super::tables::*;
 use super::transport::*;
 use super::wire::RopId;
 use super::*;
-use crate::store::MapiSyncCheckpoint;
+use crate::store::{MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncCheckpoint};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -1082,6 +1082,286 @@ fn mapi_value_debug_shape(value: &MapiValue) -> String {
     }
 }
 
+async fn apply_supported_object_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object: &MapiObject,
+    values: Vec<(u32, MapiValue)>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let (object_kind, canonical_id) =
+        custom_property_object_identity(Some(object), mailboxes, emails, snapshot)
+            .ok_or_else(|| anyhow!("canonical MAPI object was not found"))?;
+    let (canonical_values, custom_values) = split_custom_property_values(values);
+    if !canonical_values.is_empty() {
+        match object {
+            MapiObject::Message {
+                folder_id,
+                message_id,
+            } => {
+                apply_canonical_message_property_values(
+                    store,
+                    principal,
+                    *folder_id,
+                    *message_id,
+                    canonical_values,
+                    mailboxes,
+                    emails,
+                )
+                .await?;
+            }
+            MapiObject::Contact {
+                folder_id,
+                contact_id,
+            } => {
+                apply_canonical_contact_property_values(
+                    store,
+                    principal,
+                    *folder_id,
+                    *contact_id,
+                    canonical_values,
+                    snapshot,
+                )
+                .await?;
+            }
+            MapiObject::Event {
+                folder_id,
+                event_id,
+            } => {
+                apply_canonical_event_property_values(
+                    store,
+                    principal,
+                    *folder_id,
+                    *event_id,
+                    canonical_values,
+                    snapshot,
+                )
+                .await?;
+            }
+            MapiObject::Task { folder_id, task_id } => {
+                apply_canonical_task_property_values(
+                    store,
+                    principal,
+                    *folder_id,
+                    *task_id,
+                    canonical_values,
+                    snapshot,
+                )
+                .await?;
+            }
+            MapiObject::Note { folder_id, note_id } => {
+                apply_canonical_note_property_values(
+                    store,
+                    principal,
+                    *folder_id,
+                    *note_id,
+                    canonical_values,
+                    snapshot,
+                )
+                .await?;
+            }
+            MapiObject::JournalEntry {
+                folder_id,
+                journal_entry_id,
+            } => {
+                apply_canonical_journal_entry_property_values(
+                    store,
+                    principal,
+                    *folder_id,
+                    *journal_entry_id,
+                    canonical_values,
+                    snapshot,
+                )
+                .await?;
+            }
+            _ => return Err(anyhow!("MAPI object does not support property mutation")),
+        }
+    }
+    upsert_custom_property_values(store, principal, object_kind, canonical_id, custom_values).await
+}
+
+fn split_custom_property_values(
+    values: Vec<(u32, MapiValue)>,
+) -> (Vec<(u32, MapiValue)>, Vec<(u32, MapiValue)>) {
+    values
+        .into_iter()
+        .partition(|(tag, _)| !is_custom_property_tag(*tag))
+}
+
+async fn upsert_custom_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object_kind: MapiCustomPropertyObjectKind,
+    canonical_id: Uuid,
+    values: Vec<(u32, MapiValue)>,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    if values.is_empty() {
+        return Ok(());
+    }
+    let values = values
+        .into_iter()
+        .map(|(property_tag, value)| {
+            let mut property_value = Vec::new();
+            write_mapi_value(&mut property_value, property_tag, &value);
+            MapiCustomPropertyValue {
+                property_tag,
+                property_type: MapiPropertyTag::new(property_tag).property_type_code(),
+                property_value,
+            }
+        })
+        .collect::<Vec<_>>();
+    store
+        .upsert_mapi_custom_property_values(
+            principal.account_id,
+            object_kind,
+            canonical_id,
+            &values,
+        )
+        .await
+}
+
+async fn fetch_custom_property_values_for_request<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<HashMap<u32, Vec<u8>>>
+where
+    S: ExchangeStore,
+{
+    let tags = property_tags
+        .iter()
+        .copied()
+        .filter(|tag| is_custom_property_tag(*tag))
+        .collect::<Vec<_>>();
+    if tags.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let Some((object_kind, canonical_id)) =
+        custom_property_object_identity(object, mailboxes, emails, snapshot)
+    else {
+        return Ok(HashMap::new());
+    };
+    Ok(store
+        .fetch_mapi_custom_property_values(principal.account_id, object_kind, canonical_id, &tags)
+        .await?
+        .into_iter()
+        .map(|value| (value.property_tag, value.property_value))
+        .collect())
+}
+
+async fn delete_custom_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let tags = property_tags
+        .iter()
+        .copied()
+        .filter(|tag| is_custom_property_tag(*tag))
+        .collect::<Vec<_>>();
+    if tags.is_empty() {
+        return Ok(());
+    }
+    let Some((object_kind, canonical_id)) =
+        custom_property_object_identity(object, mailboxes, emails, snapshot)
+    else {
+        return Ok(());
+    };
+    store
+        .delete_mapi_custom_property_values(principal.account_id, object_kind, canonical_id, &tags)
+        .await
+}
+
+fn custom_property_object_identity(
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<(MapiCustomPropertyObjectKind, Uuid)> {
+    match object? {
+        MapiObject::Message {
+            folder_id,
+            message_id,
+        } => message_for_id(*folder_id, *message_id, mailboxes, emails)
+            .map(|email| (MapiCustomPropertyObjectKind::Message, email.id)),
+        MapiObject::Contact {
+            folder_id,
+            contact_id,
+        } => snapshot
+            .contact_for_id(*folder_id, *contact_id)
+            .map(|contact| (MapiCustomPropertyObjectKind::Contact, contact.canonical_id)),
+        MapiObject::Event {
+            folder_id,
+            event_id,
+        } => snapshot.event_for_id(*folder_id, *event_id).map(|event| {
+            (
+                MapiCustomPropertyObjectKind::CalendarEvent,
+                event.canonical_id,
+            )
+        }),
+        MapiObject::Task { folder_id, task_id } => snapshot
+            .task_for_id(*folder_id, *task_id)
+            .map(|task| (MapiCustomPropertyObjectKind::Task, task.canonical_id)),
+        MapiObject::Note { folder_id, note_id } => snapshot
+            .note_for_id(*folder_id, *note_id)
+            .map(|note| (MapiCustomPropertyObjectKind::Note, note.canonical_id)),
+        MapiObject::JournalEntry {
+            folder_id,
+            journal_entry_id,
+        } => snapshot
+            .journal_entry_for_id(*folder_id, *journal_entry_id)
+            .map(|entry| {
+                (
+                    MapiCustomPropertyObjectKind::JournalEntry,
+                    entry.canonical_id,
+                )
+            }),
+        _ => None,
+    }
+}
+
+fn is_custom_property_tag(property_tag: u32) -> bool {
+    let tag = MapiPropertyTag::new(property_tag);
+    tag.property_id() >= FIRST_NAMED_PROPERTY_ID
+        && tag.property_type().is_some()
+        && !is_canonical_named_property_tag(property_tag)
+}
+
+fn is_canonical_named_property_tag(property_tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(property_tag),
+        PID_LID_FLAG_REQUEST_W_TAG
+            | PID_LID_TASK_START_DATE_TAG
+            | PID_LID_TASK_DUE_DATE_TAG
+            | PID_LID_REMINDER_SET_TAG
+            | PID_LID_REMINDER_TIME_TAG
+            | PID_LID_REMINDER_SIGNAL_TIME_TAG
+            | PID_LID_NOTE_COLOR_TAG
+            | PID_LID_LOG_TYPE_W_TAG
+            | PID_LID_COMPANIES_TAG
+            | PID_LID_CONTACTS_TAG
+    )
+}
+
 fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'static str {
     match folder_id {
         ROOT_FOLDER_ID => "root",
@@ -1704,13 +1984,26 @@ where
             }
             Some(RopId::GetPropertiesSpecific) => {
                 echo_input_handle_table = true;
-                responses.extend_from_slice(&rop_get_properties_specific_response(
+                let object = input_object(session, &handle_slots, &request);
+                let custom_values = fetch_custom_property_values_for_request(
+                    store,
+                    principal,
+                    object,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    &request.property_tags(),
+                )
+                .await
+                .unwrap_or_default();
+                responses.extend_from_slice(&rop_get_properties_specific_response_with_custom(
                     &request,
-                    input_object(session, &handle_slots, &request),
+                    object,
                     principal,
                     mailboxes,
                     emails,
                     snapshot,
+                    &custom_values,
                 ));
             }
             Some(RopId::GetPropertiesAll) => {
@@ -1733,56 +2026,16 @@ where
                 echo_input_handle_table = true;
                 let set_result = match request.property_values() {
                     Ok(values) => match input_object(session, &handle_slots, &request).cloned() {
-                        Some(MapiObject::Message {
-                            folder_id,
-                            message_id,
-                        }) => {
-                            apply_canonical_message_property_values(
-                                store, principal, folder_id, message_id, values, mailboxes, emails,
-                            )
-                            .await
-                        }
-                        Some(MapiObject::Contact {
-                            folder_id,
-                            contact_id,
-                        }) => {
-                            apply_canonical_contact_property_values(
-                                store, principal, folder_id, contact_id, values, snapshot,
-                            )
-                            .await
-                        }
-                        Some(MapiObject::Event {
-                            folder_id,
-                            event_id,
-                        }) => {
-                            apply_canonical_event_property_values(
-                                store, principal, folder_id, event_id, values, snapshot,
-                            )
-                            .await
-                        }
-                        Some(MapiObject::Task { folder_id, task_id }) => {
-                            apply_canonical_task_property_values(
-                                store, principal, folder_id, task_id, values, snapshot,
-                            )
-                            .await
-                        }
-                        Some(MapiObject::Note { folder_id, note_id }) => {
-                            apply_canonical_note_property_values(
-                                store, principal, folder_id, note_id, values, snapshot,
-                            )
-                            .await
-                        }
-                        Some(MapiObject::JournalEntry {
-                            folder_id,
-                            journal_entry_id,
-                        }) => {
-                            apply_canonical_journal_entry_property_values(
-                                store,
-                                principal,
-                                folder_id,
-                                journal_entry_id,
-                                values,
-                                snapshot,
+                        Some(
+                            object @ (MapiObject::Message { .. }
+                            | MapiObject::Contact { .. }
+                            | MapiObject::Event { .. }
+                            | MapiObject::Task { .. }
+                            | MapiObject::Note { .. }
+                            | MapiObject::JournalEntry { .. }),
+                        ) => {
+                            apply_supported_object_property_values(
+                                store, principal, &object, values, mailboxes, emails, snapshot,
                             )
                             .await
                         }
@@ -1820,10 +2073,30 @@ where
             }
             Some(RopId::DeleteProperties | RopId::DeletePropertiesNoReplicate) => {
                 let property_tags = request.property_tags();
-                let delete_result = delete_mapi_properties(
-                    input_object_mut(session, &handle_slots, &request),
+                let object = input_object(session, &handle_slots, &request).cloned();
+                let delete_result = delete_custom_property_values(
+                    store,
+                    principal,
+                    object.as_ref(),
+                    mailboxes,
+                    emails,
+                    snapshot,
                     &property_tags,
-                );
+                )
+                .await
+                .and_then(|_| {
+                    delete_mapi_properties(
+                        input_object_mut(session, &handle_slots, &request),
+                        &property_tags,
+                    )
+                    .or_else(|error| {
+                        if property_tags.iter().all(|tag| is_custom_property_tag(*tag)) {
+                            Ok(())
+                        } else {
+                            Err(error)
+                        }
+                    })
+                });
                 match delete_result {
                     Ok(()) => {
                         responses.extend_from_slice(&rop_delete_properties_response(&request))

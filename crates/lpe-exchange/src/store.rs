@@ -73,6 +73,40 @@ pub(crate) struct MapiNamedPropertyMapping {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum MapiCustomPropertyObjectKind {
+    Message,
+    Contact,
+    CalendarEvent,
+    Task,
+    Note,
+    JournalEntry,
+    Attachment,
+}
+
+impl MapiCustomPropertyObjectKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Message => "message",
+            Self::Contact => "contact",
+            Self::CalendarEvent => "calendar_event",
+            Self::Task => "task",
+            Self::Note => "note",
+            Self::JournalEntry => "journal_entry",
+            Self::Attachment => "attachment",
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiCustomPropertyValue {
+    pub(crate) property_tag: u32,
+    pub(crate) property_type: u16,
+    pub(crate) property_value: Vec<u8>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum MapiCheckpointKind {
     Hierarchy,
     Content,
@@ -213,34 +247,46 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         properties: &'a [MapiNamedProperty],
         create: bool,
-    ) -> StoreFuture<'a, Vec<Option<MapiNamedPropertyMapping>>> {
-        Box::pin(async move {
-            let _ = (account_id, properties, create);
-            Ok(Vec::new())
-        })
-    }
+    ) -> StoreFuture<'a, Vec<Option<MapiNamedPropertyMapping>>>;
 
     fn fetch_mapi_named_properties_by_ids<'a>(
         &'a self,
         account_id: Uuid,
         property_ids: &'a [u16],
-    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
-        Box::pin(async move {
-            let _ = (account_id, property_ids);
-            Ok(Vec::new())
-        })
-    }
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>>;
 
     fn fetch_mapi_named_properties<'a>(
         &'a self,
         account_id: Uuid,
         guid: Option<[u8; 16]>,
-    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
-        Box::pin(async move {
-            let _ = (account_id, guid);
-            Ok(Vec::new())
-        })
-    }
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>>;
+
+    #[allow(dead_code)]
+    fn upsert_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        values: &'a [MapiCustomPropertyValue],
+    ) -> StoreFuture<'a, ()>;
+
+    #[allow(dead_code)]
+    fn fetch_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>>;
+
+    #[allow(dead_code)]
+    fn delete_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, ()>;
 
     #[allow(dead_code)]
     fn fetch_mapi_sync_checkpoint<'a>(
@@ -904,40 +950,60 @@ impl ExchangeStore for Storage {
                 return Ok(Vec::new());
             }
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
-            let mut tx = self.pool().begin().await?;
-            let mut mappings = Vec::with_capacity(properties.len());
+            for _attempt in 0..8 {
+                let mut tx = self.pool().begin().await?;
+                let mut mappings = Vec::with_capacity(properties.len());
+                let mut retry = false;
 
-            for property in properties {
-                if let Some(mapping) =
-                    fetch_mapi_named_property_in_tx(&mut tx, tenant_id, account_id, property)
-                        .await?
-                {
-                    mappings.push(Some(mapping));
+                for property in properties {
+                    let property = normalize_mapi_named_property(property.clone());
+                    if let Some(mapping) =
+                        fetch_mapi_named_property_in_tx(&mut tx, tenant_id, account_id, &property)
+                            .await?
+                    {
+                        mappings.push(Some(mapping));
+                        continue;
+                    }
+                    if !create {
+                        mappings.push(None);
+                        continue;
+                    }
+
+                    let property_id =
+                        allocate_next_mapi_named_property_id(&mut tx, tenant_id, account_id)
+                            .await?;
+                    match insert_mapi_named_property_in_tx(
+                        &mut tx,
+                        tenant_id,
+                        account_id,
+                        property_id,
+                        &property,
+                    )
+                    .await
+                    {
+                        Ok(()) => mappings.push(Some(MapiNamedPropertyMapping {
+                            property_id,
+                            property,
+                        })),
+                        Err(error) if is_unique_violation(&error) => {
+                            retry = true;
+                            break;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+
+                if retry {
+                    tx.rollback().await?;
                     continue;
                 }
-                if !create {
-                    mappings.push(None);
-                    continue;
-                }
 
-                let property_id =
-                    allocate_next_mapi_named_property_id(&mut tx, tenant_id, account_id).await?;
-                insert_mapi_named_property_in_tx(
-                    &mut tx,
-                    tenant_id,
-                    account_id,
-                    property_id,
-                    property,
-                )
-                .await?;
-                mappings.push(Some(MapiNamedPropertyMapping {
-                    property_id,
-                    property: property.clone(),
-                }));
+                tx.commit().await?;
+                return Ok(mappings);
             }
-
-            tx.commit().await?;
-            Ok(mappings)
+            Err(anyhow::anyhow!(
+                "MAPI named property allocation conflicted repeatedly"
+            ))
         })
     }
 
@@ -1003,6 +1069,139 @@ impl ExchangeStore for Storage {
             rows.into_iter()
                 .map(mapi_named_property_mapping_from_row)
                 .collect()
+        })
+    }
+
+    fn upsert_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        values: &'a [MapiCustomPropertyValue],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if values.is_empty() {
+                return Ok(());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            for value in values {
+                sqlx::query(
+                    r#"
+                    INSERT INTO mapi_custom_property_values (
+                        tenant_id,
+                        account_id,
+                        object_kind,
+                        canonical_id,
+                        property_tag,
+                        property_type,
+                        property_value
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    ON CONFLICT (
+                        tenant_id,
+                        account_id,
+                        object_kind,
+                        canonical_id,
+                        property_tag,
+                        property_type
+                    )
+                    DO UPDATE SET
+                        property_value = EXCLUDED.property_value,
+                        updated_at = NOW()
+                    "#,
+                )
+                .bind(tenant_id)
+                .bind(account_id)
+                .bind(object_kind.as_str())
+                .bind(canonical_id)
+                .bind(i64::from(value.property_tag))
+                .bind(i32::from(value.property_type))
+                .bind(&value.property_value)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+
+    fn fetch_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, Vec<MapiCustomPropertyValue>> {
+        Box::pin(async move {
+            if property_tags.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let tags = property_tags
+                .iter()
+                .map(|tag| i64::from(*tag))
+                .collect::<Vec<_>>();
+            let rows = sqlx::query(
+                r#"
+                SELECT property_tag, property_type, property_value
+                FROM mapi_custom_property_values
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND object_kind = $3
+                  AND canonical_id = $4
+                  AND property_tag = ANY($5)
+                ORDER BY property_tag, property_type
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(object_kind.as_str())
+            .bind(canonical_id)
+            .bind(&tags)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_custom_property_value_from_row)
+                .collect()
+        })
+    }
+
+    fn delete_mapi_custom_property_values<'a>(
+        &'a self,
+        account_id: Uuid,
+        object_kind: MapiCustomPropertyObjectKind,
+        canonical_id: Uuid,
+        property_tags: &'a [u32],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if property_tags.is_empty() {
+                return Ok(());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let tags = property_tags
+                .iter()
+                .map(|tag| i64::from(*tag))
+                .collect::<Vec<_>>();
+            sqlx::query(
+                r#"
+                DELETE FROM mapi_custom_property_values
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND object_kind = $3
+                  AND canonical_id = $4
+                  AND property_tag = ANY($5)
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(object_kind.as_str())
+            .bind(canonical_id)
+            .bind(&tags)
+            .execute(self.pool())
+            .await?;
+            Ok(())
         })
     }
 
@@ -2429,6 +2628,30 @@ fn mapi_named_property_parts(
     }
 }
 
+const MAPI_PS_INTERNET_HEADERS_GUID: [u8; 16] = [
+    0x86, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+
+fn normalize_mapi_named_property(mut property: MapiNamedProperty) -> MapiNamedProperty {
+    if property.guid == MAPI_PS_INTERNET_HEADERS_GUID {
+        if let MapiNamedPropertyKind::Name(name) = property.kind {
+            property.kind = MapiNamedPropertyKind::Name(name.to_ascii_lowercase());
+        }
+    }
+    property
+}
+
+fn is_unique_violation(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<sqlx::Error>()
+        .and_then(|error| match error {
+            sqlx::Error::Database(database_error) => database_error.code(),
+            _ => None,
+        })
+        .as_deref()
+        == Some("23505")
+}
+
 fn mapi_named_property_mapping_from_row(
     row: sqlx::postgres::PgRow,
 ) -> Result<MapiNamedPropertyMapping> {
@@ -2445,6 +2668,17 @@ fn mapi_named_property_mapping_from_row(
     Ok(MapiNamedPropertyMapping {
         property_id: row.get::<i32, _>("property_id") as u16,
         property: MapiNamedProperty { guid, kind },
+    })
+}
+
+#[allow(dead_code)]
+fn mapi_custom_property_value_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<MapiCustomPropertyValue> {
+    Ok(MapiCustomPropertyValue {
+        property_tag: row.get::<i64, _>("property_tag") as u32,
+        property_type: row.get::<i32, _>("property_type") as u16,
+        property_value: row.get("property_value"),
     })
 }
 
