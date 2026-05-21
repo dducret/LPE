@@ -392,7 +392,9 @@ fn log_execute_rop_debug(
         message = message,
     );
 
-    if endpoint == "emsmdb" && hierarchy_sync_batch_needs_response_framing(&request.ids) {
+    if let Some(response_framing_context) =
+        execute_response_framing_context(&request.ids).filter(|_| endpoint == "emsmdb")
+    {
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -402,6 +404,7 @@ fn log_execute_rop_debug(
             mailbox = %principal.email,
             request_type = "Execute",
             mapi_request_id = request_id,
+            response_framing_context = response_framing_context,
             request_rop_ids = %request.ids_csv,
             response_rop_ids = %response.ids_csv,
             response_rop_results_best_effort = %response.results_csv,
@@ -1553,8 +1556,18 @@ fn rop_has_no_response(rop_id: u8) -> bool {
     matches!(rop_id, 0x01)
 }
 
-fn hierarchy_sync_batch_needs_response_framing(request_rop_ids: &[u8]) -> bool {
-    request_rop_ids.contains(&0x70) || request_rop_ids.contains(&0x4E)
+fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static str> {
+    if request_rop_ids.contains(&0x70) || request_rop_ids.contains(&0x4E) {
+        return Some("hierarchy_sync");
+    }
+    if request_rop_ids
+        .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x07))
+        && request_rop_ids.contains(&0x07)
+    {
+        return Some("getprops_or_release_getprops");
+    }
+    None
 }
 
 fn summarize_response_rop_frame(
@@ -6261,6 +6274,23 @@ mod tests {
             .frames
             .contains("0x4e@36..55:len=19:out=2:rv=0x00000000"));
         assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn execute_response_framing_context_includes_bootstrap_getprops_batches() {
+        assert_eq!(
+            execute_response_framing_context(&[0x07]),
+            Some("getprops_or_release_getprops")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[0x01, 0x07]),
+            Some("getprops_or_release_getprops")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[0x02, 0x70, 0x4E]),
+            Some("hierarchy_sync")
+        );
+        assert_eq!(execute_response_framing_context(&[0x02, 0x07]), None);
     }
 
     #[test]
