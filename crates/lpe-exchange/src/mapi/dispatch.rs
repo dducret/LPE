@@ -831,6 +831,44 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PostHierarchyReleaseDebugEvent {
+    input_handle_index: u8,
+    handle: String,
+    object_kind: String,
+    folder_id: String,
+    remaining_before: usize,
+    remaining_after: usize,
+    logon_before_content_sync: bool,
+}
+
+fn format_post_hierarchy_release_kinds(events: &[PostHierarchyReleaseDebugEvent]) -> String {
+    events
+        .iter()
+        .map(|event| event.object_kind.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_post_hierarchy_release_context(events: &[PostHierarchyReleaseDebugEvent]) -> String {
+    events
+        .iter()
+        .map(|event| {
+            format!(
+                "in={};handle={};kind={};folder={};before={};after={};logon_before_content={}",
+                event.input_handle_index,
+                event.handle,
+                event.object_kind,
+                event.folder_id,
+                event.remaining_before,
+                event.remaining_after,
+                event.logon_before_content_sync
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 async fn folder_properties_for_open<S>(
     _store: &S,
     _principal: &AccountPrincipal,
@@ -1625,6 +1663,7 @@ where
     let mut cursor = Cursor::new(requests);
     let mut responses = Vec::new();
     let mut output_handles = Vec::new();
+    let mut post_hierarchy_release_events = Vec::new();
     let mut echo_input_handle_table = false;
     while cursor.remaining() > 0 {
         let request = match read_rop_request(&mut cursor) {
@@ -1635,29 +1674,35 @@ where
             }
         };
         let typed_request = request.typed();
-        let mut completed_hierarchy_sync_root = None;
+        let mut completed_hierarchy_sync = None;
         let mut content_sync_configure_observed = false;
         match RopId::from_u8(typed_request.rop_id()) {
             Some(RopId::Release) => {
                 let released_object = input_object(session, &handle_slots, &request);
                 if session.hierarchy_sync_completed() {
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        account_id = %principal.account_id,
-                        mailbox = %principal.email,
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        handle = %format_optional_debug_handle(input_handle(&handle_slots, &request)),
-                        object_kind = mapi_object_debug_kind(released_object),
-                        folder_id = %mapi_object_debug_folder_id(released_object),
-                        "rca debug mapi post hierarchy release"
-                    );
+                    let remaining_before = session.handles.len();
+                    post_hierarchy_release_events.push(PostHierarchyReleaseDebugEvent {
+                        input_handle_index: request.input_handle_index().unwrap_or(0),
+                        handle: format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        object_kind: mapi_object_debug_kind(released_object).to_string(),
+                        folder_id: mapi_object_debug_folder_id(released_object),
+                        remaining_before,
+                        remaining_after: remaining_before,
+                        logon_before_content_sync: matches!(
+                            released_object,
+                            Some(MapiObject::Logon)
+                        ) && !session
+                            .post_hierarchy_actions
+                            .content_sync_configure_observed,
+                    });
                 }
                 if matches!(released_object, Some(MapiObject::Logon)) {
                     session.record_logoff_after_hierarchy_completion();
                 }
                 release_handle_slot(session, &mut handle_slots, &request);
+                if let Some(event) = post_hierarchy_release_events.last_mut() {
+                    event.remaining_after = session.handles.len();
+                }
             }
             Some(RopId::OpenFolder) => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
@@ -4490,7 +4535,30 @@ where
                         let response_debug =
                             summarize_fast_transfer_get_buffer_response(&response, completed);
                         if completed && *sync_type == 0x02 {
-                            completed_hierarchy_sync_root = Some(*folder_id);
+                            completed_hierarchy_sync = Some((
+                                *folder_id,
+                                format!(
+                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{}",
+                                    *folder_id,
+                                    checkpoint_kind.as_str(),
+                                    (*mailbox_id)
+                                        .map(|id| id.to_string())
+                                        .unwrap_or_default(),
+                                    *checkpoint_change_sequence,
+                                    *checkpoint_modseq,
+                                    state.len(),
+                                    state_upload_buffer.len(),
+                                    *client_state_uploaded_bytes,
+                                    incremental_transfer_buffer.is_some(),
+                                    requested_buffer_bytes,
+                                    response.len(),
+                                    response_debug.transfer_payload_bytes,
+                                    response_debug.transfer_status,
+                                    completed,
+                                    *transfer_position,
+                                    transfer_buffer.len()
+                                ),
+                            ));
                         }
                         tracing::info!(
                             rca_debug = true,
@@ -5659,8 +5727,8 @@ where
                 request.response_handle_index(),
             )),
         }
-        if let Some(sync_root_folder_id) = completed_hierarchy_sync_root {
-            session.record_completed_hierarchy_sync(sync_root_folder_id);
+        if let Some((sync_root_folder_id, get_buffer_summary)) = completed_hierarchy_sync {
+            session.record_completed_hierarchy_sync(sync_root_folder_id, get_buffer_summary);
         }
         if content_sync_configure_observed {
             session.record_content_sync_configure();
@@ -5668,6 +5736,32 @@ where
         if typed_request.unsupported_is_terminal() {
             break;
         }
+    }
+    if !post_hierarchy_release_events.is_empty() {
+        let post_hierarchy = post_hierarchy_action_summary(session, false);
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = "emsmdb",
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            last_completed_hierarchy_sync_root =
+                %post_hierarchy.last_completed_hierarchy_sync_root,
+            content_sync_started_after_hierarchy =
+                post_hierarchy.content_sync_configure_observed,
+            released_handle_count = post_hierarchy_release_events.len(),
+            released_handle_kinds =
+                %format_post_hierarchy_release_kinds(&post_hierarchy_release_events),
+            released_logon_before_content_sync = post_hierarchy_release_events
+                .iter()
+                .any(|event| event.logon_before_content_sync),
+            remaining_live_handle_count = session.handles.len(),
+            release_context =
+                %format_post_hierarchy_release_context(&post_hierarchy_release_events),
+            "rca debug mapi post hierarchy close reason context"
+        );
     }
     let response_handles =
         response_handle_table(&handle_slots, &output_handles, echo_input_handle_table);

@@ -640,6 +640,8 @@ fn log_mapi_session_disconnect(
             post_hierarchy_summary.disconnect_client_initiated,
         post_hierarchy_last_completed_sync_root =
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
+        post_hierarchy_last_get_buffer_summary =
+            %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         sync_source_summaries = %sync_source_summaries,
         "rca debug mapi session disconnect"
     );
@@ -679,6 +681,8 @@ fn log_mapi_session_disconnect(
                 session.post_hierarchy_actions.logoff_client_initiated,
             post_hierarchy_last_completed_sync_root =
                 %post_hierarchy_summary.last_completed_hierarchy_sync_root,
+            post_hierarchy_last_get_buffer_summary =
+                %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
             sync_source_summaries = %sync_source_summaries,
             "rca debug mapi post hierarchy disconnect before content sync"
         );
@@ -694,6 +698,7 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) logoff_client_initiated: bool,
     pub(in crate::mapi) disconnect_client_initiated: bool,
     pub(in crate::mapi) last_completed_hierarchy_sync_root: String,
+    pub(in crate::mapi) last_successful_hierarchy_get_buffer_summary: String,
 }
 
 pub(in crate::mapi) fn post_hierarchy_action_summary(
@@ -713,6 +718,9 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
             .last_completed_hierarchy_sync_root
             .map(|folder_id| format!("0x{folder_id:016x}"))
             .unwrap_or_default(),
+        last_successful_hierarchy_get_buffer_summary: actions
+            .last_successful_hierarchy_get_buffer_summary
+            .clone(),
     }
 }
 
@@ -1610,13 +1618,17 @@ mod tests {
         assert!(!summary.logoff_client_initiated);
         assert!(!summary.disconnect_client_initiated);
         assert_eq!(summary.last_completed_hierarchy_sync_root, "");
+        assert_eq!(summary.last_successful_hierarchy_get_buffer_summary, "");
     }
 
     #[test]
     fn post_hierarchy_action_summary_records_execute_rops_and_client_actions() {
         let mut session = test_session(HashMap::new());
 
-        session.record_completed_hierarchy_sync(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+        session.record_completed_hierarchy_sync(
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "folder=0x0000000000040001;status=0x0003".to_string(),
+        );
         let first = session.record_execute_after_hierarchy_completion(&[0x02, 0x70, 0x4e]);
         let second = session.record_execute_after_hierarchy_completion(&[0x01, 0x70]);
         session.record_content_sync_configure();
@@ -1639,13 +1651,20 @@ mod tests {
             summary.last_completed_hierarchy_sync_root,
             format!("0x{:016x}", crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         );
+        assert_eq!(
+            summary.last_successful_hierarchy_get_buffer_summary,
+            "folder=0x0000000000040001;status=0x0003"
+        );
     }
 
     #[test]
     fn post_hierarchy_observation_logs_first_execute_and_later_first_bootstrap_probe() {
         let mut session = test_session(HashMap::new());
 
-        session.record_completed_hierarchy_sync(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+        session.record_completed_hierarchy_sync(
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "folder=0x0000000000040001;status=0x0003".to_string(),
+        );
         let receive_folder_probe = session.record_execute_after_hierarchy_completion(&[0x01, 0x27]);
         let default_folder_probe = session.record_execute_after_hierarchy_completion(&[0x02, 0x07]);
         let later_default_folder_probe =
