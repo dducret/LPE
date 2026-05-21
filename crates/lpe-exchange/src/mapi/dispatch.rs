@@ -1026,6 +1026,12 @@ fn folder_set_property_problems(
         .enumerate()
         .filter_map(|(index, (tag, value))| {
             let storage_tag = canonical_property_storage_tag(*tag);
+            if *folder_id == IPM_SUBTREE_FOLDER_ID && storage_tag == PID_TAG_OST_OSTID {
+                return match value {
+                    MapiValue::Binary(bytes) if !bytes.is_empty() => None,
+                    _ => Some((index, *tag, 0x8004_0102)),
+                };
+            }
             if *folder_id != ROOT_FOLDER_ID {
                 return Some((index, *tag, 0x8004_0102));
             }
@@ -6343,6 +6349,64 @@ mod tests {
         assert_eq!(execute_response_framing_context(&[0x0A]), Some("setprops"));
         assert_eq!(execute_response_framing_context(&[0x79]), Some("setprops"));
         assert_eq!(execute_response_framing_context(&[0x02, 0x07]), None);
+    }
+
+    #[test]
+    fn folder_set_property_problems_accepts_ipm_subtree_ostid_write() {
+        let ipm_subtree = MapiObject::Folder {
+            folder_id: IPM_SUBTREE_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let inbox = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+
+        assert!(folder_set_property_problems(
+            Some(&ipm_subtree),
+            &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
+        )
+        .is_empty());
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&ipm_subtree),
+                &[(PID_TAG_OST_OSTID, MapiValue::Binary(Vec::new()))],
+            ),
+            vec![(0, PID_TAG_OST_OSTID, 0x8004_0102)]
+        );
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&ipm_subtree),
+                &[(PID_TAG_DISPLAY_NAME_W, MapiValue::String("IPM".to_string()))],
+            ),
+            vec![(0, PID_TAG_DISPLAY_NAME_W, 0x8004_0102)]
+        );
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&inbox),
+                &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
+            ),
+            vec![(0, PID_TAG_OST_OSTID, 0x8004_0102)]
+        );
+    }
+
+    #[test]
+    fn ipm_subtree_ostid_write_is_not_retained_as_mutable_state() {
+        let mut ipm_subtree = MapiObject::Folder {
+            folder_id: IPM_SUBTREE_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+
+        apply_mapi_property_values(
+            Some(&mut ipm_subtree),
+            vec![(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
+        )
+        .unwrap();
+
+        let MapiObject::Folder { properties, .. } = ipm_subtree else {
+            panic!("expected folder object");
+        };
+        assert!(!properties.contains_key(&PID_TAG_OST_OSTID));
     }
 
     #[test]
