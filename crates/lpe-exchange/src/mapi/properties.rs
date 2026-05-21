@@ -369,9 +369,7 @@ const FOLDER_VIEWS_VALID: u32 = 0x0000_0020;
 const FOLDER_COMMON_VIEWS_VALID: u32 = 0x0000_0040;
 
 pub(in crate::mapi) fn reminders_experiment_enabled() -> bool {
-    std::env::var("LPE_MAPI_EXPERIMENT_REMINDERS_ENABLED")
-        .map(|value| matches!(value.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
-        .unwrap_or(false)
+    true
 }
 
 pub(in crate::mapi) fn logon_property_value(
@@ -649,6 +647,7 @@ pub(in crate::mapi) fn search_folder_message_for_id(
         TRACKED_MAIL_PROCESSING_FOLDER_ID => {
             snapshot.tracked_mail_processing_message_for_id(message_id)
         }
+        REMINDERS_FOLDER_ID => snapshot.reminder_message_for_id(message_id),
         _ => None,
     }
 }
@@ -1399,9 +1398,6 @@ pub(in crate::mapi) fn note_named_property_value(
 ) -> Option<MapiValue> {
     match property_tag {
         PID_LID_NOTE_COLOR_TAG => Some(MapiValue::I32(note_color_value(&note.color))),
-        PID_LID_NOTE_HEIGHT_TAG => Some(MapiValue::I32(200)),
-        PID_LID_NOTE_WIDTH_TAG => Some(MapiValue::I32(166)),
-        PID_LID_NOTE_X_TAG | PID_LID_NOTE_Y_TAG => Some(MapiValue::I32(80)),
         _ => None,
     }
 }
@@ -2242,6 +2238,33 @@ pub(in crate::mapi) fn contact_input_from_mapi(
     }
 }
 
+fn reject_unsupported_mapi_contact_properties(properties: &HashMap<u32, MapiValue>) -> Result<()> {
+    for tag in properties.keys() {
+        let supported = matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_GIVEN_NAME_W
+                | PID_TAG_SURNAME_W
+                | PID_TAG_TITLE_W
+                | PID_TAG_SMTP_ADDRESS_W
+                | PID_TAG_EMAIL_ADDRESS_W
+                | PID_TAG_MOBILE_TELEPHONE_NUMBER_W
+                | PID_TAG_BUSINESS_TELEPHONE_NUMBER_W
+                | PID_TAG_HOME_TELEPHONE_NUMBER_W
+                | PID_TAG_COMPANY_NAME_W
+                | PID_TAG_BODY_W
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI contact property {tag:#010X} is outside the canonical contact subset"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(in crate::mapi) fn note_input_from_mapi(
     account_id: Uuid,
     id: Option<Uuid>,
@@ -2270,6 +2293,25 @@ pub(in crate::mapi) fn note_input_from_mapi(
             .to_string(),
         categories_json: existing.categories_json.clone(),
     }
+}
+
+fn reject_unsupported_mapi_note_properties(properties: &HashMap<u32, MapiValue>) -> Result<()> {
+    for tag in properties.keys() {
+        let supported = matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_BODY_W
+                | PID_LID_NOTE_COLOR_TAG
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI note property {tag:#010X} is outside the canonical note subset"
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(in crate::mapi) fn journal_entry_input_from_mapi(
@@ -2334,6 +2376,39 @@ pub(in crate::mapi) fn journal_entry_input_from_mapi(
     }
 }
 
+fn reject_unsupported_mapi_journal_entry_properties(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<()> {
+    for tag in properties.keys() {
+        let supported = matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_BODY_W
+                | PID_TAG_MESSAGE_CLASS_W
+                | PID_TAG_START_DATE
+                | PID_TAG_END_DATE
+                | PID_LID_COMMON_START_TAG
+                | PID_LID_COMMON_END_TAG
+                | PID_LID_LOG_START_TAG
+                | PID_LID_LOG_END_TAG
+                | PID_LID_LOG_TYPE_W_TAG
+                | PID_LID_LOG_TYPE_STRING8_TAG
+                | PID_LID_LOG_TYPE_DESC_W_TAG
+                | PID_LID_LOG_TYPE_DESC_STRING8_TAG
+                | PID_LID_COMPANIES_TAG
+                | PID_LID_CONTACTS_TAG
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI journal property {tag:#010X} is outside the canonical journal subset"
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(in crate::mapi) fn task_input_from_mapi(
     account_id: Uuid,
     id: Option<Uuid>,
@@ -2383,6 +2458,26 @@ pub(in crate::mapi) fn task_input_from_mapi(
         completed_at: existing.completed_at.clone(),
         sort_order: existing.sort_order,
     }
+}
+
+fn reject_unsupported_mapi_task_properties(properties: &HashMap<u32, MapiValue>) -> Result<()> {
+    for tag in properties.keys() {
+        let supported = matches!(
+            canonical_property_storage_tag(*tag),
+            PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_BODY_W
+                | PID_TAG_FLAG_STATUS
+                | PID_TAG_END_DATE
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI task property {tag:#010X} is outside the canonical task subset"
+            ));
+        }
+    }
+    Ok(())
 }
 
 pub(in crate::mapi) fn event_input_from_mapi(
@@ -2928,6 +3023,7 @@ where
         .contact_for_id(folder_id, contact_id)
         .ok_or_else(|| anyhow!("canonical MAPI contact was not found"))?;
     let properties = values.into_iter().collect::<HashMap<_, _>>();
+    reject_unsupported_mapi_contact_properties(&properties)?;
     let input = contact_input_from_mapi(
         principal.account_id,
         Some(contact.canonical_id),
@@ -2982,6 +3078,7 @@ where
         .task_for_id(folder_id, task_id)
         .ok_or_else(|| anyhow!("canonical MAPI task was not found"))?;
     let properties = values.into_iter().collect::<HashMap<_, _>>();
+    reject_unsupported_mapi_task_properties(&properties)?;
     let input = task_input_from_mapi(
         principal.account_id,
         Some(task.canonical_id),
@@ -3010,6 +3107,7 @@ where
         .note_for_id(folder_id, note_id)
         .ok_or_else(|| anyhow!("canonical MAPI note was not found"))?;
     let properties = values.into_iter().collect::<HashMap<_, _>>();
+    reject_unsupported_mapi_note_properties(&properties)?;
     let input = note_input_from_mapi(
         principal.account_id,
         Some(note.canonical_id),
@@ -3035,6 +3133,7 @@ where
         .journal_entry_for_id(folder_id, journal_entry_id)
         .ok_or_else(|| anyhow!("canonical MAPI journal entry was not found"))?;
     let properties = values.into_iter().collect::<HashMap<_, _>>();
+    reject_unsupported_mapi_journal_entry_properties(&properties)?;
     let input = journal_entry_input_from_mapi(
         principal.account_id,
         Some(entry.canonical_id),

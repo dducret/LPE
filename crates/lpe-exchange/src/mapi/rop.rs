@@ -989,6 +989,15 @@ fn property_is_unsupported_for_object(
     if MapiPropertyTag::new(tag).property_type().is_none() {
         return true;
     }
+    if matches!(
+        object,
+        Some(MapiObject::Note { .. } | MapiObject::PendingNote { .. })
+    ) && matches!(
+        canonical_property_storage_tag(tag),
+        PID_LID_NOTE_HEIGHT_TAG | PID_LID_NOTE_WIDTH_TAG | PID_LID_NOTE_X_TAG | PID_LID_NOTE_Y_TAG
+    ) {
+        return true;
+    }
     matches!(object, Some(MapiObject::Logon)) && logon_property_value(principal, tag).is_none()
 }
 
@@ -4595,7 +4604,6 @@ mod tests {
             next_handle: 1,
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
-            root_default_folder_properties: HashMap::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,

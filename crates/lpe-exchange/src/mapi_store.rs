@@ -626,6 +626,12 @@ impl MapiMailStoreSnapshot {
             .collect()
     }
 
+    pub(crate) fn reminder_message_for_id(&self, message_id: u64) -> Option<&MapiMessage> {
+        self.reminder_messages()
+            .into_iter()
+            .find(|message| message.id == message_id)
+    }
+
     pub(crate) fn reminder_for_source(
         &self,
         source_type: &str,

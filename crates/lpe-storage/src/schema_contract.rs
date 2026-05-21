@@ -375,7 +375,6 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         PROTOCOLS_STORAGE.contains("FROM mail_change_log")
             && PROTOCOLS_STORAGE.contains("fetch_canonical_change_cursor(account_id)")
             && SCHEMA.contains("CREATE TABLE mapi_sync_checkpoints")
-            && SCHEMA.contains("CREATE TABLE mapi_folder_properties")
             && SCHEMA.contains("CREATE TABLE mapi_mailbox_replicas")
             && SCHEMA.contains("CREATE TABLE mapi_object_identities")
             && table_definition("mapi_sync_checkpoints").contains("last_change_sequence"),
@@ -424,22 +423,12 @@ fn mapi_identity_mapping_is_store_backed() {
 }
 
 #[test]
-fn mapi_folder_properties_are_store_backed() {
-    let properties = table_definition("mapi_folder_properties");
-    for required in [
-        "folder_id BIGINT NOT NULL CHECK (folder_id > 0)",
-        "property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295)",
-        "property_value BYTEA NOT NULL",
-        "PRIMARY KEY (tenant_id, account_id, folder_id, property_tag)",
-        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
-    ] {
-        assert!(
-            properties.contains(required),
-            "mapi_folder_properties must persist Outlook-set folder props: {required}"
-        );
-    }
-
-    assert_schema_contains_all(&["CREATE INDEX mapi_folder_properties_folder_idx"]);
+fn mapi_folder_properties_are_not_protocol_local_state() {
+    assert!(
+        !SCHEMA.contains("CREATE TABLE mapi_folder_properties")
+            && !SCHEMA.contains("mapi_folder_properties_folder_idx"),
+        "folder MAPI properties must be canonical/computed projections, not protocol-local storage"
+    );
 }
 
 #[test]

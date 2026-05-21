@@ -30,6 +30,12 @@ pub(in crate::mapi) fn folder_message_count(
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return folder.item_count;
     }
+    if folder_id == REMINDERS_FOLDER_ID {
+        let count = snapshot.reminder_events().len()
+            + snapshot.reminder_tasks().len()
+            + snapshot.reminder_messages().len();
+        return count.min(u32::MAX as usize) as u32;
+    }
     folder_row_for_id(folder_id, mailboxes)
         .map(|mailbox| mailbox.total_emails)
         .unwrap_or_else(|| emails_for_folder(folder_id, mailboxes, emails).len() as u32)
@@ -458,6 +464,28 @@ pub(in crate::mapi) fn default_task_property_tags() -> Vec<u32> {
     ]
 }
 
+pub(in crate::mapi) fn default_reminder_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_ACCESS,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+    ]
+}
+
 pub(in crate::mapi) fn default_note_property_tags() -> Vec<u32> {
     vec![
         PID_TAG_MID,
@@ -866,7 +894,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
                     None if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID => {
                         default_message_property_tags()
                     }
-                    None if *folder_id == REMINDERS_FOLDER_ID => default_message_property_tags(),
+                    None if *folder_id == REMINDERS_FOLDER_ID => default_reminder_property_tags(),
                     None if *folder_id == NOTES_FOLDER_ID => default_note_property_tags(),
                     None if *folder_id == JOURNAL_FOLDER_ID => {
                         default_journal_entry_property_tags()

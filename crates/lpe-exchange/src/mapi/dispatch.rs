@@ -9,7 +9,7 @@ use super::tables::*;
 use super::transport::*;
 use super::wire::RopId;
 use super::*;
-use crate::store::{MapiFolderPropertyValue, MapiSyncCheckpoint};
+use crate::store::MapiSyncCheckpoint;
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -832,147 +832,15 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
 }
 
 async fn folder_properties_for_open<S>(
-    store: &S,
-    principal: &AccountPrincipal,
-    session: &MapiSession,
-    folder_id: u64,
+    _store: &S,
+    _principal: &AccountPrincipal,
+    _session: &MapiSession,
+    _folder_id: u64,
 ) -> HashMap<u32, MapiValue>
 where
     S: ExchangeStore,
 {
-    let mut properties = HashMap::new();
-    match store
-        .fetch_mapi_folder_properties(principal.account_id, &[folder_id])
-        .await
-    {
-        Ok(records) => {
-            for record in records {
-                if record.folder_id == folder_id {
-                    let mut cursor = Cursor::new(&record.value_bytes);
-                    match parse_mapi_property_value(&mut cursor, record.property_tag) {
-                        Ok(value) => {
-                            if folder_id == ROOT_FOLDER_ID
-                                && is_default_folder_identification_property_tag(
-                                    record.property_tag,
-                                )
-                            {
-                                continue;
-                            }
-                            properties.insert(record.property_tag, value);
-                        }
-                        Err(error) => tracing::warn!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            account_id = %principal.account_id,
-                            mailbox = %principal.email,
-                            folder_id = %format!("{folder_id:#018x}"),
-                            property_tag = %format!("{:#010x}", record.property_tag),
-                            error = %error,
-                            "rca debug mapi folder property hydrate parse failed"
-                        ),
-                    }
-                }
-            }
-        }
-        Err(error) => tracing::warn!(
-            rca_debug = true,
-            adapter = "mapi",
-            endpoint = "emsmdb",
-            account_id = %principal.account_id,
-            mailbox = %principal.email,
-            folder_id = %format!("{folder_id:#018x}"),
-            error = %error,
-            "rca debug mapi folder property hydrate failed"
-        ),
-    }
-    if folder_id == ROOT_FOLDER_ID {
-        properties.extend(session.root_default_folder_properties.clone());
-    }
-    properties
-}
-
-fn mapi_folder_property_values(
-    folder_id: u64,
-    values: &[(u32, MapiValue)],
-) -> Vec<MapiFolderPropertyValue> {
-    values
-        .iter()
-        .filter_map(|(tag, value)| {
-            let property_tag = canonical_property_storage_tag(*tag);
-            if folder_id == IPM_SUBTREE_FOLDER_ID && property_tag == PID_TAG_OST_OSTID {
-                return None;
-            }
-            if folder_id == ROOT_FOLDER_ID
-                && is_default_folder_identification_property_tag(property_tag)
-            {
-                return None;
-            }
-            let mut value_bytes = Vec::new();
-            write_mapi_value(&mut value_bytes, property_tag, value);
-            Some(MapiFolderPropertyValue {
-                folder_id,
-                property_tag,
-                value_bytes,
-            })
-        })
-        .collect()
-}
-
-fn mapi_folder_property_tags(property_tags: &[u32]) -> Vec<u32> {
-    property_tags
-        .iter()
-        .flat_map(|tag| [*tag, canonical_property_storage_tag(*tag)])
-        .collect()
-}
-
-fn remember_root_default_folder_properties(
-    session: &mut MapiSession,
-    object: Option<&MapiObject>,
-    values: &[(u32, MapiValue)],
-) {
-    if !matches!(
-        object,
-        Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            ..
-        })
-    ) {
-        return;
-    }
-    for (tag, value) in values {
-        let storage_tag = canonical_property_storage_tag(*tag);
-        if storage_tag == PID_TAG_REM_ONLINE_ENTRY_ID && !reminders_experiment_enabled() {
-            continue;
-        }
-        if is_default_folder_identification_property_tag(storage_tag) {
-            session
-                .root_default_folder_properties
-                .insert(storage_tag, value.clone());
-        }
-    }
-}
-
-fn forget_root_default_folder_properties(
-    session: &mut MapiSession,
-    object: Option<&MapiObject>,
-    property_tags: &[u32],
-) {
-    if !matches!(
-        object,
-        Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            ..
-        })
-    ) {
-        return;
-    }
-    for tag in property_tags {
-        let storage_tag = canonical_property_storage_tag(*tag);
-        if is_default_folder_identification_property_tag(storage_tag) {
-            session.root_default_folder_properties.remove(&storage_tag);
-        }
-    }
+    HashMap::new()
 }
 
 fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeRequest {
@@ -1040,25 +908,28 @@ fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
     }
 }
 
-fn root_default_folder_set_property_problems(
+fn folder_set_property_problems(
     object: Option<&MapiObject>,
     values: &[(u32, MapiValue)],
 ) -> Vec<(usize, u32, u32)> {
-    if !matches!(
-        object,
-        Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            ..
-        })
-    ) {
+    let Some(MapiObject::Folder { folder_id, .. }) = object else {
         return Vec::new();
-    }
+    };
     values
         .iter()
         .enumerate()
         .filter_map(|(index, (tag, value))| {
             let storage_tag = canonical_property_storage_tag(*tag);
-            let expected_folder_id = default_folder_entry_id_expected_folder_id(storage_tag)?;
+            if *folder_id != ROOT_FOLDER_ID {
+                return Some((index, *tag, 0x8004_0102));
+            }
+            if !is_default_folder_identification_property_tag(storage_tag) {
+                return Some((index, *tag, 0x8004_0102));
+            }
+            let Some(expected_folder_id) = default_folder_entry_id_expected_folder_id(storage_tag)
+            else {
+                return Some((index, *tag, 0x8004_0102));
+            };
             let MapiValue::Binary(bytes) = value else {
                 return Some((index, *tag, 0x8004_0102));
             };
@@ -1510,14 +1381,6 @@ where
             }
             Some(RopId::OpenFolder) => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
-                if folder_id == REMINDERS_FOLDER_ID && !reminders_experiment_enabled() {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x02,
-                        request.output_handle_index.unwrap_or(0),
-                        0x8004_010F,
-                    ));
-                    continue;
-                }
                 if folder_row_for_id(folder_id, mailboxes).is_none()
                     && snapshot.collaboration_folder_for_id(folder_id).is_none()
                     && !is_advertised_special_folder(folder_id)
@@ -1560,28 +1423,13 @@ where
                         message_recipients(email).len(),
                     ));
                     output_handles.push(handle);
-                } else if let Some(message) = snapshot.todo_search_message_for_id(message_id) {
-                    let handle = session.allocate_output_handle(
-                        request.output_handle_index,
-                        MapiObject::Message {
-                            folder_id: TODO_SEARCH_FOLDER_ID,
-                            message_id,
-                        },
-                    );
-                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_open_message_response(
-                        &request,
-                        &message.email.subject,
-                        message_recipients(&message.email).len(),
-                    ));
-                    output_handles.push(handle);
                 } else if let Some(message) =
-                    snapshot.tracked_mail_processing_message_for_id(message_id)
+                    search_folder_message_for_id(snapshot, folder_id, message_id)
                 {
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
                         MapiObject::Message {
-                            folder_id: TRACKED_MAIL_PROCESSING_FOLDER_ID,
+                            folder_id,
                             message_id,
                         },
                     );
@@ -1938,10 +1786,9 @@ where
                             )
                             .await
                         }
-                        Some(MapiObject::Folder { folder_id, .. }) => {
+                        Some(MapiObject::Folder { .. }) => {
                             let object = input_object(session, &handle_slots, &request).cloned();
-                            let problems =
-                                root_default_folder_set_property_problems(object.as_ref(), &values);
+                            let problems = folder_set_property_problems(object.as_ref(), &values);
                             if !problems.is_empty() {
                                 responses.extend_from_slice(&rop_set_properties_problem_response(
                                     &request, &problems,
@@ -1950,49 +1797,15 @@ where
                             }
                             let values =
                                 root_default_folder_safe_property_values(object.as_ref(), values);
-                            let stored_values = mapi_folder_property_values(folder_id, &values);
-                            if let Err(error) = store
-                                .store_mapi_folder_properties(principal.account_id, &stored_values)
-                                .await
-                            {
-                                tracing::warn!(
-                                    rca_debug = true,
-                                    adapter = "mapi",
-                                    endpoint = "emsmdb",
-                                    account_id = %principal.account_id,
-                                    mailbox = %principal.email,
-                                    folder_id = %format!("{folder_id:#018x}"),
-                                    property_tags = %format_debug_property_tags(
-                                        &stored_values
-                                            .iter()
-                                            .map(|value| value.property_tag)
-                                            .collect::<Vec<_>>()
-                                    ),
-                                    error = %error,
-                                    "rca debug mapi folder property persist failed"
-                                );
-                            }
-                            remember_root_default_folder_properties(
-                                session,
-                                object.as_ref(),
-                                &values,
-                            );
                             apply_mapi_property_values(
                                 input_object_mut(session, &handle_slots, &request),
                                 values,
                             )
                         }
-                        object => {
-                            remember_root_default_folder_properties(
-                                session,
-                                object.as_ref(),
-                                &values,
-                            );
-                            apply_mapi_property_values(
-                                input_object_mut(session, &handle_slots, &request),
-                                values,
-                            )
-                        }
+                        _object => apply_mapi_property_values(
+                            input_object_mut(session, &handle_slots, &request),
+                            values,
+                        ),
                     },
                     Err(error) => Err(error),
                 };
@@ -2007,45 +1820,10 @@ where
             }
             Some(RopId::DeleteProperties | RopId::DeletePropertiesNoReplicate) => {
                 let property_tags = request.property_tags();
-                let delete_result = match input_object(session, &handle_slots, &request).cloned() {
-                    Some(MapiObject::Folder { folder_id, .. }) => {
-                        let stored_tags = mapi_folder_property_tags(&property_tags);
-                        if let Err(error) = store
-                            .delete_mapi_folder_properties(
-                                principal.account_id,
-                                folder_id,
-                                &stored_tags,
-                            )
-                            .await
-                        {
-                            tracing::warn!(
-                                rca_debug = true,
-                                adapter = "mapi",
-                                endpoint = "emsmdb",
-                                account_id = %principal.account_id,
-                                mailbox = %principal.email,
-                                folder_id = %format!("{folder_id:#018x}"),
-                                property_tags = %format_debug_property_tags(&stored_tags),
-                                error = %error,
-                                "rca debug mapi folder property delete failed"
-                            );
-                        }
-                        let object = input_object(session, &handle_slots, &request).cloned();
-                        forget_root_default_folder_properties(
-                            session,
-                            object.as_ref(),
-                            &property_tags,
-                        );
-                        delete_mapi_properties(
-                            input_object_mut(session, &handle_slots, &request),
-                            &property_tags,
-                        )
-                    }
-                    _ => delete_mapi_properties(
-                        input_object_mut(session, &handle_slots, &request),
-                        &property_tags,
-                    ),
-                };
+                let delete_result = delete_mapi_properties(
+                    input_object_mut(session, &handle_slots, &request),
+                    &property_tags,
+                );
                 match delete_result {
                     Ok(()) => {
                         responses.extend_from_slice(&rop_delete_properties_response(&request))
@@ -5843,28 +5621,10 @@ mod tests {
     }
 
     #[test]
-    fn root_default_folder_setprops_are_reused_by_next_root_getprops() {
-        let mut session = test_emsmdb_session();
-        let root = MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            properties: HashMap::new(),
-        };
-        let client_value = vec![0xAA; 24];
-        let values = vec![
-            (
-                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
-                MapiValue::Binary(client_value),
-            ),
-            (
-                PID_TAG_DISPLAY_NAME_W,
-                MapiValue::String("not-a-root-default-folder-prop".to_string()),
-            ),
-        ];
-
-        remember_root_default_folder_properties(&mut session, Some(&root), &values);
+    fn root_default_folder_getprops_uses_canonical_projection_not_setprops_state() {
         let reopened_root = MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID,
-            properties: session.root_default_folder_properties.clone(),
+            properties: HashMap::new(),
         };
         let request = get_properties_specific_request(&[PID_TAG_IPM_APPOINTMENT_ENTRY_ID]);
         let response = rop_get_properties_specific_response(
@@ -5879,13 +5639,16 @@ mod tests {
         let mut cursor = Cursor::new(&response[7..]);
         assert_eq!(
             parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
-            MapiValue::Binary(vec![0xAA; 24])
+            MapiValue::Binary(
+                long_term_id_from_object_id(CALENDAR_FOLDER_ID)
+                    .unwrap()
+                    .to_vec()
+            )
         );
         let MapiObject::Folder { properties, .. } = &reopened_root else {
             panic!("expected reopened root folder object");
         };
-        assert!(properties.contains_key(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID));
-        assert!(!properties.contains_key(&canonical_property_storage_tag(PID_TAG_DISPLAY_NAME_W)));
+        assert!(properties.is_empty());
     }
 
     #[test]
@@ -5927,29 +5690,6 @@ mod tests {
             .chain(std::iter::once(0))
             .flat_map(u16::to_le_bytes)
             .collect()
-    }
-
-    fn test_emsmdb_session() -> MapiSession {
-        MapiSession {
-            endpoint: MapiEndpoint::Emsmdb,
-            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
-            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
-            email: "alice@example.test".to_string(),
-            last_seen_at: SystemTime::UNIX_EPOCH,
-            next_handle: 1,
-            handles: HashMap::new(),
-            message_statuses: HashMap::new(),
-            root_default_folder_properties: HashMap::new(),
-            named_properties: HashMap::new(),
-            named_property_ids: HashMap::new(),
-            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
-            next_local_replica_sequence: 1,
-            notification_cursor: None,
-            pending_notifications: VecDeque::new(),
-            completed_execute_requests: HashMap::new(),
-            completed_execute_request_order: VecDeque::new(),
-            post_hierarchy_actions: PostHierarchyActionState::default(),
-        }
     }
 
     fn get_properties_specific_request(property_tags: &[u32]) -> RopRequest {

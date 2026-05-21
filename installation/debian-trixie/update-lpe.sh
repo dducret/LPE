@@ -124,6 +124,8 @@ echo "Applying bounded LPE schema compatibility patches..."
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
 
+DROP TABLE IF EXISTS public.mapi_folder_properties;
+
 CREATE TABLE IF NOT EXISTS public.search_folders (
   id UUID PRIMARY KEY,
   tenant_id UUID NOT NULL,
