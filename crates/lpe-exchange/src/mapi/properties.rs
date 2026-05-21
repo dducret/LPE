@@ -380,11 +380,60 @@ pub(in crate::mapi) fn logon_property_value(
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
+        PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON => {
+            Some(MapiValue::Binary(server_status_icon()))
+        }
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(false)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
+}
+
+fn server_status_icon() -> Vec<u8> {
+    const WIDTH: u8 = 16;
+    const HEIGHT: u8 = 16;
+    const PIXEL_BYTES: u32 = WIDTH as u32 * HEIGHT as u32 * 4;
+    const MASK_BYTES: u32 = HEIGHT as u32 * 4;
+    const IMAGE_BYTES: u32 = 40 + PIXEL_BYTES + MASK_BYTES;
+    const IMAGE_OFFSET: u32 = 22;
+
+    let mut value = Vec::with_capacity((IMAGE_OFFSET + IMAGE_BYTES) as usize);
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&[WIDTH, HEIGHT, 0, 0]);
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&32u16.to_le_bytes());
+    value.extend_from_slice(&IMAGE_BYTES.to_le_bytes());
+    value.extend_from_slice(&IMAGE_OFFSET.to_le_bytes());
+
+    value.extend_from_slice(&40u32.to_le_bytes());
+    value.extend_from_slice(&(WIDTH as i32).to_le_bytes());
+    value.extend_from_slice(&((HEIGHT as i32) * 2).to_le_bytes());
+    value.extend_from_slice(&1u16.to_le_bytes());
+    value.extend_from_slice(&32u16.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&PIXEL_BYTES.to_le_bytes());
+    value.extend_from_slice(&0i32.to_le_bytes());
+    value.extend_from_slice(&0i32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            let border = x == 0 || y == 0 || x == WIDTH - 1 || y == HEIGHT - 1;
+            let diagonal = x == y || x + y == WIDTH - 1;
+            let (blue, green, red) = if border || diagonal {
+                (0xFF, 0xFF, 0xFF)
+            } else {
+                (0x76, 0x99, 0x22)
+            };
+            value.extend_from_slice(&[blue, green, red, 0xFF]);
+        }
+    }
+    value.extend(std::iter::repeat_n(0, MASK_BYTES as usize));
+    value
 }
 
 pub(in crate::mapi) fn special_folder_identification_property_value(
@@ -4245,7 +4294,7 @@ mod tests {
     }
 
     #[test]
-    fn logon_flags_server_icon_properties_as_unsupported() {
+    fn logon_returns_bounded_server_icon_payloads() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -4254,7 +4303,20 @@ mod tests {
         };
 
         for tag in [PID_TAG_SERVER_CONNECTED_ICON, PID_TAG_SERVER_ACCOUNT_ICON] {
-            assert_eq!(logon_property_value(&principal, tag), None);
+            let Some(MapiValue::Binary(value)) = logon_property_value(&principal, tag) else {
+                panic!("expected binary icon payload");
+            };
+
+            assert_eq!(&value[0..4], &[0, 0, 1, 0]);
+            assert_eq!(u16::from_le_bytes(value[4..6].try_into().unwrap()), 1);
+            assert_eq!(value[6], 16);
+            assert_eq!(value[7], 16);
+            assert_eq!(u16::from_le_bytes(value[12..14].try_into().unwrap()), 32);
+            assert_eq!(
+                value.len(),
+                u32::from_le_bytes(value[14..18].try_into().unwrap()) as usize
+                    + u32::from_le_bytes(value[18..22].try_into().unwrap()) as usize
+            );
         }
     }
 }
