@@ -22,6 +22,7 @@ const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
+const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
@@ -93,16 +94,18 @@ pub(crate) struct SpecialMessageSyncFact {
     pub(crate) folder_id: u64,
     pub(crate) item_id: u64,
     pub(crate) canonical_id: Uuid,
+    pub(crate) associated: bool,
     pub(crate) subject: String,
     pub(crate) body_text: String,
     pub(crate) message_class: String,
-    pub(crate) updated_at: String,
+    pub(crate) last_modified_filetime: u64,
     pub(crate) message_size: i64,
     pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SpecialMessagePropertyValue {
+    Binary(Vec<u8>),
     I32(i32),
     String(String),
     MultiString(Vec<String>),
@@ -605,6 +608,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         ) {
             write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &email.subject);
         }
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
+            write_utf16_property(&mut buffer, PID_TAG_BODY_W, &email.body_text);
+        }
         if subject_in_scope {
             if sync_type == SYNC_TYPE_CONTENTS && !sync_property_tags.is_empty() {
                 buffer.extend_from_slice(&0u16.to_le_bytes());
@@ -647,10 +653,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             &source_key_for_store_id(object.item_id),
         );
         write_u32(&mut buffer, PID_TAG_LAST_MODIFICATION_TIME);
-        write_i64(
-            &mut buffer,
-            filetime_from_rfc3339_utc(&object.updated_at) as i64,
-        );
+        write_i64(&mut buffer, object.last_modified_filetime as i64);
         write_binary_property(
             &mut buffer,
             PID_TAG_CHANGE_KEY,
@@ -661,7 +664,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             PID_TAG_PREDECESSOR_CHANGE_LIST,
             &predecessor_change_list(change_number),
         );
-        write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, false);
+        write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, object.associated);
         if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
             write_u32(&mut buffer, PID_TAG_MID);
             write_i64(&mut buffer, object.item_id as i64);
@@ -1449,7 +1452,7 @@ fn format_replguid_globset_debug(value: &[u8]) -> String {
     };
 
     let mut offset = 16;
-    let mut ranges = Vec::new();
+    let mut ranges: Vec<(u64, u64)> = Vec::new();
     let mut parse_error = "";
     let mut saw_end = false;
     while offset < value.len() {
@@ -1535,7 +1538,7 @@ fn replguid_globset_counters(value: &[u8]) -> Result<Vec<u64>, String> {
                     .get(offset..offset + 6)
                     .and_then(crate::mapi::identity::global_counter_from_globcnt)
                     .ok_or_else(|| "truncated_or_invalid_range_low".to_string())?;
-                let high = value
+                let high: u64 = value
                     .get(offset + 6..offset + 12)
                     .and_then(crate::mapi::identity::global_counter_from_globcnt)
                     .ok_or_else(|| "truncated_or_invalid_range_high".to_string())?;
@@ -2404,6 +2407,9 @@ fn write_special_message_property(
     value: &SpecialMessagePropertyValue,
 ) {
     match value {
+        SpecialMessagePropertyValue::Binary(value) => {
+            write_binary_property(buffer, property_tag, value)
+        }
         SpecialMessagePropertyValue::I32(value) => write_i32_property(buffer, property_tag, *value),
         SpecialMessagePropertyValue::String(value) => {
             write_utf16_property(buffer, property_tag, value)
@@ -3083,10 +3089,11 @@ mod tests {
             folder_id: crate::mapi::identity::NOTES_FOLDER_ID,
             item_id,
             canonical_id,
+            associated: false,
             subject: "Sticky".to_string(),
             body_text: "Remember this".to_string(),
             message_class: "IPM.StickyNote".to_string(),
-            updated_at: "2026-05-19T10:00:00Z".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 19,
             named_properties: vec![(0x8B00_0003, SpecialMessagePropertyValue::I32(3))],
         };

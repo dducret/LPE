@@ -903,7 +903,7 @@ fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
         PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(JOURNAL_FOLDER_ID),
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
-        PID_TAG_REM_ONLINE_ENTRY_ID if reminders_experiment_enabled() => Some(REMINDERS_FOLDER_ID),
+        PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
         _ => None,
     }
 }

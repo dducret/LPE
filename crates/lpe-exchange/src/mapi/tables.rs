@@ -5,7 +5,7 @@ use super::session::*;
 use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
-use crate::mapi_store::MapiSearchFolderDefinitionMessage;
+use crate::mapi_store::{MapiEvent, MapiMessage, MapiSearchFolderDefinitionMessage, MapiTask};
 
 pub(in crate::mapi) fn hierarchy_row_count(
     folder_id: u64,
@@ -155,6 +155,12 @@ enum HierarchyRow<'a> {
     Mailbox(&'a JmapMailbox),
     Collaboration(&'a MapiCollaborationFolder),
     Special(u64),
+}
+
+enum SearchContentRow<'a> {
+    Event(&'a MapiEvent),
+    Message(&'a MapiMessage),
+    Task(&'a MapiTask),
 }
 
 fn hierarchy_rows<'a>(
@@ -665,20 +671,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     })
                     .collect::<Vec<_>>()
             } else if *folder_id == TODO_SEARCH_FOLDER_ID {
-                let mut message_rows = snapshot.todo_search_messages();
-                message_rows.retain(|message| {
-                    restriction_matches_email(restriction.as_ref(), &message.email)
-                });
-                sort_mapi_messages(&mut message_rows, sort_orders);
-                let mut rows = snapshot.todo_search_results();
-                rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
-                sort_tasks(&mut rows, sort_orders);
-                message_rows
-                    .into_iter()
-                    .map(|message| serialize_message_row(&message.email, &columns))
-                    .chain(rows.into_iter().map(|task| {
-                        serialize_task_row(&task.task, task.id, TODO_SEARCH_FOLDER_ID, &columns)
-                    }))
+                let mut rows = todo_search_content_rows(snapshot, restriction.as_ref());
+                sort_search_content_rows(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|row| serialize_search_content_row(row, snapshot, &columns, false))
                     .collect::<Vec<_>>()
             } else if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
                 let mut rows = snapshot.tracked_mail_processing_messages();
@@ -690,39 +686,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .map(|message| serialize_message_row(&message.email, &columns))
                     .collect::<Vec<_>>()
             } else if *folder_id == REMINDERS_FOLDER_ID {
-                let mut event_rows = snapshot.reminder_events();
-                event_rows
-                    .retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
-                sort_events(&mut event_rows, sort_orders);
-                let mut task_rows = snapshot.reminder_tasks();
-                task_rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
-                sort_tasks(&mut task_rows, sort_orders);
-                let mut message_rows = snapshot.reminder_messages();
-                message_rows.retain(|message| {
-                    restriction_matches_email(restriction.as_ref(), &message.email)
-                });
-                sort_mapi_messages(&mut message_rows, sort_orders);
-                event_rows
-                    .into_iter()
-                    .map(|event| {
-                        serialize_reminder_event_row(
-                            event,
-                            snapshot.reminder_for_source("calendar", event.canonical_id),
-                            &columns,
-                        )
-                    })
-                    .chain(task_rows.into_iter().map(|task| {
-                        serialize_reminder_task_row(
-                            task,
-                            snapshot.reminder_for_source("task", task.canonical_id),
-                            &columns,
-                        )
-                    }))
-                    .chain(
-                        message_rows
-                            .into_iter()
-                            .map(|message| serialize_message_row(&message.email, &columns)),
-                    )
+                let mut rows = reminder_search_content_rows(snapshot, restriction.as_ref());
+                sort_search_content_rows(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|row| serialize_search_content_row(row, snapshot, &columns, true))
                     .collect::<Vec<_>>()
             } else if *folder_id == NOTES_FOLDER_ID {
                 let mut rows = snapshot.notes_for_folder(*folder_id);
@@ -1186,6 +1153,145 @@ pub(in crate::mapi) fn sort_journal_entries(
         }
         Ordering::Equal
     });
+}
+
+fn todo_search_content_rows<'a>(
+    snapshot: &'a MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+) -> Vec<SearchContentRow<'a>> {
+    let mut rows = snapshot
+        .todo_search_messages()
+        .into_iter()
+        .filter(|message| restriction_matches_email(restriction, &message.email))
+        .map(SearchContentRow::Message)
+        .collect::<Vec<_>>();
+    rows.extend(
+        snapshot
+            .todo_search_results()
+            .into_iter()
+            .filter(|task| restriction_matches_task(restriction, &task.task))
+            .map(SearchContentRow::Task),
+    );
+    rows
+}
+
+fn reminder_search_content_rows<'a>(
+    snapshot: &'a MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+) -> Vec<SearchContentRow<'a>> {
+    let mut rows = snapshot
+        .reminder_events()
+        .into_iter()
+        .filter(|event| restriction_matches_event(restriction, &event.event))
+        .map(SearchContentRow::Event)
+        .collect::<Vec<_>>();
+    rows.extend(
+        snapshot
+            .reminder_tasks()
+            .into_iter()
+            .filter(|task| restriction_matches_task(restriction, &task.task))
+            .map(SearchContentRow::Task),
+    );
+    rows.extend(
+        snapshot
+            .reminder_messages()
+            .into_iter()
+            .filter(|message| restriction_matches_email(restriction, &message.email))
+            .map(SearchContentRow::Message),
+    );
+    rows
+}
+
+fn sort_search_content_rows(rows: &mut [SearchContentRow<'_>], sort_orders: &[MapiSortOrder]) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match canonical_property_storage_tag(sort_order.property_tag) {
+                PID_TAG_DISPLAY_NAME_W | PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(
+                        search_content_row_subject(left),
+                        search_content_row_subject(right),
+                    )
+                }
+                PID_TAG_MESSAGE_DELIVERY_TIME
+                | PID_TAG_LAST_MODIFICATION_TIME
+                | PID_TAG_LOCAL_COMMIT_TIME => {
+                    search_content_row_time(left).cmp(&search_content_row_time(right))
+                }
+                PID_TAG_MESSAGE_CLASS_W | PID_TAG_CONTAINER_CLASS_W => {
+                    search_content_row_class(left).cmp(search_content_row_class(right))
+                }
+                PID_TAG_MID => search_content_row_id(left).cmp(&search_content_row_id(right)),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        search_content_row_id(left).cmp(&search_content_row_id(right))
+    });
+}
+
+fn search_content_row_id(row: &SearchContentRow<'_>) -> u64 {
+    match row {
+        SearchContentRow::Event(event) => event.id,
+        SearchContentRow::Message(message) => message.id,
+        SearchContentRow::Task(task) => task.id,
+    }
+}
+
+fn search_content_row_subject<'a>(row: &'a SearchContentRow<'a>) -> &'a str {
+    match row {
+        SearchContentRow::Event(event) => &event.event.title,
+        SearchContentRow::Message(message) => &message.email.subject,
+        SearchContentRow::Task(task) => &task.task.title,
+    }
+}
+
+fn search_content_row_class(row: &SearchContentRow<'_>) -> &'static str {
+    match row {
+        SearchContentRow::Event(_) => "IPM.Appointment",
+        SearchContentRow::Message(_) => "IPM.Note",
+        SearchContentRow::Task(_) => "IPM.Task",
+    }
+}
+
+fn search_content_row_time(row: &SearchContentRow<'_>) -> String {
+    match row {
+        SearchContentRow::Event(event) => event_start_sort_key(&event.event),
+        SearchContentRow::Message(message) => message.email.received_at.clone(),
+        SearchContentRow::Task(task) => task.task.updated_at.clone(),
+    }
+}
+
+fn serialize_search_content_row(
+    row: SearchContentRow<'_>,
+    snapshot: &MapiMailStoreSnapshot,
+    columns: &[u32],
+    reminder_projection: bool,
+) -> Vec<u8> {
+    match row {
+        SearchContentRow::Event(event) if reminder_projection => serialize_reminder_event_row(
+            event,
+            snapshot.reminder_for_source("calendar", event.canonical_id),
+            columns,
+        ),
+        SearchContentRow::Event(event) => {
+            serialize_event_row(&event.event, event.id, event.folder_id, columns)
+        }
+        SearchContentRow::Message(message) => serialize_message_row(&message.email, columns),
+        SearchContentRow::Task(task) if reminder_projection => serialize_reminder_task_row(
+            task,
+            snapshot.reminder_for_source("task", task.canonical_id),
+            columns,
+        ),
+        SearchContentRow::Task(task) => {
+            serialize_task_row(&task.task, task.id, TODO_SEARCH_FOLDER_ID, columns)
+        }
+    }
 }
 
 pub(in crate::mapi) fn apply_sort_direction(ordering: Ordering, sort_order: u8) -> Ordering {
@@ -1952,18 +2058,11 @@ pub(in crate::mapi) fn table_row_keys(
                 return rows.into_iter().map(|contact| contact.id).collect();
             }
             if *folder_id == TODO_SEARCH_FOLDER_ID {
-                let mut message_rows = snapshot.todo_search_messages();
-                message_rows.retain(|message| {
-                    restriction_matches_email(restriction.as_ref(), &message.email)
-                });
-                sort_mapi_messages(&mut message_rows, sort_orders);
-                let mut rows = snapshot.todo_search_results();
-                rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
-                sort_tasks(&mut rows, sort_orders);
-                return message_rows
+                let mut rows = todo_search_content_rows(snapshot, restriction.as_ref());
+                sort_search_content_rows(&mut rows, sort_orders);
+                return rows
                     .into_iter()
-                    .map(|message| message.id)
-                    .chain(rows.into_iter().map(|task| task.id))
+                    .map(|row| search_content_row_id(&row))
                     .collect();
             }
             if *folder_id == TRACKED_MAIL_PROCESSING_FOLDER_ID {
@@ -1975,23 +2074,11 @@ pub(in crate::mapi) fn table_row_keys(
                 return rows.into_iter().map(|message| message.id).collect();
             }
             if *folder_id == REMINDERS_FOLDER_ID {
-                let mut event_rows = snapshot.reminder_events();
-                event_rows
-                    .retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
-                sort_events(&mut event_rows, sort_orders);
-                let mut task_rows = snapshot.reminder_tasks();
-                task_rows.retain(|task| restriction_matches_task(restriction.as_ref(), &task.task));
-                sort_tasks(&mut task_rows, sort_orders);
-                let mut message_rows = snapshot.reminder_messages();
-                message_rows.retain(|message| {
-                    restriction_matches_email(restriction.as_ref(), &message.email)
-                });
-                sort_mapi_messages(&mut message_rows, sort_orders);
-                return event_rows
+                let mut rows = reminder_search_content_rows(snapshot, restriction.as_ref());
+                sort_search_content_rows(&mut rows, sort_orders);
+                return rows
                     .into_iter()
-                    .map(|event| event.id)
-                    .chain(task_rows.into_iter().map(|task| task.id))
-                    .chain(message_rows.into_iter().map(|message| message.id))
+                    .map(|row| search_content_row_id(&row))
                     .collect();
             }
             if *folder_id == JOURNAL_FOLDER_ID {

@@ -969,6 +969,71 @@ impl Storage {
             .ok_or_else(|| anyhow!("event not visible after update"))
     }
 
+    pub async fn update_accessible_event_reminder(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        let existing = self
+            .fetch_accessible_events_by_ids(principal_account_id, &[event_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("event not found"))?;
+        if !existing.rights.may_write {
+            bail!("write access is not granted on this calendar");
+        }
+        if reminder_set == Some(true) && reminder_at.as_deref().unwrap_or_default().is_empty() {
+            bail!("calendar reminder time is required when reminder is set");
+        }
+
+        let tenant_id = self
+            .tenant_id_for_account_id(existing.owner_account_id)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            UPDATE calendar_events
+            SET reminder_set = CASE
+                    WHEN $4::bool IS NULL THEN reminder_set
+                    ELSE $4
+                END,
+                reminder_at = CASE
+                    WHEN $4 = FALSE THEN NULL
+                    WHEN $5::text IS NOT NULL THEN NULLIF($5, '')::timestamptz
+                    ELSE reminder_at
+                END,
+                reminder_dismissed_at = CASE
+                    WHEN $4 = FALSE THEN NULL
+                    ELSE reminder_dismissed_at
+                END,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(existing.owner_account_id)
+        .bind(event_id)
+        .bind(reminder_set)
+        .bind(reminder_at.as_deref())
+        .execute(&mut *tx)
+        .await?;
+
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            existing.owner_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn delete_accessible_event(
         &self,
         principal_account_id: Uuid,

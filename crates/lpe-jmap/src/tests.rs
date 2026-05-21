@@ -3148,6 +3148,8 @@ async fn email_get_projects_private_followup_state_when_requested() {
     email.todo_item_flags = 8;
     email.followup_request = "Follow up".to_string();
     email.followup_due_at = Some("2026-05-21T09:00:00Z".to_string());
+    email.reminder_set = true;
+    email.reminder_at = Some("2026-05-21T08:45:00Z".to_string());
     email.swapped_todo_store_id =
         Some(Uuid::parse_str("77777777-7777-4777-8777-777777777777").unwrap());
     email.swapped_todo_data = Some(vec![1, 2, 3, 4]);
@@ -3189,6 +3191,11 @@ async fn email_get_projects_private_followup_state_when_requested() {
     assert_eq!(
         followup["dueAt"],
         Value::String("2026-05-21T09:00:00Z".to_string())
+    );
+    assert_eq!(followup["reminderSet"], Value::Bool(true));
+    assert_eq!(
+        followup["reminderAt"],
+        Value::String("2026-05-21T08:45:00Z".to_string())
     );
     assert_eq!(
         followup["swappedToDoStoreId"],

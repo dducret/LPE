@@ -368,10 +368,6 @@ const FOLDER_IPM_SENTMAIL_VALID: u32 = 0x0000_0010;
 const FOLDER_VIEWS_VALID: u32 = 0x0000_0020;
 const FOLDER_COMMON_VIEWS_VALID: u32 = 0x0000_0040;
 
-pub(in crate::mapi) fn reminders_experiment_enabled() -> bool {
-    true
-}
-
 pub(in crate::mapi) fn logon_property_value(
     principal: &AccountPrincipal,
     property_tag: u32,
@@ -444,18 +440,6 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
     _mailbox_guid: Uuid,
     property_tag: u32,
 ) -> Option<MapiValue> {
-    special_folder_identification_property_value_with_reminders(
-        _mailbox_guid,
-        property_tag,
-        reminders_experiment_enabled(),
-    )
-}
-
-fn special_folder_identification_property_value_with_reminders(
-    _mailbox_guid: Uuid,
-    property_tag: u32,
-    reminders_enabled: bool,
-) -> Option<MapiValue> {
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(special_folder_long_term_id(CALENDAR_FOLDER_ID)),
@@ -463,9 +447,7 @@ fn special_folder_identification_property_value_with_reminders(
         PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(special_folder_long_term_id(JOURNAL_FOLDER_ID)),
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(special_folder_long_term_id(NOTES_FOLDER_ID)),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(special_folder_long_term_id(TASKS_FOLDER_ID)),
-        PID_TAG_REM_ONLINE_ENTRY_ID if reminders_enabled => {
-            Some(special_folder_long_term_id(REMINDERS_FOLDER_ID))
-        }
+        PID_TAG_REM_ONLINE_ENTRY_ID => Some(special_folder_long_term_id(REMINDERS_FOLDER_ID)),
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => Some(MapiValue::Binary(
             additional_ren_entry_ids_ex(_mailbox_guid),
         )),
@@ -2948,6 +2930,21 @@ where
                         .ok_or_else(|| anyhow!("invalid PidLidTaskDueDate value"))?,
                 );
             }
+            PID_LID_REMINDER_SET_TAG => {
+                update.reminder_set = Some(
+                    value
+                        .as_bool()
+                        .ok_or_else(|| anyhow!("invalid PidLidReminderSet value"))?,
+                );
+            }
+            PID_LID_REMINDER_TIME_TAG | PID_LID_REMINDER_SIGNAL_TIME_TAG => {
+                update.reminder_at = Some(
+                    value
+                        .as_i64()
+                        .and_then(filetime_to_rfc3339_utc)
+                        .ok_or_else(|| anyhow!("invalid reminder time value"))?,
+                );
+            }
             PID_LID_FLAG_REQUEST_W_TAG => {
                 update.followup_request = Some(
                     value
@@ -2968,6 +2965,8 @@ where
                 let MapiValue::Binary(bytes) = value else {
                     return Err(anyhow!("invalid PidTagSwappedToDoData value"));
                 };
+                parse_swapped_todo_data(&bytes)
+                    .map_err(|error| anyhow!("invalid PidTagSwappedToDoData value: {error}"))?;
                 update.swapped_todo_data = Some(bytes);
             }
             _ => return Err(anyhow!("canonical MAPI message property is not mutable")),
@@ -2983,6 +2982,9 @@ where
         && update.followup_start_at.is_none()
         && update.followup_due_at.is_none()
         && update.followup_completed_at.is_none()
+        && update.reminder_set.is_none()
+        && update.reminder_at.is_none()
+        && update.reminder_dismissed_at.is_none()
         && update.swapped_todo_store_id.is_none()
         && update.swapped_todo_data.is_none()
     {
@@ -3006,6 +3008,114 @@ where
 
 fn filetime_to_rfc3339_utc(filetime: i64) -> Option<String> {
     filetime_to_date_time(filetime).map(|(date, time)| format!("{date}T{time}:00Z"))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct SwappedToDoData {
+    flags: u32,
+    todo_item_flags: Option<u32>,
+    flag_request: Option<String>,
+    start_minutes: Option<u32>,
+    due_minutes: Option<u32>,
+    reminder_minutes: Option<u32>,
+    reminder_set: Option<bool>,
+}
+
+const SWAPPED_TODO_DATA_LEN: usize = 540;
+const SWAPPED_TODO_DATA_VERSION: u32 = 1;
+const SWAPPED_TODO_NO_DATE: u32 = 0x5AE9_80E0;
+const SWAPPED_TODO_FLAG_TODO_ITEM: u32 = 0x0000_0001;
+const SWAPPED_TODO_FLAG_START_DATE: u32 = 0x0000_0008;
+const SWAPPED_TODO_FLAG_DUE_DATE: u32 = 0x0000_0010;
+const SWAPPED_TODO_FLAG_FLAG_TO: u32 = 0x0000_0020;
+const SWAPPED_TODO_FLAG_REMINDER_SET: u32 = 0x0000_0040;
+const SWAPPED_TODO_FLAG_REMINDER: u32 = 0x0000_0080;
+const SWAPPED_TODO_KNOWN_FLAGS: u32 = SWAPPED_TODO_FLAG_TODO_ITEM
+    | SWAPPED_TODO_FLAG_START_DATE
+    | SWAPPED_TODO_FLAG_DUE_DATE
+    | SWAPPED_TODO_FLAG_FLAG_TO
+    | SWAPPED_TODO_FLAG_REMINDER_SET
+    | SWAPPED_TODO_FLAG_REMINDER;
+
+fn parse_swapped_todo_data(bytes: &[u8]) -> Result<SwappedToDoData> {
+    if bytes.len() != SWAPPED_TODO_DATA_LEN {
+        return Err(anyhow!("expected {SWAPPED_TODO_DATA_LEN} bytes"));
+    }
+    let version = read_swapped_u32(bytes, 0)?;
+    if version != SWAPPED_TODO_DATA_VERSION {
+        return Err(anyhow!("unsupported version {version}"));
+    }
+    let flags = read_swapped_u32(bytes, 4)?;
+    if flags & !SWAPPED_TODO_KNOWN_FLAGS != 0 {
+        return Err(anyhow!(
+            "unknown flags {:#010x}",
+            flags & !SWAPPED_TODO_KNOWN_FLAGS
+        ));
+    }
+    let todo_item_flags = (flags & SWAPPED_TODO_FLAG_TODO_ITEM != 0)
+        .then(|| read_swapped_u32(bytes, 8))
+        .transpose()?;
+    let flag_request = if flags & SWAPPED_TODO_FLAG_FLAG_TO != 0 {
+        Some(read_swapped_utf16z(
+            bytes
+                .get(12..524)
+                .ok_or_else(|| anyhow!("truncated flag text"))?,
+        )?)
+    } else {
+        None
+    };
+    let start_minutes =
+        swapped_todo_minutes(bytes, 524, flags & SWAPPED_TODO_FLAG_START_DATE != 0)?;
+    let due_minutes = swapped_todo_minutes(bytes, 528, flags & SWAPPED_TODO_FLAG_DUE_DATE != 0)?;
+    let reminder_minutes =
+        swapped_todo_minutes(bytes, 532, flags & SWAPPED_TODO_FLAG_REMINDER != 0)?;
+    let reminder_set = if flags & SWAPPED_TODO_FLAG_REMINDER_SET != 0 {
+        match read_swapped_u32(bytes, 536)? {
+            0 => Some(false),
+            1 => Some(true),
+            value => return Err(anyhow!("invalid reminder boolean {value}")),
+        }
+    } else {
+        None
+    };
+    Ok(SwappedToDoData {
+        flags,
+        todo_item_flags,
+        flag_request,
+        start_minutes,
+        due_minutes,
+        reminder_minutes,
+        reminder_set,
+    })
+}
+
+fn swapped_todo_minutes(bytes: &[u8], offset: usize, valid: bool) -> Result<Option<u32>> {
+    if !valid {
+        return Ok(None);
+    }
+    let value = read_swapped_u32(bytes, offset)?;
+    Ok((value != SWAPPED_TODO_NO_DATE).then_some(value))
+}
+
+fn read_swapped_u32(bytes: &[u8], offset: usize) -> Result<u32> {
+    let value = bytes
+        .get(offset..offset + 4)
+        .ok_or_else(|| anyhow!("truncated u32"))?;
+    Ok(u32::from_le_bytes(
+        value.try_into().map_err(|_| anyhow!("invalid u32"))?,
+    ))
+}
+
+fn read_swapped_utf16z(bytes: &[u8]) -> Result<String> {
+    if bytes.len() % 2 != 0 {
+        return Err(anyhow!("odd utf16 byte length"));
+    }
+    let units = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .take_while(|unit| *unit != 0)
+        .collect::<Vec<_>>();
+    String::from_utf16(&units).map_err(|_| anyhow!("invalid utf16 flag text"))
 }
 
 pub(in crate::mapi) async fn apply_canonical_contact_property_values<S>(
@@ -3050,7 +3160,20 @@ where
     let event = snapshot
         .event_for_id(folder_id, event_id)
         .ok_or_else(|| anyhow!("canonical MAPI calendar event was not found"))?;
-    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let (properties, reminder_set, reminder_at) = split_reminder_property_values(values)?;
+    if reminder_set.is_some() || reminder_at.is_some() {
+        store
+            .update_accessible_event_reminder(
+                principal.account_id,
+                event.canonical_id,
+                reminder_set,
+                reminder_at,
+            )
+            .await?;
+    }
+    if properties.is_empty() {
+        return Ok(());
+    }
     let input = event_input_from_mapi(
         principal.account_id,
         Some(event.canonical_id),
@@ -3077,7 +3200,20 @@ where
     let task = snapshot
         .task_for_id(folder_id, task_id)
         .ok_or_else(|| anyhow!("canonical MAPI task was not found"))?;
-    let properties = values.into_iter().collect::<HashMap<_, _>>();
+    let (properties, reminder_set, reminder_at) = split_reminder_property_values(values)?;
+    if reminder_set.is_some() || reminder_at.is_some() {
+        store
+            .update_accessible_task_reminder(
+                principal.account_id,
+                task.canonical_id,
+                reminder_set,
+                reminder_at,
+            )
+            .await?;
+    }
+    if properties.is_empty() {
+        return Ok(());
+    }
     reject_unsupported_mapi_task_properties(&properties)?;
     let input = task_input_from_mapi(
         principal.account_id,
@@ -3090,6 +3226,37 @@ where
         .update_accessible_task(principal.account_id, task.canonical_id, input)
         .await?;
     Ok(())
+}
+
+fn split_reminder_property_values(
+    values: Vec<(u32, MapiValue)>,
+) -> Result<(HashMap<u32, MapiValue>, Option<bool>, Option<String>)> {
+    let mut properties = HashMap::new();
+    let mut reminder_set = None;
+    let mut reminder_at = None;
+    for (tag, value) in values {
+        match canonical_property_storage_tag(tag) {
+            PID_LID_REMINDER_SET_TAG => {
+                reminder_set = Some(
+                    value
+                        .as_bool()
+                        .ok_or_else(|| anyhow!("invalid PidLidReminderSet value"))?,
+                );
+            }
+            PID_LID_REMINDER_TIME_TAG | PID_LID_REMINDER_SIGNAL_TIME_TAG => {
+                reminder_at = Some(
+                    value
+                        .as_i64()
+                        .and_then(filetime_to_rfc3339_utc)
+                        .ok_or_else(|| anyhow!("invalid reminder time value"))?,
+                );
+            }
+            _ => {
+                properties.insert(tag, value);
+            }
+        }
+    }
+    Ok((properties, reminder_set, reminder_at))
 }
 
 pub(in crate::mapi) async fn apply_canonical_note_property_values<S>(
@@ -3500,6 +3667,28 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
 mod tests {
     use super::*;
 
+    fn valid_swapped_todo_data() -> Vec<u8> {
+        let mut value = vec![0; SWAPPED_TODO_DATA_LEN];
+        value[0..4].copy_from_slice(&SWAPPED_TODO_DATA_VERSION.to_le_bytes());
+        let flags = SWAPPED_TODO_FLAG_TODO_ITEM
+            | SWAPPED_TODO_FLAG_FLAG_TO
+            | SWAPPED_TODO_FLAG_START_DATE
+            | SWAPPED_TODO_FLAG_DUE_DATE
+            | SWAPPED_TODO_FLAG_REMINDER
+            | SWAPPED_TODO_FLAG_REMINDER_SET;
+        value[4..8].copy_from_slice(&flags.to_le_bytes());
+        value[8..12].copy_from_slice(&8u32.to_le_bytes());
+        for (index, unit) in "Follow up".encode_utf16().enumerate() {
+            let offset = 12 + index * 2;
+            value[offset..offset + 2].copy_from_slice(&unit.to_le_bytes());
+        }
+        value[524..528].copy_from_slice(&1_000_000u32.to_le_bytes());
+        value[528..532].copy_from_slice(&1_001_440u32.to_le_bytes());
+        value[532..536].copy_from_slice(&1_000_030u32.to_le_bytes());
+        value[536..540].copy_from_slice(&1u32.to_le_bytes());
+        value
+    }
+
     fn round_trip(property_tag: u32, value: &MapiValue) -> MapiValue {
         let mut encoded = Vec::new();
         write_mapi_value(&mut encoded, property_tag, value);
@@ -3514,6 +3703,28 @@ mod tests {
         assert_eq!(tag.property_type_code(), 0x001F);
         assert_eq!(tag.property_type(), Some(MapiPropertyType::String));
         assert!(MapiPropertyTag::new(0x8001_001F).property_id() >= FIRST_NAMED_PROPERTY_ID);
+    }
+
+    #[test]
+    fn swapped_todo_data_parser_accepts_documented_layout() {
+        let parsed = parse_swapped_todo_data(&valid_swapped_todo_data()).unwrap();
+        assert_eq!(parsed.todo_item_flags, Some(8));
+        assert_eq!(parsed.flag_request.as_deref(), Some("Follow up"));
+        assert_eq!(parsed.start_minutes, Some(1_000_000));
+        assert_eq!(parsed.due_minutes, Some(1_001_440));
+        assert_eq!(parsed.reminder_minutes, Some(1_000_030));
+        assert_eq!(parsed.reminder_set, Some(true));
+    }
+
+    #[test]
+    fn swapped_todo_data_parser_rejects_placeholder_bytes() {
+        assert!(parse_swapped_todo_data(&[1, 2, 3, 4]).is_err());
+        let mut unsupported = valid_swapped_todo_data();
+        unsupported[0..4].copy_from_slice(&2u32.to_le_bytes());
+        assert!(parse_swapped_todo_data(&unsupported).is_err());
+        let mut unknown_flags = valid_swapped_todo_data();
+        unknown_flags[4..8].copy_from_slice(&0x8000_0000u32.to_le_bytes());
+        assert!(parse_swapped_todo_data(&unknown_flags).is_err());
     }
 
     #[test]
@@ -3551,28 +3762,12 @@ mod tests {
                 Some(folder_id)
             );
         }
-        assert_eq!(
-            special_folder_identification_property_value(Uuid::nil(), PID_TAG_REM_ONLINE_ENTRY_ID),
-            None
-        );
-        assert_eq!(
-            special_folder_identification_property_value_with_reminders(
-                Uuid::nil(),
-                PID_TAG_REM_ONLINE_ENTRY_ID,
-                false
-            ),
-            None
-        );
         let reminder_entry_id =
             crate::mapi::identity::long_term_id_from_object_id(REMINDERS_FOLDER_ID)
                 .unwrap()
                 .to_vec();
         assert_eq!(
-            special_folder_identification_property_value_with_reminders(
-                Uuid::nil(),
-                PID_TAG_REM_ONLINE_ENTRY_ID,
-                true
-            ),
+            special_folder_identification_property_value(Uuid::nil(), PID_TAG_REM_ONLINE_ENTRY_ID),
             Some(MapiValue::Binary(reminder_entry_id))
         );
     }
@@ -3914,7 +4109,7 @@ mod tests {
             reminder_at: Some("2026-05-20T09:30:00Z".to_string()),
             reminder_dismissed_at: None,
             swapped_todo_store_id: Some(store_id),
-            swapped_todo_data: Some(vec![1, 2, 3, 4]),
+            swapped_todo_data: Some(valid_swapped_todo_data()),
             has_attachments: false,
             size_octets: 128,
             internet_message_id: None,
@@ -3978,7 +4173,7 @@ mod tests {
         );
         assert_eq!(
             email_property_value(&email, PID_TAG_SWAPPED_TODO_DATA),
-            Some(MapiValue::Binary(vec![1, 2, 3, 4]))
+            Some(MapiValue::Binary(valid_swapped_todo_data()))
         );
     }
 

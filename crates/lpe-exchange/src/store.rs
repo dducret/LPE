@@ -347,6 +347,14 @@ pub trait ExchangeStore: AccountAuthStore {
         input: UpsertClientEventInput,
     ) -> StoreFuture<'a, AccessibleEvent>;
 
+    fn update_accessible_event_reminder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> StoreFuture<'a, ()>;
+
     fn delete_accessible_event<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -474,6 +482,14 @@ pub trait ExchangeStore: AccountAuthStore {
         task_id: Uuid,
         input: UpsertClientTaskInput,
     ) -> StoreFuture<'a, ClientTask>;
+
+    fn update_accessible_task_reminder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> StoreFuture<'a, ()>;
 
     fn delete_accessible_task<'a>(
         &'a self,
@@ -1524,6 +1540,24 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn update_accessible_event_reminder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.update_accessible_event_reminder(
+                principal_account_id,
+                event_id,
+                reminder_set,
+                reminder_at,
+            )
+            .await
+        })
+    }
+
     fn delete_accessible_event<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -1643,6 +1677,24 @@ impl ExchangeStore for Storage {
         Box::pin(async move {
             input.id = Some(task_id);
             self.upsert_client_task(input).await
+        })
+    }
+
+    fn update_accessible_task_reminder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.update_accessible_task_reminder(
+                principal_account_id,
+                task_id,
+                reminder_set,
+                reminder_at,
+            )
+            .await
         })
     }
 

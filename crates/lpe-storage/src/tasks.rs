@@ -396,6 +396,71 @@ impl Storage {
         Ok(crate::map_task(row))
     }
 
+    pub async fn update_accessible_task_reminder(
+        &self,
+        principal_account_id: Uuid,
+        task_id: Uuid,
+        reminder_set: Option<bool>,
+        reminder_at: Option<String>,
+    ) -> Result<()> {
+        let existing = self
+            .fetch_client_tasks_by_ids(principal_account_id, &[task_id])
+            .await?
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow!("task not found"))?;
+        if !existing.rights.may_write {
+            bail!("write access is not granted on this task");
+        }
+        if reminder_set == Some(true) && reminder_at.as_deref().unwrap_or_default().is_empty() {
+            bail!("task reminder time is required when reminder is set");
+        }
+
+        let tenant_id = self
+            .tenant_id_for_account_id(existing.owner_account_id)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            UPDATE tasks
+            SET reminder_set = CASE
+                    WHEN $4::bool IS NULL THEN reminder_set
+                    ELSE $4
+                END,
+                reminder_at = CASE
+                    WHEN $4 = FALSE THEN NULL
+                    WHEN $5::text IS NOT NULL THEN NULLIF($5, '')::timestamptz
+                    ELSE reminder_at
+                END,
+                reminder_dismissed_at = CASE
+                    WHEN $4 = FALSE THEN NULL
+                    ELSE reminder_dismissed_at
+                END,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(existing.owner_account_id)
+        .bind(task_id)
+        .bind(reminder_set)
+        .bind(reminder_at.as_deref())
+        .execute(&mut *tx)
+        .await?;
+
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Tasks,
+            existing.owner_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn upsert_task_list_grant(
         &self,
         input: TaskListGrantInput,

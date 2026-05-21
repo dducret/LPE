@@ -2204,6 +2204,9 @@ pub(crate) fn email_followup_value(email: &JmapEmail) -> Value {
         "startAt": email.followup_start_at,
         "dueAt": email.followup_due_at,
         "completedAt": email.followup_completed_at,
+        "reminderSet": email.reminder_set,
+        "reminderAt": email.reminder_at,
+        "reminderDismissedAt": email.reminder_dismissed_at,
         "swappedToDoStoreId": email.swapped_todo_store_id.map(|id| id.to_string()),
         "swappedToDoData": email.swapped_todo_data.as_ref().map(|data| BASE64.encode(data)),
     })

@@ -515,10 +515,13 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 folder_id: note.folder_id,
                 item_id: note.id,
                 canonical_id: note.canonical_id,
+                associated: false,
                 subject: note.note.title.clone(),
                 body_text: note.note.body_text.clone(),
                 message_class: "IPM.StickyNote".to_string(),
-                updated_at: note.note.updated_at.clone(),
+                last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
+                    &note.note.updated_at,
+                ),
                 message_size: note_size(&note.note),
                 named_properties: vec![
                     (
@@ -557,6 +560,11 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .journal_entries_for_folder(folder_id)
             .into_iter()
             .map(|entry| journal_sync_object(entry))
+            .collect(),
+        COMMON_VIEWS_FOLDER_ID => snapshot
+            .search_folder_definition_messages()
+            .iter()
+            .map(search_folder_definition_sync_object)
             .collect(),
         _ => Vec::new(),
     }
@@ -656,12 +664,69 @@ fn journal_sync_object(
         folder_id: entry.folder_id,
         item_id: entry.id,
         canonical_id: entry.canonical_id,
+        associated: false,
         subject: entry.entry.subject.clone(),
         body_text: entry.entry.body_text.clone(),
         message_class: entry.entry.message_class.clone(),
-        updated_at: entry.entry.updated_at.clone(),
+        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&entry.entry.updated_at),
         message_size: journal_entry_size(&entry.entry),
         named_properties,
+    }
+}
+
+fn search_folder_definition_sync_object(
+    message: &crate::mapi_store::MapiSearchFolderDefinitionMessage,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut named_properties = Vec::new();
+    for property_tag in [
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE,
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
+        PID_TAG_SEARCH_FOLDER_TAG,
+        PID_TAG_SEARCH_FOLDER_DEFINITION,
+    ] {
+        if let Some(value) = search_folder_definition_property_value(message, property_tag)
+            .and_then(special_message_property_value)
+        {
+            named_properties.push((property_tag, value));
+        }
+    }
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let message_size = search_folder_definition_property_value(message, PID_TAG_MESSAGE_SIZE)
+        .and_then(|value| match value {
+            MapiValue::I32(value) => Some(value),
+            _ => None,
+        })
+        .unwrap_or(0) as i64;
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: message.definition.display_name.clone(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size,
+        named_properties,
+    }
+}
+
+fn special_message_property_value(
+    value: MapiValue,
+) -> Option<mapi_mailstore::SpecialMessagePropertyValue> {
+    match value {
+        MapiValue::Binary(value) => {
+            Some(mapi_mailstore::SpecialMessagePropertyValue::Binary(value))
+        }
+        MapiValue::I32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I32(value)),
+        MapiValue::String(value) => {
+            Some(mapi_mailstore::SpecialMessagePropertyValue::String(value))
+        }
+        MapiValue::MultiString(values) => Some(
+            mapi_mailstore::SpecialMessagePropertyValue::MultiString(values),
+        ),
+        _ => None,
     }
 }
 
