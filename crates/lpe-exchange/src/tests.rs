@@ -15320,6 +15320,23 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     ));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    for folder_id in [
+        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+        crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_ID,
+        crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    ] {
+        let counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
+            .expect("stable folder counter");
+        assert!(
+            strict_replguid_globset_contains_counter(&decoded.idset_given, &globcnt_bytes(counter))
+                .expect("hierarchy final IDSET"),
+            "final hierarchy state should include hidden stable folder 0x{folder_id:016x}"
+        );
+    }
     let sync_issues = decoded
         .folder_changes
         .iter()

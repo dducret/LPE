@@ -58,6 +58,35 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 19] = [
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
 
+const IPM_SUBTREE_STATE_FOLDER_IDS: [u64; 26] = [
+    INBOX_FOLDER_ID,
+    DRAFTS_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    SENT_FOLDER_ID,
+    TRASH_FOLDER_ID,
+    CONTACTS_FOLDER_ID,
+    SUGGESTED_CONTACTS_FOLDER_ID,
+    QUICK_CONTACTS_FOLDER_ID,
+    IM_CONTACT_LIST_FOLDER_ID,
+    CONTACTS_SEARCH_FOLDER_ID,
+    CALENDAR_FOLDER_ID,
+    JOURNAL_FOLDER_ID,
+    NOTES_FOLDER_ID,
+    TASKS_FOLDER_ID,
+    DOCUMENT_LIBRARIES_FOLDER_ID,
+    SYNC_ISSUES_FOLDER_ID,
+    CONFLICTS_FOLDER_ID,
+    LOCAL_FAILURES_FOLDER_ID,
+    SERVER_FAILURES_FOLDER_ID,
+    JUNK_FOLDER_ID,
+    RSS_FEEDS_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID,
+    TODO_SEARCH_FOLDER_ID,
+    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    ARCHIVE_FOLDER_ID,
+    CONVERSATION_HISTORY_FOLDER_ID,
+];
+
 pub(in crate::mapi) fn rop_synchronization_configure_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x70, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -212,6 +241,30 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         .cloned()
         .into_iter()
         .collect()
+}
+
+pub(in crate::mapi) fn sync_state_mailboxes_for(
+    folder_id: u64,
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+) -> Vec<JmapMailbox> {
+    if sync_type != 0x02 || folder_id != IPM_SUBTREE_FOLDER_ID {
+        return sync_mailboxes_for(folder_id, sync_type, mailboxes);
+    }
+
+    let mut folder_ids = HashSet::new();
+    let mut rows = sync_mailboxes_for(folder_id, sync_type, mailboxes);
+    for mailbox in &rows {
+        folder_ids.insert(mapi_folder_id(mailbox));
+    }
+    for special_folder_id in IPM_SUBTREE_STATE_FOLDER_IDS {
+        if folder_ids.insert(special_folder_id) {
+            if let Some(mailbox) = mapi_mailstore::virtual_special_mailbox(special_folder_id) {
+                rows.push(mailbox);
+            }
+        }
+    }
+    rows
 }
 
 fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> Vec<u64> {
@@ -893,5 +946,22 @@ mod tests {
         std::env::remove_var("LPE_MAPI_EXPERIMENT_IPM_HIERARCHY_GROUPS");
 
         assert_eq!(folder_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
+    }
+
+    #[test]
+    fn ipm_hierarchy_state_keeps_full_stable_special_folder_set() {
+        let rows = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &[]);
+        let state_rows = sync_state_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &[]);
+        let row_ids = rows.iter().map(mapi_folder_id).collect::<Vec<_>>();
+        let state_ids = state_rows
+            .iter()
+            .map(mapi_folder_id)
+            .collect::<HashSet<_>>();
+
+        assert_eq!(row_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
+        assert_eq!(state_ids.len(), IPM_SUBTREE_STATE_FOLDER_IDS.len());
+        for folder_id in IPM_SUBTREE_STATE_FOLDER_IDS {
+            assert!(state_ids.contains(&folder_id));
+        }
     }
 }

@@ -4158,6 +4158,8 @@ where
                     }
                 };
                 let all_sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
+                let state_sync_mailboxes =
+                    sync_state_mailboxes_for(folder_id, sync_type, mailboxes);
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                 let all_special_sync_objects =
                     special_sync_objects_for(folder_id, sync_type, snapshot);
@@ -4243,7 +4245,7 @@ where
                 let state = mapi_mailstore::sync_state_token_with_special_objects(
                     sync_type,
                     folder_id,
-                    &all_sync_mailboxes,
+                    &state_sync_mailboxes,
                     &all_sync_emails,
                     &state_attachment_facts,
                     &all_special_sync_objects,
@@ -4261,7 +4263,7 @@ where
                         &all_special_sync_objects,
                         &[],
                         mailboxes,
-                        &all_sync_mailboxes,
+                        &state_sync_mailboxes,
                         &all_sync_emails,
                         &state_attachment_facts,
                         &all_special_sync_objects,
@@ -4289,7 +4291,7 @@ where
                         &delta_special_sync_objects,
                         &deleted_message_ids,
                         mailboxes,
-                        &all_sync_mailboxes,
+                        &state_sync_mailboxes,
                         &all_sync_emails,
                         &state_attachment_facts,
                         &all_special_sync_objects,
@@ -4334,6 +4336,7 @@ where
                     available_sync_email_count,
                     available_special_sync_object_count,
                     sync_mailbox_count = all_sync_mailboxes.len(),
+                    sync_state_mailbox_count = state_sync_mailboxes.len(),
                     sync_email_count = all_sync_emails.len(),
                     sync_special_object_count = all_special_sync_objects.len(),
                     checkpoint_delta_mailbox_count,
