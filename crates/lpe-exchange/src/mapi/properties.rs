@@ -356,7 +356,7 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
     .collect()
 }
 
-const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [
+pub(in crate::mapi) const NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID: [u8; 16] = [
     0xDC, 0xA7, 0x40, 0xC8, 0xC0, 0x42, 0x10, 0x1A, 0xB4, 0xB9, 0x08, 0x00, 0x2B, 0x2F, 0xE1, 0x82,
 ];
 

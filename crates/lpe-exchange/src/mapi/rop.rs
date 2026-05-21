@@ -1038,6 +1038,12 @@ fn log_get_properties_specific_debug(
         snapshot,
         &unsupported_tags,
     );
+    let outlook_bootstrap_getprops = is_outlook_logon_bootstrap_getprops(object, columns);
+    let outlook_bootstrap_property_details = if outlook_bootstrap_getprops {
+        format_outlook_logon_bootstrap_property_details(principal, columns)
+    } else {
+        String::new()
+    };
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1069,8 +1075,136 @@ fn log_get_properties_specific_debug(
         response_property_row_kind = %property_row_kind_for_debug(object, principal, columns),
         unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
         returned_property_value_shapes = %returned_property_value_shapes,
+        outlook_bootstrap_getprops = outlook_bootstrap_getprops,
+        outlook_bootstrap_property_details = %outlook_bootstrap_property_details,
         message = message,
     );
+}
+
+fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u32]) -> bool {
+    const OUTLOOK_BOOTSTRAP_LOGON_PROPS: [u32; 8] = [
+        PID_TAG_MAILBOX_OWNER_NAME_W,
+        PID_TAG_MAILBOX_OWNER_ENTRY_ID,
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+        PID_TAG_SERVER_CONNECTED_ICON,
+        PID_TAG_SERVER_ACCOUNT_ICON,
+        PID_TAG_PRIVATE,
+        PID_TAG_OUTLOOK_STORE_STATE,
+        PID_TAG_USER_GUID,
+    ];
+
+    matches!(object, Some(MapiObject::Logon))
+        && columns.len() == OUTLOOK_BOOTSTRAP_LOGON_PROPS.len()
+        && OUTLOOK_BOOTSTRAP_LOGON_PROPS
+            .iter()
+            .all(|expected| columns.contains(expected))
+}
+
+fn format_outlook_logon_bootstrap_property_details(
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) -> String {
+    columns
+        .iter()
+        .filter_map(|tag| {
+            let value = logon_property_value(principal, *tag)?;
+            let detail = match (*tag, value) {
+                (PID_TAG_MAILBOX_OWNER_ENTRY_ID, MapiValue::Binary(bytes)) => {
+                    format_mailbox_owner_entry_id_details(&bytes)
+                }
+                (
+                    PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON,
+                    MapiValue::Binary(bytes),
+                ) => format_ico_header_details(&bytes),
+                (PID_TAG_USER_GUID, MapiValue::Binary(bytes)) => {
+                    format!(
+                        "user_guid_bytes={};user_guid_hex={}",
+                        bytes.len(),
+                        hex_preview_for_debug(&bytes, bytes.len())
+                    )
+                }
+                (PID_TAG_OUTLOOK_STORE_STATE, MapiValue::U32(value)) => {
+                    format!("outlook_store_state={value:#010x}")
+                }
+                (PID_TAG_PRIVATE, MapiValue::Bool(value)) => format!("private={value}"),
+                (
+                    PID_TAG_MAILBOX_OWNER_NAME_W | PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+                    MapiValue::String(value),
+                ) => {
+                    format!(
+                        "string_chars={};string_preview={}",
+                        value.chars().count(),
+                        text_preview_for_debug(&value, 32)
+                    )
+                }
+                (_, value) => mapi_value_shape_for_debug(&value),
+            };
+            Some(format!(
+                "{tag:#010x}:{}:{detail}",
+                property_tag_debug_name(*tag)
+            ))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_mailbox_owner_entry_id_details(bytes: &[u8]) -> String {
+    if bytes.len() < 28 {
+        return format!(
+            "permanent_entry_id_len={};parse_error=too_short",
+            bytes.len()
+        );
+    }
+
+    let id_type = bytes[0];
+    let reserved_1 = bytes[1];
+    let reserved_2 = bytes[2];
+    let reserved_3 = bytes[3];
+    let provider_uid = &bytes[4..20];
+    let reserved_4 = u32::from_le_bytes(bytes[20..24].try_into().unwrap());
+    let display_type = u32::from_le_bytes(bytes[24..28].try_into().unwrap());
+    let dn_bytes = &bytes[28..];
+    let null_terminated = dn_bytes.last().copied() == Some(0);
+    let dn_payload = if null_terminated {
+        &dn_bytes[..dn_bytes.len().saturating_sub(1)]
+    } else {
+        dn_bytes
+    };
+    let distinguished_name = String::from_utf8_lossy(dn_payload);
+
+    format!(
+        "permanent_entry_id_len={};id_type={id_type:#04x};r1={reserved_1:#04x};r2={reserved_2:#04x};r3={reserved_3:#04x};provider_uid={};provider_uid_matches_nspi={};r4={reserved_4:#010x};display_type={display_type:#010x};dn_len={};dn_null_terminated={null_terminated};dn_preview={}",
+        bytes.len(),
+        hex_preview_for_debug(provider_uid, provider_uid.len()),
+        provider_uid == NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID,
+        dn_payload.len(),
+        text_preview_for_debug(&distinguished_name, 96),
+    )
+}
+
+fn format_ico_header_details(bytes: &[u8]) -> String {
+    if bytes.len() < 22 {
+        return format!("ico_len={};parse_error=too_short", bytes.len());
+    }
+
+    let reserved = u16::from_le_bytes(bytes[0..2].try_into().unwrap());
+    let image_type = u16::from_le_bytes(bytes[2..4].try_into().unwrap());
+    let image_count = u16::from_le_bytes(bytes[4..6].try_into().unwrap());
+    let width = bytes[6];
+    let height = bytes[7];
+    let color_count = bytes[8];
+    let planes = u16::from_le_bytes(bytes[10..12].try_into().unwrap());
+    let bit_count = u16::from_le_bytes(bytes[12..14].try_into().unwrap());
+    let image_size = u32::from_le_bytes(bytes[14..18].try_into().unwrap());
+    let image_offset = u32::from_le_bytes(bytes[18..22].try_into().unwrap());
+    let length_matches_directory = image_offset
+        .checked_add(image_size)
+        .is_some_and(|expected| expected as usize == bytes.len());
+
+    format!(
+        "ico_len={};reserved={reserved:#06x};type={image_type:#06x};count={image_count};width={width};height={height};color_count={color_count};planes={planes};bit_count={bit_count};image_size={image_size};image_offset={image_offset};length_matches_directory={length_matches_directory}",
+        bytes.len(),
+    )
 }
 
 fn property_is_unsupported_for_object(
@@ -4729,6 +4863,38 @@ mod tests {
             1_778_046_495
         );
         assert_eq!(gwart_time_marker(SystemTime::UNIX_EPOCH), 1);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn outlook_logon_bootstrap_details_decode_entry_id_and_icons() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+        let columns = [
+            PID_TAG_MAILBOX_OWNER_NAME_W,
+            PID_TAG_MAILBOX_OWNER_ENTRY_ID,
+            PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+            PID_TAG_SERVER_CONNECTED_ICON,
+            PID_TAG_SERVER_ACCOUNT_ICON,
+            PID_TAG_PRIVATE,
+            PID_TAG_OUTLOOK_STORE_STATE,
+            PID_TAG_USER_GUID,
+        ];
+
+        assert!(is_outlook_logon_bootstrap_getprops(
+            Some(&MapiObject::Logon),
+            &columns
+        ));
+        let details = format_outlook_logon_bootstrap_property_details(&principal, &columns);
+
+        assert!(details.contains("provider_uid_matches_nspi=true"));
+        assert!(details.contains("r4=0x00000001"));
+        assert!(details.contains("dn_null_terminated=true"));
+        assert!(details.contains("bit_count=32"));
+        assert!(details.contains("length_matches_directory=true"));
     }
 
     #[test]
