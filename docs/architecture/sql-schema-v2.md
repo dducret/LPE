@@ -239,6 +239,12 @@ Protocol adapters store only cursor rows:
   The source, change, and instance key columns persist 22-byte REPLGUID-scoped
   XID/GID-compatible values. The 24-byte `LongTermID` form remains a protocol
   conversion value with the two-byte pad and is not stored in these columns.
+- `mapi_named_properties` stores durable per-account named-property mappings
+  for Outlook-cached property ids. `mapi_custom_property_values` stores opaque
+  Outlook-specific property values by canonical object identity, property tag,
+  and property type. These tables preserve object fidelity; they must not
+  become protocol-local mailbox, `Sent`, outbox, search, rights, or AI/search
+  projection state.
 
 None of these tables stores canonical messages, folders, contacts, calendars,
 tasks, attachments, `Sent`, drafts, or outbox state.
@@ -598,6 +604,8 @@ collaboration, rights, or user-visible state.
 - `mapi_sync_checkpoints`
 - `mapi_mailbox_replicas`
 - `mapi_object_identities`
+- `mapi_named_properties`
+- `mapi_custom_property_values`
 
 ### Submission and Transport Integration
 

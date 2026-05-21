@@ -89,7 +89,8 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 | Scalar values | Inline ROP property values support `PtypInteger16`, `PtypInteger32`, `PtypBoolean`, `PtypInteger64`, `PtypTime`, `PtypString8`, `PtypString`, `PtypGuid`, `PtypBinary`, and `PtypErrorCode`. Unicode strings are UTF-16LE with a terminating null. |
 | Multivalued values | The bounded initial codec supports `PtypMultipleInteger16`, `PtypMultipleInteger32`, `PtypMultipleInteger64`, `PtypMultipleString8`, `PtypMultipleString`, `PtypMultipleGuid`, and `PtypMultipleBinary` using ROP-buffer counts. |
 | Binary and large values | Inline `PtypBinary` uses the ROP 16-bit byte count. Large body, HTML, and attachment data use the existing stream ROP path instead of inventing a protocol-local blob store. |
-| Named properties | `RopGetPropertyIdsFromNames`, `RopGetNamesFromPropertyIds`, and `RopQueryNamedProperties` use the session-local registry. Durable named-property mapping is deferred until a canonical persistent custom-property surface is documented. |
+| Named properties | `RopGetPropertyIdsFromNames`, `RopGetNamesFromPropertyIds`, and `RopQueryNamedProperties` use durable per-account mappings in `mapi_named_properties`, with the session registry acting as a request-local cache. |
+| Custom property values | Opaque Outlook-specific property values have a canonical storage table, `mapi_custom_property_values`, keyed by account, object kind, canonical object id, property tag, and property type. Runtime set/get/delete wiring remains the next phase before claiming full arbitrary property-bag round trip. |
 | Unsupported property types | Unsupported inline property-type enum values are logged with the raw numeric type and property id, then fail at decode time through the existing ROP property error path instead of being silently coerced or causing an untyped runtime failure. |
 
 | MAPI gate | Required behavior |

@@ -5126,8 +5126,30 @@ where
                 echo_input_handle_table = true;
                 responses.extend_from_slice(&rop_get_address_types_response(&request));
             }
-            Some(RopId::GetNamesFromPropertyIds) => responses
-                .extend_from_slice(&rop_get_names_from_property_ids_response(&request, session)),
+            Some(RopId::GetNamesFromPropertyIds) => {
+                let property_ids = request.property_ids();
+                let missing_property_ids = property_ids
+                    .iter()
+                    .copied()
+                    .filter(|property_id| !session.named_property_ids.contains_key(property_id))
+                    .collect::<Vec<_>>();
+                if !missing_property_ids.is_empty() {
+                    if let Ok(mappings) = store
+                        .fetch_mapi_named_properties_by_ids(
+                            principal.account_id,
+                            &missing_property_ids,
+                        )
+                        .await
+                    {
+                        for mapping in mappings {
+                            session.cache_named_property(mapping.property_id, mapping.property);
+                        }
+                    }
+                }
+                responses.extend_from_slice(&rop_get_names_from_property_ids_response(
+                    &request, session,
+                ));
+            }
             Some(RopId::GetPropertyIdsFromNames) => {
                 echo_input_handle_table = true;
                 let properties = match request.named_property_names() {
@@ -5159,31 +5181,79 @@ where
                     continue;
                 }
                 let mut property_ids = Vec::with_capacity(properties.len());
-                let mut exhausted = false;
-                for property in properties {
-                    match session.property_id_for_name(property, request.named_property_create()) {
+                let mut missing = Vec::new();
+                for (index, property) in properties.into_iter().enumerate() {
+                    match session.property_id_for_name(property.clone(), false) {
                         Some(property_id) => property_ids.push(property_id),
-                        None if request.named_property_create() => {
-                            exhausted = true;
-                            break;
+                        None => {
+                            property_ids.push(0);
+                            missing.push((index, property));
                         }
-                        None => property_ids.push(0),
                     }
                 }
-                if exhausted {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x56,
-                        request.response_handle_index(),
-                        0x8007_000E,
-                    ));
-                } else {
-                    responses.extend_from_slice(&rop_get_property_ids_from_names_response(
-                        &request,
-                        &property_ids,
-                    ));
+                if !missing.is_empty() {
+                    let missing_properties = missing
+                        .iter()
+                        .map(|(_index, property)| property.clone())
+                        .collect::<Vec<_>>();
+                    match store
+                        .fetch_or_allocate_mapi_named_property_ids(
+                            principal.account_id,
+                            &missing_properties,
+                            request.named_property_create(),
+                        )
+                        .await
+                    {
+                        Ok(mappings) => {
+                            for (missing_index, (index, property)) in
+                                missing.into_iter().enumerate()
+                            {
+                                let mapping = mappings.get(missing_index).cloned().flatten();
+                                let property_id = mapping
+                                    .map(|mapping| {
+                                        session.cache_named_property(
+                                            mapping.property_id,
+                                            mapping.property,
+                                        );
+                                        mapping.property_id
+                                    })
+                                    .or_else(|| {
+                                        session.property_id_for_name(
+                                            property,
+                                            request.named_property_create(),
+                                        )
+                                    });
+                                property_ids[index] = property_id.unwrap_or(0);
+                            }
+                        }
+                        Err(_) if request.named_property_create() => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x56,
+                                request.response_handle_index(),
+                                0x8007_000E,
+                            ));
+                            continue;
+                        }
+                        Err(_) => {}
+                    }
                 }
+                responses.extend_from_slice(&rop_get_property_ids_from_names_response(
+                    &request,
+                    &property_ids,
+                ));
             }
             Some(RopId::QueryNamedProperties) => {
+                if let Ok(mappings) = store
+                    .fetch_mapi_named_properties(
+                        principal.account_id,
+                        request.named_property_query_guid(),
+                    )
+                    .await
+                {
+                    for mapping in mappings {
+                        session.cache_named_property(mapping.property_id, mapping.property);
+                    }
+                }
                 responses.extend_from_slice(&rop_query_named_properties_response(&request, session))
             }
             Some(RopId::RegisterNotification) => {

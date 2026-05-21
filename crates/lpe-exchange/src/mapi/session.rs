@@ -690,6 +690,19 @@ impl MapiSession {
         Some(property_id)
     }
 
+    pub(in crate::mapi) fn cache_named_property(
+        &mut self,
+        property_id: u16,
+        property: MapiNamedProperty,
+    ) {
+        let property = normalize_named_property(property);
+        self.named_properties.insert(property.clone(), property_id);
+        self.named_property_ids.insert(property_id, property);
+        if property_id >= self.next_named_property_id {
+            self.next_named_property_id = property_id.saturating_add(1);
+        }
+    }
+
     pub(in crate::mapi) fn property_name_for_id(&self, property_id: u16) -> MapiNamedProperty {
         self.named_property_ids
             .get(&property_id)
@@ -1015,5 +1028,25 @@ mod tests {
 
         assert_eq!(logon_handle, 1);
         assert_eq!(source_handle, 2);
+    }
+
+    #[test]
+    fn cached_named_property_updates_bidirectional_registry() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let mut session = remove_session(&session_id).unwrap();
+        let property = MapiNamedProperty {
+            guid: PSETID_COMMON_GUID,
+            kind: MapiNamedPropertyKind::Name("custom-field".to_string()),
+        };
+
+        session.cache_named_property(0x8001, property.clone());
+
+        assert_eq!(
+            session.property_id_for_name(property.clone(), false),
+            Some(0x8001)
+        );
+        assert_eq!(session.property_name_for_id(0x8001), property);
+        assert_eq!(session.next_named_property_id, 0x8002);
     }
 }

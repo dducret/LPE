@@ -206,11 +206,13 @@ authenticated endpoints, EMSMDB and NSPI surfaces, session cookies, ROP
 dispatch, handle tables, MAPI identity projection, table/property support,
 ICS/FastTransfer work, permissions, and canonical store integration.
 
-The decisive remaining blocker is durable Microsoft property/object fidelity.
-Well-known properties are projected today, but arbitrary named/custom property
-mapping and values are still not a documented durable canonical store. Without
-that, Outlook cached profiles can pass selected flows while still losing object
-fidelity across sessions, restart, or cross-protocol mutation.
+Durable Microsoft property/object fidelity is now split into two concrete
+parts. Named-property ID mappings are stored per account in
+`mapi_named_properties` and the MAPI ROP registry loads them through storage
+instead of relying only on session-local allocation. A durable
+`mapi_custom_property_values` table exists for opaque Outlook-specific values,
+but runtime set/get/delete wiring for arbitrary property-bag values is still
+the next blocker before LPE can claim full property round-trip fidelity.
 
 Readiness level after this plan:
 

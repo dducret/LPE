@@ -7,13 +7,13 @@ use super::*;
 use crate::mapi_store::{MapiMessage, MapiSearchFolderDefinitionMessage};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(in crate::mapi) struct MapiNamedProperty {
-    pub(in crate::mapi) guid: [u8; 16],
-    pub(in crate::mapi) kind: MapiNamedPropertyKind,
+pub(crate) struct MapiNamedProperty {
+    pub(crate) guid: [u8; 16],
+    pub(crate) kind: MapiNamedPropertyKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(in crate::mapi) enum MapiNamedPropertyKind {
+pub(crate) enum MapiNamedPropertyKind {
     Lid(u32),
     Name(String),
 }
@@ -218,8 +218,8 @@ pub(in crate::mapi) const PID_TAG_MOBILE_TELEPHONE_NUMBER_W: u32 = 0x3A1C_001F;
 pub(in crate::mapi) const PID_TAG_START_DATE: u32 = 0x0060_0040;
 pub(in crate::mapi) const PID_TAG_END_DATE: u32 = 0x0061_0040;
 pub(in crate::mapi) const PID_TAG_LOCATION_W: u32 = 0x3FFB_001F;
-pub(in crate::mapi) const FIRST_NAMED_PROPERTY_ID: u16 = 0x8001;
-pub(in crate::mapi) const MAX_NAMED_PROPERTY_ID: u16 = 0xFFFE;
+pub(crate) const FIRST_NAMED_PROPERTY_ID: u16 = 0x8001;
+pub(crate) const MAX_NAMED_PROPERTY_ID: u16 = 0xFFFE;
 pub(in crate::mapi) const PS_MAPI_GUID: [u8; 16] = [
     0x28, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];

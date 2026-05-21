@@ -13,6 +13,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
+use crate::mapi::properties::{MapiNamedProperty, MapiNamedPropertyKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
@@ -62,6 +63,12 @@ pub(crate) struct MapiIdentityLookupRecord {
     pub(crate) canonical_id: Uuid,
     pub(crate) object_id: u64,
     pub(crate) source_key: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiNamedPropertyMapping {
+    pub(crate) property_id: u16,
+    pub(crate) property: MapiNamedProperty,
 }
 
 #[allow(dead_code)]
@@ -200,6 +207,40 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         source_keys: &'a [Vec<u8>],
     ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>>;
+
+    fn fetch_or_allocate_mapi_named_property_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        properties: &'a [MapiNamedProperty],
+        create: bool,
+    ) -> StoreFuture<'a, Vec<Option<MapiNamedPropertyMapping>>> {
+        Box::pin(async move {
+            let _ = (account_id, properties, create);
+            Ok(Vec::new())
+        })
+    }
+
+    fn fetch_mapi_named_properties_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        property_ids: &'a [u16],
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
+        Box::pin(async move {
+            let _ = (account_id, property_ids);
+            Ok(Vec::new())
+        })
+    }
+
+    fn fetch_mapi_named_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        guid: Option<[u8; 16]>,
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
+        Box::pin(async move {
+            let _ = (account_id, guid);
+            Ok(Vec::new())
+        })
+    }
 
     #[allow(dead_code)]
     fn fetch_mapi_sync_checkpoint<'a>(
@@ -848,6 +889,119 @@ impl ExchangeStore for Storage {
 
             rows.into_iter()
                 .map(mapi_identity_lookup_from_row)
+                .collect()
+        })
+    }
+
+    fn fetch_or_allocate_mapi_named_property_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        properties: &'a [MapiNamedProperty],
+        create: bool,
+    ) -> StoreFuture<'a, Vec<Option<MapiNamedPropertyMapping>>> {
+        Box::pin(async move {
+            if properties.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let mut mappings = Vec::with_capacity(properties.len());
+
+            for property in properties {
+                if let Some(mapping) =
+                    fetch_mapi_named_property_in_tx(&mut tx, tenant_id, account_id, property)
+                        .await?
+                {
+                    mappings.push(Some(mapping));
+                    continue;
+                }
+                if !create {
+                    mappings.push(None);
+                    continue;
+                }
+
+                let property_id =
+                    allocate_next_mapi_named_property_id(&mut tx, tenant_id, account_id).await?;
+                insert_mapi_named_property_in_tx(
+                    &mut tx,
+                    tenant_id,
+                    account_id,
+                    property_id,
+                    property,
+                )
+                .await?;
+                mappings.push(Some(MapiNamedPropertyMapping {
+                    property_id,
+                    property: property.clone(),
+                }));
+            }
+
+            tx.commit().await?;
+            Ok(mappings)
+        })
+    }
+
+    fn fetch_mapi_named_properties_by_ids<'a>(
+        &'a self,
+        account_id: Uuid,
+        property_ids: &'a [u16],
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
+        Box::pin(async move {
+            if property_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let ids = property_ids
+                .iter()
+                .map(|id| i32::from(*id))
+                .collect::<Vec<_>>();
+            let rows = sqlx::query(
+                r#"
+                SELECT property_id, property_guid, property_kind, property_lid, property_name
+                FROM mapi_named_properties
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND property_id = ANY($3)
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(&ids)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_named_property_mapping_from_row)
+                .collect()
+        })
+    }
+
+    fn fetch_mapi_named_properties<'a>(
+        &'a self,
+        account_id: Uuid,
+        guid: Option<[u8; 16]>,
+    ) -> StoreFuture<'a, Vec<MapiNamedPropertyMapping>> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let guid = guid.map(Vec::from);
+            let rows = sqlx::query(
+                r#"
+                SELECT property_id, property_guid, property_kind, property_lid, property_name
+                FROM mapi_named_properties
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND ($3::bytea IS NULL OR property_guid = $3)
+                ORDER BY property_id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(guid)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_named_property_mapping_from_row)
                 .collect()
         })
     }
@@ -2171,6 +2325,127 @@ async fn allocate_next_mapi_global_counter(
     .await?;
 
     Ok(next as u64)
+}
+
+async fn fetch_mapi_named_property_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    property: &MapiNamedProperty,
+) -> Result<Option<MapiNamedPropertyMapping>> {
+    let (property_kind, property_lid, property_name) = mapi_named_property_parts(property);
+    let row = sqlx::query(
+        r#"
+        SELECT property_id, property_guid, property_kind, property_lid, property_name
+        FROM mapi_named_properties
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND property_guid = $3
+          AND property_kind = $4
+          AND (
+              ($4 = 'lid' AND property_lid = $5)
+              OR ($4 = 'name' AND property_name = $6)
+          )
+        LIMIT 1
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(property.guid.to_vec())
+    .bind(property_kind)
+    .bind(property_lid)
+    .bind(property_name)
+    .fetch_optional(&mut **tx)
+    .await?;
+
+    row.map(mapi_named_property_mapping_from_row).transpose()
+}
+
+async fn insert_mapi_named_property_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    property_id: u16,
+    property: &MapiNamedProperty,
+) -> Result<()> {
+    let (property_kind, property_lid, property_name) = mapi_named_property_parts(property);
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_named_properties (
+            tenant_id,
+            account_id,
+            property_id,
+            property_guid,
+            property_kind,
+            property_lid,
+            property_name
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(i32::from(property_id))
+    .bind(property.guid.to_vec())
+    .bind(property_kind)
+    .bind(property_lid)
+    .bind(property_name)
+    .execute(&mut **tx)
+    .await?;
+
+    Ok(())
+}
+
+async fn allocate_next_mapi_named_property_id(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<u16> {
+    let next = sqlx::query_scalar::<_, i32>(
+        r#"
+        SELECT COALESCE(MAX(property_id), $3 - 1) + 1
+        FROM mapi_named_properties
+        WHERE tenant_id = $1
+          AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(i32::from(crate::mapi::properties::FIRST_NAMED_PROPERTY_ID))
+    .fetch_one(&mut **tx)
+    .await?;
+    if next > i32::from(crate::mapi::properties::MAX_NAMED_PROPERTY_ID) {
+        anyhow::bail!("MAPI named property id space exhausted");
+    }
+    Ok(next as u16)
+}
+
+fn mapi_named_property_parts(
+    property: &MapiNamedProperty,
+) -> (&'static str, Option<i32>, Option<&str>) {
+    match &property.kind {
+        MapiNamedPropertyKind::Lid(lid) => ("lid", Some(*lid as i32), None),
+        MapiNamedPropertyKind::Name(name) => ("name", None, Some(name.as_str())),
+    }
+}
+
+fn mapi_named_property_mapping_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<MapiNamedPropertyMapping> {
+    let guid: Vec<u8> = row.get("property_guid");
+    let guid: [u8; 16] = guid
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("invalid MAPI named property GUID length"))?;
+    let property_kind: String = row.get("property_kind");
+    let kind = match property_kind.as_str() {
+        "lid" => MapiNamedPropertyKind::Lid(row.get::<i32, _>("property_lid") as u32),
+        "name" => MapiNamedPropertyKind::Name(row.get::<String, _>("property_name")),
+        value => anyhow::bail!("unsupported MAPI named property kind: {value}"),
+    };
+    Ok(MapiNamedPropertyMapping {
+        property_id: row.get::<i32, _>("property_id") as u16,
+        property: MapiNamedProperty { guid, kind },
+    })
 }
 
 async fn repair_invalid_mapi_identity_change_keys(

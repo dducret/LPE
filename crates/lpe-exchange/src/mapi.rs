@@ -45,7 +45,7 @@ pub(crate) mod identity;
 mod notifications;
 mod nspi;
 pub(crate) mod permissions;
-mod properties;
+pub(crate) mod properties;
 mod rop;
 mod session;
 mod store_adapter;

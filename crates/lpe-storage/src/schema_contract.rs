@@ -495,6 +495,44 @@ fn mapi_identity_mapping_is_store_backed() {
 }
 
 #[test]
+fn mapi_named_properties_and_custom_values_are_durable() {
+    let named = table_definition("mapi_named_properties");
+    for required in [
+        "property_id INTEGER NOT NULL CHECK (property_id BETWEEN 32769 AND 65534)",
+        "property_guid BYTEA NOT NULL CHECK (octet_length(property_guid) = 16)",
+        "property_kind TEXT NOT NULL CHECK (property_kind IN ('lid', 'name'))",
+        "PRIMARY KEY (tenant_id, account_id, property_id)",
+        "REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            named.contains(required),
+            "mapi_named_properties must persist stable Outlook named-property mappings: {required}"
+        );
+    }
+
+    let values = table_definition("mapi_custom_property_values");
+    for required in [
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment'))",
+        "canonical_id UUID NOT NULL",
+        "property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295)",
+        "property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535)",
+        "property_value BYTEA NOT NULL",
+        "PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag)",
+    ] {
+        assert!(
+            values.contains(required),
+            "mapi_custom_property_values must persist custom MAPI property values by canonical object: {required}"
+        );
+    }
+
+    assert_schema_contains_all(&[
+        "CREATE UNIQUE INDEX mapi_named_properties_lid_idx",
+        "CREATE UNIQUE INDEX mapi_named_properties_name_idx",
+        "CREATE INDEX mapi_custom_property_values_object_idx",
+    ]);
+}
+
+#[test]
 fn mapi_folder_properties_are_not_protocol_local_state() {
     assert!(
         !SCHEMA.contains("CREATE TABLE mapi_folder_properties")
