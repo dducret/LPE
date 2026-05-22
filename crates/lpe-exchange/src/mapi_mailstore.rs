@@ -991,6 +991,7 @@ fn log_hierarchy_microsoft_payload_comparison(
     let comparison = hierarchy_microsoft_payload_comparison(
         sync_flags,
         sync_extra_flags,
+        folder_id,
         requested_property_tags,
         summary,
     );
@@ -1082,6 +1083,7 @@ struct HierarchyMicrosoftPayloadComparison {
 fn hierarchy_microsoft_payload_comparison(
     sync_flags: u16,
     sync_extra_flags: u32,
+    sync_root_folder_id: u64,
     requested_property_tags: &[u32],
     summary: &HierarchyTransferDebugSummary,
 ) -> HierarchyMicrosoftPayloadComparison {
@@ -1146,11 +1148,12 @@ fn hierarchy_microsoft_payload_comparison(
         .iter()
         .filter_map(|row| row.source_counter)
         .collect::<Vec<_>>();
-    let expected_change_counters = summary
+    let mut expected_change_counters = summary
         .rows
         .iter()
         .filter_map(|row| row.change_counter)
         .collect::<Vec<_>>();
+    expected_change_counters.push(change_number_for_store_id(sync_root_folder_id));
 
     HierarchyMicrosoftPayloadComparison {
         required_missing_row_names,
@@ -1239,11 +1242,12 @@ fn hierarchy_semantic_validation(
         .iter()
         .filter_map(|row| row.source_counter)
         .collect::<Vec<_>>();
-    let expected_change_counters = summary
+    let mut expected_change_counters = summary
         .rows
         .iter()
         .filter_map(|row| row.change_counter)
         .collect::<Vec<_>>();
+    expected_change_counters.push(sync_root_change_counter);
     let top_level_rows = summary
         .rows
         .iter()
@@ -2698,10 +2702,12 @@ fn sync_state_change_numbers(
     attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> Vec<u64> {
     if sync_type == SYNC_TYPE_HIERARCHY {
-        mailboxes
+        let mut change_numbers = mailboxes
             .iter()
             .map(|mailbox| canonical_hierarchy_change_number(folder_id, mailbox))
-            .collect()
+            .collect::<Vec<_>>();
+        change_numbers.push(change_number_for_store_id(folder_id));
+        change_numbers
     } else {
         emails
             .iter()
@@ -3468,11 +3474,11 @@ mod tests {
             vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
         );
         assert!(summary.final_state_expected_property_order_ok);
-        assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
+        assert_eq!(summary.final_state_property_lengths, vec![30, 43]);
         assert_eq!(summary.final_state_idset_given_len, 30);
-        assert_eq!(summary.final_state_cnset_seen_len, 30);
+        assert_eq!(summary.final_state_cnset_seen_len, 43);
         assert_eq!(summary.final_state_idset_given_counters, vec![5]);
-        assert_eq!(summary.final_state_cnset_seen_counters, vec![42]);
+        assert_eq!(summary.final_state_cnset_seen_counters, vec![4, 42]);
         assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
         assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
         assert_eq!(summary.first_folder_name(), "Inbox");
@@ -3486,7 +3492,7 @@ mod tests {
             .final_state_cnset_seen_summary
             .as_deref()
             .unwrap()
-            .contains("ranges=42"));
+            .contains("ranges=4,42"));
         assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
         assert!(summary
             .emitted_property_tags
@@ -3519,9 +3525,9 @@ mod tests {
         );
         assert!(!validation.sync_root_row_present);
         assert!(!validation.sync_root_counter_in_final_idset);
-        assert!(!validation.sync_root_counter_in_final_cnset);
+        assert!(validation.sync_root_counter_in_final_cnset);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
-        assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
+        assert_eq!(validation.root_inclusive_cnset_seen_delta_bytes, 0);
         assert!(validation
             .root_inclusive_idset_given_summary
             .contains("ranges=4-5"));
@@ -3579,6 +3585,7 @@ mod tests {
         let comparison = hierarchy_microsoft_payload_comparison(
             SYNC_FLAG_NO_FOREIGN_IDENTIFIERS,
             0,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             &requested_property_tags,
             &summary,
         );
@@ -3742,7 +3749,7 @@ mod tests {
         assert_eq!(validation.rows_without_folder_id, expected_folder_count);
         assert_eq!(validation.rows_missing_core_property_count, 0);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
-        assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
+        assert_eq!(validation.root_inclusive_cnset_seen_delta_bytes, 0);
         assert!(validation
             .root_inclusive_idset_given_summary
             .contains("ranges=4-8"));
