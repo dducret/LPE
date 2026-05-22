@@ -209,7 +209,6 @@ fn hierarchy_rows<'a>(
 ) -> Vec<HierarchyRow<'a>> {
     let mut rows = mailboxes
         .iter()
-        .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
         .filter(|mailbox| restriction_matches_mailbox_with_context(restriction, mailbox, mailboxes))
         .map(HierarchyRow::Mailbox)
         .chain(
@@ -249,6 +248,7 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
+    REMINDERS_FOLDER_ID,
     DOCUMENT_LIBRARIES_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
     CONFLICTS_FOLDER_ID,

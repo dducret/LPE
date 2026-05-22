@@ -2907,8 +2907,8 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
-const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 20;
+const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 27;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 14;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
@@ -15935,7 +15935,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("Notes")));
     assert!(contains_bytes(&response_rops, &utf16z("Tasks")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Reminders")));
+    assert!(contains_bytes(&response_rops, &utf16z("Reminders")));
     let mut folder_offsets = Vec::new();
     for name in [
         "Inbox",
@@ -15948,6 +15948,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         "Journal",
         "Notes",
         "Tasks",
+        "Reminders",
     ] {
         let name_bytes = utf16z(name);
         folder_offsets.push(
@@ -15963,7 +15964,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
+    assert!(contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")
@@ -15999,6 +16000,10 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TASKS_FOLDER_ID)
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
     ));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
@@ -16040,7 +16045,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
 }
 
 #[test]
-fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy() {
+fn mapi_hierarchy_sync_includes_direct_reminders_projection_in_normal_hierarchy() {
     let reminders =
         mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::REMINDERS_FOLDER_ID)
             .expect("Reminders mailbox");
@@ -16232,6 +16237,11 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             crate::mapi::identity::NOTES_FOLDER_ID,
         ),
         ("Tasks", "IPF.Task", crate::mapi::identity::TASKS_FOLDER_ID),
+        (
+            "Reminders",
+            "Outlook.Reminder",
+            crate::mapi::identity::REMINDERS_FOLDER_ID,
+        ),
         (
             "Document Libraries",
             "IPF.ShortcutFolder",
