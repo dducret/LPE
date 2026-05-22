@@ -419,6 +419,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         });
         for mailbox in folders {
             let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+            if folder_id == sync_root_folder_id {
+                continue;
+            }
             let parent_folder_id =
                 mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
             let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
@@ -2805,7 +2808,10 @@ fn sync_state_object_ids(
     if sync_type == SYNC_TYPE_HIERARCHY {
         mailboxes
             .iter()
-            .map(|mailbox| mapi_folder_id_for_mailbox(mailbox, folder_id))
+            .filter_map(|mailbox| {
+                let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+                (object_id != folder_id).then_some(object_id)
+            })
             .collect()
     } else {
         emails
