@@ -3,11 +3,12 @@ use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, CanonicalChangeCategory, ClientNote, ClientReminder,
-    ClientTask, CollaborationCollection, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
-    UpsertClientTaskInput, UpsertJournalEntryInput,
+    ClientTask, CollaborationCollection, ConversationAction, JmapEmail, JmapEmailFollowupUpdate,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -26,6 +27,7 @@ pub(crate) enum MapiIdentityObjectKind {
     Note,
     JournalEntry,
     SearchFolderDefinition,
+    ConversationAction,
 }
 
 impl MapiIdentityObjectKind {
@@ -40,6 +42,7 @@ impl MapiIdentityObjectKind {
             Self::Note => "note",
             Self::JournalEntry => "journal_entry",
             Self::SearchFolderDefinition => "search_folder_definition",
+            Self::ConversationAction => "conversation_action",
         }
     }
 }
@@ -147,9 +150,11 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) changed_message_ids: Vec<Uuid>,
     pub(crate) changed_note_ids: Vec<Uuid>,
     pub(crate) changed_journal_entry_ids: Vec<Uuid>,
+    pub(crate) changed_conversation_action_ids: Vec<Uuid>,
     pub(crate) deleted_message_ids: Vec<Uuid>,
     pub(crate) deleted_note_ids: Vec<Uuid>,
     pub(crate) deleted_journal_entry_ids: Vec<Uuid>,
+    pub(crate) deleted_conversation_action_ids: Vec<Uuid>,
 }
 
 impl Default for MapiSyncChangeSet {
@@ -161,9 +166,11 @@ impl Default for MapiSyncChangeSet {
             changed_message_ids: Vec::new(),
             changed_note_ids: Vec::new(),
             changed_journal_entry_ids: Vec::new(),
+            changed_conversation_action_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             deleted_note_ids: Vec::new(),
             deleted_journal_entry_ids: Vec::new(),
+            deleted_conversation_action_ids: Vec::new(),
         }
     }
 }
@@ -595,6 +602,22 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<SearchFolderDefinition>>;
+
+    fn fetch_conversation_actions<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ConversationAction>>;
+
+    fn upsert_conversation_action<'a>(
+        &'a self,
+        input: UpsertConversationActionInput,
+    ) -> StoreFuture<'a, ConversationAction>;
+
+    fn delete_conversation_action<'a>(
+        &'a self,
+        account_id: Uuid,
+        conversation_action_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
 
     fn query_client_reminders<'a>(
         &'a self,
@@ -1363,7 +1386,11 @@ impl ExchangeStore for Storage {
                                 object_kind IN ('mailbox_message', 'attachment')
                                 AND ($5::uuid IS NULL OR mailbox_id = $5 OR mailbox_id IS NULL)
                             )
-                            OR ($5::uuid IS NULL AND object_kind IN ('note', 'journal_entry'))
+                            OR ($5::uuid IS NULL AND object_kind IN (
+                                'note',
+                                'journal_entry',
+                                'conversation_action'
+                            ))
                         )
                     )
                   )
@@ -1421,6 +1448,20 @@ impl ExchangeStore for Storage {
                             push_unique_uuid(&mut changes.changed_journal_entry_ids, object_id);
                         }
                     }
+                    "conversation_action" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(
+                                &mut changes.deleted_conversation_action_ids,
+                                object_id,
+                            );
+                        } else {
+                            push_unique_uuid(
+                                &mut changes.changed_conversation_action_ids,
+                                object_id,
+                            );
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1456,7 +1497,7 @@ impl ExchangeStore for Storage {
                     FROM tombstones
                     WHERE tenant_id = $1
                       AND account_id = $2
-                      AND object_kind IN ('note', 'journal_entry')
+                      AND object_kind IN ('note', 'journal_entry', 'conversation_action')
                       AND change_cursor > $3
                       AND $4::uuid IS NULL
                       AND (retained_until IS NULL OR retained_until > NOW())
@@ -1477,6 +1518,10 @@ impl ExchangeStore for Storage {
                         }
                         "journal_entry" => push_unique_uuid(
                             &mut changes.deleted_journal_entry_ids,
+                            row.get("object_id"),
+                        ),
+                        "conversation_action" => push_unique_uuid(
+                            &mut changes.deleted_conversation_action_ids,
                             row.get("object_id"),
                         ),
                         _ => {}
@@ -2075,6 +2120,31 @@ impl ExchangeStore for Storage {
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<SearchFolderDefinition>> {
         Box::pin(async move { self.fetch_search_folders(account_id).await })
+    }
+
+    fn fetch_conversation_actions<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<ConversationAction>> {
+        Box::pin(async move { self.fetch_conversation_actions(account_id).await })
+    }
+
+    fn upsert_conversation_action<'a>(
+        &'a self,
+        input: UpsertConversationActionInput,
+    ) -> StoreFuture<'a, ConversationAction> {
+        Box::pin(async move { self.upsert_conversation_action(input).await })
+    }
+
+    fn delete_conversation_action<'a>(
+        &'a self,
+        account_id: Uuid,
+        conversation_action_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.delete_conversation_action(account_id, conversation_action_id)
+                .await
+        })
     }
 
     fn query_client_reminders<'a>(
@@ -2825,6 +2895,7 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         "note" => MapiIdentityObjectKind::Note,
         "journal_entry" => MapiIdentityObjectKind::JournalEntry,
         "search_folder_definition" => MapiIdentityObjectKind::SearchFolderDefinition,
+        "conversation_action" => MapiIdentityObjectKind::ConversationAction,
         value => anyhow::bail!("unsupported MAPI object kind: {value}"),
     };
     Ok(MapiIdentityLookupRecord {

@@ -477,6 +477,11 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .iter()
             .map(search_folder_definition_sync_object)
             .collect(),
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
+            .conversation_action_messages()
+            .iter()
+            .map(conversation_action_sync_object)
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -617,6 +622,48 @@ fn search_folder_definition_sync_object(
         subject: message.definition.display_name.clone(),
         body_text: String::new(),
         message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size,
+        named_properties,
+    }
+}
+
+fn conversation_action_sync_object(
+    message: &crate::mapi_store::MapiConversationActionMessage,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut named_properties = Vec::new();
+    for property_tag in [
+        PID_TAG_CONVERSATION_INDEX,
+        PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG,
+        PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG,
+        PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG,
+        PID_LID_CONVERSATION_PROCESSED_TAG,
+        PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG,
+        PID_LID_CONVERSATION_ACTION_VERSION_TAG,
+        PID_NAME_KEYWORDS_TAG,
+    ] {
+        if let Some(value) = conversation_action_property_value(message, property_tag)
+            .and_then(special_message_property_value)
+        {
+            named_properties.push((property_tag, value));
+        }
+    }
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let message_size = conversation_action_property_value(message, PID_TAG_MESSAGE_SIZE)
+        .and_then(|value| match value {
+            MapiValue::I32(value) => Some(value),
+            _ => None,
+        })
+        .unwrap_or(0) as i64;
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: conversation_action_subject(&message.action),
+        body_text: String::new(),
+        message_class: "IPM.ConversationAction".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
         named_properties,

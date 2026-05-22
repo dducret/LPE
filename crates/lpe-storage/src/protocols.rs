@@ -226,6 +226,7 @@ pub struct JmapEmail {
     pub reminder_dismissed_at: Option<String>,
     pub swapped_todo_store_id: Option<Uuid>,
     pub swapped_todo_data: Option<Vec<u8>>,
+    pub categories: Vec<String>,
     pub has_attachments: bool,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
@@ -249,6 +250,7 @@ pub struct JmapEmailFollowupUpdate {
     pub reminder_dismissed_at: Option<String>,
     pub swapped_todo_store_id: Option<Uuid>,
     pub swapped_todo_data: Option<Vec<u8>>,
+    pub categories: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -271,6 +273,7 @@ pub struct JmapEmailMailboxState {
     pub reminder_dismissed_at: Option<String>,
     pub swapped_todo_store_id: Option<Uuid>,
     pub swapped_todo_data: Option<Vec<u8>>,
+    pub categories: Vec<String>,
     pub draft: bool,
 }
 
@@ -297,6 +300,7 @@ pub struct ImapEmail {
     pub unread: bool,
     pub flagged: bool,
     pub deleted: bool,
+    pub keywords: Vec<String>,
     pub has_attachments: bool,
     pub size_octets: i64,
     pub internet_message_id: Option<String>,
@@ -431,6 +435,7 @@ pub struct JmapImportedEmailInput {
     pub mime_blob_ref: String,
     pub size_octets: i64,
     pub received_at: Option<String>,
+    pub thread_id: Option<Uuid>,
     pub attachments: Vec<AttachmentUploadInput>,
 }
 
@@ -2464,6 +2469,7 @@ impl Storage {
                     CASE WHEN mm.reminder_dismissed_at IS NULL THEN NULL ELSE to_char(mm.reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS reminder_dismissed_at,
                     mm.swapped_todo_store_id,
                     mm.swapped_todo_data,
+                    mm.keywords,
                     mm.is_draft,
                     mm.modseq,
                     mm.updated_at,
@@ -2503,6 +2509,7 @@ impl Storage {
                     array_agg(reminder_dismissed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_reminder_dismissed_ats,
                     array_agg(swapped_todo_store_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_swapped_todo_store_ids,
                     array_agg(swapped_todo_data ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_swapped_todo_datas,
+                    array_agg(to_json(keywords)::text ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_categories_json,
                     array_agg(is_draft ORDER BY mailbox_sort_order, mailbox_name, mailbox_id) AS mailbox_drafts,
                     array_agg(id) AS mailbox_message_ids,
                     BOOL_OR(NOT is_seen) AS unread,
@@ -2519,6 +2526,7 @@ impl Storage {
                     (array_agg(reminder_dismissed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS reminder_dismissed_at,
                     (array_agg(swapped_todo_store_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS swapped_todo_store_id,
                     (array_agg(swapped_todo_data ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS swapped_todo_data,
+                    COALESCE((array_agg(keywords ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], ARRAY[]::TEXT[]) AS categories,
                     BOOL_OR(is_draft) AS draft
                 FROM visible_memberships
                 GROUP BY message_id
@@ -2544,6 +2552,7 @@ impl Storage {
                 rollup.mailbox_reminder_dismissed_ats,
                 rollup.mailbox_swapped_todo_store_ids,
                 rollup.mailbox_swapped_todo_datas,
+                rollup.mailbox_categories_json,
                 rollup.mailbox_drafts,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at,
                 CASE
@@ -2574,6 +2583,7 @@ impl Storage {
                 rollup.reminder_dismissed_at,
                 rollup.swapped_todo_store_id,
                 rollup.swapped_todo_data,
+                rollup.categories,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
@@ -2738,6 +2748,11 @@ impl Storage {
                             .get(index)
                             .cloned()
                             .unwrap_or(None),
+                        categories: row
+                            .mailbox_categories_json
+                            .get(index)
+                            .and_then(|value| serde_json::from_str(value).ok())
+                            .unwrap_or_default(),
                         draft: row.mailbox_drafts.get(index).copied().unwrap_or(false),
                     })
                     .collect::<Vec<_>>();
@@ -2787,6 +2802,7 @@ impl Storage {
                     reminder_dismissed_at: row.reminder_dismissed_at.clone(),
                     swapped_todo_store_id: row.swapped_todo_store_id,
                     swapped_todo_data: row.swapped_todo_data.clone(),
+                    categories: row.categories.clone(),
                     has_attachments: row.has_attachments,
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id.clone(),
@@ -2894,6 +2910,7 @@ impl Storage {
                 NOT mm.is_seen AS unread,
                 mm.is_flagged AS flagged,
                 mm.is_deleted AS imap_deleted,
+                mm.keywords,
                 m.has_attachments,
                 m.size_octets,
                 m.internet_message_id,
@@ -3065,6 +3082,7 @@ impl Storage {
                     unread: row.unread,
                     flagged: row.flagged,
                     deleted: row.imap_deleted,
+                    keywords: row.keywords,
                     has_attachments: row.has_attachments,
                     size_octets: row.size_octets,
                     internet_message_id: row.internet_message_id,

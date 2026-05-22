@@ -277,6 +277,11 @@ where
         .fetch_search_folders(account_id)
         .await
         .context("fetch MAPI search folders")?;
+    log_mapi_store_load_step(account_id, plan, "fetch conversation actions", 0);
+    let conversation_actions = store
+        .fetch_conversation_actions(account_id)
+        .await
+        .context("fetch MAPI conversation actions")?;
     log_mapi_store_load_step(account_id, plan, "fetch reminders", 0);
     let reminders = store
         .query_client_reminders(
@@ -464,6 +469,15 @@ where
                     reserved_global_counter: None,
                 }),
         )
+        .chain(
+            conversation_actions
+                .iter()
+                .map(|action| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::ConversationAction,
+                    canonical_id: action.id,
+                    reserved_global_counter: None,
+                }),
+        )
         .collect::<Vec<_>>();
     log_mapi_store_load_step(
         account_id,
@@ -508,6 +522,7 @@ where
     )
     .with_notes_and_journal(notes, journal_entries)
     .with_search_folder_definitions(search_folder_definitions)
+    .with_conversation_actions(conversation_actions)
     .with_reminders(reminders)
     .with_content_windows(content_windows))
 }
@@ -618,6 +633,41 @@ fn simulate_table_access(
                 },
             );
             set_handle_slot(handle_slots, request.output_handle_index, handle);
+        }
+        0x06 => {
+            let folder_id = request.folder_id().unwrap_or_else(|| {
+                input_handle(handle_slots, request)
+                    .and_then(|handle| handles.get(&handle))
+                    .and_then(MapiObject::folder_id)
+                    .unwrap_or(INBOX_FOLDER_ID)
+            });
+            let object =
+                if folder_id == crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    MapiObject::PendingConversationAction {
+                        folder_id,
+                        properties: HashMap::new(),
+                    }
+                } else {
+                    MapiObject::PendingMessage {
+                        folder_id,
+                        properties: HashMap::new(),
+                        recipients: Vec::new(),
+                    }
+                };
+            let handle =
+                simulate_allocate_handle(handles, next_handle, request.output_handle_index, object);
+            set_handle_slot(handle_slots, request.output_handle_index, handle);
+        }
+        0x0C => {
+            if input_handle(handle_slots, request)
+                .and_then(|handle| handles.get(&handle))
+                .is_some_and(|object| {
+                    matches!(object, MapiObject::PendingConversationAction { .. })
+                })
+            {
+                plan.requires_full_snapshot = true;
+                return;
+            }
         }
         0x12 => {
             if let Some(MapiObject::ContentsTable { columns, .. }) =
@@ -819,6 +869,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingTask { folder_id, .. }
         | MapiObject::PendingNote { folder_id, .. }
         | MapiObject::PendingJournalEntry { folder_id, .. }
+        | MapiObject::PendingConversationAction { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
         | MapiObject::SynchronizationCollector { folder_id, .. }
         | MapiObject::PermissionTable { folder_id, .. } => {
@@ -886,6 +937,13 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *definition_id);
+        }
+        MapiObject::ConversationAction {
+            folder_id,
+            conversation_action_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *conversation_action_id);
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }

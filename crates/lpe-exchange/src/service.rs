@@ -3521,6 +3521,7 @@ fn imported_email_input(input: SubmitMessageInput, mailbox_id: Uuid) -> JmapImpo
             .unwrap_or_else(|| format!("ews-createitem:{}", Uuid::new_v4())),
         size_octets: input.size_octets,
         received_at: None,
+        thread_id: None,
         attachments: input.attachments,
     }
 }

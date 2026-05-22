@@ -378,6 +378,7 @@ impl FakeStore {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             draft,
         }
     }
@@ -428,6 +429,7 @@ impl FakeStore {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 42,
             internet_message_id: Some("<draft@example.test>".to_string()),
@@ -493,6 +495,7 @@ impl FakeStore {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 84,
             internet_message_id: Some("<inbox@example.test>".to_string()),
@@ -1265,6 +1268,7 @@ impl JmapStore for FakeStore {
             reminder_dismissed_at: email.reminder_dismissed_at.clone(),
             swapped_todo_store_id: email.swapped_todo_store_id,
             swapped_todo_data: email.swapped_todo_data.clone(),
+            categories: email.categories.clone(),
             draft: false,
         }];
         Ok(email)
@@ -1295,6 +1299,7 @@ impl JmapStore for FakeStore {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             draft: false,
         };
         Ok(JmapEmail {
@@ -1349,6 +1354,7 @@ impl JmapStore for FakeStore {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
@@ -3243,6 +3249,7 @@ async fn email_get_and_query_preserve_multiple_mailbox_ids_for_one_email() {
         FakeStore::mailbox_state(&inbox, true, false, false),
         FakeStore::mailbox_state(&archive, false, true, false),
     ];
+    email.categories = vec!["Red Category".to_string()];
     email.unread = true;
     email.flagged = true;
     let store = FakeStore {
@@ -3293,6 +3300,7 @@ async fn email_get_and_query_preserve_multiple_mailbox_ids_for_one_email() {
         Some(&Value::Bool(true))
     );
     assert_eq!(email_object["keywords"]["$flagged"], Value::Bool(true));
+    assert_eq!(email_object["keywords"]["Red Category"], Value::Bool(true));
     assert_eq!(email_object["keywords"].get("$seen"), None);
     assert_eq!(
         response.method_responses[1].1["ids"]

@@ -282,7 +282,8 @@ impl Storage {
             .await?;
         let source = sqlx::query(
             r#"
-            SELECT id, mailbox_id, thread_id, imap_uid, is_seen, is_flagged, received_at::text AS received_at
+            SELECT id, mailbox_id, thread_id, imap_uid, is_seen, is_flagged, keywords,
+                   received_at::text AS received_at
             FROM mailbox_messages
             WHERE tenant_id = $1
               AND account_id = $2
@@ -373,11 +374,11 @@ impl Storage {
             r#"
             INSERT INTO mailbox_messages (
                 id, tenant_id, account_id, mailbox_id, message_id, thread_id,
-                imap_uid, modseq, is_seen, is_flagged, is_draft, received_at
+                imap_uid, modseq, is_seen, is_flagged, is_draft, keywords, received_at
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
-                $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW())
+                $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW())
             )
             "#,
         )
@@ -392,6 +393,7 @@ impl Storage {
         .bind(source.try_get::<bool, _>("is_seen")?)
         .bind(source.try_get::<bool, _>("is_flagged")?)
         .bind(target_role == "drafts")
+        .bind(source.try_get::<Vec<String>, _>("keywords")?)
         .bind(source.try_get::<String, _>("received_at")?)
         .execute(&mut *tx)
         .await?;
@@ -589,6 +591,7 @@ impl Storage {
             && update.reminder_dismissed_at.is_none()
             && update.swapped_todo_store_id.is_none()
             && update.swapped_todo_data.is_none()
+            && update.categories.is_none()
         {
             return self
                 .fetch_jmap_emails(account_id, &[message_id])
@@ -607,6 +610,7 @@ impl Storage {
         {
             bail!("invalid follow-up flag value");
         }
+        let categories = update.categories.map(normalize_mail_categories);
         let reminder_changed = update.reminder_set.is_some()
             || update.reminder_at.is_some()
             || update.reminder_dismissed_at.is_some();
@@ -675,7 +679,8 @@ impl Storage {
                 END,
                 swapped_todo_store_id = COALESCE($16, swapped_todo_store_id),
                 swapped_todo_data = COALESCE($17, swapped_todo_data),
-                modseq = $18,
+                keywords = COALESCE($18, keywords),
+                modseq = $19,
                 updated_at = NOW()
             WHERE tenant_id = $1 AND account_id = $2 AND message_id = $3
               AND visibility = 'visible'
@@ -699,6 +704,7 @@ impl Storage {
         .bind(update.reminder_dismissed_at)
         .bind(update.swapped_todo_store_id)
         .bind(update.swapped_todo_data)
+        .bind(categories)
         .bind(modseq)
         .fetch_all(&mut *tx)
         .await?;
@@ -762,7 +768,7 @@ impl Storage {
         let target_role = target_mailbox.try_get::<String, _>("role")?;
 
         let message_id = Uuid::new_v4();
-        let thread_id = Uuid::new_v4();
+        let thread_id = input.thread_id.unwrap_or_else(Uuid::new_v4);
         let recipients = input
             .to
             .iter()
@@ -990,4 +996,15 @@ impl Storage {
             snapshot_json: row.snapshot_json,
         }))
     }
+}
+
+fn normalize_mail_categories(categories: Vec<String>) -> Vec<String> {
+    let mut categories = categories
+        .into_iter()
+        .map(|category| category.trim().to_string())
+        .filter(|category| !category.is_empty())
+        .collect::<Vec<_>>();
+    categories.sort();
+    categories.dedup();
+    categories
 }

@@ -5,6 +5,7 @@ mod blob_store;
 pub mod calendar;
 pub mod change;
 pub mod collaboration;
+pub mod conversation_actions;
 pub mod core;
 pub mod inbound;
 pub mod mail;
@@ -45,6 +46,9 @@ pub use crate::change::{
 pub use crate::collaboration::{
     AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationGrant,
     CollaborationGrantInput, CollaborationResourceKind, CollaborationRights,
+};
+pub use crate::conversation_actions::{
+    ConversationAction, UpsertConversationActionInput, CONVERSATION_ACTION_VERSION,
 };
 pub use crate::core::Storage;
 pub use crate::notes_journal::{

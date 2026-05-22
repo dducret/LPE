@@ -198,6 +198,7 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
                     mime_blob_ref: format!("imap-append:{}", Uuid::new_v4()),
                     size_octets: literal.len() as i64,
                     received_at: None,
+                    thread_id: None,
                     attachments: parsed.attachments,
                 },
                 AuditEntryInput {

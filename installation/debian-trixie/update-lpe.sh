@@ -157,6 +157,58 @@ CREATE UNIQUE INDEX IF NOT EXISTS search_folders_builtin_role_idx
 CREATE INDEX IF NOT EXISTS search_folders_account_idx
   ON public.search_folders (tenant_id, account_id, display_name);
 
+CREATE TABLE IF NOT EXISTS public.conversation_actions (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  account_id UUID NOT NULL,
+  conversation_id UUID NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  categories_json JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(categories_json) = 'array'),
+  move_folder_entry_id BYTEA,
+  move_store_entry_id BYTEA,
+  move_target_mailbox_id UUID,
+  max_delivery_time TIMESTAMPTZ,
+  last_applied_time TIMESTAMPTZ,
+  version INTEGER NOT NULL DEFAULT 3984588,
+  processed INTEGER NOT NULL DEFAULT 0 CHECK (processed >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, account_id, conversation_id),
+  UNIQUE (tenant_id, id),
+  FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+  CONSTRAINT conversation_actions_move_target_mailbox_id_fkey
+  FOREIGN KEY (tenant_id, account_id, move_target_mailbox_id)
+    REFERENCES public.mailboxes (tenant_id, account_id, id)
+    ON DELETE SET NULL (move_target_mailbox_id)
+);
+
+ALTER TABLE public.conversation_actions
+  ADD COLUMN IF NOT EXISTS move_target_mailbox_id UUID;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    WHERE n.nspname = 'public'
+      AND r.relname = 'conversation_actions'
+      AND c.contype = 'f'
+      AND pg_get_constraintdef(c.oid) LIKE '%move_target_mailbox_id%'
+      AND pg_get_constraintdef(c.oid) LIKE '%REFERENCES mailboxes%'
+  ) THEN
+    ALTER TABLE public.conversation_actions
+      ADD CONSTRAINT conversation_actions_move_target_mailbox_id_fkey
+      FOREIGN KEY (tenant_id, account_id, move_target_mailbox_id)
+      REFERENCES public.mailboxes (tenant_id, account_id, id)
+      ON DELETE SET NULL (move_target_mailbox_id);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS conversation_actions_account_idx
+  ON public.conversation_actions (tenant_id, account_id, updated_at DESC, id);
+
 ALTER TABLE public.mailbox_messages
   ADD COLUMN IF NOT EXISTS followup_flag_status TEXT NOT NULL DEFAULT 'none'
     CHECK (followup_flag_status IN ('none', 'flagged', 'complete')),
@@ -206,18 +258,21 @@ BEGIN
   LIMIT 1;
 
   IF constraint_name IS NOT NULL
-     AND constraint_def NOT LIKE '%search_folder_definition%' THEN
+     AND (
+       constraint_def NOT LIKE '%search_folder_definition%'
+       OR constraint_def NOT LIKE '%conversation_action%'
+     ) THEN
     EXECUTE format('ALTER TABLE public.mapi_object_identities DROP CONSTRAINT %I', constraint_name);
     ALTER TABLE public.mapi_object_identities
       ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
         'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
-        'note', 'journal_entry', 'search_folder_definition'
+        'note', 'journal_entry', 'search_folder_definition', 'conversation_action'
       ));
   ELSIF constraint_name IS NULL THEN
     ALTER TABLE public.mapi_object_identities
       ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
         'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
-        'note', 'journal_entry', 'search_folder_definition'
+        'note', 'journal_entry', 'search_folder_definition', 'conversation_action'
       ));
   END IF;
 END $$;

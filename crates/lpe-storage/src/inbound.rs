@@ -109,7 +109,7 @@ impl Storage {
 
         let mut accepted = Vec::new();
         let mut rejected = Vec::new();
-        let mut stored_message_ids = Vec::new();
+        let mut stored_messages = Vec::new();
         let thread_id = Uuid::new_v4();
         let attachments = parse_message_attachments(&request.raw_message)?;
         let mut followups = Vec::new();
@@ -177,7 +177,7 @@ impl Storage {
                     &attachments,
                 )
                 .await?;
-                stored_message_ids.push(message_id);
+                stored_messages.push((account_id, message_id));
             }
 
             if !sieve_outcome.redirects.is_empty() || sieve_outcome.vacation.is_some() {
@@ -228,6 +228,15 @@ impl Storage {
         tx.commit().await?;
         let mut followup_errors = Vec::new();
 
+        for (account_id, message_id) in &stored_messages {
+            if let Err(error) = self
+                .apply_conversation_actions_to_jmap_email(*account_id, *message_id, "lpe-ct")
+                .await
+            {
+                followup_errors.push(error.to_string());
+            }
+        }
+
         for followup in followups {
             if let Err(error) = self.dispatch_sieve_followups(&followup).await {
                 followup_errors.push(error.to_string());
@@ -241,9 +250,9 @@ impl Storage {
                 .map(|recipient| format!("rejected:{recipient}")),
         );
         delivered_mailboxes.extend(
-            stored_message_ids
+            stored_messages
                 .into_iter()
-                .map(|id| format!("message:{id}")),
+                .map(|(_, id)| format!("message:{id}")),
         );
 
         Ok(InboundDeliveryResponse {
@@ -253,7 +262,7 @@ impl Storage {
                 None
             } else {
                 Some(format!(
-                    "sieve follow-up errors: {}",
+                    "post-delivery errors: {}",
                     followup_errors.join(" | ")
                 ))
             },

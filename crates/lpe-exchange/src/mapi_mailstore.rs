@@ -3107,6 +3107,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             draft: false,
         });
         let with_archive = canonical_message_change_number(&email);
@@ -4169,6 +4170,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: None,
                 swapped_todo_data: None,
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-06T12:00:00Z".to_string(),
@@ -4203,6 +4205,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 42,
             internet_message_id: Some("<message@example.test>".to_string()),

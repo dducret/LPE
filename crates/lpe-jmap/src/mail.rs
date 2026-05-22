@@ -1511,6 +1511,7 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             mime_blob_ref: format!("upload:{}", blob.id),
             size_octets: blob.octet_size as i64,
             received_at: None,
+            thread_id: None,
             attachments: parsed.attachments,
         })
     }
@@ -2191,6 +2192,12 @@ pub(crate) fn email_keywords(email: &JmapEmail) -> Value {
     }
     if email.flagged {
         keywords.insert("$flagged".to_string(), Value::Bool(true));
+    }
+    for category in &email.categories {
+        let category = category.trim();
+        if !category.is_empty() {
+            keywords.insert(category.to_string(), Value::Bool(true));
+        }
     }
     Value::Object(keywords)
 }

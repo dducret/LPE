@@ -4,7 +4,9 @@ use super::sync::*;
 use super::tables::*;
 use super::wire::MapiPropertyType;
 use super::*;
-use crate::mapi_store::{MapiMessage, MapiSearchFolderDefinitionMessage};
+use crate::mapi_store::{
+    MapiConversationActionMessage, MapiMessage, MapiSearchFolderDefinitionMessage,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MapiNamedProperty {
@@ -136,6 +138,7 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
+pub(in crate::mapi) const PID_TAG_CONVERSATION_INDEX: u32 = 0x0071_0102;
 pub(in crate::mapi) const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 pub(in crate::mapi) const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
 pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
@@ -229,6 +232,9 @@ pub(in crate::mapi) const PS_INTERNET_HEADERS_GUID: [u8; 16] = [
 pub(in crate::mapi) const PSETID_COMMON_GUID: [u8; 16] = [
     0x08, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
+pub(in crate::mapi) const PS_PUBLIC_STRINGS_GUID: [u8; 16] = [
+    0x29, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
 pub(in crate::mapi) const PSETID_LOG_GUID: [u8; 16] = [
     0x0A, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
@@ -253,6 +259,12 @@ pub(in crate::mapi) const PID_LID_TASK_DUE_DATE: u32 = 0x0000_8105;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME: u32 = 0x0000_8586;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID: u32 = 0x0000_85C6;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID: u32 = 0x0000_85C7;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME: u32 = 0x0000_85C8;
+pub(in crate::mapi) const PID_LID_CONVERSATION_PROCESSED: u32 = 0x0000_85C9;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME: u32 = 0x0000_85CA;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_VERSION: u32 = 0x0000_85CB;
 pub(in crate::mapi) const PID_LID_LOG_TYPE: u32 = 0x0000_8700;
 pub(in crate::mapi) const PID_LID_LOG_START: u32 = 0x0000_8706;
 pub(in crate::mapi) const PID_LID_LOG_DURATION: u32 = 0x0000_8707;
@@ -284,6 +296,13 @@ pub(in crate::mapi) const PID_LID_COMPANIES_TAG: u32 = 0x8539_101F;
 pub(in crate::mapi) const PID_LID_CONTACTS_TAG: u32 = 0x853A_101F;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_W_TAG: u32 = 0x8586_001F;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME_STRING8_TAG: u32 = 0x8586_001E;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG: u32 = 0x85C6_0102;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG: u32 = 0x85C7_0102;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG: u32 = 0x85C8_0040;
+pub(in crate::mapi) const PID_LID_CONVERSATION_PROCESSED_TAG: u32 = 0x85C9_0003;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG: u32 = 0x85CA_0040;
+pub(in crate::mapi) const PID_LID_CONVERSATION_ACTION_VERSION_TAG: u32 = 0x85CB_0003;
+pub(in crate::mapi) const PID_NAME_KEYWORDS_TAG: u32 = 0x9000_101F;
 pub(in crate::mapi) const PID_LID_LOG_TYPE_W_TAG: u32 = 0x8700_001F;
 pub(in crate::mapi) const PID_LID_LOG_TYPE_STRING8_TAG: u32 = 0x8700_001E;
 pub(in crate::mapi) const PID_LID_LOG_START_TAG: u32 = 0x8706_0040;
@@ -324,6 +343,24 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         (PID_LID_COMPANIES, PSETID_COMMON_GUID),
         (PID_LID_CONTACTS, PSETID_COMMON_GUID),
         (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
+        (
+            PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID,
+            PSETID_COMMON_GUID,
+        ),
+        (
+            PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID,
+            PSETID_COMMON_GUID,
+        ),
+        (
+            PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME,
+            PSETID_COMMON_GUID,
+        ),
+        (PID_LID_CONVERSATION_PROCESSED, PSETID_COMMON_GUID),
+        (
+            PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME,
+            PSETID_COMMON_GUID,
+        ),
+        (PID_LID_CONVERSATION_ACTION_VERSION, PSETID_COMMON_GUID),
         (PID_LID_LOG_TYPE, PSETID_LOG_GUID),
         (PID_LID_LOG_START, PSETID_LOG_GUID),
         (PID_LID_LOG_DURATION, PSETID_LOG_GUID),
@@ -353,6 +390,15 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             },
         )
     })
+    .collect::<Vec<_>>()
+    .into_iter()
+    .chain(std::iter::once((
+        0x9000,
+        MapiNamedProperty {
+            guid: PS_PUBLIC_STRINGS_GUID,
+            kind: MapiNamedPropertyKind::Name("Keywords".to_string()),
+        },
+    )))
     .collect()
 }
 
@@ -508,7 +554,13 @@ fn special_folder_entry_id_value(mailbox_guid: Uuid, folder_id: u64) -> MapiValu
 fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
     let entries = [
         (0x8001u16, RSS_FEEDS_FOLDER_ID),
+        (0x8002, TRACKED_MAIL_PROCESSING_FOLDER_ID),
+        (0x8004, TODO_SEARCH_FOLDER_ID),
+        (0x8006, CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
         (0x8008, SUGGESTED_CONTACTS_FOLDER_ID),
+        (0x8009, CONTACTS_SEARCH_FOLDER_ID),
+        (0x800A, IM_CONTACT_LIST_FOLDER_ID),
+        (0x800B, QUICK_CONTACTS_FOLDER_ID),
     ];
     let mut value = Vec::new();
     for (persist_id, folder_id) in entries {
@@ -929,6 +981,7 @@ pub(in crate::mapi) fn email_property_value(
             .swapped_todo_data
             .as_ref()
             .map(|data| MapiValue::Binary(data.clone())),
+        PID_NAME_KEYWORDS_TAG => Some(MapiValue::MultiString(email.categories.clone())),
         PID_LID_FLAG_REQUEST_W_TAG => Some(MapiValue::String(email.followup_request.clone())),
         PID_LID_TASK_START_DATE_TAG => email
             .followup_start_at
@@ -1028,6 +1081,104 @@ pub(in crate::mapi) fn search_folder_definition_property_value(
         }
         _ => None,
     }
+}
+
+pub(in crate::mapi) fn conversation_action_property_value(
+    message: &MapiConversationActionMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let action = &message.action;
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(conversation_action_subject(action)))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.ConversationAction".to_string())),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(
+            conversation_action_size(action).min(i32::MAX as usize) as i32,
+        )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_CONVERSATION_INDEX => Some(MapiValue::Binary(conversation_index_for_uuid(
+            action.conversation_id,
+        ))),
+        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST => Some(
+            MapiValue::Binary(mapi_mailstore::source_key_for_store_id(message.id)),
+        ),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
+        PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG => {
+            action.move_folder_entry_id.clone().map(MapiValue::Binary)
+        }
+        PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG => {
+            action.move_store_entry_id.clone().map(MapiValue::Binary)
+        }
+        PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG => action
+            .max_delivery_time
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG => action
+            .last_applied_time
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
+        PID_LID_CONVERSATION_ACTION_VERSION_TAG => Some(MapiValue::I32(action.version)),
+        PID_LID_CONVERSATION_PROCESSED_TAG => Some(MapiValue::I32(action.processed)),
+        PID_NAME_KEYWORDS_TAG => Some(MapiValue::MultiString(json_string_array(
+            &action.categories_json,
+        ))),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec<u8> {
+    let mut value = Vec::with_capacity(22);
+    value.extend_from_slice(&[0x01, 0, 0, 0, 0, 0]);
+    value.extend_from_slice(conversation_id.as_bytes());
+    value
+}
+
+pub(in crate::mapi) fn conversation_id_from_index(value: &[u8]) -> Option<Uuid> {
+    let bytes: [u8; 16] = value.get(6..22)?.try_into().ok()?;
+    Some(Uuid::from_bytes(bytes))
+}
+
+pub(in crate::mapi) fn conversation_action_subject(
+    action: &lpe_storage::ConversationAction,
+) -> String {
+    if action.subject.trim().is_empty() {
+        "Conv.Action".to_string()
+    } else {
+        action.subject.clone()
+    }
+}
+
+fn conversation_action_size(action: &lpe_storage::ConversationAction) -> usize {
+    conversation_action_subject(action)
+        .len()
+        .saturating_add(action.categories_json.len())
+        .saturating_add(
+            action
+                .move_folder_entry_id
+                .as_ref()
+                .map(Vec::len)
+                .unwrap_or_default(),
+        )
+        .saturating_add(
+            action
+                .move_store_entry_id
+                .as_ref()
+                .map(Vec::len)
+                .unwrap_or_default(),
+        )
 }
 
 fn search_folder_tag(role: &str) -> i32 {
@@ -2631,6 +2782,10 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         .or_else(|| Some(principal.display_name.clone()));
     let internet_message_id =
         optional_pending_text_property(properties, &[PID_TAG_INTERNET_MESSAGE_ID_W]);
+    let thread_id = match properties.get(&PID_TAG_CONVERSATION_INDEX) {
+        Some(MapiValue::Binary(value)) => conversation_id_from_index(value),
+        _ => None,
+    };
     let size_octets = subject
         .len()
         .saturating_add(body_text.len())
@@ -2657,6 +2812,7 @@ pub(in crate::mapi) fn jmap_import_from_pending_message(
         mime_blob_ref: format!("mapi-save-message:{}", Uuid::new_v4()),
         size_octets,
         received_at: None,
+        thread_id,
         attachments: Vec::new(),
     }
 }
@@ -2975,6 +3131,9 @@ where
                     .map_err(|error| anyhow!("invalid PidTagSwappedToDoData value: {error}"))?;
                 update.swapped_todo_data = Some(bytes);
             }
+            PID_NAME_KEYWORDS_TAG => {
+                update.categories = Some(categories_from_mapi_value(value)?);
+            }
             _ => return Err(anyhow!("canonical MAPI message property is not mutable")),
         }
     }
@@ -2993,6 +3152,7 @@ where
         && update.reminder_dismissed_at.is_none()
         && update.swapped_todo_store_id.is_none()
         && update.swapped_todo_data.is_none()
+        && update.categories.is_none()
     {
         return Ok(());
     }
@@ -3012,7 +3172,22 @@ where
     Ok(())
 }
 
-fn filetime_to_rfc3339_utc(filetime: i64) -> Option<String> {
+pub(in crate::mapi) fn categories_from_mapi_value(value: MapiValue) -> Result<Vec<String>> {
+    let mut categories = match value {
+        MapiValue::MultiString(values) => values,
+        MapiValue::String(value) => vec![value],
+        _ => return Err(anyhow!("invalid PidNameKeywords value")),
+    };
+    for category in &mut categories {
+        *category = category.trim().to_string();
+    }
+    categories.retain(|category| !category.is_empty());
+    categories.sort();
+    categories.dedup();
+    Ok(categories)
+}
+
+pub(in crate::mapi) fn filetime_to_rfc3339_utc(filetime: i64) -> Option<String> {
     filetime_to_date_time(filetime).map(|(date, time)| format!("{date}T{time}:00Z"))
 }
 
@@ -3334,7 +3509,8 @@ pub(in crate::mapi) fn apply_mapi_property_values(
         | Some(MapiObject::PendingEvent { properties, .. })
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })
-        | Some(MapiObject::PendingJournalEntry { properties, .. }) => {
+        | Some(MapiObject::PendingJournalEntry { properties, .. })
+        | Some(MapiObject::PendingConversationAction { properties, .. }) => {
             properties.extend(values);
             Ok(())
         }
@@ -3386,7 +3562,8 @@ pub(in crate::mapi) fn delete_mapi_properties(
         | Some(MapiObject::PendingEvent { properties, .. })
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })
-        | Some(MapiObject::PendingJournalEntry { properties, .. }) => {
+        | Some(MapiObject::PendingJournalEntry { properties, .. })
+        | Some(MapiObject::PendingConversationAction { properties, .. }) => {
             for tag in &property_tags {
                 properties.remove(tag);
             }
@@ -3783,7 +3960,7 @@ mod tests {
     }
 
     #[test]
-    fn additional_ren_entry_ids_ex_advertises_only_initial_hierarchy_folders() {
+    fn additional_ren_entry_ids_ex_advertises_outlook_store_special_folders() {
         let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
         let Some(MapiValue::Binary(value)) = special_folder_identification_property_value(
             mailbox_guid,
@@ -3825,7 +4002,13 @@ mod tests {
             entries,
             vec![
                 (0x8001, Some(RSS_FEEDS_FOLDER_ID)),
+                (0x8002, Some(TRACKED_MAIL_PROCESSING_FOLDER_ID)),
+                (0x8004, Some(TODO_SEARCH_FOLDER_ID)),
+                (0x8006, Some(CONVERSATION_ACTION_SETTINGS_FOLDER_ID)),
                 (0x8008, Some(SUGGESTED_CONTACTS_FOLDER_ID)),
+                (0x8009, Some(CONTACTS_SEARCH_FOLDER_ID)),
+                (0x800A, Some(IM_CONTACT_LIST_FOLDER_ID)),
+                (0x800B, Some(QUICK_CONTACTS_FOLDER_ID)),
             ]
         );
     }
@@ -4028,6 +4211,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: None,
                 swapped_todo_data: None,
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-20T10:00:00Z".to_string(),
@@ -4059,6 +4243,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 128,
             internet_message_id: Some("rss-guid".to_string()),
@@ -4137,6 +4322,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: Some(store_id),
                 swapped_todo_data: Some(vec![1, 2, 3, 4]),
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-20T10:00:00Z".to_string(),
@@ -4168,6 +4354,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: Some(store_id),
             swapped_todo_data: Some(valid_swapped_todo_data()),
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 128,
             internet_message_id: None,

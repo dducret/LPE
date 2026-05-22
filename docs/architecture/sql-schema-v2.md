@@ -98,7 +98,7 @@ for hierarchy sync and folder-list projections.
 
 - `imap_uid`
 - `modseq`
-- flags and keywords
+- flags and keywords, including Outlook category names projected through MAPI `PidNameKeywords`
 - visibility and deletion state
 - membership timestamps
 - soft-delete / expunge state while visible to sync logic
@@ -148,11 +148,17 @@ selected membership.
 Schema v2 keeps thread identity lightweight until the product needs first-class
 thread lifecycle. `mailbox_messages.thread_id` and durable change-log
 `threadId` summaries are enough for current JMAP thread projection and replay.
-If thread creation/deletion state, MAPI conversation IDs, conversation indexes,
-or retained JMAP `Thread/changes` need stable identity beyond message and
-mailbox-message summaries, add a real `threads` table with tenant/account
-ownership and make messages or memberships reference it. Do not stretch
-mailbox-message summary fields into an implicit thread store.
+MAPI conversation actions use `conversation_actions.conversation_id` to persist
+Outlook conversation-action FAI state against the existing lightweight thread
+identifier. Same-store move actions also persist the resolved canonical target
+mailbox id so delivery and non-MAPI protocol paths can apply the action without
+parsing Outlook EntryIDs; cross-store move requests retain the raw Outlook
+EntryIDs and leave the canonical target null. If broader thread
+creation/deletion state, richer MAPI conversation
+IDs, or retained JMAP `Thread/changes` need stable identity beyond message,
+mailbox-message, and conversation-action summaries, add a real `threads` table
+with tenant/account ownership and make messages or memberships reference it. Do
+not stretch mailbox-message summary fields into an implicit thread store.
 
 Protocol adapters and tests must treat `uid_validity` and `uid_next` as mailbox
 state. They must not derive `UIDNEXT` from the maximum currently visible
@@ -167,7 +173,7 @@ Schema v2 uses counters plus append-only logs.
 
 | Table | Scope | Use |
 | --- | --- | --- |
-| `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, notes, journal, rights, search, rules |
+| `account_sync_state` | account/category | current modseq for mail, contacts, calendars, tasks, notes, journal, rights, search, rules, conversation actions |
 | `mailboxes.modseq` | mailbox | IMAP `HIGHESTMODSEQ`, QRESYNC, mailbox-scoped refresh |
 | `mail_change_log` | object | JMAP changes, push replay, MAPI ICS manifests, DAV sync, ActiveSync deltas |
 | `tombstones` | deleted object | JMAP destroyed ids, IMAP expunge, MAPI ICS deletes, ActiveSync deletes |
@@ -200,12 +206,15 @@ task-list grant rows through their durable `collectionId` summary. Item-level
 visibility changes still fall back because one grant row can affect many child
 objects. This fallback is compatibility behavior, not a protocol-local
 canonical store.
-Search-folder definitions and mailbox rule definitions also replay through the
-same durable object log. Built-in Exchange-compatible search folders are stored
-as `search_folders` rows with `object_kind = 'search_folder_definition'` change
-rows; Sieve-backed mailbox rules use `object_kind = 'sieve_script'` change rows
-and tombstones. These rows are canonical LPE state, not Exchange FAI message
-stores or protocol-owned rule tables.
+Search-folder definitions, mailbox rule definitions, and Outlook conversation
+actions also replay through the same durable object log. Built-in
+Exchange-compatible search folders are stored as `search_folders` rows with
+`object_kind = 'search_folder_definition'` change rows; Sieve-backed mailbox
+rules use `object_kind = 'sieve_script'` change rows and tombstones;
+Conversation Action Settings FAI messages are projections of
+`conversation_actions` rows with `object_kind = 'conversation_action'` change
+rows. These rows are canonical LPE state, not Exchange-only FAI message stores
+or protocol-owned rule tables.
 
 Protocol adapters store only cursor rows:
 
@@ -575,6 +584,7 @@ collaboration, rights, or user-visible state.
 - `mailboxes`
 - `mailbox_subscriptions`
 - `search_folders`
+- `conversation_actions`
 - `storage_pools`
 - `blobs`
 - `blob_placements`

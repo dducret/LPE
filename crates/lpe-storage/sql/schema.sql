@@ -476,7 +476,7 @@ CREATE TABLE local_ai_settings (
 CREATE TABLE account_sync_state (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules')),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions')),
     current_modseq BIGINT NOT NULL DEFAULT 1 CHECK (current_modseq > 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, category),
@@ -565,6 +565,33 @@ CREATE UNIQUE INDEX search_folders_builtin_role_idx
 
 CREATE INDEX search_folders_account_idx
     ON search_folders (tenant_id, account_id, display_name);
+
+CREATE TABLE conversation_actions (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    conversation_id UUID NOT NULL,
+    subject TEXT NOT NULL DEFAULT '',
+    categories_json JSONB NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(categories_json) = 'array'),
+    move_folder_entry_id BYTEA,
+    move_store_entry_id BYTEA,
+    move_target_mailbox_id UUID,
+    max_delivery_time TIMESTAMPTZ,
+    last_applied_time TIMESTAMPTZ,
+    version INTEGER NOT NULL DEFAULT 3984588,
+    processed INTEGER NOT NULL DEFAULT 0 CHECK (processed >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, account_id, conversation_id),
+    UNIQUE (tenant_id, id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id, move_target_mailbox_id)
+        REFERENCES mailboxes (tenant_id, account_id, id)
+        ON DELETE SET NULL (move_target_mailbox_id)
+);
+
+CREATE INDEX conversation_actions_account_idx
+    ON conversation_actions (tenant_id, account_id, updated_at DESC, id);
 
 CREATE TABLE mailbox_subscriptions (
     tenant_id UUID NOT NULL,
@@ -1267,7 +1294,8 @@ CREATE TABLE mail_change_log (
         'mailbox_delegation_grant',
         'sender_right',
         'search_folder_definition',
-        'sieve_script'
+        'sieve_script',
+        'conversation_action'
     )),
     object_id UUID NOT NULL,
     object_uid TEXT,
@@ -1340,7 +1368,8 @@ CREATE TABLE mail_change_log (
                 'mailbox_delegation_grant',
                 'sender_right',
                 'search_folder_definition',
-                'sieve_script'
+                'sieve_script',
+                'conversation_action'
             )
             AND account_id IS NOT NULL
             AND mailbox_id IS NULL
@@ -1544,7 +1573,7 @@ CREATE TRIGGER tombstones_append_only_update_guard
 CREATE TABLE canonical_change_journal (
     sequence BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id UUID NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules')),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions')),
     principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1707,7 +1736,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),

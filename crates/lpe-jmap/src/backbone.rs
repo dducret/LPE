@@ -99,6 +99,12 @@ impl JmapEmailObject {
         if email.mailbox_states.iter().any(|state| state.draft) {
             keywords.insert("$draft".to_string(), true);
         }
+        for category in &email.categories {
+            let category = category.trim();
+            if !category.is_empty() {
+                keywords.insert(category.to_string(), true);
+            }
+        }
 
         Self {
             id: email.id.to_string(),

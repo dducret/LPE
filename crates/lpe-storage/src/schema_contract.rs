@@ -3,6 +3,7 @@ const ATTACHMENTS_STORAGE: &str = include_str!("attachments.rs");
 const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
+const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
@@ -165,6 +166,7 @@ fn mailbox_messages_persist_outlook_followup_state() {
         "reminder_dismissed_at TIMESTAMPTZ",
         "swapped_todo_store_id UUID",
         "swapped_todo_data BYTEA",
+        "keywords TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]",
     ] {
         assert!(
             mailbox_messages.contains(needle),
@@ -178,8 +180,10 @@ fn mailbox_messages_persist_outlook_followup_state() {
             && MESSAGE_OPS_STORAGE.contains("WHEN $11::text = '' THEN NULL")
             && MESSAGE_OPS_STORAGE.contains("reminder_set = CASE")
             && MESSAGE_OPS_STORAGE.contains("WHEN $14::text = '' THEN NULL")
+            && MESSAGE_OPS_STORAGE.contains("keywords = COALESCE")
             && NOTES_JOURNAL_STORAGE.contains("'mail'::text AS source_type")
             && PROTOCOLS_STORAGE.contains("followup_flag_status = CASE")
+            && PROTOCOLS_STORAGE.contains("categories: Vec<String>")
             && PROTOCOLS_STORAGE.contains("WHEN $5 THEN 'flagged'")
             && PROTOCOLS_STORAGE.contains("JmapEmailFollowupUpdate"),
         "canonical message writes must expose a protocol-neutral follow-up update path"
@@ -336,7 +340,8 @@ fn collaboration_changes_and_tombstones_are_object_level() {
         "'sender_right'",
         "'search_folder_definition'",
         "'sieve_script'",
-        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules'))",
+        "'conversation_action'",
+        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions'))",
         "affected_principal_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
         "principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
     ]);
@@ -472,7 +477,7 @@ fn mapi_identity_mapping_is_store_backed() {
 
     let identities = table_definition("mapi_object_identities");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action'))",
         "canonical_id UUID NOT NULL",
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
@@ -1161,6 +1166,42 @@ fn search_folder_schema_persists_exchange_builtin_definitions() {
             && PROTOCOLS_STORAGE.contains("insert_mail_change_log_in_tx")
             && PROTOCOLS_STORAGE.contains("emit_account_scoped_change"),
         "search-folder definition bootstrap must write canonical object changes instead of MAPI-local FAI state"
+    );
+}
+
+#[test]
+fn conversation_actions_are_canonical_fai_state() {
+    let actions = table_definition("conversation_actions");
+    for fragment in [
+        "conversation_id UUID NOT NULL",
+        "categories_json JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "move_folder_entry_id BYTEA",
+        "move_store_entry_id BYTEA",
+        "move_target_mailbox_id UUID",
+        "max_delivery_time TIMESTAMPTZ",
+        "last_applied_time TIMESTAMPTZ",
+        "version INTEGER NOT NULL DEFAULT 3984588",
+        "processed INTEGER NOT NULL DEFAULT 0",
+        "UNIQUE (tenant_id, account_id, conversation_id)",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+        "FOREIGN KEY (tenant_id, account_id, move_target_mailbox_id)",
+    ] {
+        assert!(
+            actions.contains(fragment),
+            "conversation_actions table must persist {fragment}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE INDEX conversation_actions_account_idx",
+        "'conversation_actions'",
+        "'conversation_action'",
+    ]);
+    assert!(
+        CONVERSATION_ACTIONS_STORAGE.contains("CanonicalChangeCategory::ConversationActions")
+            && CONVERSATION_ACTIONS_STORAGE.contains("\"conversation_action\"")
+            && CONVERSATION_ACTIONS_STORAGE.contains("insert_mail_change_log_in_tx")
+            && CONVERSATION_ACTIONS_STORAGE.contains("emit_canonical_change"),
+        "conversation actions must write canonical change rows instead of MAPI-local FAI state"
     );
 }
 

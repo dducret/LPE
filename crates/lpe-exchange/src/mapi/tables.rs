@@ -5,7 +5,10 @@ use super::session::*;
 use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
-use crate::mapi_store::{MapiEvent, MapiMessage, MapiSearchFolderDefinitionMessage, MapiTask};
+use crate::mapi_store::{
+    MapiConversationActionMessage, MapiEvent, MapiMessage, MapiSearchFolderDefinitionMessage,
+    MapiTask,
+};
 
 pub(in crate::mapi) fn hierarchy_row_count(
     folder_id: u64,
@@ -48,6 +51,11 @@ pub(in crate::mapi) fn associated_folder_message_count(
     if folder_id == COMMON_VIEWS_FOLDER_ID {
         snapshot
             .search_folder_definition_messages()
+            .len()
+            .min(u32::MAX as usize) as u32
+    } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+        snapshot
+            .conversation_action_messages()
             .len()
             .min(u32::MAX as usize) as u32
     } else {
@@ -108,6 +116,35 @@ pub(in crate::mapi) fn default_search_folder_definition_property_tags() -> Vec<u
         PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
         PID_TAG_SEARCH_FOLDER_TAG,
         PID_TAG_SEARCH_FOLDER_DEFINITION,
+    ]
+}
+
+pub(in crate::mapi) fn default_conversation_action_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_MID,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_SUBJECT_W,
+        PID_TAG_NORMALIZED_SUBJECT_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_MESSAGE_SIZE,
+        PID_TAG_ACCESS,
+        PID_TAG_ASSOCIATED,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+        PID_TAG_CONVERSATION_INDEX,
+        PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG,
+        PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG,
+        PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG,
+        PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG,
+        PID_LID_CONVERSATION_ACTION_VERSION_TAG,
+        PID_LID_CONVERSATION_PROCESSED_TAG,
+        PID_NAME_KEYWORDS_TAG,
     ]
 }
 
@@ -589,6 +626,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
             let columns = if columns.is_empty() {
                 if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                     default_search_folder_definition_property_tags()
+                } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    default_conversation_action_property_tags()
                 } else {
                     default_contents_columns()
                 }
@@ -601,6 +640,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .search_folder_definition_messages()
                         .iter()
                         .map(|message| serialize_search_folder_definition_row(message, &columns))
+                        .collect::<Vec<_>>()
+                } else if *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    snapshot
+                        .conversation_action_messages()
+                        .iter()
+                        .map(|message| serialize_conversation_action_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else {
                     Vec::new()
@@ -1696,6 +1741,8 @@ pub(in crate::mapi) fn rop_find_row_response(
             let columns = if columns.is_empty() {
                 if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                     default_search_folder_definition_property_tags()
+                } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    default_conversation_action_property_tags()
                 } else {
                     default_contents_columns()
                 }
@@ -1715,6 +1762,23 @@ pub(in crate::mapi) fn rop_find_row_response(
                     write_standard_property_row(
                         &mut response,
                         &serialize_search_folder_definition_row(message, &columns),
+                    );
+                } else {
+                    response.push(0);
+                }
+            } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                let rows = snapshot
+                    .conversation_action_messages()
+                    .iter()
+                    .collect::<Vec<_>>();
+                if let Some((index, message)) =
+                    find_row(rows.as_slice(), *position, request, |_message| true)
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_conversation_action_row(message, &columns),
                     );
                 } else {
                     response.push(0);
@@ -2928,6 +2992,20 @@ pub(in crate::mapi) fn serialize_search_folder_definition_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_conversation_action_row(
+    message: &MapiConversationActionMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match conversation_action_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
 pub(in crate::mapi) fn serialize_contact_row(
     contact: &AccessibleContact,
     item_id: u64,
@@ -3077,6 +3155,83 @@ pub(in crate::mapi) fn serialize_pending_journal_entry_row(
         updated_at: "1970-01-01T00:00:00Z".to_string(),
     };
     serialize_journal_entry_row(&entry, item_id, JOURNAL_FOLDER_ID, columns)
+}
+
+pub(in crate::mapi) fn serialize_pending_conversation_action_row(
+    properties: &HashMap<u32, MapiValue>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let action = conversation_action_from_mapi_properties(properties);
+    let item_id = properties
+        .get(&PID_TAG_MID)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u64::try_from(value).ok())
+        .unwrap_or_default();
+    let message = MapiConversationActionMessage {
+        id: item_id,
+        folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        canonical_id: Uuid::nil(),
+        action,
+    };
+    serialize_conversation_action_row(&message, columns)
+}
+
+pub(in crate::mapi) fn conversation_action_from_mapi_properties(
+    properties: &HashMap<u32, MapiValue>,
+) -> lpe_storage::ConversationAction {
+    let conversation_id = properties
+        .get(&PID_TAG_CONVERSATION_INDEX)
+        .and_then(|value| match value {
+            MapiValue::Binary(bytes) => conversation_id_from_index(bytes),
+            _ => None,
+        })
+        .unwrap_or_else(Uuid::nil);
+    lpe_storage::ConversationAction {
+        id: conversation_id,
+        conversation_id,
+        subject: properties
+            .get(&PID_TAG_SUBJECT_W)
+            .or_else(|| properties.get(&PID_TAG_NORMALIZED_SUBJECT_W))
+            .and_then(|value| value.as_text())
+            .unwrap_or("Conv.Action")
+            .to_string(),
+        categories_json: match properties.get(&PID_NAME_KEYWORDS_TAG) {
+            Some(MapiValue::MultiString(values)) => {
+                serde_json::to_string(values).unwrap_or_else(|_| "[]".to_string())
+            }
+            _ => "[]".to_string(),
+        },
+        move_folder_entry_id: match properties.get(&PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG)
+        {
+            Some(MapiValue::Binary(value)) => Some(value.clone()),
+            _ => None,
+        },
+        move_store_entry_id: match properties.get(&PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG) {
+            Some(MapiValue::Binary(value)) => Some(value.clone()),
+            _ => None,
+        },
+        move_target_mailbox_id: None,
+        max_delivery_time: properties
+            .get(&PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG)
+            .and_then(MapiValue::as_i64)
+            .and_then(filetime_to_rfc3339_utc),
+        last_applied_time: properties
+            .get(&PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG)
+            .and_then(MapiValue::as_i64)
+            .and_then(filetime_to_rfc3339_utc),
+        version: properties
+            .get(&PID_LID_CONVERSATION_ACTION_VERSION_TAG)
+            .and_then(MapiValue::as_i64)
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or(lpe_storage::CONVERSATION_ACTION_VERSION),
+        processed: properties
+            .get(&PID_LID_CONVERSATION_PROCESSED_TAG)
+            .and_then(MapiValue::as_i64)
+            .and_then(|value| i32::try_from(value).ok())
+            .unwrap_or_default(),
+        created_at: "1970-01-01T00:00:00Z".to_string(),
+        updated_at: "1970-01-01T00:00:00Z".to_string(),
+    }
 }
 
 pub(in crate::mapi) fn serialize_note_row(

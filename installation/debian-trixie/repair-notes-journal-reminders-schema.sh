@@ -89,11 +89,17 @@ END $$;
 
 ALTER TABLE public.account_sync_state
   ADD CONSTRAINT account_sync_state_category_check
-  CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights'));
+  CHECK (category IN (
+    'mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights',
+    'search', 'rules', 'conversation_actions'
+  ));
 
 ALTER TABLE public.canonical_change_journal
   ADD CONSTRAINT canonical_change_journal_category_check
-  CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights'));
+  CHECK (category IN (
+    'mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights',
+    'search', 'rules', 'conversation_actions'
+  ));
 
 DO $$
 DECLARE
@@ -119,7 +125,8 @@ ALTER TABLE public.mail_change_log
     'contact_book', 'contact', 'calendar', 'calendar_event', 'task_list', 'task',
     'note', 'journal_entry',
     'contact_book_grant', 'calendar_grant', 'task_list_grant',
-    'mailbox_delegation_grant', 'sender_right'
+    'mailbox_delegation_grant', 'sender_right',
+    'search_folder_definition', 'sieve_script', 'conversation_action'
   )),
   ADD CONSTRAINT mail_change_log_object_shape_check CHECK (
     (
@@ -168,7 +175,8 @@ ALTER TABLE public.mail_change_log
         'contact_book', 'contact', 'calendar', 'calendar_event', 'task_list', 'task',
         'note', 'journal_entry',
         'contact_book_grant', 'calendar_grant', 'task_list_grant',
-        'mailbox_delegation_grant', 'sender_right'
+        'mailbox_delegation_grant', 'sender_right',
+        'search_folder_definition', 'sieve_script', 'conversation_action'
       )
       AND account_id IS NOT NULL
       AND mailbox_id IS NULL
@@ -181,7 +189,8 @@ ALTER TABLE public.tombstones
     'contact_book', 'contact', 'calendar', 'calendar_event', 'task_list', 'task',
     'note', 'journal_entry',
     'contact_book_grant', 'calendar_grant', 'task_list_grant',
-    'mailbox_delegation_grant', 'sender_right'
+    'mailbox_delegation_grant', 'sender_right',
+    'search_folder_definition', 'sieve_script'
   )),
   ADD CONSTRAINT tombstones_object_shape_check CHECK (
     (
@@ -215,7 +224,8 @@ ALTER TABLE public.tombstones
         'contact_book', 'contact', 'calendar', 'calendar_event', 'task_list', 'task',
         'note', 'journal_entry',
         'contact_book_grant', 'calendar_grant', 'task_list_grant',
-        'mailbox_delegation_grant', 'sender_right'
+        'mailbox_delegation_grant', 'sender_right',
+        'search_folder_definition', 'sieve_script'
       )
       AND account_id IS NOT NULL
       AND mailbox_id IS NULL

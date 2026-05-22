@@ -450,7 +450,9 @@ impl<S: crate::store::ImapStore, D: Detector> Session<S, D> {
             .write_all(b"* FLAGS (\\Seen \\Flagged \\Deleted \\Draft)\r\n")
             .await?;
         writer
-            .write_all(b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted)] supported flags\r\n")
+            .write_all(
+                b"* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\*)] supported flags\r\n",
+            )
             .await?;
         writer
             .write_all(format!("* {} EXISTS\r\n", exists).as_bytes())

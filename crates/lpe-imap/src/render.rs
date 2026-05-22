@@ -374,18 +374,36 @@ fn append_literal(output: &mut Vec<u8>, label: &str, value: &[u8]) {
 pub(crate) fn render_flags(email: &ImapEmail, mailbox_name: &str) -> String {
     let mut flags = Vec::new();
     if !email.unread {
-        flags.push("\\Seen");
+        flags.push("\\Seen".to_string());
     }
     if email.flagged {
-        flags.push("\\Flagged");
+        flags.push("\\Flagged".to_string());
     }
     if email.deleted {
-        flags.push("\\Deleted");
+        flags.push("\\Deleted".to_string());
     }
     if mailbox_name.eq_ignore_ascii_case("Drafts") {
-        flags.push("\\Draft");
+        flags.push("\\Draft".to_string());
+    }
+    for keyword in email.keywords.iter().filter_map(|keyword| {
+        let keyword = keyword.trim();
+        imap_keyword_atom(keyword).map(str::to_string)
+    }) {
+        if !flags.contains(&keyword) {
+            flags.push(keyword);
+        }
     }
     flags.join(" ")
+}
+
+fn imap_keyword_atom(keyword: &str) -> Option<&str> {
+    if keyword.is_empty() || keyword.starts_with('\\') {
+        return None;
+    }
+    keyword
+        .bytes()
+        .all(|byte| (0x21..=0x7e).contains(&byte) && !b"(){ %*\"\\]".contains(&byte))
+        .then_some(keyword)
 }
 
 pub(crate) fn render_status_response(
@@ -1320,8 +1338,8 @@ pub(crate) fn first_unseen_sequence(selected: &SelectedMailbox) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{
-        mailbox_name_matches, render_fetch_response, render_list_flags, render_mailbox_name,
-        FetchAttributes, FetchItem,
+        mailbox_name_matches, render_fetch_response, render_flags, render_list_flags,
+        render_mailbox_name, FetchAttributes, FetchItem,
     };
     use lpe_storage::{ImapEmail, ImapMimePart, JmapMailbox};
     use uuid::Uuid;
@@ -1372,6 +1390,41 @@ mod tests {
     }
 
     #[test]
+    fn render_flags_projects_atom_safe_keywords() {
+        let email = ImapEmail {
+            id: Uuid::new_v4(),
+            uid: 1,
+            modseq: 1,
+            thread_id: Uuid::new_v4(),
+            mailbox_id: Uuid::new_v4(),
+            mailbox_role: "inbox".to_string(),
+            mailbox_name: "INBOX".to_string(),
+            received_at: "2026-05-03T10:00:00Z".to_string(),
+            sent_at: None,
+            from_address: String::new(),
+            from_display: None,
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Message".to_string(),
+            preview: String::new(),
+            body_text: String::new(),
+            body_html_sanitized: None,
+            unread: false,
+            flagged: false,
+            deleted: false,
+            keywords: vec!["ProjectX".to_string(), "Red Category".to_string()],
+            has_attachments: false,
+            size_octets: 0,
+            internet_message_id: None,
+            delivery_status: "stored".to_string(),
+            mime_parts: Vec::new(),
+        };
+
+        assert_eq!(render_flags(&email, "INBOX"), "\\Seen ProjectX");
+    }
+
+    #[test]
     fn fetch_envelope_uses_parseable_sender_fallback() {
         let email = ImapEmail {
             id: Uuid::new_v4(),
@@ -1395,6 +1448,7 @@ mod tests {
             unread: true,
             flagged: false,
             deleted: false,
+            keywords: Vec::new(),
             has_attachments: false,
             size_octets: 4,
             internet_message_id: None,
@@ -1444,6 +1498,7 @@ mod tests {
             unread: true,
             flagged: false,
             deleted: false,
+            keywords: Vec::new(),
             has_attachments: false,
             size_octets: 4,
             internet_message_id: None,
@@ -1503,6 +1558,7 @@ mod tests {
             unread: true,
             flagged: false,
             deleted: false,
+            keywords: Vec::new(),
             has_attachments: false,
             size_octets: 4,
             internet_message_id: None,
@@ -1556,6 +1612,7 @@ mod tests {
             unread: true,
             flagged: false,
             deleted: false,
+            keywords: Vec::new(),
             has_attachments: true,
             size_octets: 4,
             internet_message_id: None,

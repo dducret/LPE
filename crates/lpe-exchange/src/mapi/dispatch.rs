@@ -838,12 +838,14 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::Note { .. }) => "note",
         Some(MapiObject::JournalEntry { .. }) => "journal_entry",
         Some(MapiObject::SearchFolderDefinition { .. }) => "search_folder_definition",
+        Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::PendingMessage { .. }) => "pending_message",
         Some(MapiObject::PendingContact { .. }) => "pending_contact",
         Some(MapiObject::PendingEvent { .. }) => "pending_event",
         Some(MapiObject::PendingTask { .. }) => "pending_task",
         Some(MapiObject::PendingNote { .. }) => "pending_note",
         Some(MapiObject::PendingJournalEntry { .. }) => "pending_journal_entry",
+        Some(MapiObject::PendingConversationAction { .. }) => "pending_conversation_action",
         Some(MapiObject::HierarchyTable { .. }) => "hierarchy_table",
         Some(MapiObject::ContentsTable { .. }) => "contents_table",
         Some(MapiObject::AttachmentTable { .. }) => "attachment_table",
@@ -1206,9 +1208,6 @@ async fn apply_supported_object_property_values<S>(
 where
     S: ExchangeStore,
 {
-    let (object_kind, canonical_id) =
-        custom_property_object_identity(Some(object), mailboxes, emails, snapshot)
-            .ok_or_else(|| anyhow!("canonical MAPI object was not found"))?;
     let (canonical_values, custom_values) = split_custom_property_values(values);
     if !canonical_values.is_empty() {
         match object {
@@ -1291,9 +1290,48 @@ where
                 )
                 .await?;
             }
+            MapiObject::ConversationAction {
+                folder_id: _,
+                conversation_action_id,
+            } => {
+                let Some(existing) =
+                    snapshot.conversation_action_message_for_id(*conversation_action_id)
+                else {
+                    return Err(anyhow!("canonical MAPI conversation action was not found"));
+                };
+                let mut properties = conversation_action_properties(&existing.action);
+                apply_mapi_property_values_to_map(&mut properties, canonical_values);
+                let action = conversation_action_from_mapi_properties(&properties);
+                let move_target_mailbox_id =
+                    conversation_action_target_mailbox_id(&action, mailboxes);
+                let input = lpe_storage::UpsertConversationActionInput {
+                    account_id: principal.account_id,
+                    conversation_id: action.conversation_id,
+                    subject: action.subject,
+                    categories_json: action.categories_json,
+                    move_folder_entry_id: action.move_folder_entry_id,
+                    move_store_entry_id: action.move_store_entry_id,
+                    move_target_mailbox_id,
+                    max_delivery_time: action.max_delivery_time,
+                    last_applied_time: action.last_applied_time,
+                    version: Some(action.version),
+                    processed: Some(action.processed),
+                };
+                let saved = store.upsert_conversation_action(input).await?;
+                apply_conversation_action_to_existing_messages(
+                    store, principal, &saved, mailboxes, emails,
+                )
+                .await?;
+            }
             _ => return Err(anyhow!("MAPI object does not support property mutation")),
         }
     }
+    if custom_values.is_empty() {
+        return Ok(());
+    }
+    let (object_kind, canonical_id) =
+        custom_property_object_identity(Some(object), mailboxes, emails, snapshot)
+            .ok_or_else(|| anyhow!("canonical MAPI object was not found"))?;
     upsert_custom_property_values(store, principal, object_kind, canonical_id, custom_values).await
 }
 
@@ -1303,6 +1341,238 @@ fn split_custom_property_values(
     values
         .into_iter()
         .partition(|(tag, _)| !is_custom_property_tag(*tag))
+}
+
+fn apply_mapi_property_values_to_map(
+    properties: &mut HashMap<u32, MapiValue>,
+    values: Vec<(u32, MapiValue)>,
+) {
+    properties.extend(
+        values
+            .into_iter()
+            .map(|(tag, value)| (canonical_property_storage_tag(tag), value)),
+    );
+}
+
+fn conversation_action_properties(
+    action: &lpe_storage::ConversationAction,
+) -> HashMap<u32, MapiValue> {
+    let mut properties = HashMap::new();
+    properties.insert(
+        PID_TAG_CONVERSATION_INDEX,
+        MapiValue::Binary(conversation_index_for_uuid(action.conversation_id)),
+    );
+    properties.insert(
+        PID_TAG_SUBJECT_W,
+        MapiValue::String(conversation_action_subject(action)),
+    );
+    if let Some(value) = &action.move_folder_entry_id {
+        properties.insert(
+            PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG,
+            MapiValue::Binary(value.clone()),
+        );
+    }
+    if let Some(value) = &action.move_store_entry_id {
+        properties.insert(
+            PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG,
+            MapiValue::Binary(value.clone()),
+        );
+    }
+    if let Some(value) = &action.max_delivery_time {
+        properties.insert(
+            PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG,
+            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value)),
+        );
+    }
+    if let Some(value) = &action.last_applied_time {
+        properties.insert(
+            PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG,
+            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value)),
+        );
+    }
+    properties.insert(
+        PID_LID_CONVERSATION_ACTION_VERSION_TAG,
+        MapiValue::I32(action.version),
+    );
+    properties.insert(
+        PID_LID_CONVERSATION_PROCESSED_TAG,
+        MapiValue::I32(action.processed),
+    );
+    properties.insert(
+        PID_NAME_KEYWORDS_TAG,
+        MapiValue::MultiString(
+            serde_json::from_str::<Vec<String>>(&action.categories_json).unwrap_or_default(),
+        ),
+    );
+    properties
+}
+
+async fn apply_conversation_action_to_existing_messages<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    action: &lpe_storage::ConversationAction,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let categories = serde_json::from_str::<Vec<String>>(&action.categories_json)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|category| category.trim().to_string())
+        .filter(|category| !category.is_empty())
+        .collect::<Vec<_>>();
+    let target_mailbox = if action.move_store_entry_id.is_some() {
+        None
+    } else {
+        conversation_action_target_mailbox(action, mailboxes)
+    };
+    for email in emails
+        .iter()
+        .filter(|email| email.thread_id == action.conversation_id)
+        .filter(|email| email.mailbox_role != "sent")
+        .filter(|email| {
+            action
+                .max_delivery_time
+                .as_deref()
+                .map(|max_delivery| email.received_at.as_str() > max_delivery)
+                .unwrap_or(true)
+        })
+    {
+        if !categories.is_empty() && email.categories != categories {
+            store
+                .update_jmap_email_followup_flags(
+                    principal.account_id,
+                    email.id,
+                    lpe_storage::JmapEmailFollowupUpdate {
+                        categories: Some(categories.clone()),
+                        ..Default::default()
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "mapi-conversation-action-categorize".to_string(),
+                        subject: format!("message:{}", email.id),
+                    },
+                )
+                .await?;
+        }
+        let Some(target_mailbox) = target_mailbox else {
+            continue;
+        };
+        if email.mailbox_id == target_mailbox.id {
+            continue;
+        }
+        store
+            .move_jmap_email_from_mailbox(
+                principal.account_id,
+                email.mailbox_id,
+                email.id,
+                target_mailbox.id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "mapi-conversation-action-move".to_string(),
+                    subject: format!("message:{}->{}", email.id, target_mailbox.id),
+                },
+            )
+            .await?;
+    }
+    Ok(())
+}
+
+async fn apply_conversation_actions_to_new_message<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    mailboxes: &[JmapMailbox],
+    email: &JmapEmail,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    for message in snapshot
+        .conversation_action_messages()
+        .iter()
+        .filter(|message| message.action.conversation_id == email.thread_id)
+    {
+        apply_conversation_action_to_existing_messages(
+            store,
+            principal,
+            &message.action,
+            mailboxes,
+            std::slice::from_ref(email),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+fn conversation_action_target_mailbox<'a>(
+    action: &lpe_storage::ConversationAction,
+    mailboxes: &'a [JmapMailbox],
+) -> Option<&'a JmapMailbox> {
+    if action.move_store_entry_id.is_some() {
+        return None;
+    }
+    if let Some(mailbox_id) = action.move_target_mailbox_id {
+        return mailboxes.iter().find(|mailbox| mailbox.id == mailbox_id);
+    }
+    match action.move_folder_entry_id.as_deref() {
+        Some([]) => mailboxes.iter().find(|mailbox| mailbox.role == "trash"),
+        Some(entry_id) => {
+            let folder_id = crate::mapi::identity::object_id_from_folder_entry_id(entry_id)?;
+            folder_row_for_id(folder_id, mailboxes)
+        }
+        None => None,
+    }
+}
+
+fn conversation_action_target_mailbox_id(
+    action: &lpe_storage::ConversationAction,
+    mailboxes: &[JmapMailbox],
+) -> Option<Uuid> {
+    conversation_action_target_mailbox(action, mailboxes).map(|mailbox| mailbox.id)
+}
+
+async fn delete_conversation_action_properties<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    conversation_action_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    property_tags: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let existing = snapshot
+        .conversation_action_message_for_id(conversation_action_id)
+        .ok_or_else(|| anyhow!("canonical MAPI conversation action was not found"))?;
+    let mut properties = conversation_action_properties(&existing.action);
+    for tag in property_tags {
+        properties.remove(tag);
+        properties.remove(&canonical_property_storage_tag(*tag));
+    }
+    let action = conversation_action_from_mapi_properties(&properties);
+    let move_target_mailbox_id = conversation_action_target_mailbox_id(&action, mailboxes);
+    let saved = store
+        .upsert_conversation_action(lpe_storage::UpsertConversationActionInput {
+            account_id: principal.account_id,
+            conversation_id: action.conversation_id,
+            subject: action.subject,
+            categories_json: action.categories_json,
+            move_folder_entry_id: action.move_folder_entry_id,
+            move_store_entry_id: action.move_store_entry_id,
+            move_target_mailbox_id,
+            max_delivery_time: action.max_delivery_time,
+            last_applied_time: action.last_applied_time,
+            version: Some(action.version),
+            processed: Some(action.processed),
+        })
+        .await?;
+    apply_conversation_action_to_existing_messages(store, principal, &saved, mailboxes, emails)
+        .await
 }
 
 async fn upsert_custom_property_values<S>(
@@ -1471,6 +1741,13 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_LOG_TYPE_W_TAG
             | PID_LID_COMPANIES_TAG
             | PID_LID_CONTACTS_TAG
+            | PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID_TAG
+            | PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID_TAG
+            | PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME_TAG
+            | PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME_TAG
+            | PID_LID_CONVERSATION_ACTION_VERSION_TAG
+            | PID_LID_CONVERSATION_PROCESSED_TAG
+            | PID_NAME_KEYWORDS_TAG
     )
 }
 
@@ -2054,6 +2331,29 @@ where
                             0x8004_010F,
                         ));
                     }
+                } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    if let Some(message) = snapshot.conversation_action_message_for_id(message_id) {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::ConversationAction {
+                                folder_id,
+                                conversation_action_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &conversation_action_subject(&message.action),
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
                 } else {
                     responses.extend_from_slice(&rop_error_response(
                         0x03,
@@ -2170,6 +2470,7 @@ where
                             | OUTBOX_FOLDER_ID
                             | NOTES_FOLDER_ID
                             | JOURNAL_FOLDER_ID
+                            | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
                     )
                 {
                     responses.extend_from_slice(&rop_error_response(
@@ -2204,6 +2505,12 @@ where
                         folder_id,
                         properties: HashMap::new(),
                     },
+                    _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
+                        MapiObject::PendingConversationAction {
+                            folder_id,
+                            properties: HashMap::new(),
+                        }
+                    }
                     _ => MapiObject::PendingMessage {
                         folder_id,
                         properties: HashMap::new(),
@@ -2274,7 +2581,8 @@ where
                             | MapiObject::Event { .. }
                             | MapiObject::Task { .. }
                             | MapiObject::Note { .. }
-                            | MapiObject::JournalEntry { .. }),
+                            | MapiObject::JournalEntry { .. }
+                            | MapiObject::ConversationAction { .. }),
                         ) => {
                             apply_supported_object_property_values(
                                 store, principal, &object, values, mailboxes, emails, snapshot,
@@ -2315,29 +2623,46 @@ where
             Some(RopId::DeleteProperties | RopId::DeletePropertiesNoReplicate) => {
                 let property_tags = request.property_tags();
                 let object = input_object(session, &handle_slots, &request).cloned();
-                let delete_result = delete_custom_property_values(
-                    store,
-                    principal,
-                    object.as_ref(),
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    &property_tags,
-                )
-                .await
-                .and_then(|_| {
-                    delete_mapi_properties(
-                        input_object_mut(session, &handle_slots, &request),
+                let delete_result = if let Some(MapiObject::ConversationAction {
+                    conversation_action_id,
+                    ..
+                }) = object
+                {
+                    delete_conversation_action_properties(
+                        store,
+                        principal,
+                        conversation_action_id,
+                        snapshot,
+                        &property_tags,
+                        mailboxes,
+                        emails,
+                    )
+                    .await
+                } else {
+                    delete_custom_property_values(
+                        store,
+                        principal,
+                        object.as_ref(),
+                        mailboxes,
+                        emails,
+                        snapshot,
                         &property_tags,
                     )
-                    .or_else(|error| {
-                        if property_tags.iter().all(|tag| is_custom_property_tag(*tag)) {
-                            Ok(())
-                        } else {
-                            Err(error)
-                        }
+                    .await
+                    .and_then(|_| {
+                        delete_mapi_properties(
+                            input_object_mut(session, &handle_slots, &request),
+                            &property_tags,
+                        )
+                        .or_else(|error| {
+                            if property_tags.iter().all(|tag| is_custom_property_tag(*tag)) {
+                                Ok(())
+                            } else {
+                                Err(error)
+                            }
+                        })
                     })
-                });
+                };
                 match delete_result {
                     Ok(()) => {
                         responses.extend_from_slice(&rop_delete_properties_response(&request))
@@ -2677,6 +3002,92 @@ where
                         }
                         continue;
                     }
+                    Some(MapiObject::PendingConversationAction {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let action = conversation_action_from_mapi_properties(&properties);
+                        if action.conversation_id.is_nil() {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_0102,
+                            ));
+                            continue;
+                        }
+                        let move_target_mailbox_id =
+                            conversation_action_target_mailbox_id(&action, mailboxes);
+                        let input = lpe_storage::UpsertConversationActionInput {
+                            account_id: principal.account_id,
+                            conversation_id: action.conversation_id,
+                            subject: action.subject,
+                            categories_json: action.categories_json,
+                            move_folder_entry_id: action.move_folder_entry_id,
+                            move_store_entry_id: action.move_store_entry_id,
+                            move_target_mailbox_id,
+                            max_delivery_time: action.max_delivery_time,
+                            last_applied_time: action.last_applied_time,
+                            version: Some(action.version),
+                            processed: Some(action.processed),
+                        };
+                        match store.upsert_conversation_action(input).await {
+                            Ok(saved) => {
+                                let conversation_action_id = match remember_created_mapi_identity(
+                                    store,
+                                    principal,
+                                    MapiIdentityObjectKind::ConversationAction,
+                                    saved.id,
+                                    None,
+                                )
+                                .await
+                                {
+                                    Ok(conversation_action_id) => conversation_action_id,
+                                    Err(_) => {
+                                        responses.extend_from_slice(&rop_error_response(
+                                            0x0C,
+                                            request.response_handle_index(),
+                                            0x8004_010F,
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                if apply_conversation_action_to_existing_messages(
+                                    store, principal, &saved, mailboxes, emails,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::ConversationAction {
+                                        folder_id,
+                                        conversation_action_id,
+                                    },
+                                );
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request,
+                                    conversation_action_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
                     Some(MapiObject::Contact { contact_id, .. })
                     | Some(MapiObject::Event {
                         event_id: contact_id,
@@ -2692,6 +3103,10 @@ where
                     })
                     | Some(MapiObject::JournalEntry {
                         journal_entry_id: contact_id,
+                        ..
+                    })
+                    | Some(MapiObject::ConversationAction {
+                        conversation_action_id: contact_id,
                         ..
                     }) => {
                         responses.extend_from_slice(&rop_save_changes_message_response(
@@ -2736,6 +3151,19 @@ where
                     .await
                 {
                     Ok(email) => {
+                        if apply_conversation_actions_to_new_message(
+                            store, principal, mailboxes, &email, snapshot,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        }
                         let message_id = match remember_created_mapi_identity(
                             store,
                             principal,
@@ -3297,6 +3725,16 @@ where
                     if let Some(entry) = snapshot.journal_entry_for_id(folder_id, message_id) {
                         if store
                             .delete_mapi_journal_entry(principal.account_id, entry.canonical_id)
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(message) = snapshot.conversation_action_message_for_id(message_id) {
+                        if store
+                            .delete_conversation_action(principal.account_id, message.canonical_id)
                             .await
                             .is_err()
                         {
@@ -4412,6 +4850,9 @@ where
                         let changed_special_ids: &[Uuid] = match folder_id {
                             NOTES_FOLDER_ID => &changes.changed_note_ids,
                             JOURNAL_FOLDER_ID => &changes.changed_journal_entry_ids,
+                            CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
+                                &changes.changed_conversation_action_ids
+                            }
                             _ => &[],
                         };
                         (
@@ -4478,6 +4919,18 @@ where
                             principal,
                             MapiIdentityObjectKind::JournalEntry,
                             &changes.deleted_journal_entry_ids,
+                        )
+                        .await
+                        .unwrap_or_default(),
+                    );
+                }
+                if checkpoint.is_some() && folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                    deleted_message_ids.extend(
+                        mapi_object_ids_for_deleted_changes(
+                            store,
+                            principal,
+                            MapiIdentityObjectKind::ConversationAction,
+                            &changes.deleted_conversation_action_ids,
                         )
                         .await
                         .unwrap_or_default(),
@@ -6539,9 +6992,12 @@ mod tests {
         assert_eq!(
             parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
             MapiValue::Binary(
-                long_term_id_from_object_id(CALENDAR_FOLDER_ID)
-                    .unwrap()
-                    .to_vec()
+                crate::mapi::identity::folder_entry_id_from_object_id(
+                    test_principal().account_id,
+                    CALENDAR_FOLDER_ID,
+                )
+                .unwrap()
+                .to_vec()
             )
         );
         let MapiObject::Folder { properties, .. } = &reopened_root else {

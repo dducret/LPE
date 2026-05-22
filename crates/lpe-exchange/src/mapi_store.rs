@@ -1,8 +1,8 @@
 use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ClientNote, ClientReminder,
-    ClientTask, CollaborationCollection, JmapEmail, JmapMailbox, JournalEntry, ReminderQuery,
-    SearchFolderDefinition,
+    ClientTask, CollaborationCollection, ConversationAction, JmapEmail, JmapMailbox, JournalEntry,
+    ReminderQuery, SearchFolderDefinition,
 };
 use uuid::Uuid;
 
@@ -23,6 +23,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     notes: Vec<MapiNote>,
     journal_entries: Vec<MapiJournalEntry>,
     search_folder_definitions: Vec<MapiSearchFolderDefinitionMessage>,
+    conversation_actions: Vec<MapiConversationActionMessage>,
     reminders: Vec<ClientReminder>,
     folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
@@ -112,6 +113,15 @@ pub(crate) struct MapiSearchFolderDefinitionMessage {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) definition: SearchFolderDefinition,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiConversationActionMessage {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) action: ConversationAction,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +318,7 @@ impl MapiMailStoreSnapshot {
             notes: Vec::new(),
             journal_entries: Vec::new(),
             search_folder_definitions: Vec::new(),
+            conversation_actions: Vec::new(),
             reminders: Vec::new(),
             folder_permissions,
             content_windows: Vec::new(),
@@ -325,6 +336,22 @@ impl MapiMailStoreSnapshot {
                 folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
                 canonical_id: definition.id,
                 definition,
+            })
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_conversation_actions(
+        mut self,
+        conversation_actions: Vec<ConversationAction>,
+    ) -> Self {
+        self.conversation_actions = conversation_actions
+            .into_iter()
+            .map(|action| MapiConversationActionMessage {
+                id: mapi_item_id(&action.id),
+                folder_id: crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+                canonical_id: action.id,
+                action,
             })
             .collect();
         self
@@ -713,6 +740,19 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
     }
 
+    pub(crate) fn conversation_action_messages(&self) -> &[MapiConversationActionMessage] {
+        &self.conversation_actions
+    }
+
+    pub(crate) fn conversation_action_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<&MapiConversationActionMessage> {
+        self.conversation_actions
+            .iter()
+            .find(|message| message.id == item_id)
+    }
+
     pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
         let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) else {
             return Vec::new();
@@ -808,6 +848,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let notes = self.fetch_mapi_notes(account_id).await?;
             let journal_entries = self.fetch_mapi_journal_entries(account_id).await?;
             let search_folder_definitions = self.fetch_search_folders(account_id).await?;
+            let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let reminders = self
                 .query_client_reminders(
                     account_id,
@@ -825,6 +866,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &notes,
                 &journal_entries,
                 &search_folder_definitions,
+                &conversation_actions,
             );
             for identity in self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
@@ -856,6 +898,7 @@ impl<T: ExchangeStore> MapiStore for T {
             ))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
+            .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_reminders(reminders))
         })
     }
@@ -870,6 +913,7 @@ fn mapi_identity_requests(
     notes: &[ClientNote],
     journal_entries: &[JournalEntry],
     search_folder_definitions: &[SearchFolderDefinition],
+    conversation_actions: &[ConversationAction],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
     requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
@@ -913,6 +957,15 @@ fn mapi_identity_requests(
             .map(|definition| MapiIdentityRequest {
                 object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
                 canonical_id: definition.id,
+                reserved_global_counter: None,
+            }),
+    );
+    requests.extend(
+        conversation_actions
+            .iter()
+            .map(|action| MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::ConversationAction,
+                canonical_id: action.id,
                 reserved_global_counter: None,
             }),
     );
@@ -1078,6 +1131,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: None,
                 swapped_todo_data: None,
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-03T12:00:00Z".to_string(),
@@ -1112,6 +1166,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: true,
             size_octets: 42,
             internet_message_id: None,
@@ -1517,6 +1572,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: None,
                 swapped_todo_data: None,
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-20T12:00:00Z".to_string(),
@@ -1548,6 +1604,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 42,
             internet_message_id: None,
@@ -1642,6 +1699,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: Some(store_id),
                 swapped_todo_data: Some(vec![9, 8, 7]),
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-20T12:00:00Z".to_string(),
@@ -1673,6 +1731,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: Some(store_id),
             swapped_todo_data: Some(vec![9, 8, 7]),
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 42,
             internet_message_id: None,
@@ -1815,6 +1874,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: None,
                 swapped_todo_data: None,
+                categories: Vec::new(),
                 draft: false,
             }],
             received_at: "2026-05-20T12:00:00Z".to_string(),
@@ -1846,6 +1906,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 42,
             internet_message_id: None,

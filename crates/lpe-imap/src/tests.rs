@@ -626,6 +626,7 @@ impl ImapStore for FakeStore {
             unread: source.unread,
             flagged: source.flagged,
             deleted: false,
+            keywords: source.keywords.clone(),
             has_attachments: source.has_attachments,
             size_octets: source.size_octets,
             internet_message_id: source.internet_message_id,
@@ -731,6 +732,7 @@ impl ImapStore for FakeStore {
             unread: false,
             flagged: false,
             deleted: false,
+            keywords: Vec::new(),
             has_attachments: !input.attachments.is_empty(),
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
@@ -808,6 +810,7 @@ impl ImapStore for FakeStore {
             unread: false,
             flagged: false,
             deleted: false,
+            keywords: Vec::new(),
             has_attachments: !input.attachments.is_empty(),
             size_octets: input.size_octets,
             internet_message_id: input.internet_message_id,
@@ -1884,7 +1887,7 @@ async fn outlook_first_login_list_select_sync_transcript() {
 
     let select = send_command(&mut stream, "OL9 SELECT Inbox\r\n", "OL9").await;
     assert!(select.contains("* 1 EXISTS"));
-    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted)]"));
+    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\*)]"));
     assert!(select.contains("* OK [UIDVALIDITY 111]"));
     assert!(select.contains("* OK [UIDNEXT 2]"));
     assert!(select.contains("* OK [HIGHESTMODSEQ 3]"));
@@ -2254,7 +2257,7 @@ async fn store_and_uid_store_update_only_canonical_supported_flags() {
     let _ = read_response(&mut stream, None).await;
     let _ = send_command(&mut stream, "A1 LOGIN alice@example.test secret\r\n", "A1").await;
     let select = send_command(&mut stream, "A2 SELECT Inbox\r\n", "A2").await;
-    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted)]"));
+    assert!(select.contains("* OK [PERMANENTFLAGS (\\Seen \\Flagged \\Deleted \\*)]"));
 
     let add_flags = send_command(
         &mut stream,
@@ -3975,6 +3978,7 @@ fn email(
         unread,
         flagged,
         deleted: false,
+        keywords: Vec::new(),
         has_attachments: false,
         size_octets: 64,
         internet_message_id: Some(format!("<{}@example.test>", id)),

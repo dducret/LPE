@@ -17,6 +17,7 @@ pub enum CanonicalChangeCategory {
     Rights,
     Search,
     Rules,
+    ConversationActions,
 }
 
 impl CanonicalChangeCategory {
@@ -31,6 +32,7 @@ impl CanonicalChangeCategory {
             Self::Rights => "rights",
             Self::Search => "search",
             Self::Rules => "rules",
+            Self::ConversationActions => "conversation_actions",
         }
     }
 
@@ -45,6 +47,7 @@ impl CanonicalChangeCategory {
             "rights" => Some(Self::Rights),
             "search" => Some(Self::Search),
             "rules" => Some(Self::Rules),
+            "conversation_actions" => Some(Self::ConversationActions),
             _ => None,
         }
     }
@@ -688,6 +691,10 @@ mod tests {
         assert_eq!(CanonicalChangeCategory::Notes.as_str(), "notes");
         assert_eq!(CanonicalChangeCategory::Journal.as_str(), "journal");
         assert_eq!(
+            CanonicalChangeCategory::ConversationActions.as_str(),
+            "conversation_actions"
+        );
+        assert_eq!(
             CanonicalChangeCategory::from_str("rights"),
             Some(CanonicalChangeCategory::Rights)
         );
@@ -698,6 +705,10 @@ mod tests {
         assert_eq!(
             CanonicalChangeCategory::from_str("journal"),
             Some(CanonicalChangeCategory::Journal)
+        );
+        assert_eq!(
+            CanonicalChangeCategory::from_str("conversation_actions"),
+            Some(CanonicalChangeCategory::ConversationActions)
         );
     }
 
