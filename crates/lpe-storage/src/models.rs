@@ -562,6 +562,7 @@ pub(crate) struct ClientTaskRow {
     pub(crate) status: String,
     pub(crate) due_at: Option<String>,
     pub(crate) completed_at: Option<String>,
+    pub(crate) recurrence_rule: String,
     pub(crate) sort_order: i32,
     pub(crate) updated_at: String,
 }
@@ -597,6 +598,7 @@ pub(crate) struct JournalEntryRow {
 pub(crate) struct ClientReminderRow {
     pub(crate) source_type: String,
     pub(crate) source_id: Uuid,
+    pub(crate) occurrence_start_at: Option<String>,
     pub(crate) title: String,
     pub(crate) due_at: Option<String>,
     pub(crate) reminder_at: String,
@@ -622,6 +624,7 @@ pub(crate) struct DavTaskRow {
     pub(crate) status: String,
     pub(crate) due_at: Option<String>,
     pub(crate) completed_at: Option<String>,
+    pub(crate) recurrence_rule: String,
     pub(crate) sort_order: i32,
     pub(crate) updated_at: String,
 }

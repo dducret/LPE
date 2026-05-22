@@ -540,6 +540,7 @@ impl FakeStore {
             status: "needs-action".to_string(),
             due_at: Some("2026-05-05T09:00:00Z".to_string()),
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 10,
             updated_at: "2026-05-04T08:00:00Z".to_string(),
         }
@@ -1347,6 +1348,7 @@ impl ExchangeStore for FakeStore {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> StoreFuture<'a, ()> {
         let mut reminders = self.reminders.lock().unwrap();
         reminders.retain(|reminder| {
@@ -1364,10 +1366,11 @@ impl ExchangeStore for FakeStore {
             reminders.push(ClientReminder {
                 source_type: "calendar".to_string(),
                 source_id: event_id,
+                occurrence_start_at: None,
                 title: event.title,
                 due_at: Some(format!("{}T{}:00Z", event.date, event.time)),
                 reminder_at: reminder_at.unwrap(),
-                dismissed_at: None,
+                dismissed_at: reminder_dismissed_at,
                 completed_at: None,
                 status: "pending".to_string(),
             });
@@ -1476,6 +1479,7 @@ impl ExchangeStore for FakeStore {
             status: input.status,
             due_at: input.due_at,
             completed_at: input.completed_at,
+            recurrence_rule: input.recurrence_rule,
             sort_order: input.sort_order,
             updated_at: "2026-05-05T08:00:00Z".to_string(),
         };
@@ -1522,6 +1526,8 @@ impl ExchangeStore for FakeStore {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        _reminder_reset: Option<bool>,
     ) -> StoreFuture<'a, ()> {
         let mut reminders = self.reminders.lock().unwrap();
         reminders
@@ -1538,10 +1544,11 @@ impl ExchangeStore for FakeStore {
             reminders.push(ClientReminder {
                 source_type: "task".to_string(),
                 source_id: task_id,
+                occurrence_start_at: None,
                 title: task.title,
                 due_at: task.due_at,
                 reminder_at: reminder_at.unwrap(),
-                dismissed_at: None,
+                dismissed_at: reminder_dismissed_at,
                 completed_at: task.completed_at,
                 status: "pending".to_string(),
             });
@@ -7088,7 +7095,12 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
             definition_kind: "exchange_builtin".to_string(),
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
-            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_reminders",
+                "match": "reminder_set_or_recurring",
+                "recurrenceHorizonDays": 90,
+                "occurrenceDismissals": true
+            }),
             excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
             is_builtin: true,
         }])),
@@ -13699,6 +13711,7 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
     let reminders = Arc::new(Mutex::new(vec![ClientReminder {
         source_type: "task".to_string(),
         source_id: task_id,
+        occurrence_start_at: None,
         title: "Task reminder source".to_string(),
         due_at: Some("2026-05-21T12:00:00Z".to_string()),
         reminder_at: "2026-05-21T11:30:00Z".to_string(),
@@ -13742,7 +13755,12 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
             definition_kind: "exchange_builtin".to_string(),
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
-            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_reminders",
+                "match": "reminder_set_or_recurring",
+                "recurrenceHorizonDays": 90,
+                "occurrenceDismissals": true
+            }),
             excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
             is_builtin: true,
         }])),
@@ -14384,7 +14402,12 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
                 "scope": "top_of_personal_folders",
                 "recursive": true
             }),
-            restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+            restriction_json: serde_json::json!({
+                "kind": "exchange_reminders",
+                "match": "reminder_set_or_recurring",
+                "recurrenceHorizonDays": 90,
+                "occurrenceDismissals": true
+            }),
             excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
             is_builtin: true,
         }])),
@@ -14455,6 +14478,8 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.SFInfo")
     ));
+    assert!(contains_bytes(&response_rops, b"exchange_reminders"));
+    assert!(contains_bytes(&response_rops, b"occurrenceDismissals"));
 }
 
 #[tokio::test]
@@ -20243,7 +20268,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn mapi_over_http_root_rem_online_entry_id_is_not_projected_as_default_folder() {
+async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -20290,23 +20315,13 @@ async fn mapi_over_http_root_rem_online_entry_id_is_not_projected_as_default_fol
     let response_rops = response_rops_from_execute_response(response).await;
     let get_props_offset = 8;
     assert_eq!(response_rops[get_props_offset], 0x07);
-    assert_eq!(response_rops[get_props_offset + 6], 1);
-    assert_eq!(response_rops[get_props_offset + 7], 0x0A);
-    assert_eq!(
-        u32::from_le_bytes(
-            response_rops[get_props_offset + 8..get_props_offset + 12]
-                .try_into()
-                .unwrap()
-        ),
-        0x8004_0102
-    );
     let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
         crate::mapi::identity::REMINDERS_FOLDER_ID,
     )
     .unwrap()
     .to_vec();
-    assert!(!contains_bytes(&response_rops, &entry_id));
+    assert!(contains_bytes(&response_rops, &entry_id));
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -20375,6 +20390,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
             ClientReminder {
                 source_type: "calendar".to_string(),
                 source_id: event_id,
+                occurrence_start_at: None,
                 title: "Calendar reminder".to_string(),
                 due_at: Some("2026-05-21T09:00:00Z".to_string()),
                 reminder_at: "2026-05-21T08:45:00Z".to_string(),
@@ -20385,6 +20401,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
             ClientReminder {
                 source_type: "task".to_string(),
                 source_id: task_id,
+                occurrence_start_at: None,
                 title: "Task reminder".to_string(),
                 due_at: Some("2026-05-21T12:00:00Z".to_string()),
                 reminder_at: "2026-05-21T11:45:00Z".to_string(),
@@ -20395,6 +20412,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
             ClientReminder {
                 source_type: "mail".to_string(),
                 source_id: mail_id,
+                occurrence_start_at: None,
                 title: "Mail reminder".to_string(),
                 due_at: Some("2026-05-21T12:00:00Z".to_string()),
                 reminder_at: "2026-05-21T12:00:00Z".to_string(),

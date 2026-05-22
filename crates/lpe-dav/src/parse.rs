@@ -142,6 +142,7 @@ pub(crate) fn parse_vtodo(
     let mut status = String::new();
     let mut due_at = None;
     let mut completed_at = None;
+    let mut recurrence_rule = String::new();
     let mut sort_order = 0;
 
     for line in unfolded_lines(content) {
@@ -160,6 +161,7 @@ pub(crate) fn parse_vtodo(
             "STATUS" => status = task_status_from_vtodo_status(&value)?,
             "DUE" => due_at = Some(parse_ical_timestamp(&value)?),
             "COMPLETED" => completed_at = Some(parse_ical_timestamp(&value)?),
+            "RRULE" => recurrence_rule = value,
             "X-LPE-SORT-ORDER" => {
                 sort_order = value
                     .parse::<i32>()
@@ -183,6 +185,7 @@ pub(crate) fn parse_vtodo(
         status,
         due_at,
         completed_at,
+        recurrence_rule,
         sort_order,
     })
 }

@@ -64,6 +64,7 @@ pub struct UpsertJournalEntryInput {
 pub struct ClientReminder {
     pub source_type: String,
     pub source_id: Uuid,
+    pub occurrence_start_at: Option<String>,
     pub title: String,
     pub due_at: Option<String>,
     pub reminder_at: String,
@@ -110,6 +111,7 @@ fn map_reminder(row: ClientReminderRow) -> ClientReminder {
     ClientReminder {
         source_type: row.source_type,
         source_id: row.source_id,
+        occurrence_start_at: row.occurrence_start_at,
         title: row.title,
         due_at: row.due_at,
         reminder_at: row.reminder_at,
@@ -120,6 +122,40 @@ fn map_reminder(row: ClientReminderRow) -> ClientReminder {
 }
 
 impl Storage {
+    pub async fn dismiss_reminder_occurrence(
+        &self,
+        account_id: Uuid,
+        source_type: &str,
+        source_id: Uuid,
+        occurrence_start_at: &str,
+        dismissed_at: &str,
+    ) -> Result<()> {
+        if !matches!(source_type, "calendar" | "task") {
+            return Ok(());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO reminder_occurrence_dismissals (
+                tenant_id, owner_account_id, source_type, source_id,
+                occurrence_start_at, dismissed_at
+            )
+            VALUES ($1, $2, $3, $4, NULLIF($5, '')::timestamptz, NULLIF($6, '')::timestamptz)
+            ON CONFLICT (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at)
+            DO UPDATE SET dismissed_at = EXCLUDED.dismissed_at, updated_at = NOW()
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(source_type)
+        .bind(source_id)
+        .bind(occurrence_start_at)
+        .bind(dismissed_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn fetch_client_notes(&self, account_id: Uuid) -> Result<Vec<ClientNote>> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
         let rows = sqlx::query_as::<_, ClientNoteRow>(
@@ -584,50 +620,195 @@ impl Storage {
             FROM (
                 SELECT
                     'calendar'::text AS source_type,
-                    id AS source_id,
-                    title,
-                    to_char(ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS due_at,
-                    to_char(reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,
+                    event_id AS source_id,
+                    to_char(occurrence_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurrence_start_at,
+                    event_title AS title,
+                    to_char(occurrence_end AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS due_at,
+                    to_char(occurrence_reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,
                     CASE WHEN reminder_dismissed_at IS NULL THEN NULL ELSE to_char(reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS dismissed_at,
                     NULL::text AS completed_at,
                     CASE
                         WHEN reminder_dismissed_at IS NOT NULL THEN 'dismissed'
-                        WHEN status = 'cancelled' THEN 'excluded'
-                        WHEN reminder_at <= NOW() THEN 'due'
+                        WHEN event_status = 'cancelled' THEN 'excluded'
+                        WHEN occurrence_reminder_at <= NOW() THEN 'due'
                         ELSE 'pending'
                     END AS status
-                FROM calendar_events
-                WHERE tenant_id = $1
-                  AND owner_account_id = $2
-                  AND reminder_set
-                  AND reminder_at IS NOT NULL
+                FROM (
+                    SELECT
+                        e.id AS event_id,
+                        e.title AS event_title,
+                        e.status AS event_status,
+                        COALESCE(rod.dismissed_at, e.reminder_dismissed_at) AS reminder_dismissed_at,
+                        occurrence_start,
+                        occurrence_start + (e.ends_at - e.starts_at) AS occurrence_end,
+                        occurrence_start + (e.reminder_at - e.starts_at) AS occurrence_reminder_at
+                    FROM calendar_events e
+                    CROSS JOIN LATERAL (
+                        SELECT e.starts_at AS occurrence_start
+                        WHERE COALESCE(e.recurrence_rule, '') = ''
+                        UNION ALL
+                        SELECT generated_at AS occurrence_start
+                        FROM generate_series(
+                            e.starts_at,
+                            NOW() + interval '90 days',
+                            CASE
+                                WHEN e.recurrence_rule ILIKE 'FREQ=DAILY%' THEN make_interval(days => COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                WHEN e.recurrence_rule ILIKE 'FREQ=WEEKLY%' THEN make_interval(days => 7 * COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                WHEN e.recurrence_rule ILIKE 'FREQ=MONTHLY%' THEN make_interval(months => COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                WHEN e.recurrence_rule ILIKE 'FREQ=YEARLY%' THEN make_interval(years => COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                ELSE interval '100 years'
+                            END
+                        ) WITH ORDINALITY AS occurrences(generated_at, occurrence_index)
+                        WHERE COALESCE(e.recurrence_rule, '') <> ''
+                          AND generated_at >= NOW() - interval '1 day'
+                          AND occurrence_index <= COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'COUNT=([0-9]+)'))[1], '')::bigint, occurrence_index)
+                          AND (
+                              COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'UNTIL=([0-9]{8})'))[1], ''), '') = ''
+                              OR generated_at::date <= to_date((regexp_match(e.recurrence_rule, 'UNTIL=([0-9]{8})'))[1], 'YYYYMMDD')
+                          )
+                          AND (
+                              COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'BYDAY=([^;]+)'))[1], ''), '') = ''
+                              OR position(
+                                  CASE EXTRACT(ISODOW FROM generated_at)::int
+                                      WHEN 1 THEN 'MO'
+                                      WHEN 2 THEN 'TU'
+                                      WHEN 3 THEN 'WE'
+                                      WHEN 4 THEN 'TH'
+                                      WHEN 5 THEN 'FR'
+                                      WHEN 6 THEN 'SA'
+                                      ELSE 'SU'
+                                  END
+                                  IN (regexp_match(e.recurrence_rule, 'BYDAY=([^;]+)'))[1]
+                              ) > 0
+                          )
+                          AND (
+                              COALESCE(NULLIF((regexp_match(e.recurrence_rule, 'BYMONTHDAY=([^;]+)'))[1], ''), '') = ''
+                              OR EXTRACT(DAY FROM generated_at)::int::text = ANY(string_to_array((regexp_match(e.recurrence_rule, 'BYMONTHDAY=([^;]+)'))[1], ','))
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM jsonb_array_elements_text(e.recurrence_exceptions_json) AS exception(value)
+                              WHERE exception.value = to_char(generated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                                 OR exception.value = to_char(generated_at AT TIME ZONE 'UTC', 'YYYYMMDD"T"HH24MISS"Z"')
+                                 OR exception.value = to_char(generated_at AT TIME ZONE 'UTC', 'YYYYMMDD')
+                          )
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM calendar_events exception_event
+                              WHERE exception_event.tenant_id = e.tenant_id
+                                AND exception_event.owner_account_id = e.owner_account_id
+                                AND exception_event.calendar_id = e.calendar_id
+                                AND exception_event.exception_for_event_id = e.id
+                                AND exception_event.exception_recurrence_id IN (
+                                    to_char(generated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                                    to_char(generated_at AT TIME ZONE 'UTC', 'YYYYMMDD"T"HH24MISS"Z"'),
+                                    to_char(generated_at AT TIME ZONE 'UTC', 'YYYYMMDD')
+                                )
+                                AND exception_event.status = 'cancelled'
+                          )
+                    ) occurrence
+                    LEFT JOIN reminder_occurrence_dismissals rod
+                      ON rod.tenant_id = e.tenant_id
+                     AND rod.owner_account_id = e.owner_account_id
+                     AND rod.source_type = 'calendar'
+                     AND rod.source_id = e.id
+                     AND rod.occurrence_start_at = occurrence_start
+                    WHERE e.tenant_id = $1
+                      AND e.owner_account_id = $2
+                      AND e.reminder_set
+                      AND e.reminder_at IS NOT NULL
+                      AND occurrence_start + (e.reminder_at - e.starts_at) <= NOW() + interval '90 days'
+                ) calendar_reminders
                 UNION ALL
                 SELECT
                     'task'::text AS source_type,
-                    id AS source_id,
-                    title,
-                    CASE WHEN due_at IS NULL THEN NULL ELSE to_char(due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS due_at,
-                    to_char(reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,
+                    task_id AS source_id,
+                    to_char(occurrence_anchor AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS occurrence_start_at,
+                    task_title AS title,
+                    CASE WHEN occurrence_due_at IS NULL THEN NULL ELSE to_char(occurrence_due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS due_at,
+                    to_char(occurrence_reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,
                     CASE WHEN reminder_dismissed_at IS NULL THEN NULL ELSE to_char(reminder_dismissed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS dismissed_at,
                     CASE WHEN completed_at IS NULL THEN NULL ELSE to_char(completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS completed_at,
                     CASE
-                        WHEN status = 'cancelled' THEN 'excluded'
+                        WHEN task_status = 'cancelled' THEN 'excluded'
                         WHEN completed_at IS NOT NULL THEN 'completed'
                         WHEN reminder_dismissed_at IS NOT NULL THEN 'dismissed'
-                        WHEN reminder_at <= NOW() THEN 'due'
+                        WHEN occurrence_reminder_at <= NOW() THEN 'due'
                         ELSE 'pending'
                     END AS status
-                FROM tasks
-                WHERE tenant_id = $1
-                  AND owner_account_id = $2
-                  AND reminder_set
-                  AND reminder_at IS NOT NULL
+                FROM (
+                    SELECT
+                        t.id AS task_id,
+                        t.title AS task_title,
+                        t.status AS task_status,
+                        t.completed_at,
+                        COALESCE(rod.dismissed_at, t.reminder_dismissed_at) AS reminder_dismissed_at,
+                        occurrence_anchor,
+                        CASE WHEN t.due_at IS NULL THEN NULL ELSE occurrence_anchor + (t.due_at - COALESCE(t.due_at, t.reminder_at)) END AS occurrence_due_at,
+                        occurrence_anchor + (t.reminder_at - COALESCE(t.due_at, t.reminder_at)) AS occurrence_reminder_at
+                    FROM tasks t
+                    CROSS JOIN LATERAL (
+                        SELECT COALESCE(t.due_at, t.reminder_at) AS occurrence_anchor
+                        WHERE COALESCE(t.recurrence_rule, '') = ''
+                        UNION ALL
+                        SELECT generated_at AS occurrence_anchor
+                        FROM generate_series(
+                            COALESCE(t.due_at, t.reminder_at),
+                            NOW() + interval '90 days',
+                            CASE
+                                WHEN t.recurrence_rule ILIKE 'FREQ=DAILY%' THEN make_interval(days => COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                WHEN t.recurrence_rule ILIKE 'FREQ=WEEKLY%' THEN make_interval(days => 7 * COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                WHEN t.recurrence_rule ILIKE 'FREQ=MONTHLY%' THEN make_interval(months => COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                WHEN t.recurrence_rule ILIKE 'FREQ=YEARLY%' THEN make_interval(years => COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'INTERVAL=([0-9]+)'))[1], '')::int, 1))
+                                ELSE interval '100 years'
+                            END
+                        ) WITH ORDINALITY AS occurrences(generated_at, occurrence_index)
+                        WHERE COALESCE(t.recurrence_rule, '') <> ''
+                          AND generated_at >= NOW() - interval '1 day'
+                          AND occurrence_index <= COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'COUNT=([0-9]+)'))[1], '')::bigint, occurrence_index)
+                          AND (
+                              COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'UNTIL=([0-9]{8})'))[1], ''), '') = ''
+                              OR generated_at::date <= to_date((regexp_match(t.recurrence_rule, 'UNTIL=([0-9]{8})'))[1], 'YYYYMMDD')
+                          )
+                          AND (
+                              COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'BYDAY=([^;]+)'))[1], ''), '') = ''
+                              OR position(
+                                  CASE EXTRACT(ISODOW FROM generated_at)::int
+                                      WHEN 1 THEN 'MO'
+                                      WHEN 2 THEN 'TU'
+                                      WHEN 3 THEN 'WE'
+                                      WHEN 4 THEN 'TH'
+                                      WHEN 5 THEN 'FR'
+                                      WHEN 6 THEN 'SA'
+                                      ELSE 'SU'
+                                  END
+                                  IN (regexp_match(t.recurrence_rule, 'BYDAY=([^;]+)'))[1]
+                              ) > 0
+                          )
+                          AND (
+                              COALESCE(NULLIF((regexp_match(t.recurrence_rule, 'BYMONTHDAY=([^;]+)'))[1], ''), '') = ''
+                              OR EXTRACT(DAY FROM generated_at)::int::text = ANY(string_to_array((regexp_match(t.recurrence_rule, 'BYMONTHDAY=([^;]+)'))[1], ','))
+                          )
+                    ) occurrence
+                    LEFT JOIN reminder_occurrence_dismissals rod
+                      ON rod.tenant_id = t.tenant_id
+                     AND rod.owner_account_id = t.owner_account_id
+                     AND rod.source_type = 'task'
+                     AND rod.source_id = t.id
+                     AND rod.occurrence_start_at = occurrence_anchor
+                    WHERE t.tenant_id = $1
+                      AND t.owner_account_id = $2
+                      AND t.reminder_set
+                      AND t.reminder_at IS NOT NULL
+                      AND occurrence_anchor + (t.reminder_at - COALESCE(t.due_at, t.reminder_at)) <= NOW() + interval '90 days'
+                ) task_reminders
                 UNION ALL
                 SELECT *
                 FROM (
                     SELECT DISTINCT ON (mm.message_id)
                         'mail'::text AS source_type,
                         mm.message_id AS source_id,
+                        NULL::text AS occurrence_start_at,
                         m.normalized_subject AS title,
                         CASE WHEN mm.followup_due_at IS NULL THEN NULL ELSE to_char(mm.followup_due_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') END AS due_at,
                         to_char(mm.reminder_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS reminder_at,

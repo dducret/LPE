@@ -126,7 +126,9 @@ fn exchange_builtin_search_folder_definitions() -> Vec<BuiltinSearchFolderDefini
             scope_json: top_ipm_scope.clone(),
             restriction_json: serde_json::json!({
                 "kind": "exchange_reminders",
-                "match": "reminder_set_or_recurring"
+                "match": "reminder_set_or_recurring",
+                "recurrenceHorizonDays": 90,
+                "occurrenceDismissals": true
             }),
             excluded_folder_roles: excluded_mail_roles.clone(),
         },

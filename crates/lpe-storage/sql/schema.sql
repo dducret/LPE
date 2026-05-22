@@ -2170,6 +2170,22 @@ CREATE INDEX tasks_owner_reminder_idx
     ON tasks (tenant_id, owner_account_id, reminder_set, reminder_at)
     WHERE reminder_set;
 
+CREATE TABLE reminder_occurrence_dismissals (
+    tenant_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    source_type TEXT NOT NULL CHECK (source_type IN ('calendar', 'task')),
+    source_id UUID NOT NULL,
+    occurrence_start_at TIMESTAMPTZ NOT NULL,
+    dismissed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at),
+    FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX reminder_occurrence_dismissals_owner_idx
+    ON reminder_occurrence_dismissals (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at);
+
 CREATE TABLE notes (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

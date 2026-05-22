@@ -361,8 +361,17 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        reminder_reset: Option<bool>,
     ) -> Result<()> {
-        let _ = (principal_account_id, task_id, reminder_set, reminder_at);
+        let _ = (
+            principal_account_id,
+            task_id,
+            reminder_set,
+            reminder_at,
+            reminder_dismissed_at,
+            reminder_reset,
+        );
         Ok(())
     }
     async fn update_jmap_event_reminder(
@@ -371,8 +380,15 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> Result<()> {
-        let _ = (principal_account_id, event_id, reminder_set, reminder_at);
+        let _ = (
+            principal_account_id,
+            event_id,
+            reminder_set,
+            reminder_at,
+            reminder_dismissed_at,
+        );
         Ok(())
     }
     async fn update_jmap_mail_reminder(
@@ -391,6 +407,23 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
             reminder_at,
             reminder_dismissed_at,
             audit,
+        );
+        Ok(())
+    }
+    async fn dismiss_jmap_reminder_occurrence(
+        &self,
+        account_id: Uuid,
+        source_type: String,
+        source_id: Uuid,
+        occurrence_start_at: String,
+        dismissed_at: String,
+    ) -> Result<()> {
+        let _ = (
+            account_id,
+            source_type,
+            source_id,
+            occurrence_start_at,
+            dismissed_at,
         );
         Ok(())
     }
@@ -959,12 +992,16 @@ impl JmapStore for Storage {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        reminder_reset: Option<bool>,
     ) -> Result<()> {
         self.update_accessible_task_reminder(
             principal_account_id,
             task_id,
             reminder_set,
             reminder_at,
+            reminder_dismissed_at,
+            reminder_reset,
         )
         .await
     }
@@ -975,12 +1012,14 @@ impl JmapStore for Storage {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> Result<()> {
         self.update_accessible_event_reminder(
             principal_account_id,
             event_id,
             reminder_set,
             reminder_at,
+            reminder_dismissed_at,
         )
         .await
     }
@@ -1007,6 +1046,24 @@ impl JmapStore for Storage {
         )
         .await?;
         Ok(())
+    }
+
+    async fn dismiss_jmap_reminder_occurrence(
+        &self,
+        account_id: Uuid,
+        source_type: String,
+        source_id: Uuid,
+        occurrence_start_at: String,
+        dismissed_at: String,
+    ) -> Result<()> {
+        self.dismiss_reminder_occurrence(
+            account_id,
+            &source_type,
+            source_id,
+            &occurrence_start_at,
+            &dismissed_at,
+        )
+        .await
     }
 
     async fn fetch_jmap_shares(&self, account_id: Uuid) -> Result<Vec<Value>> {

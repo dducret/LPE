@@ -1470,6 +1470,7 @@ mod tests {
             status: "needs-action".to_string(),
             due_at: Some("2026-05-21T09:00:00Z".to_string()),
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-05-20T09:00:00Z".to_string(),
         };
@@ -1833,6 +1834,7 @@ mod tests {
             status: "needs-action".to_string(),
             due_at: Some("2026-05-21T12:00:00Z".to_string()),
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-05-20T09:00:00Z".to_string(),
         };
@@ -1959,6 +1961,7 @@ mod tests {
             ClientReminder {
                 source_type: "mail".to_string(),
                 source_id: message_id,
+                occurrence_start_at: None,
                 title: "Mail reminder".to_string(),
                 due_at: Some("2026-05-21T17:00:00Z".to_string()),
                 reminder_at: "2026-05-21T16:45:00Z".to_string(),
@@ -1969,6 +1972,7 @@ mod tests {
             ClientReminder {
                 source_type: "calendar".to_string(),
                 source_id: event_id,
+                occurrence_start_at: None,
                 title: "Standup".to_string(),
                 due_at: Some("2026-05-21T09:30:00Z".to_string()),
                 reminder_at: "2026-05-21T09:00:00Z".to_string(),
@@ -1979,6 +1983,7 @@ mod tests {
             ClientReminder {
                 source_type: "task".to_string(),
                 source_id: task_id,
+                occurrence_start_at: None,
                 title: "Follow up".to_string(),
                 due_at: Some("2026-05-21T12:00:00Z".to_string()),
                 reminder_at: "2026-05-21T11:45:00Z".to_string(),

@@ -38,7 +38,7 @@ pub(crate) fn serialize_ical(event: &AccessibleEvent) -> String {
     ];
     push_line(&mut lines, "LOCATION", &event.location);
     push_line(&mut lines, "DESCRIPTION", &event.notes);
-    push_line(&mut lines, "RRULE", &event.recurrence_rule);
+    push_raw_line(&mut lines, "RRULE", &event.recurrence_rule);
     if let Some(organizer) = metadata.organizer.as_ref() {
         lines.push(serialize_organizer(organizer));
     }
@@ -75,6 +75,7 @@ pub(crate) fn serialize_vtodo(task: &DavTask) -> String {
     if let Some(completed_at) = task.completed_at.as_deref() {
         lines.push(format!("COMPLETED:{}", format_ical_timestamp(completed_at)));
     }
+    push_raw_line(&mut lines, "RRULE", &task.recurrence_rule);
     lines.push(format!("X-LPE-SORT-ORDER:{}", task.sort_order));
     lines.push("END:VTODO".to_string());
     lines.push("END:VCALENDAR".to_string());
@@ -84,6 +85,12 @@ pub(crate) fn serialize_vtodo(task: &DavTask) -> String {
 fn push_line(lines: &mut Vec<String>, name: &str, value: &str) {
     if !value.trim().is_empty() {
         lines.push(format!("{name}:{}", text_escape(value)));
+    }
+}
+
+fn push_raw_line(lines: &mut Vec<String>, name: &str, value: &str) {
+    if !value.trim().is_empty() {
+        lines.push(format!("{name}:{}", value.trim()));
     }
 }
 

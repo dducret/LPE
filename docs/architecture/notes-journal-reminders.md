@@ -30,8 +30,11 @@ objects that carry reminder metadata.
   MAPI message class projection metadata, start/end/occurred timestamps,
   companies, contacts, source metadata, and timestamps.
 - `calendar_events` and `tasks` carry `reminder_set`, `reminder_at`, and
-  `reminder_dismissed_at`. `tasks` also carries `reminder_reset` for future
-  recurring-task reminder projection.
+  `reminder_dismissed_at`. `tasks` also carries `reminder_reset` for recurring
+  task reminder projection.
+- `reminder_occurrence_dismissals` stores per-occurrence dismissals for
+  recurring calendar and task reminders. It is not a reminder object table; it
+  only records that a generated occurrence has been dismissed.
 - There is no `reminders` table. Reminder APIs query canonical tasks and
   calendar events.
 
@@ -58,7 +61,15 @@ The Reminders endpoint returns computed rows with `sourceType`, `sourceId`,
 `title`, `dueAt`, `reminderAt`, `dismissedAt`, `completedAt`, and `status`.
 Default queries return active due/pending reminders. `includeInactive=true`
 also returns dismissed, completed, and explicitly excluded rows for diagnostics
-and compatibility tests.
+and compatibility tests. Calendar and task reminders with `DAILY`, `WEEKLY`,
+`MONTHLY`, or `YEARLY` recurrence rules are expanded as computed occurrences
+over the next 90 days. The bounded Reminders evaluator applies `INTERVAL`,
+`COUNT`, `UNTIL`, `BYDAY`, and `BYMONTHDAY` filters, and calendar recurrence
+exception metadata can suppress cancelled occurrences. The reminder signal time
+keeps the same offset from each occurrence anchor as the canonical base reminder
+has from the base event start, task due time, or task reminder time.
+Occurrence-level dismissal records suppress only the matching generated
+occurrence.
 
 ## JMAP Foundation
 
@@ -97,7 +108,12 @@ canonical create-style writes using the same payloads as each object's `set`
 create branch. Reminder mutation, import, and copy methods update reminder
 metadata on the canonical source object. Supported sources are canonical tasks,
 calendar events, and mail follow-up rows; reminders themselves remain computed
-and do not have a separate reminder table.
+and do not have a separate reminder table. Setting a new reminder time clears
+dismissal state for that source, which provides canonical snooze/reactivation
+behavior. For recurring calendar and task reminders, private Reminder ids include
+the generated occurrence start so dismissing one occurrence does not dismiss the
+series. Destroying a base reminder clears the source object's reminder flag and
+reminder timestamps.
 
 Notes and Journal writes allocate account/category modseqs in `account_sync_state`,
 append object-level `mail_change_log` rows, and write tombstones for deletes.
@@ -110,6 +126,6 @@ or `journal` canonical change category advances.
 
 ## Deferred Work
 
-- MAPI ROP behavior for Notes, Journal, and Reminders remains deferred to the
-  MAPI over HTTP adapter phase.
+- Full RFC 5545 recurrence parity beyond the bounded Outlook-oriented
+  `FREQ`/`INTERVAL`/`COUNT`/`UNTIL`/`BYDAY`/`BYMONTHDAY` subset remains deferred.
 - Web UI is intentionally not part of this foundation change.

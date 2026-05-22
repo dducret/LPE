@@ -69,6 +69,7 @@ pub struct ClientTask {
     pub status: String,
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
+    pub recurrence_rule: String,
     pub sort_order: i32,
     pub updated_at: String,
 }
@@ -89,6 +90,7 @@ pub struct DavTask {
     pub status: String,
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
+    pub recurrence_rule: String,
     pub sort_order: i32,
     pub updated_at: String,
 }
@@ -119,6 +121,7 @@ pub struct UpsertClientTaskInput {
     pub status: String,
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
+    pub recurrence_rule: String,
     pub sort_order: i32,
 }
 
@@ -184,6 +187,7 @@ pub(crate) fn map_task(row: ClientTaskRow) -> ClientTask {
         status: row.status,
         due_at: row.due_at,
         completed_at: row.completed_at,
+        recurrence_rule: row.recurrence_rule,
         sort_order: row.sort_order,
         updated_at: row.updated_at,
     }
@@ -209,6 +213,7 @@ pub(crate) fn map_dav_task(row: DavTaskRow) -> DavTask {
         status: row.status,
         due_at: row.due_at,
         completed_at: row.completed_at,
+        recurrence_rule: row.recurrence_rule,
         sort_order: row.sort_order,
         updated_at: row.updated_at,
     }
@@ -293,6 +298,7 @@ impl Storage {
                 status,
                 due_at,
                 completed_at,
+                recurrence_rule,
                 sort_order
             )
             VALUES (
@@ -309,7 +315,8 @@ impl Storage {
                     WHEN $7 = 'completed' THEN COALESCE(NULLIF($9, '')::timestamptz, NOW())
                     ELSE NULL
                 END,
-                $10
+                NULLIF($10, ''),
+                $11
             )
             ON CONFLICT (id) DO UPDATE SET
                 task_list_id = EXCLUDED.task_list_id,
@@ -318,6 +325,7 @@ impl Storage {
                 status = EXCLUDED.status,
                 due_at = EXCLUDED.due_at,
                 completed_at = EXCLUDED.completed_at,
+                recurrence_rule = EXCLUDED.recurrence_rule,
                 sort_order = EXCLUDED.sort_order,
                 updated_at = NOW()
             WHERE tasks.tenant_id = EXCLUDED.tenant_id
@@ -325,13 +333,13 @@ impl Storage {
             RETURNING
                 tasks.id,
                 tasks.owner_account_id,
-                $11::text AS owner_email,
-                $12::text AS owner_display_name,
-                $13::boolean AS is_owned,
-                $14::boolean AS may_read,
-                $15::boolean AS may_write,
-                $16::boolean AS may_delete,
-                $17::boolean AS may_share,
+                $12::text AS owner_email,
+                $13::text AS owner_display_name,
+                $14::boolean AS is_owned,
+                $15::boolean AS may_read,
+                $16::boolean AS may_write,
+                $17::boolean AS may_delete,
+                $18::boolean AS may_share,
                 tasks.task_list_id,
                 (
                     SELECT sort_order
@@ -351,6 +359,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             "#,
@@ -364,6 +373,7 @@ impl Storage {
         .bind(status)
         .bind(input.due_at.as_deref().unwrap_or_default().trim())
         .bind(input.completed_at.as_deref().unwrap_or_default().trim())
+        .bind(input.recurrence_rule.trim())
         .bind(input.sort_order)
         .bind(target_task_list.owner_email.clone())
         .bind(target_task_list.owner_display_name.clone())
@@ -426,6 +436,8 @@ impl Storage {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        reminder_reset: Option<bool>,
     ) -> Result<()> {
         let existing = self
             .fetch_client_tasks_by_ids(principal_account_id, &[task_id])
@@ -458,7 +470,13 @@ impl Storage {
                 END,
                 reminder_dismissed_at = CASE
                     WHEN $4 = FALSE THEN NULL
+                    WHEN $6::text IS NOT NULL THEN NULLIF($6, '')::timestamptz
+                    WHEN $5::text IS NOT NULL THEN NULL
                     ELSE reminder_dismissed_at
+                END,
+                reminder_reset = CASE
+                    WHEN $7::bool IS NULL THEN reminder_reset
+                    ELSE $7
                 END,
                 updated_at = NOW()
             WHERE tenant_id = $1
@@ -471,6 +489,8 @@ impl Storage {
         .bind(task_id)
         .bind(reminder_set)
         .bind(reminder_at.as_deref())
+        .bind(reminder_dismissed_at.as_deref())
+        .bind(reminder_reset)
         .execute(&mut *tx)
         .await?;
 
@@ -1232,6 +1252,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM tasks
@@ -1313,6 +1334,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM tasks
@@ -1376,6 +1398,7 @@ impl Storage {
             status: task.status,
             due_at: task.due_at,
             completed_at: task.completed_at,
+            recurrence_rule: task.recurrence_rule,
             sort_order: task.sort_order,
             updated_at: task.updated_at,
         })
@@ -1426,6 +1449,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM tasks
@@ -1508,6 +1532,7 @@ impl Storage {
                     WHEN tasks.completed_at IS NULL THEN NULL
                     ELSE to_char(tasks.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')
                 END AS completed_at,
+                COALESCE(tasks.recurrence_rule, '') AS recurrence_rule,
                 tasks.sort_order,
                 to_char(tasks.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
             FROM tasks

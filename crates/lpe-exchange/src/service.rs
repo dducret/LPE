@@ -2955,6 +2955,7 @@ fn parse_create_task_input(
         status,
         due_at: element_text(task, "DueDate"),
         completed_at: element_text(task, "CompleteDate"),
+        recurrence_rule: parse_ews_recurrence(task)?,
         sort_order: 0,
     })
 }
@@ -3002,6 +3003,11 @@ fn parse_update_task_input(
             None
         } else {
             element_text(task, "CompleteDate").or_else(|| existing.completed_at.clone())
+        },
+        recurrence_rule: if field_deleted(request, "task:Recurrence") {
+            String::new()
+        } else {
+            parse_ews_recurrence(task)?.if_empty(existing.recurrence_rule.clone())
         },
         sort_order: existing.sort_order,
     })

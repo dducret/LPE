@@ -1499,11 +1499,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             for (id, value) in update {
                 let mut object = value.clone();
                 if let Value::Object(map) = &mut object {
-                    let (source_type, source_id) = parse_reminder_id(id)?;
+                    let (source_type, source_id, occurrence_start_at) = parse_reminder_id(id)?;
                     map.entry("sourceType")
                         .or_insert_with(|| Value::String(source_type));
                     map.entry("sourceId")
                         .or_insert_with(|| Value::String(source_id.to_string()));
+                    if let Some(occurrence_start_at) = occurrence_start_at {
+                        map.entry("occurrenceStartAt")
+                            .or_insert_with(|| Value::String(occurrence_start_at));
+                    }
                 }
                 match self
                     .apply_reminder_mutation(account, account_id, &object, true, id)
@@ -1523,7 +1527,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                 let Some(id) = value.as_str() else {
                     continue;
                 };
-                let (source_type, source_id) = match parse_reminder_id(id) {
+                let (source_type, source_id, occurrence_start_at) = match parse_reminder_id(id) {
                     Ok(parsed) => parsed,
                     Err(error) => {
                         not_destroyed.insert(id.to_string(), set_error(&error.to_string()));
@@ -1535,6 +1539,15 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     "sourceId": source_id.to_string(),
                     "reminderSet": false,
                 });
+                let mut object = object;
+                if let (Some(occurrence_start_at), Value::Object(map)) =
+                    (occurrence_start_at, &mut object)
+                {
+                    map.insert(
+                        "occurrenceStartAt".to_string(),
+                        Value::String(occurrence_start_at),
+                    );
+                }
                 match self
                     .apply_reminder_mutation(account, account_id, &object, false, id)
                     .await
@@ -1616,27 +1629,65 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .or_else(|| value.get("reminderDismissedAt"))
             .and_then(Value::as_str)
             .map(str::to_string);
+        let occurrence_start_at = value
+            .get("occurrenceStartAt")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let reminder_reset = value
+            .get("reminderReset")
+            .and_then(Value::as_bool);
 
         match source_type {
             "task" => {
-                self.store
-                    .update_jmap_task_reminder(
-                        account_id,
-                        source_id,
-                        Some(reminder_set),
-                        reminder_at,
-                    )
-                    .await?;
+                if let (Some(occurrence_start_at), Some(dismissed_at)) =
+                    (occurrence_start_at.clone(), dismissed_at.clone())
+                {
+                    self.store
+                        .dismiss_jmap_reminder_occurrence(
+                            account_id,
+                            source_type.to_string(),
+                            source_id,
+                            occurrence_start_at,
+                            dismissed_at,
+                        )
+                        .await?;
+                } else {
+                    self.store
+                        .update_jmap_task_reminder(
+                            account_id,
+                            source_id,
+                            Some(reminder_set),
+                            reminder_at,
+                            dismissed_at,
+                            reminder_reset,
+                        )
+                        .await?;
+                }
             }
             "calendar" => {
-                self.store
-                    .update_jmap_event_reminder(
-                        account_id,
-                        source_id,
-                        Some(reminder_set),
-                        reminder_at,
-                    )
-                    .await?;
+                if let (Some(occurrence_start_at), Some(dismissed_at)) =
+                    (occurrence_start_at, dismissed_at.clone())
+                {
+                    self.store
+                        .dismiss_jmap_reminder_occurrence(
+                            account_id,
+                            source_type.to_string(),
+                            source_id,
+                            occurrence_start_at,
+                            dismissed_at,
+                        )
+                        .await?;
+                } else {
+                    self.store
+                        .update_jmap_event_reminder(
+                            account_id,
+                            source_id,
+                            Some(reminder_set),
+                            reminder_at,
+                            dismissed_at,
+                        )
+                        .await?;
+                }
             }
             "mail" => {
                 self.store
@@ -2279,11 +2330,16 @@ fn canonical_create_ids(arguments: &Value) -> Vec<String> {
     }
 }
 
-fn parse_reminder_id(id: &str) -> Result<(String, Uuid)> {
-    let (source_type, source_id) = id
-        .split_once(':')
-        .ok_or_else(|| anyhow!("reminder id must be sourceType:sourceId"))?;
-    Ok((source_type.to_string(), parse_uuid(source_id)?))
+fn parse_reminder_id(id: &str) -> Result<(String, Uuid, Option<String>)> {
+    let parts = id.splitn(3, ':').collect::<Vec<_>>();
+    if parts.len() < 2 || parts[0].is_empty() || parts[1].is_empty() {
+        bail!("reminder id must be sourceType:sourceId");
+    }
+    Ok((
+        parts[0].to_string(),
+        parse_uuid(parts[1])?,
+        parts.get(2).map(|value| (*value).to_string()),
+    ))
 }
 
 fn parse_share_input(owner_account_id: Uuid, value: &Value) -> Result<JmapShareInput> {

@@ -521,6 +521,12 @@ fn task_to_value(task: &ClientTask, properties: &HashSet<String>) -> Value {
         "completed",
         task.completed_at.clone(),
     );
+    insert_if(
+        properties,
+        &mut object,
+        "recurrenceRule",
+        task.recurrence_rule.clone(),
+    );
     insert_if(properties, &mut object, "sortOrder", task.sort_order);
     insert_if(properties, &mut object, "updated", task.updated_at.clone());
     Value::Object(object)
@@ -593,6 +599,7 @@ fn parse_task_input(
             .unwrap_or_else(|| "needs-action".to_string()),
         due_at: parse_optional_string(object.get("due"))?,
         completed_at: parse_optional_string(object.get("completed"))?,
+        recurrence_rule: parse_optional_string(object.get("recurrenceRule"))?.unwrap_or_default(),
         sort_order: object.get("sortOrder").and_then(Value::as_i64).unwrap_or(0) as i32,
     })
 }
@@ -633,7 +640,7 @@ fn reject_unknown_task_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
             "@type" | "uid" | "title" | "description" | "status" | "due" | "completed"
-            | "sortOrder" | "taskListId" => {}
+            | "recurrenceRule" | "sortOrder" | "taskListId" => {}
             _ => bail!("unsupported task property: {key}"),
         }
     }

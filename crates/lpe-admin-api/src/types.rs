@@ -527,6 +527,7 @@ pub struct UpsertClientTaskRequest {
     pub status: String,
     pub due_at: Option<String>,
     pub completed_at: Option<String>,
+    pub recurrence_rule: Option<String>,
     pub sort_order: Option<i32>,
 }
 

@@ -975,6 +975,7 @@ impl Storage {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> Result<()> {
         let existing = self
             .fetch_accessible_events_by_ids(principal_account_id, &[event_id])
@@ -1007,6 +1008,8 @@ impl Storage {
                 END,
                 reminder_dismissed_at = CASE
                     WHEN $4 = FALSE THEN NULL
+                    WHEN $6::text IS NOT NULL THEN NULLIF($6, '')::timestamptz
+                    WHEN $5::text IS NOT NULL THEN NULL
                     ELSE reminder_dismissed_at
                 END,
                 updated_at = NOW()
@@ -1020,6 +1023,7 @@ impl Storage {
         .bind(event_id)
         .bind(reminder_set)
         .bind(reminder_at.as_deref())
+        .bind(reminder_dismissed_at.as_deref())
         .execute(&mut *tx)
         .await?;
 

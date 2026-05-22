@@ -728,6 +728,7 @@ fn reminder_to_value(reminder: &ClientReminder) -> Value {
         "@type": "Reminder",
         "sourceType": reminder.source_type,
         "sourceId": reminder.source_id.to_string(),
+        "occurrenceStartAt": reminder.occurrence_start_at,
         "title": reminder.title,
         "dueAt": reminder.due_at,
         "reminderAt": reminder.reminder_at,
@@ -738,7 +739,11 @@ fn reminder_to_value(reminder: &ClientReminder) -> Value {
 }
 
 fn reminder_id(reminder: &ClientReminder) -> String {
-    format!("{}:{}", reminder.source_type, reminder.source_id)
+    if let Some(occurrence_start_at) = reminder.occurrence_start_at.as_deref() {
+        format!("{}:{}:{}", reminder.source_type, reminder.source_id, occurrence_start_at)
+    } else {
+        format!("{}:{}", reminder.source_type, reminder.source_id)
+    }
 }
 
 fn note_matches_filter(note: &ClientNote, filter: &NoteQueryFilter) -> bool {

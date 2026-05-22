@@ -447,6 +447,7 @@ pub trait ExchangeStore: AccountAuthStore {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> StoreFuture<'a, ()>;
 
     fn delete_accessible_event<'a>(
@@ -583,6 +584,8 @@ pub trait ExchangeStore: AccountAuthStore {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        reminder_reset: Option<bool>,
     ) -> StoreFuture<'a, ()>;
 
     fn delete_accessible_task<'a>(
@@ -1944,6 +1947,7 @@ impl ExchangeStore for Storage {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.update_accessible_event_reminder(
@@ -1951,6 +1955,7 @@ impl ExchangeStore for Storage {
                 event_id,
                 reminder_set,
                 reminder_at,
+                reminder_dismissed_at,
             )
             .await
         })
@@ -2084,6 +2089,8 @@ impl ExchangeStore for Storage {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        reminder_reset: Option<bool>,
     ) -> StoreFuture<'a, ()> {
         Box::pin(async move {
             self.update_accessible_task_reminder(
@@ -2091,6 +2098,8 @@ impl ExchangeStore for Storage {
                 task_id,
                 reminder_set,
                 reminder_at,
+                reminder_dismissed_at,
+                reminder_reset,
             )
             .await
         })

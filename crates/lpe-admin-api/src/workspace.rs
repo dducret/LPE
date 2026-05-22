@@ -571,6 +571,7 @@ pub(crate) async fn upsert_client_task(
                 status: request.status,
                 due_at: request.due_at,
                 completed_at: request.completed_at,
+                recurrence_rule: request.recurrence_rule.unwrap_or_default(),
                 sort_order: request.sort_order.unwrap_or(0),
             })
             .await
@@ -1297,6 +1298,7 @@ mod tests {
         ClientReminder {
             source_type: "task".to_string(),
             source_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+            occurrence_start_at: None,
             title: "Reminder".to_string(),
             due_at: None,
             reminder_at: "2026-05-19T09:00:00Z".to_string(),
@@ -1331,6 +1333,7 @@ mod tests {
                 reminder_dismissed_at: None,
                 swapped_todo_store_id: None,
                 swapped_todo_data: None,
+                categories: Vec::new(),
                 draft: false,
             }],
             mailbox_id,
@@ -1369,6 +1372,7 @@ mod tests {
             reminder_dismissed_at: None,
             swapped_todo_store_id: None,
             swapped_todo_data: None,
+            categories: Vec::new(),
             has_attachments: false,
             size_octets: 32,
             internet_message_id: None,

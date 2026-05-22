@@ -252,6 +252,10 @@ pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
 pub(in crate::mapi) const PID_LID_REMINDER_SET: u32 = 0x0000_8503;
+pub(in crate::mapi) const PID_LID_REMINDER_DELTA: u32 = 0x0000_8501;
+pub(in crate::mapi) const PID_LID_REMINDER_OVERRIDE: u32 = 0x0000_851C;
+pub(in crate::mapi) const PID_LID_REMINDER_PLAY_SOUND: u32 = 0x0000_851E;
+pub(in crate::mapi) const PID_LID_REMINDER_FILE_PARAMETER: u32 = 0x0000_851F;
 pub(in crate::mapi) const PID_LID_FLAG_REQUEST: u32 = 0x0000_8530;
 pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME: u32 = 0x0000_8560;
 pub(in crate::mapi) const PID_LID_TASK_START_DATE: u32 = 0x0000_8104;
@@ -288,6 +292,10 @@ pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
 pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
+pub(in crate::mapi) const PID_LID_REMINDER_DELTA_TAG: u32 = 0x8501_0003;
+pub(in crate::mapi) const PID_LID_REMINDER_OVERRIDE_TAG: u32 = 0x851C_000B;
+pub(in crate::mapi) const PID_LID_REMINDER_PLAY_SOUND_TAG: u32 = 0x851E_000B;
+pub(in crate::mapi) const PID_LID_REMINDER_FILE_PARAMETER_W_TAG: u32 = 0x851F_001F;
 pub(in crate::mapi) const PID_LID_FLAG_REQUEST_W_TAG: u32 = 0x8530_001F;
 pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME_TAG: u32 = 0x8560_0040;
 pub(in crate::mapi) const PID_LID_TASK_START_DATE_TAG: u32 = 0x8104_0040;
@@ -336,6 +344,10 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         (PID_LID_COMMON_END, PSETID_COMMON_GUID),
         (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
         (PID_LID_REMINDER_SET, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_DELTA, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_OVERRIDE, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_PLAY_SOUND, PSETID_COMMON_GUID),
+        (PID_LID_REMINDER_FILE_PARAMETER, PSETID_COMMON_GUID),
         (PID_LID_FLAG_REQUEST, PSETID_COMMON_GUID),
         (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
         (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
@@ -506,7 +518,10 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
         PID_TAG_IPM_TASK_ENTRY_ID => {
             Some(special_folder_entry_id_value(mailbox_guid, TASKS_FOLDER_ID))
         }
-        PID_TAG_REM_ONLINE_ENTRY_ID => None,
+        PID_TAG_REM_ONLINE_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            REMINDERS_FOLDER_ID,
+        )),
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => {
             Some(MapiValue::Binary(additional_ren_entry_ids_ex(mailbox_guid)))
         }
@@ -1212,15 +1227,20 @@ fn search_folder_definition_blob(definition: &lpe_storage::SearchFolderDefinitio
     let mut buffer = Vec::new();
     buffer.extend_from_slice(&0x0410_0000u32.to_be_bytes());
     buffer.extend_from_slice(&0x0000_0040u32.to_be_bytes());
-    buffer.extend_from_slice(&0u32.to_be_bytes());
+    buffer.extend_from_slice(&(search_folder_tag(definition.role.as_str()) as u32).to_be_bytes());
     buffer.push(0);
-    buffer.extend_from_slice(&0u32.to_be_bytes());
+    buffer.extend_from_slice(&(definition.excluded_folder_roles.len().min(u32::MAX as usize) as u32).to_be_bytes());
     buffer.extend_from_slice(&1u32.to_be_bytes());
     buffer.push(0);
     let folder_list = definition.scope_json.to_string().into_bytes();
     buffer.extend_from_slice(&(folder_list.len().min(u32::MAX as usize) as u32).to_be_bytes());
     buffer.extend_from_slice(&folder_list);
-    buffer.extend_from_slice(&0u32.to_be_bytes());
+    let restriction = definition.restriction_json.to_string().into_bytes();
+    buffer.extend_from_slice(&(restriction.len().min(u32::MAX as usize) as u32).to_be_bytes());
+    buffer.extend_from_slice(&restriction);
+    let excluded = definition.excluded_folder_roles.join(",").into_bytes();
+    buffer.extend_from_slice(&(excluded.len().min(u32::MAX as usize) as u32).to_be_bytes());
+    buffer.extend_from_slice(&excluded);
     buffer.extend_from_slice(&0u32.to_be_bytes());
     buffer
 }
@@ -1427,6 +1447,14 @@ fn event_reminder_property_value(
     let reminder = reminder?;
     match property_tag {
         PID_LID_REMINDER_SET_TAG => Some(MapiValue::Bool(true)),
+        PID_LID_REMINDER_DELTA_TAG => Some(MapiValue::I32(reminder_delta_minutes(
+            event_start_filetime(event),
+            &reminder.reminder_at,
+        ))),
+        PID_LID_REMINDER_OVERRIDE_TAG | PID_LID_REMINDER_PLAY_SOUND_TAG => {
+            Some(MapiValue::Bool(false))
+        }
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG => Some(MapiValue::String(String::new())),
         PID_LID_REMINDER_SIGNAL_TIME_TAG => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&reminder.reminder_at),
         )),
@@ -1442,11 +1470,35 @@ fn task_reminder_property_value(
     let reminder = reminder?;
     match property_tag {
         PID_LID_REMINDER_SET_TAG => Some(MapiValue::Bool(true)),
+        PID_LID_REMINDER_DELTA_TAG => Some(MapiValue::I32(
+            reminder
+                .due_at
+                .as_deref()
+                .map(|due_at| {
+                    reminder_delta_minutes(
+                        mapi_mailstore::filetime_from_rfc3339_utc(due_at),
+                        &reminder.reminder_at,
+                    )
+                })
+                .unwrap_or_default(),
+        )),
+        PID_LID_REMINDER_OVERRIDE_TAG | PID_LID_REMINDER_PLAY_SOUND_TAG => {
+            Some(MapiValue::Bool(false))
+        }
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG => Some(MapiValue::String(String::new())),
         PID_LID_REMINDER_TIME_TAG | PID_LID_REMINDER_SIGNAL_TIME_TAG => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&reminder.reminder_at),
         )),
         _ => None,
     }
+}
+
+fn reminder_delta_minutes(anchor_filetime: u64, reminder_at: &str) -> i32 {
+    let reminder_filetime = mapi_mailstore::filetime_from_rfc3339_utc(reminder_at);
+    if anchor_filetime <= reminder_filetime {
+        return 0;
+    }
+    ((anchor_filetime - reminder_filetime) / 600_000_000).min(i32::MAX as u64) as i32
 }
 
 pub(in crate::mapi) fn note_property_value(
@@ -2304,6 +2356,7 @@ pub(in crate::mapi) fn default_task_for_mapping(
         status: "needs-action".to_string(),
         due_at: None,
         completed_at: None,
+        recurrence_rule: String::new(),
         sort_order: if matches!(collection_id, "tasks" | "default") {
             0
         } else {
@@ -2612,6 +2665,7 @@ pub(in crate::mapi) fn task_input_from_mapi(
         status,
         due_at,
         completed_at: existing.completed_at.clone(),
+        recurrence_rule: existing.recurrence_rule.clone(),
         sort_order: existing.sort_order,
     }
 }
@@ -3366,6 +3420,7 @@ where
                 event.canonical_id,
                 reminder_set,
                 reminder_at,
+                None,
             )
             .await?;
     }
@@ -3406,6 +3461,8 @@ where
                 task.canonical_id,
                 reminder_set,
                 reminder_at,
+                None,
+                None,
             )
             .await?;
     }
@@ -4040,9 +4097,19 @@ mod tests {
                 Some(folder_id)
             );
         }
+        let reminders_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            mailbox_guid,
+            REMINDERS_FOLDER_ID,
+        )
+        .unwrap()
+        .to_vec();
         assert_eq!(
             special_folder_identification_property_value(mailbox_guid, PID_TAG_REM_ONLINE_ENTRY_ID),
-            None
+            Some(MapiValue::Binary(reminders_entry_id.clone()))
+        );
+        assert_eq!(
+            crate::mapi::identity::object_id_from_folder_entry_id(&reminders_entry_id),
+            Some(REMINDERS_FOLDER_ID)
         );
     }
 
@@ -4547,6 +4614,7 @@ mod tests {
         let reminder = lpe_storage::ClientReminder {
             source_type: "calendar".to_string(),
             source_id: event_id,
+            occurrence_start_at: None,
             title: "Standup".to_string(),
             due_at: Some("2026-05-21T09:30:00Z".to_string()),
             reminder_at: "2026-05-21T08:45:00Z".to_string(),
@@ -4576,6 +4644,26 @@ mod tests {
                 "2026-05-21T08:45:00Z"
             )))
         );
+        assert_eq!(
+            event_property_value_with_reminder(
+                &event,
+                1,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_DELTA_TAG,
+                Some(&reminder)
+            ),
+            Some(MapiValue::I32(15))
+        );
+        assert_eq!(
+            event_property_value_with_reminder(
+                &event,
+                1,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_OVERRIDE_TAG,
+                Some(&reminder)
+            ),
+            Some(MapiValue::Bool(false))
+        );
 
         let task = lpe_storage::ClientTask {
             id: Uuid::from_u128(0x4444),
@@ -4591,12 +4679,14 @@ mod tests {
             status: "needs-action".to_string(),
             due_at: Some("2026-05-21T12:00:00Z".to_string()),
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-05-20T09:00:00Z".to_string(),
         };
         let task_reminder = lpe_storage::ClientReminder {
             source_type: "task".to_string(),
             source_id: task.id,
+            occurrence_start_at: None,
             title: "Follow up".to_string(),
             due_at: task.due_at.clone(),
             reminder_at: "2026-05-21T11:45:00Z".to_string(),
@@ -4615,6 +4705,26 @@ mod tests {
             Some(MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(
                 "2026-05-21T11:45:00Z"
             )))
+        );
+        assert_eq!(
+            task_property_value_with_reminder(
+                &task,
+                2,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_DELTA_TAG,
+                Some(&task_reminder)
+            ),
+            Some(MapiValue::I32(15))
+        );
+        assert_eq!(
+            task_property_value_with_reminder(
+                &task,
+                2,
+                REMINDERS_FOLDER_ID,
+                PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
+                Some(&task_reminder)
+            ),
+            Some(MapiValue::String(String::new()))
         );
     }
 

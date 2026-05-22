@@ -1009,6 +1009,17 @@ async fn exercise_notes_journal_reminder_path(
             "inactive reminder query must include {expected} reminders"
         );
     }
+    anyhow::ensure!(
+        all.iter().any(|reminder| reminder.title == "Recurring calendar reminder"
+            && reminder.occurrence_start_at.is_some()
+            && reminder.status == "dismissed"),
+        "recurring calendar reminder query must apply occurrence-level dismissal"
+    );
+    anyhow::ensure!(
+        all.iter().any(|reminder| reminder.title == "Recurring task reminder"
+            && reminder.occurrence_start_at.is_some()),
+        "recurring task reminders must expand into occurrence rows"
+    );
 
     storage
         .delete_client_note(fixture.account_id, note.id)
@@ -1092,13 +1103,14 @@ async fn seed_reminder_rows(pool: &PgPool, fixture: &RuntimeFixture) -> Result<(
         r#"
         INSERT INTO calendar_events (
             id, tenant_id, owner_account_id, calendar_id, uid, title,
-            starts_at, ends_at, reminder_set, reminder_at, reminder_dismissed_at, status
+            starts_at, ends_at, recurrence_rule, reminder_set, reminder_at, reminder_dismissed_at, status
         )
         VALUES
-            ($1, $5, $6, $7, $1::text, 'Due calendar reminder', NOW(), NOW() + interval '1 hour', TRUE, NOW() - interval '10 minutes', NULL, 'confirmed'),
-            ($2, $5, $6, $7, $2::text, 'Dismissed calendar reminder', NOW(), NOW() + interval '1 hour', TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes', 'confirmed'),
-            ($3, $5, $6, $7, $3::text, 'Excluded calendar reminder', NOW(), NOW() + interval '1 hour', TRUE, NOW() - interval '30 minutes', NULL, 'cancelled'),
-            ($4, $5, $6, $7, $4::text, 'No reminder calendar event', NOW(), NOW() + interval '1 hour', FALSE, NULL, NULL, 'confirmed')
+            ($1, $5, $6, $7, $1::text, 'Due calendar reminder', NOW(), NOW() + interval '1 hour', '', TRUE, NOW() - interval '10 minutes', NULL, 'confirmed'),
+            ($2, $5, $6, $7, $2::text, 'Dismissed calendar reminder', NOW(), NOW() + interval '1 hour', '', TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes', 'confirmed'),
+            ($3, $5, $6, $7, $3::text, 'Excluded calendar reminder', NOW(), NOW() + interval '1 hour', '', TRUE, NOW() - interval '30 minutes', NULL, 'cancelled'),
+            ($4, $5, $6, $7, $4::text, 'No reminder calendar event', NOW(), NOW() + interval '1 hour', '', FALSE, NULL, NULL, 'confirmed'),
+            ($8, $5, $6, $7, $8::text, 'Recurring calendar reminder', date_trunc('hour', NOW()) - interval '1 hour', date_trunc('hour', NOW()), 'FREQ=DAILY;COUNT=2;BYDAY=' || upper(to_char(date_trunc('hour', NOW()) - interval '1 hour', 'DY')), TRUE, date_trunc('hour', NOW()) - interval '70 minutes', NULL, 'confirmed')
         "#,
     )
     .bind(Uuid::new_v4())
@@ -1108,20 +1120,39 @@ async fn seed_reminder_rows(pool: &PgPool, fixture: &RuntimeFixture) -> Result<(
     .bind(fixture.tenant_id)
     .bind(fixture.account_id)
     .bind(calendar_id)
+    .bind(Uuid::new_v4())
     .execute(pool)
     .await
     .context("seed calendar reminder rows")?;
     sqlx::query(
         r#"
+        INSERT INTO reminder_occurrence_dismissals (
+            tenant_id, owner_account_id, source_type, source_id, occurrence_start_at, dismissed_at
+        )
+        SELECT tenant_id, owner_account_id, 'calendar', id, starts_at, NOW()
+        FROM calendar_events
+        WHERE tenant_id = $1
+          AND owner_account_id = $2
+          AND title = 'Recurring calendar reminder'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .execute(pool)
+    .await
+    .context("seed recurring reminder occurrence dismissal")?;
+    sqlx::query(
+        r#"
         INSERT INTO tasks (
             id, tenant_id, owner_account_id, task_list_id, uid, title,
-            status, due_at, completed_at, reminder_set, reminder_at, reminder_dismissed_at
+            status, due_at, completed_at, recurrence_rule, reminder_set, reminder_at, reminder_dismissed_at
         )
         VALUES
-            ($1, $5, $6, $7, $1::text, 'Due task reminder', 'needs-action', NOW() + interval '1 day', NULL, TRUE, NOW() - interval '10 minutes', NULL),
-            ($2, $5, $6, $7, $2::text, 'Dismissed task reminder', 'needs-action', NOW() + interval '1 day', NULL, TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes'),
-            ($3, $5, $6, $7, $3::text, 'Completed task reminder', 'completed', NOW() + interval '1 day', NOW() - interval '1 minute', TRUE, NOW() - interval '30 minutes', NULL),
-            ($4, $5, $6, $7, $4::text, 'No reminder task', 'needs-action', NOW() + interval '1 day', NULL, FALSE, NULL, NULL)
+            ($1, $5, $6, $7, $1::text, 'Due task reminder', 'needs-action', NOW() + interval '1 day', NULL, '', TRUE, NOW() - interval '10 minutes', NULL),
+            ($2, $5, $6, $7, $2::text, 'Dismissed task reminder', 'needs-action', NOW() + interval '1 day', NULL, '', TRUE, NOW() - interval '20 minutes', NOW() - interval '5 minutes'),
+            ($3, $5, $6, $7, $3::text, 'Completed task reminder', 'completed', NOW() + interval '1 day', NOW() - interval '1 minute', '', TRUE, NOW() - interval '30 minutes', NULL),
+            ($4, $5, $6, $7, $4::text, 'No reminder task', 'needs-action', NOW() + interval '1 day', NULL, '', FALSE, NULL, NULL),
+            ($8, $5, $6, $7, $8::text, 'Recurring task reminder', 'needs-action', date_trunc('hour', NOW()) - interval '1 hour', NULL, 'FREQ=DAILY;COUNT=2', TRUE, date_trunc('hour', NOW()) - interval '70 minutes', NULL)
         "#,
     )
     .bind(Uuid::new_v4())
@@ -1131,6 +1162,7 @@ async fn seed_reminder_rows(pool: &PgPool, fixture: &RuntimeFixture) -> Result<(
     .bind(fixture.tenant_id)
     .bind(fixture.account_id)
     .bind(task_list_id)
+    .bind(Uuid::new_v4())
     .execute(pool)
     .await
     .context("seed task reminder rows")?;

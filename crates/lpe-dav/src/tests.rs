@@ -217,7 +217,7 @@ impl FakeStore {
             time: "09:30".to_string(),
             time_zone: String::new(),
             duration_minutes: 0,
-            recurrence_rule: String::new(),
+            recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TH".to_string(),
             title: title.to_string(),
             location: String::new(),
             attendees: String::new(),
@@ -242,6 +242,7 @@ impl FakeStore {
             status: "needs-action".to_string(),
             due_at: None,
             completed_at: None,
+            recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TH".to_string(),
             sort_order: 0,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
         }
@@ -636,6 +637,7 @@ impl DavStore for FakeStore {
                         Some(value) if !value.trim().is_empty() => Some(value),
                         _ => None,
                     },
+                    recurrence_rule: input.recurrence_rule,
                     sort_order: input.sort_order,
                     updated_at: "2026-04-20T09:00:00Z".to_string(),
                 };
@@ -1091,6 +1093,7 @@ async fn propfind_lists_task_collection_and_resources() {
             status: "in-progress".to_string(),
             due_at: Some("2026-04-25T08:30:00Z".to_string()),
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 7,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
         }])),
@@ -1138,6 +1141,7 @@ async fn propfind_lists_shared_task_collection_with_canonical_name() {
             status: "needs-action".to_string(),
             due_at: None,
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
         }])),
@@ -1185,6 +1189,7 @@ async fn get_returns_vtodo_for_existing_task() {
             status: "completed".to_string(),
             due_at: Some("2026-04-30T10:00:00Z".to_string()),
             completed_at: Some("2026-04-28T16:45:00Z".to_string()),
+            recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TH".to_string(),
             sort_order: 3,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
         }])),
@@ -1207,6 +1212,7 @@ async fn get_returns_vtodo_for_existing_task() {
     assert!(body.contains("BEGIN:VTODO"));
     assert!(body.contains("SUMMARY:File quarterly report"));
     assert!(body.contains("STATUS:COMPLETED"));
+    assert!(body.contains("RRULE:FREQ=WEEKLY;COUNT=4;BYDAY=TH"));
     assert!(body.contains("X-LPE-SORT-ORDER:3"));
 }
 
@@ -1225,7 +1231,7 @@ async fn put_upserts_task_from_vtodo() {
                 &Method::PUT,
                 &Uri::from_maybe_shared(task_resource_path(&collection_id, task_id)).unwrap(),
                 &bearer_headers(),
-                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:14141414-1414-1414-1414-141414141414\r\nSUMMARY:Prepare migration\r\nDESCRIPTION:Freeze tenant changes before the window\r\nSTATUS:IN-PROCESS\r\nDUE:20260501T083000Z\r\nX-LPE-SORT-ORDER:5\r\nEND:VTODO\r\nEND:VCALENDAR",
+                b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:14141414-1414-1414-1414-141414141414\r\nSUMMARY:Prepare migration\r\nDESCRIPTION:Freeze tenant changes before the window\r\nSTATUS:IN-PROCESS\r\nDUE:20260501T083000Z\r\nRRULE:FREQ=WEEKLY;COUNT=4;BYDAY=FR\r\nX-LPE-SORT-ORDER:5\r\nEND:VTODO\r\nEND:VCALENDAR",
             )
             .await
             .unwrap();
@@ -1237,6 +1243,7 @@ async fn put_upserts_task_from_vtodo() {
     assert_eq!(tasks[0].collection_id, collection_id);
     assert_eq!(tasks[0].status, "in-progress");
     assert_eq!(tasks[0].due_at.as_deref(), Some("2026-05-01T08:30:00Z"));
+    assert_eq!(tasks[0].recurrence_rule, "FREQ=WEEKLY;COUNT=4;BYDAY=FR");
     assert_eq!(tasks[0].sort_order, 5);
 }
 
@@ -1445,6 +1452,7 @@ async fn delete_returns_forbidden_for_read_only_shared_task() {
             status: "needs-action".to_string(),
             due_at: None,
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 0,
             updated_at: "2026-04-20T09:00:00Z".to_string(),
         }])),

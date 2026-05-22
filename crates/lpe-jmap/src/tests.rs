@@ -569,6 +569,7 @@ impl FakeStore {
             status: "needs-action".to_string(),
             due_at: Some("2026-04-21T09:00:00Z".to_string()),
             completed_at: None,
+            recurrence_rule: String::new(),
             sort_order: 10,
             updated_at: "2026-04-20T15:00:00Z".to_string(),
         }
@@ -607,6 +608,7 @@ impl FakeStore {
         ClientReminder {
             source_type: "task".to_string(),
             source_id: Self::task().id,
+            occurrence_start_at: None,
             title: "Prepare release".to_string(),
             due_at: Some("2026-04-21T09:00:00Z".to_string()),
             reminder_at: "2026-04-21T08:45:00Z".to_string(),
@@ -1699,6 +1701,7 @@ impl JmapStore for FakeStore {
             } else {
                 None
             },
+            recurrence_rule: input.recurrence_rule,
             sort_order: input.sort_order,
             updated_at: if input.id.is_some() {
                 "2026-04-20T16:00:00Z".to_string()
@@ -1849,8 +1852,21 @@ impl JmapStore for FakeStore {
         task_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
+        _reminder_reset: Option<bool>,
     ) -> Result<()> {
-        update_fake_reminder(&self.reminders, "task", task_id, reminder_set, reminder_at)
+        update_fake_reminder(&self.reminders, "task", task_id, reminder_set, reminder_at)?;
+        if let Some(dismissed_at) = reminder_dismissed_at {
+            if let Some(reminder) =
+                self.reminders.lock().unwrap().iter_mut().find(|reminder| {
+                    reminder.source_type == "task" && reminder.source_id == task_id
+                })
+            {
+                reminder.dismissed_at = Some(dismissed_at);
+                reminder.status = "dismissed".to_string();
+            }
+        }
+        Ok(())
     }
 
     async fn update_jmap_event_reminder(
@@ -1859,6 +1875,7 @@ impl JmapStore for FakeStore {
         event_id: Uuid,
         reminder_set: Option<bool>,
         reminder_at: Option<String>,
+        reminder_dismissed_at: Option<String>,
     ) -> Result<()> {
         update_fake_reminder(
             &self.reminders,
@@ -1866,7 +1883,18 @@ impl JmapStore for FakeStore {
             event_id,
             reminder_set,
             reminder_at,
-        )
+        )?;
+        if let Some(dismissed_at) = reminder_dismissed_at {
+            if let Some(reminder) =
+                self.reminders.lock().unwrap().iter_mut().find(|reminder| {
+                    reminder.source_type == "calendar" && reminder.source_id == event_id
+                })
+            {
+                reminder.dismissed_at = Some(dismissed_at);
+                reminder.status = "dismissed".to_string();
+            }
+        }
+        Ok(())
     }
 
     async fn update_jmap_mail_reminder(
@@ -1893,6 +1921,27 @@ impl JmapStore for FakeStore {
             {
                 reminder.dismissed_at = Some(dismissed_at);
             }
+        }
+        Ok(())
+    }
+
+    async fn dismiss_jmap_reminder_occurrence(
+        &self,
+        _account_id: Uuid,
+        source_type: String,
+        source_id: Uuid,
+        occurrence_start_at: String,
+        dismissed_at: String,
+    ) -> Result<()> {
+        if let Some(reminder) =
+            self.reminders.lock().unwrap().iter_mut().find(|reminder| {
+                reminder.source_type == source_type
+                    && reminder.source_id == source_id
+                    && reminder.occurrence_start_at.as_deref() == Some(occurrence_start_at.as_str())
+            })
+        {
+            reminder.dismissed_at = Some(dismissed_at);
+            reminder.status = "dismissed".to_string();
         }
         Ok(())
     }
@@ -1967,16 +2016,21 @@ fn update_fake_reminder(
         });
         return Ok(());
     }
-    let reminder_at = reminder_at.unwrap_or_else(|| "2026-05-21T08:45:00Z".to_string());
     if let Some(reminder) = reminders
         .iter_mut()
         .find(|reminder| reminder.source_type == source_type && reminder.source_id == source_id)
     {
-        reminder.reminder_at = reminder_at;
+        if let Some(reminder_at) = reminder_at {
+            reminder.reminder_at = reminder_at;
+            reminder.dismissed_at = None;
+            reminder.status = "pending".to_string();
+        }
     } else {
+        let reminder_at = reminder_at.unwrap_or_else(|| "2026-05-21T08:45:00Z".to_string());
         reminders.push(ClientReminder {
             source_type: source_type.to_string(),
             source_id,
+            occurrence_start_at: None,
             title: "Reminder".to_string(),
             due_at: None,
             reminder_at,
@@ -10745,6 +10799,7 @@ async fn shared_task_push_change_wakes_grantee_principal() {
         status: "in-progress".to_string(),
         due_at: None,
         completed_at: None,
+        recurrence_rule: String::new(),
         sort_order: 1,
         updated_at: "2026-04-20T16:20:00Z".to_string(),
     };
@@ -11915,6 +11970,50 @@ async fn reminder_writes_update_canonical_source_metadata() {
     );
     assert_eq!(response.method_responses[3].1["total"], 3);
 
+    let dismiss = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_LPE_OUTLOOK_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "Reminder/set".to_string(),
+                        json!({
+                            "update": {
+                                format!("calendar:{event_id}"): {
+                                    "dismissedAt": "2026-05-22T09:00:00Z"
+                                },
+                                format!("task:{task_id}"): {
+                                    "dismissedAt": "2026-05-21T09:00:00Z",
+                                    "reminderReset": true
+                                }
+                            }
+                        }),
+                        "dismiss".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "Reminder/query".to_string(),
+                        json!({"includeInactive": true}),
+                        "query-dismissed".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        dismiss.method_responses[0].1["updated"][format!("calendar:{event_id}")],
+        json!({})
+    );
+    assert!(
+        dismiss.method_responses[1].1["list"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reminder| reminder["id"] == format!("task:{task_id}")
+                && reminder["status"] == "dismissed")
+    );
+
     let destroy = service
         .handle_api_request(
             Some("Bearer token"),
@@ -12290,6 +12389,7 @@ async fn reminder_query_changes_use_persisted_query_snapshots_and_filter() {
     store.reminders.lock().unwrap().push(ClientReminder {
         source_type: "mail".to_string(),
         source_id: FakeStore::inbox_email().id,
+        occurrence_start_at: None,
         title: "Mail reminder".to_string(),
         due_at: None,
         reminder_at: "2026-05-21T08:45:00Z".to_string(),
@@ -12510,6 +12610,7 @@ async fn share_and_reminder_changes_use_string_id_durable_replay() {
     let mail_reminder = ClientReminder {
         source_type: "mail".to_string(),
         source_id: FakeStore::inbox_email().id,
+        occurrence_start_at: None,
         title: "Mail reminder".to_string(),
         due_at: None,
         reminder_at: "2026-04-22T08:45:00Z".to_string(),
@@ -12882,6 +12983,7 @@ async fn task_query_includes_shared_accessible_tasks() {
         description: "Visible through canonical sharing".to_string(),
         status: "in-progress".to_string(),
         due_at: None,
+        recurrence_rule: String::new(),
         completed_at: None,
         sort_order: 1,
         updated_at: "2026-04-20T16:20:00Z".to_string(),
