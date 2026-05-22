@@ -2525,7 +2525,7 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Top of Information Store"),
             PID_TAG_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
-            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
@@ -2650,10 +2650,7 @@ mod tests {
 
         let ipm_row =
             serialize_special_folder_row(IPM_SUBTREE_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
-        assert_eq!(
-            u32::from_le_bytes(ipm_row.try_into().unwrap()),
-            FOLDER_GENERIC
-        );
+        assert_eq!(u32::from_le_bytes(ipm_row.try_into().unwrap()), FOLDER_ROOT);
 
         for folder_id in [
             SEARCH_FOLDER_ID,

@@ -15899,6 +15899,10 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             .map(|folder| folder.display_name.as_str()),
         Some("Top of Information Store")
     );
+    assert_eq!(
+        decoded.folder_changes.first().and_then(|folder| folder.folder_type),
+        Some(0)
+    );
     assert!(decoded
         .folder_changes
         .iter()
