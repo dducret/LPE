@@ -1616,6 +1616,11 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     {
         return Some("getprops_or_release_getprops");
     }
+    if request_rop_ids.iter().all(|rop_id| matches!(*rop_id, 0x01))
+        && request_rop_ids.contains(&0x01)
+    {
+        return Some("release_only");
+    }
     None
 }
 
@@ -6341,6 +6346,10 @@ mod tests {
         assert_eq!(
             execute_response_framing_context(&[0x01, 0x07]),
             Some("getprops_or_release_getprops")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[0x01, 0x01]),
+            Some("release_only")
         );
         assert_eq!(
             execute_response_framing_context(&[0x02, 0x70, 0x4E]),
