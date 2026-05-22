@@ -6347,6 +6347,39 @@ async fn mapi_over_http_execute_stops_batch_after_reserved_rop() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_empty_extended_execute_returns_success() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rpc_proxy_wrapped_rop_buffer(&[], &[])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-requesttype").unwrap(), "Execute");
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    assert_eq!(rop_buffer_size, 10);
+    assert_eq!(&body[16..26], &[0, 0, 4, 0, 2, 0, 2, 0, 2, 0]);
+}
+
+#[tokio::test]
 async fn mapi_over_http_execute_stops_batch_after_unsupported_rop() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

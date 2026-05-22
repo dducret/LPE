@@ -1229,7 +1229,13 @@ fn search_folder_definition_blob(definition: &lpe_storage::SearchFolderDefinitio
     buffer.extend_from_slice(&0x0000_0040u32.to_be_bytes());
     buffer.extend_from_slice(&(search_folder_tag(definition.role.as_str()) as u32).to_be_bytes());
     buffer.push(0);
-    buffer.extend_from_slice(&(definition.excluded_folder_roles.len().min(u32::MAX as usize) as u32).to_be_bytes());
+    buffer.extend_from_slice(
+        &(definition
+            .excluded_folder_roles
+            .len()
+            .min(u32::MAX as usize) as u32)
+            .to_be_bytes(),
+    );
     buffer.extend_from_slice(&1u32.to_be_bytes());
     buffer.push(0);
     let folder_list = definition.scope_json.to_string().into_bytes();

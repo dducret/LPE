@@ -740,7 +740,10 @@ fn reminder_to_value(reminder: &ClientReminder) -> Value {
 
 fn reminder_id(reminder: &ClientReminder) -> String {
     if let Some(occurrence_start_at) = reminder.occurrence_start_at.as_deref() {
-        format!("{}:{}:{}", reminder.source_type, reminder.source_id, occurrence_start_at)
+        format!(
+            "{}:{}:{}",
+            reminder.source_type, reminder.source_id, occurrence_start_at
+        )
     } else {
         format!("{}:{}", reminder.source_type, reminder.source_id)
     }

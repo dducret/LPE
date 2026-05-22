@@ -1010,14 +1010,16 @@ async fn exercise_notes_journal_reminder_path(
         );
     }
     anyhow::ensure!(
-        all.iter().any(|reminder| reminder.title == "Recurring calendar reminder"
-            && reminder.occurrence_start_at.is_some()
-            && reminder.status == "dismissed"),
+        all.iter()
+            .any(|reminder| reminder.title == "Recurring calendar reminder"
+                && reminder.occurrence_start_at.is_some()
+                && reminder.status == "dismissed"),
         "recurring calendar reminder query must apply occurrence-level dismissal"
     );
     anyhow::ensure!(
-        all.iter().any(|reminder| reminder.title == "Recurring task reminder"
-            && reminder.occurrence_start_at.is_some()),
+        all.iter()
+            .any(|reminder| reminder.title == "Recurring task reminder"
+                && reminder.occurrence_start_at.is_some()),
         "recurring task reminders must expand into occurrence rows"
     );
 

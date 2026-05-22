@@ -1885,11 +1885,9 @@ impl JmapStore for FakeStore {
             reminder_at,
         )?;
         if let Some(dismissed_at) = reminder_dismissed_at {
-            if let Some(reminder) =
-                self.reminders.lock().unwrap().iter_mut().find(|reminder| {
-                    reminder.source_type == "calendar" && reminder.source_id == event_id
-                })
-            {
+            if let Some(reminder) = self.reminders.lock().unwrap().iter_mut().find(|reminder| {
+                reminder.source_type == "calendar" && reminder.source_id == event_id
+            }) {
                 reminder.dismissed_at = Some(dismissed_at);
                 reminder.status = "dismissed".to_string();
             }
@@ -1933,13 +1931,11 @@ impl JmapStore for FakeStore {
         occurrence_start_at: String,
         dismissed_at: String,
     ) -> Result<()> {
-        if let Some(reminder) =
-            self.reminders.lock().unwrap().iter_mut().find(|reminder| {
-                reminder.source_type == source_type
-                    && reminder.source_id == source_id
-                    && reminder.occurrence_start_at.as_deref() == Some(occurrence_start_at.as_str())
-            })
-        {
+        if let Some(reminder) = self.reminders.lock().unwrap().iter_mut().find(|reminder| {
+            reminder.source_type == source_type
+                && reminder.source_id == source_id
+                && reminder.occurrence_start_at.as_deref() == Some(occurrence_start_at.as_str())
+        }) {
             reminder.dismissed_at = Some(dismissed_at);
             reminder.status = "dismissed".to_string();
         }
@@ -12005,14 +12001,12 @@ async fn reminder_writes_update_canonical_source_metadata() {
         dismiss.method_responses[0].1["updated"][format!("calendar:{event_id}")],
         json!({})
     );
-    assert!(
-        dismiss.method_responses[1].1["list"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|reminder| reminder["id"] == format!("task:{task_id}")
-                && reminder["status"] == "dismissed")
-    );
+    assert!(dismiss.method_responses[1].1["list"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|reminder| reminder["id"] == format!("task:{task_id}")
+            && reminder["status"] == "dismissed"));
 
     let destroy = service
         .handle_api_request(

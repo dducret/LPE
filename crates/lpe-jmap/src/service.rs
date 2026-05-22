@@ -1633,9 +1633,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .get("occurrenceStartAt")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let reminder_reset = value
-            .get("reminderReset")
-            .and_then(Value::as_bool);
+        let reminder_reset = value.get("reminderReset").and_then(Value::as_bool);
 
         match source_type {
             "task" => {

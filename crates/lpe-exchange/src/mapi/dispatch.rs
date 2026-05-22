@@ -132,7 +132,9 @@ where
         );
     }
 
-    if rop_buffer_is_store_independent_logon(&execute.rop_buffer) {
+    if rop_buffer_has_no_requests(&execute.rop_buffer)
+        || rop_buffer_is_store_independent_logon(&execute.rop_buffer)
+    {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mailboxes = snapshot.mailboxes();
         let emails = snapshot.emails();
@@ -325,6 +327,12 @@ fn rop_buffer_is_store_independent_logon(rop_buffer: &[u8]) -> bool {
         saw_request = true;
     }
     saw_request
+}
+
+fn rop_buffer_has_no_requests(rop_buffer: &[u8]) -> bool {
+    split_rop_buffer(rop_buffer)
+        .map(|(requests, _handle_table)| requests.is_empty())
+        .unwrap_or(false)
 }
 
 fn execute_success_rop_buffer(body: &[u8]) -> Option<&[u8]> {
