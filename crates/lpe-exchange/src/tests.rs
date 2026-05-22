@@ -18895,8 +18895,9 @@ async fn mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state()
 
 #[tokio::test]
 async fn mapi_over_http_root_default_folder_set_properties_do_not_override_computed_defaults() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -18979,7 +18980,8 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    let expected_calendar_eid = crate::mapi::identity::long_term_id_from_object_id(
+    let expected_calendar_eid = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
         crate::mapi::identity::CALENDAR_FOLDER_ID,
     )
     .unwrap()
@@ -19049,8 +19051,9 @@ async fn mapi_over_http_root_default_folder_set_properties_reject_invalid_entry_
 
 #[tokio::test]
 async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_ids() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -19069,7 +19072,8 @@ async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_id
         .unwrap()
         .to_string();
 
-    let calendar_eid = crate::mapi::identity::long_term_id_from_object_id(
+    let calendar_eid = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
         crate::mapi::identity::CALENDAR_FOLDER_ID,
     )
     .unwrap();
@@ -19107,8 +19111,9 @@ async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_id
 
 #[tokio::test]
 async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_entry_ids() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -19164,9 +19169,10 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
         crate::mapi::identity::NOTES_FOLDER_ID,
         crate::mapi::identity::TASKS_FOLDER_ID,
     ] {
-        let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id)
-            .unwrap()
-            .to_vec();
+        let entry_id =
+            crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, folder_id)
+                .unwrap()
+                .to_vec();
         assert!(contains_bytes(&response_rops, &entry_id));
     }
 }
@@ -19353,8 +19359,9 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
 
 #[tokio::test(flavor = "current_thread")]
 async fn mapi_over_http_root_rem_online_entry_id_returns_canonical_projection() {
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -19399,7 +19406,8 @@ async fn mapi_over_http_root_rem_online_entry_id_returns_canonical_projection() 
     let get_props_offset = 8;
     assert_eq!(response_rops[get_props_offset], 0x07);
     assert_eq!(response_rops[get_props_offset + 6], 0);
-    let entry_id = crate::mapi::identity::long_term_id_from_object_id(
+    let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
         crate::mapi::identity::REMINDERS_FOLDER_ID,
     )
     .unwrap()
