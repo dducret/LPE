@@ -441,6 +441,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             );
             let local_commit_time_max_present = local_commit_time_max != 0
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
+            let deleted_count_total_present =
+                !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL);
             let folder_type_forced = false;
             let access_forced = false;
             let display_name = mapi_folder_display_name(mailbox);
@@ -468,6 +470,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                     property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT),
                 local_commit_time_max,
                 local_commit_time_max_present,
+                deleted_count_total_present,
                 folder_type_forced_by_experiment = folder_type_forced,
                 access_forced_by_experiment = access_forced,
                 aggregate_email_count = aggregate_emails.len(),
@@ -530,6 +533,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             if local_commit_time_max_present {
                 write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
                 write_i64(&mut buffer, local_commit_time_max as i64);
+            }
+            if deleted_count_total_present {
+                write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
             }
             write_bool_property(
                 &mut buffer,
@@ -3680,8 +3686,12 @@ mod tests {
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
         assert!(summary
             .emitted_property_tags
+            .contains(&PID_TAG_DELETED_COUNT_TOTAL));
+        assert!(summary
+            .emitted_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert!(row.local_commit_time_max.is_some());
+        assert_eq!(row.deleted_count_total, Some(0));
         assert!(row.missing_core_property_tags.is_empty());
         assert!(row.property_tags.contains(&PID_TAG_PARENT_FOLDER_ID));
         assert_eq!(
