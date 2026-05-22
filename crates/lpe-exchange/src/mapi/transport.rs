@@ -638,6 +638,7 @@ fn log_mapi_session_disconnect(
             post_hierarchy_summary.logoff_client_initiated,
         post_hierarchy_disconnect_client_initiated =
             post_hierarchy_summary.disconnect_client_initiated,
+        post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
         post_hierarchy_last_completed_sync_root =
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
         post_hierarchy_last_get_buffer_summary =
@@ -658,7 +659,7 @@ fn log_mapi_session_disconnect(
     {
         tracing::warn!(
             rca_debug = true,
-            rca_warning = "outlook_disconnect_before_content_sync",
+            rca_warning = %post_hierarchy_summary.close_kind,
             adapter = "mapi",
             endpoint = endpoint_label,
             tenant_id = %principal.tenant_id,
@@ -679,6 +680,7 @@ fn log_mapi_session_disconnect(
                 session.post_hierarchy_actions.release_client_initiated,
             post_hierarchy_logoff_client_initiated =
                 session.post_hierarchy_actions.logoff_client_initiated,
+            post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
             post_hierarchy_last_completed_sync_root =
                 %post_hierarchy_summary.last_completed_hierarchy_sync_root,
             post_hierarchy_last_get_buffer_summary =
@@ -697,6 +699,7 @@ pub(in crate::mapi) struct PostHierarchyActionDebugSummary {
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
     pub(in crate::mapi) disconnect_client_initiated: bool,
+    pub(in crate::mapi) close_kind: &'static str,
     pub(in crate::mapi) last_completed_hierarchy_sync_root: String,
     pub(in crate::mapi) last_successful_hierarchy_get_buffer_summary: String,
 }
@@ -714,6 +717,7 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
         logoff_client_initiated: actions.logoff_client_initiated,
         disconnect_client_initiated: disconnect_client_initiated
             && actions.last_completed_hierarchy_sync_root.is_some(),
+        close_kind: post_hierarchy_close_kind(actions, disconnect_client_initiated),
         last_completed_hierarchy_sync_root: actions
             .last_completed_hierarchy_sync_root
             .map(|folder_id| format!("0x{folder_id:016x}"))
@@ -721,6 +725,25 @@ pub(in crate::mapi) fn post_hierarchy_action_summary(
         last_successful_hierarchy_get_buffer_summary: actions
             .last_successful_hierarchy_get_buffer_summary
             .clone(),
+    }
+}
+
+fn post_hierarchy_close_kind(
+    actions: &PostHierarchyActionState,
+    disconnect_client_initiated: bool,
+) -> &'static str {
+    if actions.content_sync_configure_observed {
+        "post_hierarchy_content_sync_observed"
+    } else if actions.release_client_initiated && actions.logoff_client_initiated {
+        "outlook_release_logoff_before_content_sync"
+    } else if actions.release_client_initiated {
+        "outlook_release_before_content_sync"
+    } else if actions.execute_count > 0 {
+        "outlook_post_hierarchy_execute_before_content_sync"
+    } else if disconnect_client_initiated && actions.last_completed_hierarchy_sync_root.is_some() {
+        "outlook_disconnect_immediately_after_hierarchy"
+    } else {
+        "post_hierarchy_no_close"
     }
 }
 
@@ -1617,6 +1640,7 @@ mod tests {
         assert!(!summary.release_client_initiated);
         assert!(!summary.logoff_client_initiated);
         assert!(!summary.disconnect_client_initiated);
+        assert_eq!(summary.close_kind, "post_hierarchy_no_close");
         assert_eq!(summary.last_completed_hierarchy_sync_root, "");
         assert_eq!(summary.last_successful_hierarchy_get_buffer_summary, "");
     }
@@ -1647,6 +1671,7 @@ mod tests {
         assert!(summary.release_client_initiated);
         assert!(summary.logoff_client_initiated);
         assert!(summary.disconnect_client_initiated);
+        assert_eq!(summary.close_kind, "post_hierarchy_content_sync_observed");
         assert_eq!(
             summary.last_completed_hierarchy_sync_root,
             format!("0x{:016x}", crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
@@ -1654,6 +1679,29 @@ mod tests {
         assert_eq!(
             summary.last_successful_hierarchy_get_buffer_summary,
             "folder=0x0000000000040001;status=0x0003"
+        );
+    }
+
+    #[test]
+    fn post_hierarchy_action_summary_classifies_release_logoff_without_content_sync() {
+        let mut session = test_session(HashMap::new());
+
+        session.record_completed_hierarchy_sync(
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "folder=0x0000000000040001;status=0x0003".to_string(),
+        );
+        session.record_execute_after_hierarchy_completion(&[0x01]);
+        session.record_logoff_after_hierarchy_completion();
+        let summary = post_hierarchy_action_summary(&session, true);
+
+        assert_eq!(summary.execute_count, 1);
+        assert_eq!(summary.rop_ids_seen, "0x01");
+        assert!(summary.release_client_initiated);
+        assert!(summary.logoff_client_initiated);
+        assert!(!summary.content_sync_configure_observed);
+        assert_eq!(
+            summary.close_kind,
+            "outlook_release_logoff_before_content_sync"
         );
     }
 
