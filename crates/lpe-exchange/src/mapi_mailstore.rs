@@ -523,6 +523,11 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) || access_forced {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
+            write_bool_property(
+                &mut buffer,
+                PID_TAG_SUBFOLDERS,
+                mapi_folder_has_subfolders(mailbox, parent_context_mailboxes),
+            );
         }
     }
 
@@ -1797,6 +1802,7 @@ fn missing_hierarchy_core_property_tags(property_tags: &[u32]) -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_SUBFOLDERS,
     ]
     .into_iter()
     .filter(|tag| !property_tags.contains(tag))
@@ -2221,6 +2227,13 @@ fn mapi_folder_display_name(mailbox: &JmapMailbox) -> &str {
     virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
         .map(|(_, name, _, _, _)| name)
         .unwrap_or(&mailbox.name)
+}
+
+fn mapi_folder_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
+    let folder_id = mapi_folder_id_for_mailbox(mailbox, 0);
+    mailboxes
+        .iter()
+        .any(|candidate| mapi_folder_parent_id_for_mailbox(candidate, mailboxes) == folder_id)
 }
 
 fn folder_content_counts(
@@ -3363,7 +3376,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_transfer_omits_subfolders_optional_property() {
+    fn hierarchy_transfer_keeps_subfolders_optional_property() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -3393,11 +3406,16 @@ mod tests {
             1,
         );
 
-        assert!(!contains_bytes(&buffer, &PID_TAG_SUBFOLDERS.to_le_bytes()));
-        assert!(contains_bytes(
-            &buffer,
+        let subfolders = PID_TAG_SUBFOLDERS.to_le_bytes();
+        let offset = buffer
+            .windows(subfolders.len())
+            .position(|window| window == subfolders)
+            .expect("subfolders property is present");
+        assert_eq!(&buffer[offset + 4..offset + 6], &0u16.to_le_bytes());
+        assert_eq!(
+            &buffer[offset + 6..offset + 10],
             &INCR_SYNC_STATE_BEGIN.to_le_bytes()
-        ));
+        );
     }
 
     #[test]
@@ -3574,7 +3592,7 @@ mod tests {
         assert!(!comparison
             .optional_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert!(!comparison
+        assert!(comparison
             .optional_property_tags
             .contains(&PID_TAG_SUBFOLDERS));
         assert!(!comparison
@@ -3655,7 +3673,7 @@ mod tests {
             Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         );
         assert!(!row.property_tags.contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert!(!row.property_tags.contains(&PID_TAG_SUBFOLDERS));
+        assert!(row.property_tags.contains(&PID_TAG_SUBFOLDERS));
         assert_eq!(
             summary.final_state_property_tags,
             vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
@@ -3968,7 +3986,7 @@ mod tests {
         assert_eq!(row.content_unread_count, None);
         assert_eq!(row.folder_type, None);
         assert_eq!(row.access, None);
-        assert_eq!(row.subfolders, None);
+        assert_eq!(row.subfolders, Some(false));
     }
 
     #[test]
