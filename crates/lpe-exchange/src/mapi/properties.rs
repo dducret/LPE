@@ -692,12 +692,13 @@ pub(in crate::mapi) fn search_folder_message_for_id(
     }
 }
 
-pub(in crate::mapi) fn restriction_matches_mailbox(
+pub(in crate::mapi) fn restriction_matches_mailbox_with_context(
     restriction: Option<&MapiRestriction>,
     mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
 ) -> bool {
     restriction_matches(restriction, |property_tag| {
-        mailbox_property_value(mailbox, property_tag)
+        mailbox_property_value_with_context(mailbox, mailboxes, property_tag)
     })
 }
 
@@ -837,8 +838,9 @@ pub(in crate::mapi) fn restriction_matches(
     }
 }
 
-pub(in crate::mapi) fn mailbox_property_value(
+pub(in crate::mapi) fn mailbox_property_value_with_context(
     mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
     property_tag: u32,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
@@ -852,7 +854,7 @@ pub(in crate::mapi) fn mailbox_property_value(
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mailbox.name.clone())),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
-        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(false)),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(mailbox_has_subfolders(mailbox, mailboxes))),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(if mailbox.role == "__mapi_search" {
             FOLDER_SEARCH
         } else {
@@ -874,7 +876,7 @@ pub(in crate::mapi) fn mailbox_property_value(
             mapi_mailstore::source_key_for_mailbox_folder(mailbox),
         )),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
+            mapi_mailstore::source_key_for_store_id(mailbox_parent_folder_id(mailbox, mailboxes)),
         )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::change_key_for_change_number(
@@ -890,6 +892,24 @@ pub(in crate::mapi) fn mailbox_property_value(
             mapi_mailstore::canonical_folder_change_number(mailbox),
         )),
         _ => None,
+    }
+}
+
+fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
+    !mailboxes.is_empty()
+        && mailboxes
+            .iter()
+            .any(|candidate| candidate.parent_id == Some(mailbox.id))
+}
+
+fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
+    match mailbox.role.as_str() {
+        "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
+        _ => mailbox
+            .parent_id
+            .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
+            .map(|parent| mapi_folder_id(parent))
+            .unwrap_or(IPM_SUBTREE_FOLDER_ID),
     }
 }
 
@@ -3850,6 +3870,20 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
 mod tests {
     use super::*;
 
+    fn mailbox(id: &str, parent_id: Option<Uuid>, role: &str, name: &str) -> JmapMailbox {
+        JmapMailbox {
+            id: Uuid::parse_str(id).unwrap(),
+            parent_id,
+            role: role.to_string(),
+            name: name.to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }
+    }
+
     fn valid_swapped_todo_data() -> Vec<u8> {
         let mut value = vec![0; SWAPPED_TODO_DATA_LEN];
         value[0..4].copy_from_slice(&SWAPPED_TODO_DATA_VERSION.to_le_bytes());
@@ -3886,6 +3920,68 @@ mod tests {
         assert_eq!(tag.property_type_code(), 0x001F);
         assert_eq!(tag.property_type(), Some(MapiPropertyType::String));
         assert!(MapiPropertyTag::new(0x8001_001F).property_id() >= FIRST_NAMED_PROPERTY_ID);
+    }
+
+    #[test]
+    fn mailbox_properties_report_real_subfolder_state() {
+        let parent = mailbox("11111111-1111-1111-1111-111111111111", None, "", "Parent");
+        let child = mailbox(
+            "22222222-2222-2222-2222-222222222222",
+            Some(parent.id),
+            "",
+            "Child",
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            parent.id,
+            crate::mapi::identity::mapi_store_id(0x1001),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            child.id,
+            crate::mapi::identity::mapi_store_id(0x1002),
+        );
+        let mailboxes = vec![parent.clone(), child.clone()];
+
+        assert_eq!(
+            mailbox_property_value_with_context(&parent, &mailboxes, PID_TAG_SUBFOLDERS),
+            Some(MapiValue::Bool(true))
+        );
+        assert_eq!(
+            mailbox_property_value_with_context(&child, &mailboxes, PID_TAG_SUBFOLDERS),
+            Some(MapiValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn mailbox_parent_source_key_uses_real_parent_when_context_is_available() {
+        let parent = mailbox("33333333-3333-3333-3333-333333333333", None, "", "Parent");
+        let child = mailbox(
+            "44444444-4444-4444-4444-444444444444",
+            Some(parent.id),
+            "",
+            "Child",
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            parent.id,
+            crate::mapi::identity::mapi_store_id(0x1003),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            child.id,
+            crate::mapi::identity::mapi_store_id(0x1004),
+        );
+        let mailboxes = vec![parent.clone(), child.clone()];
+
+        assert_eq!(
+            mailbox_property_value_with_context(&child, &mailboxes, PID_TAG_PARENT_SOURCE_KEY),
+            Some(MapiValue::Binary(
+                mapi_mailstore::source_key_for_mailbox_folder(&parent)
+            ))
+        );
+        assert_eq!(
+            mailbox_property_value_with_context(&parent, &mailboxes, PID_TAG_PARENT_SOURCE_KEY),
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                IPM_SUBTREE_FOLDER_ID
+            )))
+        );
     }
 
     #[test]

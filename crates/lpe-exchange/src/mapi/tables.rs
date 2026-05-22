@@ -210,7 +210,7 @@ fn hierarchy_rows<'a>(
     let mut rows = mailboxes
         .iter()
         .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
-        .filter(|mailbox| restriction_matches_mailbox(restriction, mailbox))
+        .filter(|mailbox| restriction_matches_mailbox_with_context(restriction, mailbox, mailboxes))
         .map(HierarchyRow::Mailbox)
         .chain(
             snapshot
@@ -323,9 +323,15 @@ fn hierarchy_row_id(row: &HierarchyRow<'_>) -> u64 {
     }
 }
 
-fn hierarchy_row_matches(row: &HierarchyRow<'_>, restriction: Option<&MapiRestriction>) -> bool {
+fn hierarchy_row_matches(
+    row: &HierarchyRow<'_>,
+    mailboxes: &[JmapMailbox],
+    restriction: Option<&MapiRestriction>,
+) -> bool {
     match row {
-        HierarchyRow::Mailbox(mailbox) => restriction_matches_mailbox(restriction, mailbox),
+        HierarchyRow::Mailbox(mailbox) => {
+            restriction_matches_mailbox_with_context(restriction, mailbox, mailboxes)
+        }
         HierarchyRow::Collaboration(folder) => {
             restriction_matches_collaboration_folder(restriction, folder)
         }
@@ -382,9 +388,15 @@ fn special_folder_property_value(folder_id: u64, property_tag: u32) -> Option<Ma
     }
 }
 
-fn serialize_hierarchy_row(row: HierarchyRow<'_>, columns: &[u32]) -> Vec<u8> {
+fn serialize_hierarchy_row(
+    row: HierarchyRow<'_>,
+    mailboxes: &[JmapMailbox],
+    columns: &[u32],
+) -> Vec<u8> {
     match row {
-        HierarchyRow::Mailbox(mailbox) => serialize_folder_row(mailbox, columns),
+        HierarchyRow::Mailbox(mailbox) => {
+            serialize_folder_row_with_context(mailbox, mailboxes, columns)
+        }
         HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
         HierarchyRow::Special(folder_id) => {
             serialize_special_folder_row(folder_id, &[], columns, None)
@@ -610,7 +622,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 sort_orders,
             )
             .into_iter()
-            .map(|row| serialize_hierarchy_row(row, &columns))
+            .map(|row| serialize_hierarchy_row(row, mailboxes, &columns))
             .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
@@ -1719,12 +1731,19 @@ pub(in crate::mapi) fn rop_find_row_response(
                 table_restriction.as_ref(),
                 sort_orders,
             );
-            if let Some((index, row)) =
-                find_hierarchy_row(rows.as_slice(), *position, request, Some(&restriction))
-            {
+            if let Some((index, row)) = find_hierarchy_row(
+                rows.as_slice(),
+                mailboxes,
+                *position,
+                request,
+                Some(&restriction),
+            ) {
                 *position = index;
                 response.push(1);
-                write_standard_property_row(&mut response, &serialize_hierarchy_row(row, &columns));
+                write_standard_property_row(
+                    &mut response,
+                    &serialize_hierarchy_row(row, mailboxes, &columns),
+                );
             } else {
                 response.push(0);
             }
@@ -1876,6 +1895,7 @@ pub(in crate::mapi) fn find_row<'a, T>(
 
 fn find_hierarchy_row<'a>(
     rows: &'a [HierarchyRow<'a>],
+    mailboxes: &[JmapMailbox],
     current_position: usize,
     request: &RopRequest,
     restriction: Option<&MapiRestriction>,
@@ -1891,14 +1911,15 @@ fn find_hierarchy_row<'a>(
     if request.find_backward() {
         let end = start.min(rows.len().saturating_sub(1));
         (0..=end).rev().find_map(|index| {
-            hierarchy_row_matches(&rows[index], restriction).then_some((index, rows[index]))
+            hierarchy_row_matches(&rows[index], mailboxes, restriction)
+                .then_some((index, rows[index]))
         })
     } else {
         rows.iter()
             .enumerate()
             .skip(start)
             .find_map(|(index, row)| {
-                hierarchy_row_matches(row, restriction).then_some((index, *row))
+                hierarchy_row_matches(row, mailboxes, restriction).then_some((index, *row))
             })
     }
 }
@@ -2602,7 +2623,7 @@ mod tests {
             is_subscribed: true,
         };
 
-        let mailbox_row = serialize_folder_row(&mailbox, &[PID_TAG_FOLDER_TYPE]);
+        let mailbox_row = serialize_folder_row_with_context(&mailbox, &[], &[PID_TAG_FOLDER_TYPE]);
         assert_eq!(
             u32::from_le_bytes(mailbox_row.try_into().unwrap()),
             FOLDER_GENERIC
@@ -2722,7 +2743,7 @@ mod tests {
             is_subscribed: true,
         };
 
-        let mailbox_row = serialize_folder_row(&mailbox, &[PID_TAG_ACCESS]);
+        let mailbox_row = serialize_folder_row_with_context(&mailbox, &[], &[PID_TAG_ACCESS]);
         assert_eq!(
             u32::from_le_bytes(mailbox_row.try_into().unwrap()),
             MAPI_FOLDER_ACCESS
@@ -2881,7 +2902,11 @@ pub(in crate::mapi) fn serialize_saved_attachment_row(
     row
 }
 
-pub(in crate::mapi) fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u32]) -> Vec<u8> {
+pub(in crate::mapi) fn serialize_folder_row_with_context(
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    columns: &[u32],
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
         match *column {
@@ -2890,12 +2915,12 @@ pub(in crate::mapi) fn serialize_folder_row(mailbox: &JmapMailbox, columns: &[u3
             PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, mapi_parent_folder_id(mailbox)),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
-            PID_TAG_SUBFOLDERS => row.push(0),
+            PID_TAG_SUBFOLDERS => row.push(mailbox_has_subfolders(mailbox, mailboxes) as u8),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
-            _ => match mailbox_property_value(mailbox, *column) {
+            _ => match mailbox_property_value_with_context(mailbox, mailboxes, *column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },
@@ -3683,6 +3708,13 @@ fn mapi_parent_folder_id(mailbox: &JmapMailbox) -> u64 {
             .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
             .unwrap_or(IPM_SUBTREE_FOLDER_ID),
     }
+}
+
+fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
+    !mailboxes.is_empty()
+        && mailboxes
+            .iter()
+            .any(|candidate| candidate.parent_id == Some(mailbox.id))
 }
 
 pub(in crate::mapi) fn mapi_message_id(email: &JmapEmail) -> u64 {
