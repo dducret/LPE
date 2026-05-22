@@ -119,6 +119,29 @@ pub(in crate::mapi) fn plan_mapi_store_access(
     plan
 }
 
+pub(in crate::mapi) fn hierarchy_sync_selective_fallback_plan(
+    rop_buffer: &[u8],
+) -> Option<MapiAccessPlan> {
+    let (requests, _) = split_rop_buffer(rop_buffer)?;
+    let mut saw_hierarchy_configure = false;
+    let mut cursor = Cursor::new(requests);
+    while cursor.remaining() > 0 {
+        let request = read_rop_request(&mut cursor).ok()?;
+        match request.rop_id {
+            0x70 if request.sync_type() == 0x02 => saw_hierarchy_configure = true,
+            0x4E if saw_hierarchy_configure => {}
+            rop_id if rop_requires_full_snapshot(rop_id) => return None,
+            _ => {}
+        }
+    }
+
+    saw_hierarchy_configure.then_some(MapiAccessPlan {
+        requires_full_snapshot: false,
+        object_ids: Vec::new(),
+        content_queries: Vec::new(),
+    })
+}
+
 pub(in crate::mapi) async fn load_mapi_store_for_access_plan<S>(
     store: &S,
     account_id: Uuid,

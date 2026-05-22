@@ -190,6 +190,7 @@ struct FakeStore {
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
+    fail_query_jmap_email_ids: bool,
     mapi_mail_store_load_started: Option<Arc<tokio::sync::Notify>>,
     mapi_mail_store_load_continue: Option<Arc<tokio::sync::Notify>>,
 }
@@ -1692,6 +1693,9 @@ impl ExchangeStore for FakeStore {
         _limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery> {
         self.queried_jmap_email_ids.fetch_add(1, Ordering::SeqCst);
+        if self.fail_query_jmap_email_ids {
+            return Box::pin(async move { Err(anyhow::anyhow!("forced email query failure")) });
+        }
         let ids = self
             .emails
             .lock()
@@ -15717,8 +15721,10 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
             inbox_id, "inbox", "Inbox",
         )])),
+        fail_query_jmap_email_ids: true,
         ..Default::default()
     };
+    let queried_jmap_email_ids = store.queried_jmap_email_ids.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -15740,6 +15746,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         )
         .await
         .unwrap();
+    assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 1);
     let response_rops = response_rops_from_execute_response(response).await;
     let get_buffer_response_offset = response_rops
         .windows(6)

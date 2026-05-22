@@ -187,20 +187,62 @@ where
 
     let access_plan = plan_mapi_store_access(&session, &execute.rop_buffer);
     log_execute_store_access_debug(endpoint, principal, headers, request_id, &access_plan);
-    let snapshot =
-        match load_mapi_store_for_access_plan(store, principal.account_id, &access_plan, 500).await
-        {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
+    let snapshot = match load_mapi_store_for_access_plan(
+        store,
+        principal.account_id,
+        &access_plan,
+        500,
+    )
+    .await
+    {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            if let Some(fallback_plan) = hierarchy_sync_selective_fallback_plan(&execute.rop_buffer)
+            {
+                tracing::warn!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    mapi_request_id = request_id,
+                    full_snapshot_error = %format!("{error:#}"),
+                    "rca debug mapi full snapshot fallback to hierarchy store view"
+                );
+                match load_mapi_store_for_access_plan(
+                    store,
+                    principal.account_id,
+                    &fallback_plan,
+                    500,
+                )
+                .await
+                {
+                    Ok(snapshot) => snapshot,
+                    Err(fallback_error) => {
+                        store_session(session_id.clone(), session);
+                        return execute_failure_response(
+                                request_id,
+                                4,
+                                &format!(
+                                    "failed to load MAPI mail store view: {error:#}; fallback failed: {fallback_error:#}"
+                                ),
+                                Some(session_cookie(endpoint, &session_id, false)),
+                            );
+                    }
+                }
+            } else {
                 store_session(session_id.clone(), session);
                 return execute_failure_response(
                     request_id,
                     4,
-                    &format!("failed to load MAPI mail store view: {error}"),
+                    &format!("failed to load MAPI mail store view: {error:#}"),
                     Some(session_cookie(endpoint, &session_id, false)),
                 );
             }
-        };
+        }
+    };
     let mailboxes = snapshot.mailboxes();
     let emails = snapshot.emails();
     log_execute_dispatch_start_debug(
