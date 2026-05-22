@@ -15892,6 +15892,13 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     );
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
+    assert_eq!(
+        decoded
+            .folder_changes
+            .first()
+            .map(|folder| folder.display_name.as_str()),
+        Some("Top of Information Store")
+    );
     assert!(decoded
         .folder_changes
         .iter()

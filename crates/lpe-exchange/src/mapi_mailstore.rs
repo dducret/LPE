@@ -2340,6 +2340,9 @@ fn hierarchy_sort_depth(
     if sync_type != SYNC_TYPE_HIERARCHY {
         return 0;
     }
+    if mapi_folder_id_for_mailbox(mailbox, 0) == sync_root_folder_id {
+        return 0;
+    }
     let mut parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, mailboxes);
     if parent_folder_id == sync_root_folder_id {
         return 0;
