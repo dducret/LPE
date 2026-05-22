@@ -506,10 +506,6 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
         PID_TAG_IPM_TASK_ENTRY_ID => {
             Some(special_folder_entry_id_value(mailbox_guid, TASKS_FOLDER_ID))
         }
-        PID_TAG_REM_ONLINE_ENTRY_ID => Some(special_folder_entry_id_value(
-            mailbox_guid,
-            REMINDERS_FOLDER_ID,
-        )),
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => {
             Some(MapiValue::Binary(additional_ren_entry_ids_ex(mailbox_guid)))
         }
@@ -525,7 +521,6 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
             | PID_TAG_IPM_JOURNAL_ENTRY_ID
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
-            | PID_TAG_REM_ONLINE_ENTRY_ID
             | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
     )
 }
@@ -3947,15 +3942,9 @@ mod tests {
                 Some(folder_id)
             );
         }
-        let reminder_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
-            mailbox_guid,
-            REMINDERS_FOLDER_ID,
-        )
-        .unwrap()
-        .to_vec();
         assert_eq!(
             special_folder_identification_property_value(mailbox_guid, PID_TAG_REM_ONLINE_ENTRY_ID),
-            Some(MapiValue::Binary(reminder_entry_id))
+            None
         );
     }
 

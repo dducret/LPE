@@ -16618,7 +16618,7 @@ async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
     append_rop_get_properties_specific(
         &mut probe_rops,
         0,
-        &[0x36D0_0102, 0x36D1_0102, 0x36D4_0102],
+        &[0x36D0_0102, 0x36D1_0102, 0x36D4_0102, 0x36D5_0102],
     );
     append_rop_open_folder(
         &mut probe_rops,
@@ -16640,10 +16640,18 @@ async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
     assert!(contains_bytes(&response_rops, &[0x07, 0x00, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(!contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
+    ));
 }
 
 #[tokio::test]
@@ -20179,7 +20187,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn mapi_over_http_root_rem_online_entry_id_returns_canonical_projection() {
+async fn mapi_over_http_root_rem_online_entry_id_stays_unsupported_until_hierarchy_projects_it() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -20226,14 +20234,18 @@ async fn mapi_over_http_root_rem_online_entry_id_returns_canonical_projection() 
     let response_rops = response_rops_from_execute_response(response).await;
     let get_props_offset = 8;
     assert_eq!(response_rops[get_props_offset], 0x07);
-    assert_eq!(response_rops[get_props_offset + 6], 0);
+    assert_eq!(response_rops[get_props_offset + 6], 1);
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
     let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
         crate::mapi::identity::REMINDERS_FOLDER_ID,
     )
     .unwrap()
     .to_vec();
-    assert!(contains_bytes(&response_rops, &entry_id));
+    assert!(!contains_bytes(&response_rops, &entry_id));
 }
 
 #[tokio::test(flavor = "current_thread")]
