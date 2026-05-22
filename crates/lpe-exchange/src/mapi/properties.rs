@@ -508,13 +508,7 @@ fn special_folder_entry_id_value(mailbox_guid: Uuid, folder_id: u64) -> MapiValu
 fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
     let entries = [
         (0x8001u16, RSS_FEEDS_FOLDER_ID),
-        (0x8002, TRACKED_MAIL_PROCESSING_FOLDER_ID),
-        (0x8004, TODO_SEARCH_FOLDER_ID),
-        (0x8006, CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
         (0x8008, SUGGESTED_CONTACTS_FOLDER_ID),
-        (0x8009, CONTACTS_SEARCH_FOLDER_ID),
-        (0x800A, IM_CONTACT_LIST_FOLDER_ID),
-        (0x800B, QUICK_CONTACTS_FOLDER_ID),
     ];
     let mut value = Vec::new();
     for (persist_id, folder_id) in entries {
@@ -3785,6 +3779,54 @@ mod tests {
         assert_eq!(
             special_folder_identification_property_value(mailbox_guid, PID_TAG_REM_ONLINE_ENTRY_ID),
             Some(MapiValue::Binary(reminder_entry_id))
+        );
+    }
+
+    #[test]
+    fn additional_ren_entry_ids_ex_advertises_only_initial_hierarchy_folders() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let Some(MapiValue::Binary(value)) = special_folder_identification_property_value(
+            mailbox_guid,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        ) else {
+            panic!("expected AdditionalRenEntryIdsEx binary value");
+        };
+
+        let mut offset = 0;
+        let mut entries = Vec::new();
+        loop {
+            let persist_id = u16::from_le_bytes(value[offset..offset + 2].try_into().unwrap());
+            let data_size = u16::from_le_bytes(value[offset + 2..offset + 4].try_into().unwrap());
+            offset += 4;
+            if persist_id == 0 {
+                break;
+            }
+            let block_end = offset + data_size as usize;
+            let mut folder_id = None;
+            while offset < block_end {
+                let element_id = u16::from_le_bytes(value[offset..offset + 2].try_into().unwrap());
+                let element_size =
+                    u16::from_le_bytes(value[offset + 2..offset + 4].try_into().unwrap()) as usize;
+                offset += 4;
+                if element_id == 0 {
+                    break;
+                }
+                let element = &value[offset..offset + element_size];
+                if element_id == 0x0001 {
+                    folder_id = crate::mapi::identity::object_id_from_folder_entry_id(element);
+                }
+                offset += element_size;
+            }
+            offset = block_end;
+            entries.push((persist_id, folder_id));
+        }
+
+        assert_eq!(
+            entries,
+            vec![
+                (0x8001, Some(RSS_FEEDS_FOLDER_ID)),
+                (0x8008, Some(SUGGESTED_CONTACTS_FOLDER_ID)),
+            ]
         );
     }
 
