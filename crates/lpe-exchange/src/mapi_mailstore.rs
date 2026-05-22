@@ -433,6 +433,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             let container_class = mapi_folder_message_class(mailbox);
             let (content_count, content_unread_count, content_count_source) =
                 folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
+            let local_commit_time_max = local_commit_time_max(
+                folder_id,
+                mailboxes,
+                aggregate_emails,
+                aggregate_attachment_facts,
+            );
             let folder_type_forced = false;
             let access_forced = false;
             let display_name = mapi_folder_display_name(mailbox);
@@ -458,6 +464,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                     property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT),
                 content_unread_count_excluded =
                     property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT),
+                local_commit_time_max,
+                local_commit_time_max_omitted_for_outlook_hierarchy_ics =
+                    local_commit_time_max != 0,
                 folder_type_forced_by_experiment = folder_type_forced,
                 access_forced_by_experiment = access_forced,
                 aggregate_email_count = aggregate_emails.len(),
@@ -508,18 +517,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 || folder_type_forced
             {
                 write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
-            }
-            let local_commit_time_max = local_commit_time_max(
-                folder_id,
-                mailboxes,
-                aggregate_emails,
-                aggregate_attachment_facts,
-            );
-            if local_commit_time_max != 0
-                && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX)
-            {
-                write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
-                write_i64(&mut buffer, local_commit_time_max as i64);
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
                 write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
@@ -3618,6 +3615,68 @@ mod tests {
         assert!(comparison
             .final_state_cnset_extra_change_counters
             .is_empty());
+    }
+
+    #[test]
+    fn hierarchy_transfer_omits_local_commit_time_max_but_keeps_required_outlook_shape() {
+        let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            mailbox_id,
+            crate::mapi::identity::mapi_store_id(5),
+        );
+        let mailbox = JmapMailbox {
+            id: mailbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 1,
+            unread_emails: 1,
+            is_subscribed: true,
+        };
+        let email = test_email();
+        let buffer = sync_manifest_buffer_with_final_state(
+            SYNC_TYPE_HIERARCHY,
+            SYNC_FLAG_NO_FOREIGN_IDENTIFIERS,
+            0,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            std::slice::from_ref(&email),
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+        let row = summary.rows.first().expect("folder row");
+
+        assert!(!summary
+            .emitted_property_tags
+            .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
+        assert_eq!(row.local_commit_time_max, None);
+        assert!(row.missing_core_property_tags.is_empty());
+        assert!(row.property_tags.contains(&PID_TAG_PARENT_FOLDER_ID));
+        assert_eq!(
+            row.parent_folder_id,
+            Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+        );
+        assert!(row.property_tags.contains(&PID_TAG_CONTAINER_CLASS_W));
+        assert!(row.property_tags.contains(&PID_TAG_SUBFOLDERS));
+        assert_eq!(
+            summary.final_state_property_tags,
+            vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
+        );
+        assert!(summary.final_state_expected_property_order_ok);
+        assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
+        assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
     }
 
     #[test]

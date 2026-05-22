@@ -15005,7 +15005,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
     let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
     local_commit_time_property.extend_from_slice(&(local_commit_time_max as i64).to_le_bytes());
-    assert!(contains_bytes(&response_rops, &local_commit_time_property));
+    assert!(!contains_bytes(&response_rops, &local_commit_time_property));
     let mut deleted_count_property = 0x670B_0003u32.to_le_bytes().to_vec();
     deleted_count_property.extend_from_slice(&0i32.to_le_bytes());
     assert!(!contains_bytes(&response_rops, &deleted_count_property));
@@ -16046,7 +16046,7 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_advertises_counts_from_snapshot_messages() {
+async fn mapi_over_http_hierarchy_sync_counts_omit_local_commit_time_max() {
     let inbox_id = Uuid::parse_str("94949494-9494-4494-9494-949494949494").unwrap();
     let sent_id = Uuid::parse_str("96969696-9696-4696-9696-969696969696").unwrap();
     let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
@@ -16079,9 +16079,6 @@ async fn mapi_over_http_hierarchy_sync_advertises_counts_from_snapshot_messages(
         swapped_todo_data: None,
         draft: false,
     });
-    let inbox_local_commit_time_max = mapi_mailstore::filetime_from_change_number(
-        mapi_mailstore::canonical_message_change_number(&email),
-    );
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox, sent])),
@@ -16128,10 +16125,7 @@ async fn mapi_over_http_hierarchy_sync_advertises_counts_from_snapshot_messages(
         .expect("Inbox folderChange");
     assert_eq!(inbox.content_count, Some(1));
     assert_eq!(inbox.content_unread_count, Some(1));
-    assert_eq!(
-        inbox.local_commit_time_max,
-        Some(inbox_local_commit_time_max)
-    );
+    assert_eq!(inbox.local_commit_time_max, None);
 }
 
 #[tokio::test]
