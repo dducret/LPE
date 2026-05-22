@@ -439,6 +439,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 aggregate_emails,
                 aggregate_attachment_facts,
             );
+            let local_commit_time_max_present = local_commit_time_max != 0
+                && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
             let folder_type_forced = false;
             let access_forced = false;
             let display_name = mapi_folder_display_name(mailbox);
@@ -465,8 +467,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 content_unread_count_excluded =
                     property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT),
                 local_commit_time_max,
-                local_commit_time_max_omitted_for_outlook_hierarchy_ics =
-                    local_commit_time_max != 0,
+                local_commit_time_max_present,
                 folder_type_forced_by_experiment = folder_type_forced,
                 access_forced_by_experiment = access_forced,
                 aggregate_email_count = aggregate_emails.len(),
@@ -522,6 +523,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) || access_forced {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
+            }
+            if local_commit_time_max_present {
+                write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
+                write_i64(&mut buffer, local_commit_time_max as i64);
             }
             write_bool_property(
                 &mut buffer,
@@ -3666,13 +3671,13 @@ mod tests {
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
         let row = summary.rows.first().expect("folder row");
 
-        assert!(!summary
+        assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
         assert!(!summary
             .emitted_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert_eq!(row.local_commit_time_max, None);
+        assert!(row.local_commit_time_max.is_some());
         assert!(row.missing_core_property_tags.is_empty());
         assert!(row.property_tags.contains(&PID_TAG_PARENT_FOLDER_ID));
         assert_eq!(
