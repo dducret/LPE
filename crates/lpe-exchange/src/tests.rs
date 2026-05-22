@@ -15904,16 +15904,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         };
         folder.parent_folder_id == Some(expected_parent)
     }));
-    for tag in [
-        0x3601_0003u32,
-        0x0E08_0003,
-        0x0FF4_0003,
-        0x3FE0_0102,
-        0x3FE1_0102,
-        0x0E27_0102,
-        0x3602_0003,
-        0x3603_0003,
-    ] {
+    for tag in [0x0E08_0003u32, 0x3FE0_0102, 0x3FE1_0102, 0x0E27_0102] {
         assert!(!contains_bytes(&response_rops, &tag.to_le_bytes()));
     }
     assert!(contains_bytes(
@@ -16133,7 +16124,7 @@ fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy
     let decoded = strict_decode_hierarchy_sync_stream(&buffer).expect("strict hierarchy ICS");
     assert_eq!(decoded.folder_changes.len(), 1);
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
-    assert_eq!(decoded.folder_changes[0].folder_type, None);
+    assert_eq!(decoded.folder_changes[0].folder_type, Some(1));
     assert!(decoded.folder_changes[0].parent_source_key.is_empty());
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }

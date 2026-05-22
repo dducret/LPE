@@ -443,8 +443,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
             let deleted_count_total_present =
                 !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL);
-            let folder_type_forced = false;
-            let access_forced = false;
+            let hierarchy_core_folder_facts_forced = sync_type == SYNC_TYPE_HIERARCHY;
             let display_name = mapi_folder_display_name(mailbox);
             tracing::info!(
                 rca_debug = true,
@@ -471,8 +470,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 local_commit_time_max,
                 local_commit_time_max_present,
                 deleted_count_total_present,
-                folder_type_forced_by_experiment = folder_type_forced,
-                access_forced_by_experiment = access_forced,
+                folder_type_forced_by_experiment = hierarchy_core_folder_facts_forced,
+                access_forced_by_experiment = hierarchy_core_folder_facts_forced,
                 aggregate_email_count = aggregate_emails.len(),
                 "rca debug mapi hierarchy row"
             );
@@ -507,10 +506,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTAINER_CLASS_W) {
                 write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT)
+                || hierarchy_core_folder_facts_forced
+            {
                 write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT) {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT)
+                || hierarchy_core_folder_facts_forced
+            {
                 write_i32_property(
                     &mut buffer,
                     PID_TAG_CONTENT_UNREAD_COUNT,
@@ -518,14 +521,16 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 );
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE)
-                || folder_type_forced
+                || hierarchy_core_folder_facts_forced
             {
                 write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
                 write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) || access_forced {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS)
+                || hierarchy_core_folder_facts_forced
+            {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
             if local_commit_time_max_present {
@@ -3957,8 +3962,8 @@ mod tests {
         let summary =
             decode_hierarchy_transfer_debug_summary(&buffer).expect("hierarchy transfer debug");
         let row = summary.rows.first().expect("folder row");
-        assert_eq!(row.content_count, None);
-        assert_eq!(row.content_unread_count, None);
+        assert_eq!(row.content_count, Some(1));
+        assert_eq!(row.content_unread_count, Some(1));
     }
 
     #[test]
@@ -4007,10 +4012,10 @@ mod tests {
         let summary =
             decode_hierarchy_transfer_debug_summary(&buffer).expect("hierarchy transfer debug");
         let row = summary.rows.first().expect("folder row");
-        assert_eq!(row.content_count, None);
-        assert_eq!(row.content_unread_count, None);
-        assert_eq!(row.folder_type, None);
-        assert_eq!(row.access, None);
+        assert_eq!(row.content_count, Some(1));
+        assert_eq!(row.content_unread_count, Some(1));
+        assert_eq!(row.folder_type, Some(1));
+        assert_eq!(row.access, Some(MAPI_FOLDER_ACCESS as i32));
         assert_eq!(row.subfolders, Some(false));
     }
 
