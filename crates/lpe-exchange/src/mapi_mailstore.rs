@@ -424,7 +424,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
             let source_key = source_key_for_store_id(folder_id);
             let parent_source_key = if parent_folder_id == crate::mapi::identity::ROOT_FOLDER_ID
-                || parent_folder_id == sync_root_folder_id
+                || (parent_folder_id == sync_root_folder_id
+                    && !matches!(
+                        sync_root_folder_id,
+                        crate::mapi::identity::ROOT_FOLDER_ID
+                            | crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
+                    ))
             {
                 Vec::new()
             } else {
@@ -3483,8 +3488,8 @@ mod tests {
         );
         assert!(summary.stream_end_marker_seen);
         assert_eq!(summary.parent_before_child_violations, 0);
-        assert_eq!(summary.zero_length_parent_source_key_count, 1);
-        assert_eq!(summary.nonzero_parent_source_key_count, 0);
+        assert_eq!(summary.zero_length_parent_source_key_count, 0);
+        assert_eq!(summary.nonzero_parent_source_key_count, 1);
         assert_eq!(summary.source_key_lengths, vec![22]);
         assert_eq!(summary.change_key_lengths, vec![22]);
         assert_eq!(
@@ -3524,7 +3529,7 @@ mod tests {
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert_eq!(summary.rows[0].folder_id, None);
         assert_eq!(summary.rows[0].source_key_len, 22);
-        assert_eq!(summary.rows[0].parent_source_key_len, 0);
+        assert_eq!(summary.rows[0].parent_source_key_len, 22);
         assert!(hierarchy_identity_properties_before_display_name(
             &summary.rows[0].property_tags
         ));
