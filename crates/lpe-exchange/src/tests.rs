@@ -15115,7 +15115,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &response_rops,
         &empty_local_commit_time_property
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &0x3613_001Fu32.to_le_bytes()
     ));
@@ -15191,7 +15191,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         ),
         22
     );
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPF.Note")));
 }
 
 #[tokio::test]
@@ -15264,11 +15264,11 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         );
     }
     assert!(folder_offsets.windows(2).all(|pair| pair[0] < pair[1]));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Contact")));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPF.Contact")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPF.Journal")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPF.Task")));
     assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
     assert!(!contains_bytes(
         &response_rops,
@@ -15382,7 +15382,7 @@ fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy
     assert_eq!(decoded.folder_changes[0].display_name, "Reminders");
     assert_eq!(decoded.folder_changes[0].folder_type, None);
     assert!(decoded.folder_changes[0].parent_source_key.is_empty());
-    assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
+    assert!(!contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
 #[test]

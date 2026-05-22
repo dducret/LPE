@@ -502,7 +502,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
                 write_i64(&mut buffer, parent_folder_id as i64);
             }
-            write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
             if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
                 write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
             }
@@ -1804,7 +1803,6 @@ fn missing_hierarchy_core_property_tags(property_tags: &[u32]) -> Vec<u32> {
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_DISPLAY_NAME_W,
         PID_TAG_SUBFOLDERS,
-        PID_TAG_CONTAINER_CLASS_W,
     ]
     .into_iter()
     .filter(|tag| !property_tags.contains(tag))
@@ -3496,7 +3494,10 @@ mod tests {
         assert!(summary.emitted_property_tags.contains(&PID_TAG_CHANGE_KEY));
         assert_eq!(summary.rows.len(), 1);
         assert_eq!(summary.rows[0].display_name, "Inbox");
-        assert_eq!(summary.rows[0].container_class, "IPF.Note");
+        assert_eq!(summary.rows[0].container_class, "");
+        assert!(!summary.rows[0]
+            .property_tags
+            .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert_eq!(summary.rows[0].folder_id, None);
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 0);
@@ -3588,7 +3589,7 @@ mod tests {
         assert!(comparison.parent_folder_id_expected_by_no_foreign_identifiers);
         assert!(!comparison.parent_folder_id_recommended_by_eid);
         assert!(comparison.parent_folder_id_missing_required_rows.is_empty());
-        assert!(comparison
+        assert!(!comparison
             .optional_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert!(comparison
@@ -3618,7 +3619,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_transfer_omits_local_commit_time_max_but_keeps_required_outlook_shape() {
+    fn hierarchy_transfer_omits_targeted_optional_properties_but_keeps_required_outlook_shape() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -3661,6 +3662,9 @@ mod tests {
         assert!(!summary
             .emitted_property_tags
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
+        assert!(!summary
+            .emitted_property_tags
+            .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert_eq!(row.local_commit_time_max, None);
         assert!(row.missing_core_property_tags.is_empty());
         assert!(row.property_tags.contains(&PID_TAG_PARENT_FOLDER_ID));
@@ -3668,7 +3672,7 @@ mod tests {
             row.parent_folder_id,
             Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         );
-        assert!(row.property_tags.contains(&PID_TAG_CONTAINER_CLASS_W));
+        assert!(!row.property_tags.contains(&PID_TAG_CONTAINER_CLASS_W));
         assert!(row.property_tags.contains(&PID_TAG_SUBFOLDERS));
         assert_eq!(
             summary.final_state_property_tags,
