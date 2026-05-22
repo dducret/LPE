@@ -15892,10 +15892,11 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     );
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
-    assert!(decoded
-        .folder_changes
-        .iter()
-        .all(|folder| folder.folder_id.is_none()));
+    assert!(decoded.folder_changes.iter().all(|folder| {
+        folder
+            .folder_id
+            .is_some_and(|folder_id| folder_id != test_mapi_folder_id(4))
+    }));
     assert!(decoded.folder_changes.iter().all(|folder| {
         let expected_parent = match folder.display_name.as_str() {
             "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
@@ -16702,10 +16703,7 @@ async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
-    assert!(!contains_bytes(
-        &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
-    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("Reminders")));
 }
 
 #[tokio::test]
