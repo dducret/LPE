@@ -503,6 +503,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
                 write_i64(&mut buffer, parent_folder_id as i64);
             }
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTAINER_CLASS_W) {
+                write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
+            }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT) {
                 write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
             }
@@ -3505,8 +3508,8 @@ mod tests {
         assert!(summary.emitted_property_tags.contains(&PID_TAG_CHANGE_KEY));
         assert_eq!(summary.rows.len(), 1);
         assert_eq!(summary.rows[0].display_name, "Inbox");
-        assert_eq!(summary.rows[0].container_class, "");
-        assert!(!summary.rows[0]
+        assert_eq!(summary.rows[0].container_class, "IPF.Note");
+        assert!(summary.rows[0]
             .property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert_eq!(summary.rows[0].folder_id, None);
@@ -3601,7 +3604,7 @@ mod tests {
         assert!(comparison.parent_folder_id_expected_by_no_foreign_identifiers);
         assert!(!comparison.parent_folder_id_recommended_by_eid);
         assert!(comparison.parent_folder_id_missing_required_rows.is_empty());
-        assert!(!comparison
+        assert!(comparison
             .optional_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert!(comparison
@@ -3674,7 +3677,7 @@ mod tests {
         assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
-        assert!(!summary
+        assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert!(row.local_commit_time_max.is_some());
@@ -3684,7 +3687,8 @@ mod tests {
             row.parent_folder_id,
             Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
         );
-        assert!(!row.property_tags.contains(&PID_TAG_CONTAINER_CLASS_W));
+        assert!(row.property_tags.contains(&PID_TAG_CONTAINER_CLASS_W));
+        assert_eq!(row.container_class, "IPF.Note");
         assert!(row.property_tags.contains(&PID_TAG_SUBFOLDERS));
         assert_eq!(
             summary.final_state_property_tags,
