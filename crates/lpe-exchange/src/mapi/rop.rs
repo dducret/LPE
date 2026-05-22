@@ -568,6 +568,12 @@ pub(in crate::mapi) fn rop_simple_success_response(request: &RopRequest) -> Vec<
     response
 }
 
+pub(in crate::mapi) fn rop_upload_state_success_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, 0);
+    response
+}
+
 pub(in crate::mapi) fn rop_save_changes_message_response(
     request: &RopRequest,
     message_id: u64,
@@ -5005,6 +5011,23 @@ mod tests {
             rop_handle_index_error_response(&request),
             vec![0x04, 0x07, 0x0F, 0x01, 0x04, 0x80]
         );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn upload_state_success_response_uses_input_handle_index() {
+        for rop_id in [0x75, 0x76, 0x77] {
+            let request = RopRequest {
+                rop_id,
+                input_handle_index: Some(3),
+                output_handle_index: Some(9),
+                payload: Vec::new(),
+            };
+
+            assert_eq!(
+                rop_upload_state_success_response(&request),
+                vec![rop_id, 3, 0, 0, 0, 0]
+            );
+        }
     }
 
     #[test]

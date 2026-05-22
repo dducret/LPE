@@ -4949,7 +4949,7 @@ where
                                 request.upload_state_transfer_size().unwrap_or_default(),
                             "rca debug mapi sync upload state begin"
                         );
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
                     }
                     _ => responses.extend_from_slice(&rop_error_response(
                         0x75,
@@ -4984,7 +4984,7 @@ where
                             upload_state_buffer_bytes = state_upload_buffer.len(),
                             "rca debug mapi sync upload state continue"
                         );
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
                     }
                     _ => responses.extend_from_slice(&rop_error_response(
                         0x76,
@@ -5034,7 +5034,7 @@ where
                             transfer_position = *transfer_position,
                             "rca debug mapi sync upload state end"
                         );
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
                     }
                     Some(MapiObject::SynchronizationCollector {
                         folder_id,
@@ -5054,7 +5054,7 @@ where
                             upload_state_total_bytes = state.len(),
                             "rca debug mapi sync upload state end"
                         );
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
                     }
                     _ => responses.extend_from_slice(&rop_error_response(
                         0x77,
