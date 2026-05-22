@@ -27,7 +27,8 @@ BEGIN;
 ALTER TABLE public.calendar_events
   ADD COLUMN IF NOT EXISTS reminder_set BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS reminder_dismissed_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS reminder_dismissed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS recurrence_rule TEXT;
 
 DO $$
 DECLARE
@@ -67,7 +68,8 @@ ALTER TABLE public.tasks
   ADD COLUMN IF NOT EXISTS reminder_set BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS reminder_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS reminder_dismissed_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS reminder_reset BOOLEAN NOT NULL DEFAULT FALSE;
+  ADD COLUMN IF NOT EXISTS reminder_reset BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS recurrence_rule TEXT;
 
 DO $$
 DECLARE
@@ -297,6 +299,22 @@ CREATE INDEX IF NOT EXISTS calendar_events_owner_reminder_idx
 CREATE INDEX IF NOT EXISTS tasks_owner_reminder_idx
   ON public.tasks (tenant_id, owner_account_id, reminder_set, reminder_at)
   WHERE reminder_set;
+
+CREATE TABLE IF NOT EXISTS public.reminder_occurrence_dismissals (
+  tenant_id UUID NOT NULL,
+  owner_account_id UUID NOT NULL,
+  source_type TEXT NOT NULL CHECK (source_type IN ('calendar', 'task')),
+  source_id UUID NOT NULL,
+  occurrence_start_at TIMESTAMPTZ NOT NULL,
+  dismissed_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at),
+  FOREIGN KEY (tenant_id, owner_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS reminder_occurrence_dismissals_owner_idx
+  ON public.reminder_occurrence_dismissals (tenant_id, owner_account_id, source_type, source_id, occurrence_start_at);
 
 COMMIT;
 SQL
