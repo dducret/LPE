@@ -521,6 +521,7 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
             | PID_TAG_IPM_JOURNAL_ENTRY_ID
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
+            | PID_TAG_REM_ONLINE_ENTRY_ID
             | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
     )
 }

@@ -19939,6 +19939,66 @@ async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_id
 }
 
 #[tokio::test]
+async fn mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_online_entry_id() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let reminders_eid = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::REMINDERS_FOLDER_ID,
+    )
+    .unwrap();
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(&mut property_values, 0x36D5_0102, &reminders_eid);
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on root
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0x00, 0x00, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_entry_ids() {
     let account = FakeStore::account();
     let store = FakeStore {
