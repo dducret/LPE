@@ -2907,8 +2907,8 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 20;
-const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 27;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
+const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 14;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
@@ -15935,7 +15935,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("Notes")));
     assert!(contains_bytes(&response_rops, &utf16z("Tasks")));
-    assert!(contains_bytes(&response_rops, &utf16z("Reminders")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Reminders")));
     let mut folder_offsets = Vec::new();
     for name in [
         "Inbox",
@@ -15948,7 +15948,6 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         "Journal",
         "Notes",
         "Tasks",
-        "Reminders",
     ] {
         let name_bytes = utf16z(name);
         folder_offsets.push(
@@ -15964,7 +15963,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
-    assert!(contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
+    assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")
@@ -16000,10 +15999,6 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::TASKS_FOLDER_ID)
-    ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
     ));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
@@ -16045,7 +16040,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
 }
 
 #[test]
-fn mapi_hierarchy_sync_includes_direct_reminders_projection_in_normal_hierarchy() {
+fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy() {
     let reminders =
         mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::REMINDERS_FOLDER_ID)
             .expect("Reminders mailbox");
@@ -16237,11 +16232,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             crate::mapi::identity::NOTES_FOLDER_ID,
         ),
         ("Tasks", "IPF.Task", crate::mapi::identity::TASKS_FOLDER_ID),
-        (
-            "Reminders",
-            "Outlook.Reminder",
-            crate::mapi::identity::REMINDERS_FOLDER_ID,
-        ),
         (
             "Document Libraries",
             "IPF.ShortcutFolder",
@@ -16654,7 +16644,7 @@ async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::REMINDERS_FOLDER_ID)
     ));
@@ -20253,7 +20243,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn mapi_over_http_root_rem_online_entry_id_returns_canonical_projection() {
+async fn mapi_over_http_root_rem_online_entry_id_is_not_projected_as_default_folder() {
     let account = FakeStore::account();
     let store = FakeStore {
         session: Some(account.clone()),
@@ -20300,14 +20290,23 @@ async fn mapi_over_http_root_rem_online_entry_id_returns_canonical_projection() 
     let response_rops = response_rops_from_execute_response(response).await;
     let get_props_offset = 8;
     assert_eq!(response_rops[get_props_offset], 0x07);
-    assert_eq!(response_rops[get_props_offset + 6], 0);
+    assert_eq!(response_rops[get_props_offset + 6], 1);
+    assert_eq!(response_rops[get_props_offset + 7], 0x0A);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[get_props_offset + 8..get_props_offset + 12]
+                .try_into()
+                .unwrap()
+        ),
+        0x8004_0102
+    );
     let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
         account.account_id,
         crate::mapi::identity::REMINDERS_FOLDER_ID,
     )
     .unwrap()
     .to_vec();
-    assert!(contains_bytes(&response_rops, &entry_id));
+    assert!(!contains_bytes(&response_rops, &entry_id));
 }
 
 #[tokio::test(flavor = "current_thread")]
