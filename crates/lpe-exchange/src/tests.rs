@@ -2914,7 +2914,7 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 20;
 const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 14;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
@@ -15892,13 +15892,17 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     );
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
-    assert!(decoded.folder_changes.iter().all(|folder| {
-        folder
-            .folder_id
-            .is_some_and(|folder_id| folder_id != test_mapi_folder_id(4))
-    }));
+    assert!(decoded
+        .folder_changes
+        .iter()
+        .any(|folder| folder.folder_id == Some(test_mapi_folder_id(4))));
+    assert!(decoded
+        .folder_changes
+        .iter()
+        .all(|folder| folder.folder_id.is_some()));
     assert!(decoded.folder_changes.iter().all(|folder| {
         let expected_parent = match folder.display_name.as_str() {
+            "Top of Information Store" => crate::mapi::identity::ROOT_FOLDER_ID,
             "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
             _ => test_mapi_folder_id(4),
         };
@@ -16016,7 +16020,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
     assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")
     ));

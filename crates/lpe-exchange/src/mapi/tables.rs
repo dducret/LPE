@@ -3681,6 +3681,9 @@ pub(in crate::mapi) fn write_property_default(row: &mut Vec<u8>, property_tag: u
 
 pub(in crate::mapi) fn mapi_folder_id(mailbox: &JmapMailbox) -> u64 {
     match mailbox.role.as_str() {
+        "__mapi_ipm_subtree" => IPM_SUBTREE_FOLDER_ID,
+        "__mapi_deferred_action" => DEFERRED_ACTION_FOLDER_ID,
+        "__mapi_spooler_queue" => SPOOLER_QUEUE_FOLDER_ID,
         "inbox" => INBOX_FOLDER_ID,
         "drafts" => DRAFTS_FOLDER_ID,
         "outbox" => OUTBOX_FOLDER_ID,

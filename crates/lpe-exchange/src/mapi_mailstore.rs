@@ -3546,8 +3546,8 @@ mod tests {
             validation.sync_root_change_counter,
             crate::mapi::identity::IPM_SUBTREE_FOLDER_COUNTER
         );
-        assert!(!validation.sync_root_row_present);
-        assert!(!validation.sync_root_counter_in_final_idset);
+        assert!(validation.sync_root_row_present);
+        assert!(validation.sync_root_counter_in_final_idset);
         assert!(validation.sync_root_counter_in_final_cnset);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
         assert_eq!(validation.root_inclusive_cnset_seen_delta_bytes, 0);

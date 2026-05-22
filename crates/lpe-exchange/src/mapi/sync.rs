@@ -36,7 +36,8 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 14] = [
     FREEBUSY_DATA_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 19] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 20] = [
+    IPM_SUBTREE_FOLDER_ID,
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
     OUTBOX_FOLDER_ID,
@@ -315,7 +316,8 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
         ROOT_FOLDER_ID => special_folder_id != ROOT_FOLDER_ID,
         IPM_SUBTREE_FOLDER_ID => matches!(
             special_folder_id,
-            INBOX_FOLDER_ID
+            IPM_SUBTREE_FOLDER_ID
+                | INBOX_FOLDER_ID
                 | DRAFTS_FOLDER_ID
                 | OUTBOX_FOLDER_ID
                 | SENT_FOLDER_ID
