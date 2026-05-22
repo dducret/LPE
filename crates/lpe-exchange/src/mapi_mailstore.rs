@@ -902,6 +902,7 @@ pub(crate) fn log_hierarchy_get_buffer_payload_summary(
                 nonzero_parent_count = summary.nonzero_parent_source_key_count,
                 first_folder_name = %summary.first_folder_name(),
                 last_folder_name = %summary.last_folder_name(),
+                parent_before_child_violations = summary.parent_before_child_violations,
                 final_state_idset_given_includes_all_expected_folder_source_key_counters =
                     summary.final_state_idset_given_includes_all_expected_folder_source_counters,
                 final_state_cnset_seen_includes_all_expected_folder_change_counters =
@@ -948,8 +949,21 @@ fn log_hierarchy_semantic_validation(
         sync_root_source_counter = validation.sync_root_source_counter,
         sync_root_change_counter = validation.sync_root_change_counter,
         sync_root_row_present = validation.sync_root_row_present,
+        sync_root_row_index = validation.sync_root_row_index,
+        sync_root_row_first = validation.sync_root_row_index == 1,
+        sync_root_display_name = %validation.sync_root_display_name,
+        sync_root_folder_id = %validation.sync_root_folder_id,
+        sync_root_parent_folder_id = %validation.sync_root_parent_folder_id,
+        sync_root_parent_source_key_len = validation.sync_root_parent_source_key_len,
+        sync_root_folder_type = validation.sync_root_folder_type,
+        sync_root_access = validation.sync_root_access,
+        sync_root_subfolders = validation.sync_root_subfolders,
         sync_root_counter_in_final_idset = validation.sync_root_counter_in_final_idset,
         sync_root_counter_in_final_cnset = validation.sync_root_counter_in_final_cnset,
+        first_row_name = %validation.first_row_name,
+        first_row_folder_id = %validation.first_row_folder_id,
+        first_row_parent_folder_id = %validation.first_row_parent_folder_id,
+        parent_before_child_violations = validation.parent_before_child_violations,
         root_inclusive_idset_given_bytes = validation.root_inclusive_idset_given_len,
         root_inclusive_cnset_seen_bytes = validation.root_inclusive_cnset_seen_len,
         root_inclusive_idset_given_delta_bytes = validation.root_inclusive_idset_given_delta_bytes,
@@ -1227,8 +1241,20 @@ struct HierarchySemanticValidation {
     sync_root_source_counter: u64,
     sync_root_change_counter: u64,
     sync_root_row_present: bool,
+    sync_root_row_index: usize,
+    sync_root_display_name: String,
+    sync_root_folder_id: String,
+    sync_root_parent_folder_id: String,
+    sync_root_parent_source_key_len: usize,
+    sync_root_folder_type: i32,
+    sync_root_access: i32,
+    sync_root_subfolders: bool,
     sync_root_counter_in_final_idset: bool,
     sync_root_counter_in_final_cnset: bool,
+    first_row_name: String,
+    first_row_folder_id: String,
+    first_row_parent_folder_id: String,
+    parent_before_child_violations: usize,
     root_inclusive_idset_given_len: usize,
     root_inclusive_cnset_seen_len: usize,
     root_inclusive_idset_given_delta_bytes: isize,
@@ -1280,6 +1306,11 @@ fn hierarchy_semantic_validation(
         .iter()
         .filter(|row| !row.missing_core_property_tags.is_empty())
         .collect::<Vec<_>>();
+    let sync_root_row = summary
+        .rows
+        .iter()
+        .find(|row| row.source_counter == Some(sync_root_source_counter));
+    let first_row = summary.rows.first();
 
     let idset_missing_source_counters = counter_difference(
         &expected_source_counters,
@@ -1335,12 +1366,42 @@ fn hierarchy_semantic_validation(
         sync_root_source_counter,
         sync_root_change_counter,
         sync_root_row_present: expected_source_counters.contains(&sync_root_source_counter),
+        sync_root_row_index: sync_root_row.map(|row| row.row_index).unwrap_or_default(),
+        sync_root_display_name: sync_root_row
+            .map(|row| row.display_name.clone())
+            .unwrap_or_default(),
+        sync_root_folder_id: sync_root_row
+            .and_then(|row| row.folder_id.map(format_u64_hex))
+            .unwrap_or_default(),
+        sync_root_parent_folder_id: sync_root_row
+            .and_then(|row| row.parent_folder_id.map(format_u64_hex))
+            .unwrap_or_default(),
+        sync_root_parent_source_key_len: sync_root_row
+            .map(|row| row.parent_source_key_len)
+            .unwrap_or_default(),
+        sync_root_folder_type: sync_root_row
+            .and_then(|row| row.folder_type)
+            .unwrap_or_default(),
+        sync_root_access: sync_root_row.and_then(|row| row.access).unwrap_or_default(),
+        sync_root_subfolders: sync_root_row
+            .and_then(|row| row.subfolders)
+            .unwrap_or_default(),
         sync_root_counter_in_final_idset: summary
             .final_state_idset_given_counters
             .contains(&sync_root_source_counter),
         sync_root_counter_in_final_cnset: summary
             .final_state_cnset_seen_counters
             .contains(&sync_root_change_counter),
+        first_row_name: first_row
+            .map(|row| row.display_name.clone())
+            .unwrap_or_default(),
+        first_row_folder_id: first_row
+            .and_then(|row| row.folder_id.map(format_u64_hex))
+            .unwrap_or_default(),
+        first_row_parent_folder_id: first_row
+            .and_then(|row| row.parent_folder_id.map(format_u64_hex))
+            .unwrap_or_default(),
+        parent_before_child_violations: summary.parent_before_child_violations,
         root_inclusive_idset_given_len: root_inclusive_idset_given.len(),
         root_inclusive_cnset_seen_len: root_inclusive_cnset_seen.len(),
         root_inclusive_idset_given_delta_bytes: root_inclusive_idset_given.len() as isize
