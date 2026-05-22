@@ -2526,7 +2526,14 @@ impl Storage {
                     (array_agg(reminder_dismissed_at ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS reminder_dismissed_at,
                     (array_agg(swapped_todo_store_id ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS swapped_todo_store_id,
                     (array_agg(swapped_todo_data ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1] AS swapped_todo_data,
-                    COALESCE((array_agg(keywords ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1], ARRAY[]::TEXT[]) AS categories,
+                    COALESCE(
+                        ARRAY(
+                            SELECT jsonb_array_elements_text(
+                                (array_agg(to_jsonb(keywords) ORDER BY mailbox_sort_order, mailbox_name, mailbox_id))[1]
+                            )
+                        ),
+                        ARRAY[]::TEXT[]
+                    ) AS categories,
                     BOOL_OR(is_draft) AS draft
                 FROM visible_memberships
                 GROUP BY message_id

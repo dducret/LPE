@@ -184,6 +184,7 @@ fn mailbox_messages_persist_outlook_followup_state() {
             && NOTES_JOURNAL_STORAGE.contains("'mail'::text AS source_type")
             && PROTOCOLS_STORAGE.contains("followup_flag_status = CASE")
             && PROTOCOLS_STORAGE.contains("categories: Vec<String>")
+            && PROTOCOLS_STORAGE.contains("array_agg(to_jsonb(keywords)")
             && PROTOCOLS_STORAGE.contains("WHEN $5 THEN 'flagged'")
             && PROTOCOLS_STORAGE.contains("JmapEmailFollowupUpdate"),
         "canonical message writes must expose a protocol-neutral follow-up update path"
