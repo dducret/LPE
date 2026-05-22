@@ -5235,10 +5235,16 @@ where
                         let response_debug =
                             summarize_fast_transfer_get_buffer_response(&response, completed);
                         if completed && *sync_type == 0x02 {
+                            let hierarchy_close_summary =
+                                mapi_mailstore::hierarchy_transfer_close_summary(
+                                    *sync_type,
+                                    *folder_id,
+                                    transfer_buffer,
+                                );
                             completed_hierarchy_sync = Some((
                                 *folder_id,
                                 format!(
-                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{}",
+                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
                                     *folder_id,
                                     checkpoint_kind.as_str(),
                                     (*mailbox_id)
@@ -5256,7 +5262,8 @@ where
                                     response_debug.transfer_status,
                                     completed,
                                     *transfer_position,
-                                    transfer_buffer.len()
+                                    transfer_buffer.len(),
+                                    hierarchy_close_summary
                                 ),
                             ));
                         }

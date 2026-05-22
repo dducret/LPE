@@ -928,6 +928,39 @@ pub(crate) fn log_hierarchy_get_buffer_payload_summary(
     }
 }
 
+pub(crate) fn hierarchy_transfer_close_summary(
+    sync_type: u8,
+    folder_id: u64,
+    transfer_buffer: &[u8],
+) -> String {
+    if sync_type != SYNC_TYPE_HIERARCHY {
+        return String::new();
+    }
+    let Ok(summary) = decode_hierarchy_transfer_debug_summary(transfer_buffer) else {
+        return "hierarchy_debug=parse_error".to_string();
+    };
+    let validation = hierarchy_semantic_validation(folder_id, &summary);
+    format!(
+        "first={};last={};root_first={};root_index={};root_name={};root_folder={};root_parent={};root_parent_sk={};root_type={};root_access={};root_subfolders={};parent_before_child={};semantic={};idset_missing={};cnset_missing={};final_state_order={}",
+        summary.first_folder_name(),
+        summary.last_folder_name(),
+        validation.sync_root_row_index == 1,
+        validation.sync_root_row_index,
+        validation.sync_root_display_name,
+        validation.sync_root_folder_id,
+        validation.sync_root_parent_folder_id,
+        validation.sync_root_parent_source_key_len,
+        validation.sync_root_folder_type,
+        validation.sync_root_access,
+        validation.sync_root_subfolders,
+        validation.parent_before_child_violations,
+        validation.semantic_flags,
+        format_counter_list(&validation.idset_missing_source_counters),
+        format_counter_list(&validation.cnset_missing_change_counters),
+        summary.final_state_expected_property_order_ok,
+    )
+}
+
 fn log_hierarchy_semantic_validation(
     sync_type: u8,
     folder_id: u64,
