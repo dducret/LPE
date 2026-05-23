@@ -445,7 +445,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             let local_commit_time_max_present = sync_type != SYNC_TYPE_HIERARCHY
                 && local_commit_time_max != 0
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
-            let hierarchy_core_folder_facts_forced = sync_type == SYNC_TYPE_HIERARCHY;
             let content_count_present = sync_type != SYNC_TYPE_HIERARCHY
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
             let content_unread_count_present = sync_type != SYNC_TYPE_HIERARCHY
@@ -474,8 +473,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 local_commit_time_max,
                 local_commit_time_max_present,
                 deleted_count_total_present = false,
-                folder_type_forced_by_experiment = hierarchy_core_folder_facts_forced,
-                access_forced_by_experiment = hierarchy_core_folder_facts_forced,
+                folder_type_excluded =
+                    property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE),
+                access_excluded = property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS),
                 aggregate_email_count = aggregate_emails.len(),
                 "rca debug mapi hierarchy row"
             );
@@ -520,17 +520,13 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                     content_unread_count,
                 );
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE)
-                || hierarchy_core_folder_facts_forced
-            {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE) {
                 write_i32_property(&mut buffer, PID_TAG_FOLDER_TYPE, mapi_folder_type(mailbox));
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_MESSAGE_SIZE) {
                 write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
             }
-            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS)
-                || hierarchy_core_folder_facts_forced
-            {
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS) {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
             if local_commit_time_max_present {
@@ -3714,8 +3710,8 @@ mod tests {
         assert_eq!(validation.rows_without_folder_id, 0);
         assert_eq!(validation.rows_missing_core_property_count, 0);
         assert_eq!(validation.rows_with_content_counts_present, 0);
-        assert_eq!(validation.rows_with_folder_type_present, 1);
-        assert_eq!(validation.rows_with_access_present, 1);
+        assert_eq!(validation.rows_with_folder_type_present, 0);
+        assert_eq!(validation.rows_with_access_present, 0);
         assert!(validation.idset_missing_source_counters.is_empty());
         assert!(validation.idset_extra_source_counters.is_empty());
         assert!(validation.cnset_missing_change_counters.is_empty());
@@ -4139,7 +4135,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_sync_omitted_count_properties_do_not_remove_stable_folder_facts() {
+    fn hierarchy_sync_excluded_properties_are_not_reintroduced_as_stable_folder_facts() {
         let mailbox_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             mailbox_id,
@@ -4186,8 +4182,8 @@ mod tests {
         let row = summary.rows.first().expect("folder row");
         assert_eq!(row.content_count, None);
         assert_eq!(row.content_unread_count, None);
-        assert_eq!(row.folder_type, Some(1));
-        assert_eq!(row.access, Some(MAPI_FOLDER_ACCESS as i32));
+        assert_eq!(row.folder_type, None);
+        assert_eq!(row.access, None);
         assert_eq!(row.subfolders, Some(false));
     }
 
