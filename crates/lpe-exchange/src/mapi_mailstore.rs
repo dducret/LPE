@@ -536,6 +536,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
+            write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
+            write_i64(&mut buffer, change_number as i64);
             if local_commit_time_max_present {
                 write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
                 write_i64(&mut buffer, local_commit_time_max as i64);
