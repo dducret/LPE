@@ -1280,9 +1280,9 @@ impl ExchangeStore for Storage {
         Box::pin(async move {
             let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
             let mut tx = self.pool().begin().await?;
-            let existing_id = sqlx::query_scalar::<_, Uuid>(
+            let existing = sqlx::query(
                 r#"
-                SELECT id
+                SELECT id, mailbox_id, checkpoint_kind, last_change_sequence, last_modseq, cursor_json
                 FROM mapi_sync_checkpoints
                 WHERE tenant_id = $1
                   AND account_id = $2
@@ -1302,6 +1302,26 @@ impl ExchangeStore for Storage {
             .bind(mailbox_id)
             .fetch_optional(&mut *tx)
             .await?;
+            if let Some(existing) = existing.as_ref() {
+                let existing_change_sequence =
+                    existing.get::<i64, _>("last_change_sequence").max(0) as u64;
+                let existing_modseq = existing.get::<i64, _>("last_modseq").max(0) as u64;
+                if existing_change_sequence > last_change_sequence
+                    || (existing_change_sequence == last_change_sequence
+                        && existing_modseq > last_modseq)
+                {
+                    let checkpoint = MapiSyncCheckpoint {
+                        mailbox_id: existing.get::<Option<Uuid>, _>("mailbox_id"),
+                        checkpoint_kind,
+                        last_change_sequence: existing_change_sequence,
+                        last_modseq: existing_modseq,
+                        cursor_json: existing.get("cursor_json"),
+                    };
+                    tx.commit().await?;
+                    return Ok(checkpoint);
+                }
+            }
+            let existing_id = existing.as_ref().map(|row| row.get::<Uuid, _>("id"));
             let row = sqlx::query(
                 if existing_id.is_some() {
                     r#"
