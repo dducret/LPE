@@ -444,8 +444,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             );
             let local_commit_time_max_present = local_commit_time_max != 0
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
-            let deleted_count_total_present =
-                !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL);
             let hierarchy_core_folder_facts_forced = sync_type == SYNC_TYPE_HIERARCHY;
             let display_name = mapi_folder_display_name(mailbox);
             tracing::info!(
@@ -472,7 +470,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                     property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_UNREAD_COUNT),
                 local_commit_time_max,
                 local_commit_time_max_present,
-                deleted_count_total_present,
+                deleted_count_total_present = false,
                 folder_type_forced_by_experiment = hierarchy_core_folder_facts_forced,
                 access_forced_by_experiment = hierarchy_core_folder_facts_forced,
                 aggregate_email_count = aggregate_emails.len(),
@@ -536,14 +534,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             {
                 write_i32_property(&mut buffer, PID_TAG_ACCESS, MAPI_FOLDER_ACCESS as i32);
             }
-            write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
-            write_i64(&mut buffer, change_number as i64);
             if local_commit_time_max_present {
                 write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
                 write_i64(&mut buffer, local_commit_time_max as i64);
-            }
-            if deleted_count_total_present {
-                write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
             }
             write_bool_property(
                 &mut buffer,
@@ -3832,14 +3825,18 @@ mod tests {
         assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
-        assert!(summary
+        assert!(!summary
             .emitted_property_tags
             .contains(&PID_TAG_DELETED_COUNT_TOTAL));
+        assert!(!summary
+            .emitted_property_tags
+            .contains(&PID_TAG_CHANGE_NUMBER));
         assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
         assert!(row.local_commit_time_max.is_some());
-        assert_eq!(row.deleted_count_total, Some(0));
+        assert_eq!(row.deleted_count_total, None);
+        assert_eq!(row.change_number, None);
         assert!(row.missing_core_property_tags.is_empty());
         assert!(row.property_tags.contains(&PID_TAG_PARENT_FOLDER_ID));
         assert_eq!(

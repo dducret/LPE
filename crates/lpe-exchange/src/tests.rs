@@ -15796,9 +15796,14 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
     local_commit_time_property.extend_from_slice(&(local_commit_time_max as i64).to_le_bytes());
     assert!(contains_bytes(&response_rops, &local_commit_time_property));
-    let mut deleted_count_property = 0x670B_0003u32.to_le_bytes().to_vec();
-    deleted_count_property.extend_from_slice(&0i32.to_le_bytes());
-    assert!(contains_bytes(&response_rops, &deleted_count_property));
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x670B_0003u32.to_le_bytes()
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x67A4_0014u32.to_le_bytes()
+    ));
     let mut folder_type_property = 0x3601_0003u32.to_le_bytes().to_vec();
     folder_type_property.extend_from_slice(&1i32.to_le_bytes());
     assert!(contains_bytes(&response_rops, &folder_type_property));
