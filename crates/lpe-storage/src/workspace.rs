@@ -192,7 +192,7 @@ impl Storage {
                 a.id,
                 a.message_id,
                 a.file_name AS name,
-                a.media_type,
+                COALESCE(mp.content_type, '') AS media_type,
                 a.size_octets
             FROM attachments a
             JOIN mailbox_messages mm
@@ -200,6 +200,10 @@ impl Storage {
              AND mm.message_id = a.message_id
              AND mm.account_id = $2
              AND mm.visibility <> 'expunged'
+            LEFT JOIN mime_parts mp
+              ON mp.tenant_id = a.tenant_id
+             AND mp.message_id = a.message_id
+             AND mp.id = a.mime_part_id
             WHERE a.tenant_id = $1
             ORDER BY a.file_name ASC
             "#,

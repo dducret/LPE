@@ -1748,6 +1748,14 @@ fn runtime_collaboration_sql_uses_canonical_v2_columns() {
         !WORKSPACE_STORAGE.contains("FROM calendar_events\n            WHERE contacts."),
         "workspace calendar queries must filter calendar_events, not contacts"
     );
+    assert!(
+        !WORKSPACE_STORAGE.contains("a.media_type"),
+        "workspace attachment queries must not read retired attachments.media_type"
+    );
+    assert!(
+        WORKSPACE_STORAGE.contains("mp.content_type"),
+        "workspace attachment queries must read attachment MIME type from mime_parts"
+    );
 
     for (name, source) in [
         ("workspace.rs", WORKSPACE_STORAGE),
