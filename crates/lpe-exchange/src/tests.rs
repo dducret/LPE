@@ -4365,6 +4365,15 @@ fn append_mapi_binary_property(values: &mut Vec<u8>, property_tag: u32, value: &
     values.extend_from_slice(value);
 }
 
+fn append_mapi_multi_binary_property(values: &mut Vec<u8>, property_tag: u32, items: &[&[u8]]) {
+    values.extend_from_slice(&property_tag.to_le_bytes());
+    values.extend_from_slice(&(items.len() as u32).to_le_bytes());
+    for item in items {
+        values.extend_from_slice(&(item.len() as u16).to_le_bytes());
+        values.extend_from_slice(item);
+    }
+}
+
 fn append_mapi_multi_utf16_property(values: &mut Vec<u8>, property_tag: u32, items: &[&str]) {
     values.extend_from_slice(&property_tag.to_le_bytes());
     values.extend_from_slice(&(items.len() as u32).to_le_bytes());
@@ -20668,6 +20677,71 @@ async fn mapi_over_http_folder_set_properties_rejects_protocol_local_values() {
         ]
     ));
     assert!(!contains_bytes(&response_rops, &state));
+}
+
+#[tokio::test]
+async fn mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids() {
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let folder_id = test_mapi_folder_id(5);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let conflicts = test_mapi_folder_id(0x1b).to_le_bytes();
+    let local_failures = test_mapi_folder_id(0x1c).to_le_bytes();
+    let server_failures = test_mapi_folder_id(0x1d).to_le_bytes();
+    let junk = test_mapi_folder_id(0x1e).to_le_bytes();
+    let mut property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut property_values,
+        0x36D8_1102,
+        &[&conflicts, &local_failures, &server_failures, &junk],
+    );
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    rops.extend_from_slice(&folder_id.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on opened folder
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
 }
 
 #[tokio::test]

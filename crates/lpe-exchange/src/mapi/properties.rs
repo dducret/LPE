@@ -123,6 +123,7 @@ pub(in crate::mapi) const PID_TAG_IPM_JOURNAL_ENTRY_ID: u32 = 0x36D2_0102;
 pub(in crate::mapi) const PID_TAG_IPM_NOTE_ENTRY_ID: u32 = 0x36D3_0102;
 pub(in crate::mapi) const PID_TAG_IPM_TASK_ENTRY_ID: u32 = 0x36D4_0102;
 pub(in crate::mapi) const PID_TAG_REM_ONLINE_ENTRY_ID: u32 = 0x36D5_0102;
+pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS: u32 = 0x36D8_1102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
 pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;

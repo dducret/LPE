@@ -1084,6 +1084,12 @@ fn folder_set_property_problems(
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
+            if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
+                return match value {
+                    MapiValue::MultiBinary(values) if !values.is_empty() => None,
+                    _ => Some((index, *tag, 0x8004_0102)),
+                };
+            }
             if *folder_id != ROOT_FOLDER_ID {
                 return Some((index, *tag, 0x8004_0102));
             }

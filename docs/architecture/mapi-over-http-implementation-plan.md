@@ -154,6 +154,8 @@ not by itself authorize broad client publication.
   table query, hierarchy sync, content sync, FastTransfer source buffering,
   message import/save, draft/send flows, read-state changes, deletes, moves,
   copies, and attachment reads/writes where backed by canonical state.
+- Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
+  accepted as session-local folder metadata during cached-mode bootstrap.
 - Unsupported or malformed ROPs use parseable error responses and terminate the
   current buffer as required by the wire contract.
 
