@@ -16989,7 +16989,7 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_counts_omit_local_commit_time_max() {
+async fn mapi_over_http_hierarchy_sync_omits_content_activity_properties() {
     let inbox_id = Uuid::parse_str("94949494-9494-4494-9494-949494949494").unwrap();
     let sent_id = Uuid::parse_str("96969696-9696-4696-9696-969696969696").unwrap();
     let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
@@ -17067,8 +17067,8 @@ async fn mapi_over_http_hierarchy_sync_counts_omit_local_commit_time_max() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
-    assert_eq!(inbox.content_count, Some(1));
-    assert_eq!(inbox.content_unread_count, Some(1));
+    assert_eq!(inbox.content_count, None);
+    assert_eq!(inbox.content_unread_count, None);
     assert_eq!(inbox.local_commit_time_max, None);
 }
 
