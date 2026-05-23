@@ -2875,7 +2875,7 @@ fn sync_state_change_numbers(
 
 fn canonical_hierarchy_change_number(sync_root_folder_id: u64, mailbox: &JmapMailbox) -> u64 {
     let folder_id = mapi_folder_id_for_mailbox(mailbox, sync_root_folder_id);
-    canonical_folder_change_number(mailbox).max(change_number_for_store_id(folder_id))
+    change_number_for_store_id(folder_id)
 }
 
 pub(crate) fn final_sync_state_stream(
@@ -3366,6 +3366,26 @@ mod tests {
         assert_eq!(
             canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &trash),
             crate::mapi::identity::TRASH_FOLDER_COUNTER
+        );
+    }
+
+    #[test]
+    fn hierarchy_change_numbers_stay_in_folder_counter_domain() {
+        let inbox = JmapMailbox {
+            id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "Inbox".to_string(),
+            sort_order: 10,
+            modseq: 51,
+            total_emails: 7,
+            unread_emails: 7,
+            is_subscribed: true,
+        };
+
+        assert_eq!(
+            canonical_hierarchy_change_number(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID, &inbox),
+            crate::mapi::identity::INBOX_FOLDER_COUNTER
         );
     }
 

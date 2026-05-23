@@ -15731,7 +15731,7 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     let mut inbox = FakeStore::mailbox(inbox_id, "inbox", "Inbox");
     inbox.total_emails = 3;
     inbox.unread_emails = 1;
-    let change_number = mapi_mailstore::canonical_folder_change_number(&inbox);
+    let change_number = crate::mapi::identity::INBOX_FOLDER_COUNTER;
     let change_key = mapi_mailstore::change_key_for_change_number(change_number);
     let predecessor_change_list = mapi_mailstore::predecessor_change_list(change_number);
     let email = FakeStore::email(
@@ -15808,14 +15808,16 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     folder_type_property.extend_from_slice(&1i32.to_le_bytes());
     assert!(contains_bytes(&response_rops, &folder_type_property));
     let final_cnset_seen = mapi_last_binary_property(&response_rops, 0x6796_0102).unwrap();
-    assert!(contains_bytes(
+    assert!(strict_replguid_globset_contains_counter(
         final_cnset_seen,
         &globcnt_bytes(change_number)
-    ));
-    assert!(!contains_bytes(
+    )
+    .unwrap());
+    assert!(!strict_replguid_globset_contains_counter(
         final_cnset_seen,
         &globcnt_bytes(message_change_number)
-    ));
+    )
+    .unwrap());
 }
 
 #[tokio::test]
