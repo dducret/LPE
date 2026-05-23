@@ -194,6 +194,26 @@ where
         );
         return Ok(response);
     }
+    if request_type != MapiRequestType::Ping && !content_length_matches_body(&content_length, _body)
+    {
+        let response = mapi_diagnostic_response(
+            &request_type_label,
+            &request_id,
+            4,
+            "MAPI Content-Length header does not match request body length",
+        );
+        let response = finalize_mapi_response(response, headers);
+        log_mapi_connection(
+            endpoint,
+            &principal,
+            headers,
+            _body,
+            &request_type_label,
+            &request_id,
+            &response,
+        );
+        return Ok(response);
+    }
     if !is_mapi_content_type(headers) {
         let response = mapi_diagnostic_response(
             &request_type_label,
@@ -972,6 +992,13 @@ pub(in crate::mapi) fn content_length_header(headers: &HeaderMap) -> Option<Stri
 
 pub(in crate::mapi) fn is_valid_content_length(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn content_length_matches_body(value: &str, body: &[u8]) -> bool {
+    value == "0"
+        || value
+            .parse::<usize>()
+            .is_ok_and(|length| length == body.len())
 }
 
 pub(in crate::mapi) fn is_mapi_content_type(headers: &HeaderMap) -> bool {

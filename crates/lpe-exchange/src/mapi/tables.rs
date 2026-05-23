@@ -70,8 +70,15 @@ pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
         PID_TAG_PARENT_FOLDER_ID,
         PID_TAG_FOLDER_TYPE,
         PID_TAG_ACCESS,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
         PID_TAG_SUBFOLDERS,
     ]
 }
@@ -83,14 +90,22 @@ pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
         PID_TAG_NORMALIZED_SUBJECT_W,
         PID_TAG_MESSAGE_CLASS_W,
         PID_TAG_MESSAGE_DELIVERY_TIME,
+        PID_TAG_CLIENT_SUBMIT_TIME,
         PID_TAG_MESSAGE_FLAGS,
+        PID_TAG_READ,
         PID_TAG_MESSAGE_SIZE,
         PID_TAG_SENDER_NAME_W,
         PID_TAG_SENDER_EMAIL_ADDRESS_W,
         PID_TAG_DISPLAY_TO_W,
+        PID_TAG_DISPLAY_CC_W,
         PID_TAG_HAS_ATTACHMENTS,
         PID_TAG_ENTRY_ID,
         PID_TAG_INSTANCE_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
     ]
 }
 
@@ -179,6 +194,7 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_LOCAL_COMMIT_TIME_MAX,
         PID_TAG_HIERARCHY_CHANGE_NUMBER,
         PID_TAG_HIER_REV,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
         PID_TAG_SOURCE_KEY,
         PID_TAG_PARENT_SOURCE_KEY,
         PID_TAG_CHANGE_KEY,
@@ -2317,6 +2333,9 @@ fn serialize_advertised_special_folder_row(
                 &mut row,
                 mapi_mailstore::filetime_from_change_number(change_number),
             ),
+            PID_TAG_SERIALIZED_REPLID_GUID_MAP => {
+                write_u16_prefixed_bytes(&mut row, &serialized_replid_guid_map())
+            }
             PID_TAG_HIERARCHY_CHANGE_NUMBER => {
                 write_u32(&mut row, change_number.min(u64::from(u32::MAX)) as u32)
             }
@@ -2482,6 +2501,9 @@ pub(in crate::mapi) fn serialize_root_folder_row(
                 &mut row,
                 mapi_mailstore::filetime_from_change_number(change_number),
             ),
+            PID_TAG_SERIALIZED_REPLID_GUID_MAP => {
+                write_u16_prefixed_bytes(&mut row, &serialized_replid_guid_map())
+            }
             PID_TAG_HIERARCHY_CHANGE_NUMBER => {
                 write_u32(&mut row, change_number.min(u64::from(u32::MAX)) as u32)
             }
@@ -2538,6 +2560,9 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
                 &mut row,
                 mapi_mailstore::filetime_from_change_number(change_number),
             ),
+            PID_TAG_SERIALIZED_REPLID_GUID_MAP => {
+                write_u16_prefixed_bytes(&mut row, &serialized_replid_guid_map())
+            }
             PID_TAG_HIERARCHY_CHANGE_NUMBER => {
                 write_u32(&mut row, change_number.min(u64::from(u32::MAX)) as u32)
             }
@@ -2577,6 +2602,60 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
 mod tests {
     use super::*;
     use lpe_storage::SearchFolderDefinition;
+
+    #[test]
+    fn default_hierarchy_columns_cover_table_projection_contract() {
+        let columns = default_hierarchy_columns();
+        for property_tag in [
+            PID_TAG_DISPLAY_NAME_W,
+            PID_TAG_FOLDER_ID,
+            PID_TAG_PARENT_FOLDER_ID,
+            PID_TAG_FOLDER_TYPE,
+            PID_TAG_ACCESS,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_PARENT_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_CHANGE_NUMBER,
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            PID_TAG_CONTAINER_CLASS_W,
+            PID_TAG_SERIALIZED_REPLID_GUID_MAP,
+            PID_TAG_SUBFOLDERS,
+        ] {
+            assert!(columns.contains(&property_tag));
+        }
+    }
+
+    #[test]
+    fn default_contents_columns_cover_table_projection_contract() {
+        let columns = default_contents_columns();
+        for property_tag in [
+            PID_TAG_MID,
+            PID_TAG_ENTRY_ID,
+            PID_TAG_INSTANCE_KEY,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_PARENT_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_CHANGE_NUMBER,
+            PID_TAG_SUBJECT_W,
+            PID_TAG_NORMALIZED_SUBJECT_W,
+            PID_TAG_MESSAGE_DELIVERY_TIME,
+            PID_TAG_CLIENT_SUBMIT_TIME,
+            PID_TAG_SENDER_NAME_W,
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            PID_TAG_DISPLAY_TO_W,
+            PID_TAG_DISPLAY_CC_W,
+            PID_TAG_MESSAGE_FLAGS,
+            PID_TAG_READ,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_MESSAGE_SIZE,
+            PID_TAG_HAS_ATTACHMENTS,
+        ] {
+            assert!(columns.contains(&property_tag));
+        }
+    }
 
     #[test]
     fn special_folder_rows_use_global_counters_for_change_xids() {
@@ -2983,8 +3062,17 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                 &mut row,
                 mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
             ),
+            PID_TAG_CLIENT_SUBMIT_TIME => write_u64(
+                &mut row,
+                email
+                    .sent_at
+                    .as_deref()
+                    .map(mapi_mailstore::filetime_from_rfc3339_utc)
+                    .unwrap_or_default(),
+            ),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
+            PID_TAG_READ => row.push((!email.unread) as u8),
             PID_TAG_MESSAGE_SIZE => {
                 write_u32(&mut row, email.size_octets.clamp(0, u32::MAX as i64) as u32)
             }
@@ -2994,6 +3082,7 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             ),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
             PID_TAG_DISPLAY_TO_W => write_utf16z(&mut row, &display_to(email)),
+            PID_TAG_DISPLAY_CC_W => write_utf16z(&mut row, &display_cc(email)),
             PID_TAG_HAS_ATTACHMENTS => row.push(email.has_attachments as u8),
             PID_TAG_BODY_W => write_utf16z(&mut row, &email.body_text),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
@@ -3437,6 +3526,21 @@ pub(in crate::mapi) fn serialize_pending_task_row(
 pub(in crate::mapi) fn display_to(email: &JmapEmail) -> String {
     email
         .to
+        .iter()
+        .map(|address| {
+            address
+                .display_name
+                .as_deref()
+                .unwrap_or(&address.address)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+pub(in crate::mapi) fn display_cc(email: &JmapEmail) -> String {
+    email
+        .cc
         .iter()
         .map(|address| {
             address

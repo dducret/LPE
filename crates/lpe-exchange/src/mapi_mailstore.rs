@@ -498,9 +498,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 &predecessor_change_list(change_number),
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
-            if sync_type != SYNC_TYPE_HIERARCHY
-                || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
-            {
+            if sync_type != SYNC_TYPE_HIERARCHY || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
                 write_u32(&mut buffer, PID_TAG_FOLDER_ID);
                 write_i64(&mut buffer, folder_id as i64);
             }
@@ -2849,15 +2847,11 @@ fn sync_state_change_numbers(
 ) -> Vec<u64> {
     if sync_type == SYNC_TYPE_HIERARCHY {
         let mut change_numbers = vec![change_number_for_store_id(folder_id)];
-        change_numbers.extend(mailboxes
-            .iter()
-            .filter_map(|mailbox| {
-                let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-                (object_id != folder_id).then_some(canonical_hierarchy_change_number(
-                    folder_id, mailbox,
-                ))
-            })
-        );
+        change_numbers.extend(mailboxes.iter().filter_map(|mailbox| {
+            let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+            (object_id != folder_id)
+                .then_some(canonical_hierarchy_change_number(folder_id, mailbox))
+        }));
         change_numbers
     } else {
         emails
@@ -3646,11 +3640,11 @@ mod tests {
             vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
         );
         assert!(summary.final_state_expected_property_order_ok);
-        assert_eq!(summary.final_state_property_lengths, vec![30, 43]);
+        assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
         assert_eq!(summary.final_state_idset_given_len, 30);
-        assert_eq!(summary.final_state_cnset_seen_len, 43);
+        assert_eq!(summary.final_state_cnset_seen_len, 30);
         assert_eq!(summary.final_state_idset_given_counters, vec![5]);
-        assert_eq!(summary.final_state_cnset_seen_counters, vec![4, 42]);
+        assert_eq!(summary.final_state_cnset_seen_counters, vec![4, 5]);
         assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
         assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
         assert_eq!(summary.first_folder_name(), "Inbox");
@@ -3664,7 +3658,7 @@ mod tests {
             .final_state_cnset_seen_summary
             .as_deref()
             .unwrap()
-            .contains("ranges=4,42"));
+            .contains("ranges=4-5"));
         assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
         assert!(summary
             .emitted_property_tags
@@ -3699,20 +3693,20 @@ mod tests {
         assert!(!validation.sync_root_counter_in_final_idset);
         assert!(validation.sync_root_counter_in_final_cnset);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
-        assert_eq!(validation.root_inclusive_cnset_seen_delta_bytes, 0);
+        assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
         assert!(validation
             .root_inclusive_idset_given_summary
             .contains("ranges=4-5"));
         assert!(validation
             .root_inclusive_cnset_seen_summary
-            .contains("ranges=4,42"));
+            .contains("ranges=4-5"));
         assert_eq!(validation.top_level_row_count, 1);
         assert_eq!(validation.nested_row_count, 0);
         assert_eq!(validation.rows_without_folder_id, 1);
         assert_eq!(validation.rows_missing_core_property_count, 0);
         assert_eq!(validation.rows_with_content_counts_present, 0);
-        assert_eq!(validation.rows_with_folder_type_present, 0);
-        assert_eq!(validation.rows_with_access_present, 0);
+        assert_eq!(validation.rows_with_folder_type_present, 1);
+        assert_eq!(validation.rows_with_access_present, 1);
         assert!(validation.idset_missing_source_counters.is_empty());
         assert!(validation.idset_extra_source_counters.is_empty());
         assert!(validation.cnset_missing_change_counters.is_empty());

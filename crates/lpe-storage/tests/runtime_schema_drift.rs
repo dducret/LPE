@@ -2316,6 +2316,117 @@ async fn exercise_mapi_cross_protocol_interoperability_gate(
     pool: &PgPool,
     fixture: &RuntimeFixture,
 ) -> Result<()> {
+    let draft = storage
+        .save_draft_message(
+            SubmitMessageInput {
+                draft_message_id: None,
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                source: "mapi".to_string(),
+                from_display: Some("Alice MAPI".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: vec![SubmittedRecipientInput {
+                    address: "draft-recipient@example.test".to_string(),
+                    display_name: Some("Draft Recipient".to_string()),
+                }],
+                cc: Vec::new(),
+                bcc: vec![SubmittedRecipientInput {
+                    address: "draft-hidden@example.test".to_string(),
+                    display_name: Some("Draft Hidden".to_string()),
+                }],
+                subject: "MAPI canonical draft gate".to_string(),
+                body_text: "MAPI draft canonical body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!("<mapi-draft-{}@example.test>", Uuid::new_v4())),
+                mime_blob_ref: None,
+                size_octets: 128,
+                unread: Some(false),
+                flagged: Some(true),
+                attachments: Vec::new(),
+            },
+            audit("alice@example.test", "mapi-save-draft", "MAPI draft gate"),
+        )
+        .await
+        .context("save MAPI-sourced canonical draft")?;
+    anyhow::ensure!(
+        draft.delivery_status == "draft",
+        "MAPI draft save must create canonical draft state"
+    );
+
+    let draft_jmap = storage
+        .fetch_jmap_emails(fixture.account_id, &[draft.message_id])
+        .await
+        .context("fetch JMAP projection for MAPI draft")?
+        .into_iter()
+        .next()
+        .context("MAPI draft missing from JMAP projection")?;
+    anyhow::ensure!(
+        draft_jmap.mailbox_ids == vec![draft.draft_mailbox_id]
+            && draft_jmap.mailbox_role == "drafts"
+            && draft_jmap.delivery_status == "draft"
+            && !draft_jmap.unread
+            && draft_jmap.flagged
+            && draft_jmap.bcc.is_empty(),
+        "JMAP projection must expose canonical MAPI draft state without protected Bcc"
+    );
+
+    let draft_imap = storage
+        .fetch_imap_emails(fixture.account_id, draft.draft_mailbox_id)
+        .await
+        .context("fetch IMAP projection for MAPI draft")?
+        .into_iter()
+        .find(|email| email.id == draft.message_id)
+        .context("MAPI draft missing from IMAP Drafts projection")?;
+    anyhow::ensure!(
+        !draft_imap.unread && draft_imap.flagged && draft_imap.bcc.is_empty(),
+        "IMAP projection must expose canonical MAPI draft flags without protected Bcc"
+    );
+
+    let draft_submission = storage
+        .submit_draft_message(
+            fixture.account_id,
+            draft.message_id,
+            fixture.account_id,
+            "mapi",
+            audit(
+                "alice@example.test",
+                "mapi-submit-draft",
+                "MAPI draft submit",
+            ),
+        )
+        .await
+        .context("submit MAPI-sourced canonical draft")?;
+    anyhow::ensure!(
+        draft_submission.delivery_status == "queued",
+        "MAPI draft submit must use canonical queued submission"
+    );
+
+    let old_draft_projection = storage
+        .fetch_jmap_emails(fixture.account_id, &[draft.message_id])
+        .await
+        .context("fetch old draft projection after MAPI submit")?;
+    anyhow::ensure!(
+        old_draft_projection.is_empty(),
+        "MAPI draft submit must remove the source draft from canonical projections"
+    );
+
+    let sent_draft_jmap = storage
+        .fetch_jmap_emails(fixture.account_id, &[draft_submission.message_id])
+        .await
+        .context("fetch JMAP projection for MAPI-submitted draft")?
+        .into_iter()
+        .next()
+        .context("MAPI-submitted draft missing from JMAP Sent projection")?;
+    anyhow::ensure!(
+        sent_draft_jmap.mailbox_ids == vec![draft_submission.sent_mailbox_id]
+            && sent_draft_jmap.mailbox_role == "sent"
+            && sent_draft_jmap.delivery_status == "queued"
+            && sent_draft_jmap.bcc.is_empty(),
+        "MAPI draft submit must create authoritative canonical Sent visible through JMAP"
+    );
+
     let submitted = storage
         .submit_message(
             SubmitMessageInput {

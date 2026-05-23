@@ -7,7 +7,7 @@ use super::store_adapter::*;
 use super::sync::*;
 use super::tables::*;
 use super::transport::*;
-use super::wire::RopId;
+use super::wire::{FastTransferMarker, MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::store::{MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncCheckpoint};
 
@@ -2192,6 +2192,16 @@ where
         let typed_request = request.typed();
         let mut completed_hierarchy_sync = None;
         let mut content_sync_configure_observed = false;
+        if matches!(request.rop_id, 0x07 | 0x0B | 0x7A)
+            && !property_tags_are_supported(&request.property_tags())
+        {
+            responses.extend_from_slice(&rop_error_response(
+                request.rop_id,
+                request.response_handle_index(),
+                0x8004_0102,
+            ));
+            break;
+        }
         match RopId::from_u8(typed_request.rop_id()) {
             Some(RopId::Release) => {
                 let released_object = input_object(session, &handle_slots, &request);
@@ -2623,43 +2633,51 @@ where
                     set_properties_object.as_ref(),
                     &set_properties_probe,
                 );
-                let set_result = match request.property_values() {
-                    Ok(values) => match set_properties_object {
-                        Some(
-                            object @ (MapiObject::Message { .. }
-                            | MapiObject::Contact { .. }
-                            | MapiObject::Event { .. }
-                            | MapiObject::Task { .. }
-                            | MapiObject::Note { .. }
-                            | MapiObject::JournalEntry { .. }
-                            | MapiObject::ConversationAction { .. }),
-                        ) => {
-                            apply_supported_object_property_values(
-                                store, principal, &object, values, mailboxes, emails, snapshot,
-                            )
-                            .await
+                let values = match request.property_values() {
+                    Ok(values) => values,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        break;
+                    }
+                };
+                let set_result = match set_properties_object {
+                    Some(
+                        object @ (MapiObject::Message { .. }
+                        | MapiObject::Contact { .. }
+                        | MapiObject::Event { .. }
+                        | MapiObject::Task { .. }
+                        | MapiObject::Note { .. }
+                        | MapiObject::JournalEntry { .. }
+                        | MapiObject::ConversationAction { .. }),
+                    ) => {
+                        apply_supported_object_property_values(
+                            store, principal, &object, values, mailboxes, emails, snapshot,
+                        )
+                        .await
+                    }
+                    object @ Some(MapiObject::Folder { .. }) => {
+                        let problems = folder_set_property_problems(object.as_ref(), &values);
+                        if !problems.is_empty() {
+                            responses.extend_from_slice(&rop_set_properties_problem_response(
+                                &request, &problems,
+                            ));
+                            continue;
                         }
-                        object @ Some(MapiObject::Folder { .. }) => {
-                            let problems = folder_set_property_problems(object.as_ref(), &values);
-                            if !problems.is_empty() {
-                                responses.extend_from_slice(&rop_set_properties_problem_response(
-                                    &request, &problems,
-                                ));
-                                continue;
-                            }
-                            let values =
-                                root_default_folder_safe_property_values(object.as_ref(), values);
-                            apply_mapi_property_values(
-                                input_object_mut(session, &handle_slots, &request),
-                                values,
-                            )
-                        }
-                        _object => apply_mapi_property_values(
+                        let values =
+                            root_default_folder_safe_property_values(object.as_ref(), values);
+                        apply_mapi_property_values(
                             input_object_mut(session, &handle_slots, &request),
                             values,
-                        ),
-                    },
-                    Err(error) => Err(error),
+                        )
+                    }
+                    _object => apply_mapi_property_values(
+                        input_object_mut(session, &handle_slots, &request),
+                        values,
+                    ),
                 };
                 match set_result {
                     Ok(()) => responses.extend_from_slice(&rop_set_properties_response(&request)),
@@ -3380,6 +3398,14 @@ where
                 | Some(MapiObject::ContentsTable { columns, .. })
                 | Some(MapiObject::AttachmentTable { columns, .. })
                 | Some(MapiObject::PermissionTable { columns, .. }) => {
+                    if !property_tags_are_supported(&request.property_tags()) {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x12,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        break;
+                    }
                     *columns = request.property_tags();
                     responses.extend_from_slice(&rop_set_columns_response(&request));
                 }
@@ -3444,11 +3470,14 @@ where
                         bookmarks.clear();
                         responses.extend_from_slice(&rop_restrict_response(&request));
                     }
-                    Err(_) => responses.extend_from_slice(&rop_error_response(
-                        0x14,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x14,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        break;
+                    }
                 },
                 _ => responses.extend_from_slice(&rop_error_response(
                     0x14,
@@ -4801,9 +4830,25 @@ where
                     continue;
                 };
                 let sync_type = request.sync_type();
+                if MapiSyncType::from_u8(sync_type).is_none() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x70,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    break;
+                }
                 let sync_flags = request.sync_flags();
                 let sync_extra_flags = request.sync_extra_flags();
                 let sync_property_tags = request.sync_property_tags();
+                if !property_tags_are_supported(&sync_property_tags) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x70,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    break;
+                }
                 let sync_property_tags_hex = sync_property_tags
                     .iter()
                     .map(|tag| format!("0x{tag:08x}"))
@@ -5164,6 +5209,17 @@ where
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_fast_transfer_source_copy_response(&request));
                 output_handles.push(handle);
+            }
+            Some(RopId::FastTransferDestinationPutBuffer)
+                if first_fast_transfer_marker(&request)
+                    .is_some_and(|marker| FastTransferMarker::from_u32(marker).is_none()) =>
+            {
+                responses.extend_from_slice(&rop_error_response(
+                    0x54,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                ));
+                break;
             }
             Some(
                 RopId::FastTransferSourceCopyFolder
@@ -6425,7 +6481,7 @@ where
                         0xFE,
                         request.response_handle_index(),
                     ));
-                    continue;
+                    break;
                 }
                 let handle =
                     session.allocate_output_handle(request.output_handle_index, MapiObject::Logon);
@@ -6437,10 +6493,13 @@ where
                 rop_id.as_u8(),
                 request.response_handle_index(),
             )),
-            None => responses.extend_from_slice(&unsupported_rop_response(
-                request.rop_id,
-                request.response_handle_index(),
-            )),
+            None => {
+                responses.extend_from_slice(&unsupported_rop_response(
+                    request.rop_id,
+                    request.response_handle_index(),
+                ));
+                break;
+            }
         }
         if let Some((sync_root_folder_id, get_buffer_summary)) = completed_hierarchy_sync {
             session.record_completed_hierarchy_sync(sync_root_folder_id, get_buffer_summary);
@@ -6490,6 +6549,20 @@ where
     } else {
         response
     }
+}
+
+fn property_tags_are_supported(property_tags: &[u32]) -> bool {
+    property_tags.iter().all(|tag| {
+        let property_type = (*tag & 0xFFFF) as u16;
+        property_type == 0 || MapiPropertyType::from_code(property_type).is_some()
+    })
+}
+
+fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
+    let size = u16::from_le_bytes(request.payload.get(..2)?.try_into().ok()?) as usize;
+    let bytes = request.payload.get(2..2 + size)?;
+    let marker = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
+    (marker & 0x4000_0000 != 0).then_some(marker)
 }
 
 async fn mapi_submit_attachments_from_email<S>(

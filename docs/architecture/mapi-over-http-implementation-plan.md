@@ -305,6 +305,10 @@ not by itself authorize broad client publication.
 
 Each supported Outlook version must have separate evidence. A pass for Outlook
 2016 does not imply a pass for Outlook 2019, and vice versa.
+Use `docs/architecture/outlook-cached-mode-gate-evidence-template.md` to record
+deployment, autodiscover, local harness, Microsoft RCA, real Outlook profile,
+and log evidence. Completing the template does not by itself mark the gate
+passed or authorize publication.
 
 Success criteria for each version:
 

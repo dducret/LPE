@@ -1230,7 +1230,6 @@ pub(in crate::mapi) fn nspi_lookup_matches_principal(
     let principal_entry = principal_address_book_entry(principal);
     value == email
         || value == display_name
-        || email.contains(value.as_str())
         || nspi_entry_matches(&principal_entry, &value)
 }
 

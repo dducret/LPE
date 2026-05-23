@@ -132,12 +132,15 @@ pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
 pub(in crate::mapi) const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
+pub(in crate::mapi) const PID_TAG_CLIENT_SUBMIT_TIME: u32 = 0x0039_0040;
+pub(in crate::mapi) const PID_TAG_DISPLAY_CC_W: u32 = 0x0E03_001F;
 pub(in crate::mapi) const PID_TAG_DISPLAY_TO_W: u32 = 0x0E04_001F;
 pub(in crate::mapi) const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
+pub(in crate::mapi) const PID_TAG_READ: u32 = 0x0E69_000B;
 pub(in crate::mapi) const PID_TAG_CONVERSATION_INDEX: u32 = 0x0071_0102;
 pub(in crate::mapi) const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 pub(in crate::mapi) const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
@@ -881,6 +884,7 @@ pub(in crate::mapi) fn mailbox_property_value_with_context(
         | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
             mapi_mailstore::canonical_folder_change_number(mailbox),
         ))),
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
         PID_TAG_HIERARCHY_CHANGE_NUMBER => Some(MapiValue::U32(
             mapi_mailstore::canonical_folder_change_number(mailbox).min(u64::from(u32::MAX)) as u32,
         )),
@@ -948,6 +952,7 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
             change_number,
         ))),
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
         PID_TAG_HIERARCHY_CHANGE_NUMBER => {
             Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
         }
@@ -997,8 +1002,13 @@ pub(in crate::mapi) fn email_property_value(
         | PID_TAG_LOCAL_COMMIT_TIME => Some(MapiValue::U64(
             mapi_mailstore::filetime_from_rfc3339_utc(&email.received_at),
         )),
+        PID_TAG_CLIENT_SUBMIT_TIME => email
+            .sent_at
+            .as_deref()
+            .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
+        PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
         PID_TAG_FLAG_COMPLETE_TIME => email
             .followup_completed_at
@@ -1037,6 +1047,7 @@ pub(in crate::mapi) fn email_property_value(
         )),
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
+        PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(email.has_attachments)),
         PID_TAG_BODY_W => Some(MapiValue::String(email.body_text.clone())),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
