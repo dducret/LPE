@@ -1072,6 +1072,11 @@ fn log_get_properties_specific_debug(
     } else {
         String::new()
     };
+    let outlook_bootstrap_row_shape = if outlook_bootstrap_getprops {
+        outlook_logon_bootstrap_row_shape(principal, columns)
+    } else {
+        OutlookLogonBootstrapRowShape::default()
+    };
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1104,9 +1109,43 @@ fn log_get_properties_specific_debug(
         unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
         returned_property_value_shapes = %returned_property_value_shapes,
         outlook_bootstrap_getprops = outlook_bootstrap_getprops,
+        outlook_bootstrap_estimated_rop_payload_bytes =
+            outlook_bootstrap_row_shape.estimated_rop_payload_bytes,
+        outlook_bootstrap_property_row_bytes = outlook_bootstrap_row_shape.property_row_bytes,
+        outlook_bootstrap_icon_row_bytes = outlook_bootstrap_row_shape.icon_row_bytes,
+        outlook_bootstrap_non_icon_row_bytes = outlook_bootstrap_row_shape.non_icon_row_bytes,
         outlook_bootstrap_property_details = %outlook_bootstrap_property_details,
         message = message,
     );
+}
+
+#[derive(Default)]
+struct OutlookLogonBootstrapRowShape {
+    estimated_rop_payload_bytes: usize,
+    property_row_bytes: usize,
+    icon_row_bytes: usize,
+    non_icon_row_bytes: usize,
+}
+
+fn outlook_logon_bootstrap_row_shape(
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) -> OutlookLogonBootstrapRowShape {
+    let mut shape = OutlookLogonBootstrapRowShape::default();
+    for tag in columns {
+        let value = serialize_logon_row(principal, &[*tag]);
+        shape.property_row_bytes += value.len();
+        if matches!(
+            *tag,
+            PID_TAG_SERVER_CONNECTED_ICON | PID_TAG_SERVER_ACCOUNT_ICON
+        ) {
+            shape.icon_row_bytes += value.len();
+        } else {
+            shape.non_icon_row_bytes += value.len();
+        }
+    }
+    shape.estimated_rop_payload_bytes = shape.property_row_bytes + 7;
+    shape
 }
 
 fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u32]) -> bool {
@@ -4948,6 +4987,7 @@ mod tests {
             &columns
         ));
         let details = format_outlook_logon_bootstrap_property_details(&principal, &columns);
+        let row_shape = outlook_logon_bootstrap_row_shape(&principal, &columns);
 
         assert!(details.contains("provider_uid_matches_nspi=true"));
         assert!(details.contains("r4=0x00000001"));
@@ -4955,6 +4995,10 @@ mod tests {
         assert!(details.contains("private=true"));
         assert!(details.contains("bit_count=32"));
         assert!(details.contains("length_matches_directory=true"));
+        assert_eq!(row_shape.estimated_rop_payload_bytes, 2453);
+        assert_eq!(row_shape.property_row_bytes, 2446);
+        assert_eq!(row_shape.icon_row_bytes, 2304);
+        assert_eq!(row_shape.non_icon_row_bytes, 142);
     }
 
     #[test]
