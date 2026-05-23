@@ -1226,11 +1226,10 @@ pub(in crate::mapi) fn nspi_lookup_matches_principal(
 ) -> bool {
     let value = normalize_nspi_lookup_value(value);
     let email = principal.email.to_ascii_lowercase();
-    let display_name = principal.display_name.to_ascii_lowercase();
     let principal_entry = principal_address_book_entry(principal);
     value == email
-        || value == display_name
-        || nspi_entry_matches(&principal_entry, &value)
+        || value == nspi_entry_legacy_dn(&principal_entry).to_ascii_lowercase()
+        || value == nspi_entry_unprefixed_legacy_dn(&principal_entry).to_ascii_lowercase()
 }
 
 pub(in crate::mapi) fn nspi_requested_entry<'a>(

@@ -167,7 +167,7 @@ not by itself authorize broad client publication.
 
 - Hierarchy synchronization emits canonical folder identities, source keys,
   change keys, predecessor lists, special-folder fields, content counts, unread
-  counts, and final state.
+  counts, `PidTagLocalCommitTimeMax`, `PidTagDeletedCountTotal`, and final state.
 - Contents synchronization emits canonical message-change rows, folder-associated
   information rows for the bounded bootstrap surface, conversation action FAI
   rows, destroyed conversation actions as `IncrSyncDel`, tombstones, read-state

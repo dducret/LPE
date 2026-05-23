@@ -2973,6 +2973,7 @@ const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
+const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
@@ -3016,6 +3017,7 @@ struct StrictHierarchyFolderChange {
     content_count: Option<u32>,
     content_unread_count: Option<u32>,
     local_commit_time_max: Option<u64>,
+    deleted_count_total: Option<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -3031,6 +3033,7 @@ struct StrictHierarchyFolderBuilder {
     content_count: Option<u32>,
     content_unread_count: Option<u32>,
     local_commit_time_max: Option<u64>,
+    deleted_count_total: Option<u32>,
 }
 
 struct StrictFastTransferProperty {
@@ -3311,6 +3314,9 @@ fn strict_record_folder_property(
         PID_TAG_LOCAL_COMMIT_TIME_MAX => {
             folder.local_commit_time_max = Some(strict_decode_u64_property(&property)?);
         }
+        PID_TAG_DELETED_COUNT_TOTAL => {
+            folder.deleted_count_total = Some(strict_decode_u32_property(&property)?);
+        }
         PID_TAG_SUBFOLDERS => {
             if property.value.len() != 2 {
                 return Err("PidTagSubfolders was not encoded as a two-byte PtypBoolean".into());
@@ -3428,6 +3434,7 @@ fn strict_finish_folder_change(
         content_count: folder.content_count,
         content_unread_count: folder.content_unread_count,
         local_commit_time_max: folder.local_commit_time_max,
+        deleted_count_total: folder.deleted_count_total,
     });
     Ok(())
 }
@@ -16527,8 +16534,8 @@ async fn mapi_over_http_hierarchy_sync_manifest_includes_folder_change_key_facts
     assert!(contains_bytes(&response_rops, &predecessor_change_list));
     let mut local_commit_time_property = 0x670A_0040u32.to_le_bytes().to_vec();
     local_commit_time_property.extend_from_slice(&(local_commit_time_max as i64).to_le_bytes());
-    assert!(!contains_bytes(&response_rops, &local_commit_time_property));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(&response_rops, &local_commit_time_property));
+    assert!(contains_bytes(
         &response_rops,
         &0x670B_0003u32.to_le_bytes()
     ));
@@ -17715,7 +17722,7 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_hierarchy_sync_omits_content_activity_properties() {
+async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
     let inbox_id = Uuid::parse_str("94949494-9494-4494-9494-949494949494").unwrap();
     let sent_id = Uuid::parse_str("96969696-9696-4696-9696-969696969696").unwrap();
     let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
@@ -17769,10 +17776,18 @@ async fn mapi_over_http_hierarchy_sync_omits_content_activity_properties() {
     append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(4));
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
-        0x02, 0x00, 0x00, 0x00, // hierarchy sync
+        0x02, 0x09, 0x01, 0x01, // hierarchy sync, Unicode + NoForeignIdentifiers
         0x00, 0x00, // RestrictionDataSize
-        0x01, 0x00, 0x00, 0x00, // SynchronizationExtraFlags, Eid
-        0x00, 0x00, // PropertyTagCount
+        0x00, 0x00, 0x00, 0x00, // SynchronizationExtraFlags
+        0x08, 0x00, // PropertyTagCount
+        0x03, 0x00, 0x01, 0x36, // PidTagFolderType
+        0x03, 0x00, 0x02, 0x36, // PidTagContentCount
+        0x03, 0x00, 0x03, 0x36, // PidTagContentUnreadCount
+        0x03, 0x00, 0x08, 0x0e, // PidTagMessageSize
+        0x03, 0x00, 0xf4, 0x0f, // PidTagAccess
+        0x02, 0x01, 0xe0, 0x3f, // PidTagMappingSignature
+        0x02, 0x01, 0xe1, 0x3f, // PidTagRecordKey
+        0x02, 0x01, 0x27, 0x0e, // PidTagOrdinalMost
         0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&8192u16.to_le_bytes());
@@ -17793,9 +17808,11 @@ async fn mapi_over_http_hierarchy_sync_omits_content_activity_properties() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
+    assert_eq!(inbox.folder_id, None);
     assert_eq!(inbox.content_count, None);
     assert_eq!(inbox.content_unread_count, None);
-    assert_eq!(inbox.local_commit_time_max, None);
+    assert!(inbox.local_commit_time_max.unwrap_or_default() > 0);
+    assert_eq!(inbox.deleted_count_total, Some(0));
 }
 
 #[tokio::test]

@@ -442,9 +442,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 aggregate_emails,
                 aggregate_attachment_facts,
             );
-            let local_commit_time_max_present = sync_type != SYNC_TYPE_HIERARCHY
-                && local_commit_time_max != 0
+            let local_commit_time_max_present = local_commit_time_max != 0
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
+            let deleted_count_total_present =
+                !property_tag_excluded(excluded_property_tags, PID_TAG_DELETED_COUNT_TOTAL);
             let content_count_present = sync_type != SYNC_TYPE_HIERARCHY
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_CONTENT_COUNT);
             let content_unread_count_present = sync_type != SYNC_TYPE_HIERARCHY
@@ -472,7 +473,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 content_unread_count_present,
                 local_commit_time_max,
                 local_commit_time_max_present,
-                deleted_count_total_present = false,
+                deleted_count_total_present,
                 folder_type_excluded =
                     property_tag_excluded(excluded_property_tags, PID_TAG_FOLDER_TYPE),
                 access_excluded = property_tag_excluded(excluded_property_tags, PID_TAG_ACCESS),
@@ -534,6 +535,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             if local_commit_time_max_present {
                 write_u32(&mut buffer, PID_TAG_LOCAL_COMMIT_TIME_MAX);
                 write_i64(&mut buffer, local_commit_time_max as i64);
+            }
+            if deleted_count_total_present {
+                write_i32_property(&mut buffer, PID_TAG_DELETED_COUNT_TOTAL, 0);
             }
             write_bool_property(
                 &mut buffer,
@@ -3832,10 +3836,10 @@ mod tests {
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
         let row = summary.rows.first().expect("folder row");
 
-        assert!(!summary
+        assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
-        assert!(!summary
+        assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_DELETED_COUNT_TOTAL));
         assert!(!summary
@@ -3850,8 +3854,8 @@ mod tests {
         assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert_eq!(row.local_commit_time_max, None);
-        assert_eq!(row.deleted_count_total, None);
+        assert!(row.local_commit_time_max.is_some());
+        assert_eq!(row.deleted_count_total, Some(0));
         assert_eq!(row.change_number, None);
         assert_eq!(row.content_count, None);
         assert_eq!(row.content_unread_count, None);
