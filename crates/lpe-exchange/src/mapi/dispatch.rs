@@ -5089,6 +5089,8 @@ where
                     checkpoint_delta_special_object_count = delta_special_sync_objects.len(),
                     checkpoint_deleted_message_count,
                     current_change_sequence = changes.current_change_sequence,
+                    generated_sync_state_summary =
+                        %mapi_mailstore::final_sync_state_debug_summary(&state),
                     transfer_buffer_bytes = transfer_buffer.len(),
                     incremental_transfer_buffer_bytes,
                     "rca debug mapi sync configure"
@@ -5283,6 +5285,8 @@ where
                             checkpoint_change_sequence = *checkpoint_change_sequence,
                             checkpoint_modseq = *checkpoint_modseq,
                             sync_state_bytes = state.len(),
+                            sync_state_summary =
+                                %mapi_mailstore::final_sync_state_debug_summary(state),
                             upload_state_buffer_bytes = state_upload_buffer.len(),
                             upload_state_client_bytes = *client_state_uploaded_bytes,
                             incremental_transfer_available = incremental_transfer_buffer.is_some(),
@@ -5521,6 +5525,8 @@ where
                         ..
                     }) => {
                         let uploaded_bytes = state_upload_buffer.len();
+                        let upload_state_stream_summary =
+                            mapi_mailstore::replguid_globset_debug_summary(state_upload_buffer);
                         let may_use_incremental = *client_state_uploaded_bytes == 0;
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
@@ -5543,6 +5549,7 @@ where
                             folder_id = format_args!("0x{:016x}", *folder_id),
                             upload_state_total_bytes = state.len(),
                             upload_state_stream_bytes = uploaded_bytes,
+                            upload_state_stream_summary = %upload_state_stream_summary,
                             upload_state_client_bytes = *client_state_uploaded_bytes,
                             upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
                             transfer_buffer_bytes = transfer_buffer.len(),

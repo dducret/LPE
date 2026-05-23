@@ -2113,6 +2113,34 @@ fn format_property_tags(tags: &[u32]) -> String {
         .join(",")
 }
 
+pub(crate) fn replguid_globset_debug_summary(value: &[u8]) -> String {
+    format_replguid_globset_debug(value)
+}
+
+pub(crate) fn final_sync_state_debug_summary(value: &[u8]) -> String {
+    match decode_hierarchy_transfer_debug_summary(value) {
+        Ok(summary) => format!(
+            "bytes={};property_tags={};expected_order={};idset={};cnset={}",
+            value.len(),
+            format_property_tags(&summary.final_state_property_tags),
+            summary.final_state_expected_property_order_ok,
+            summary
+                .final_state_idset_given_summary
+                .as_deref()
+                .unwrap_or("missing"),
+            summary
+                .final_state_cnset_seen_summary
+                .as_deref()
+                .unwrap_or("missing")
+        ),
+        Err(error) => format!(
+            "bytes={};preview={};parse_error={error}",
+            value.len(),
+            format_debug_hex(&value[..value.len().min(32)])
+        ),
+    }
+}
+
 fn format_marker_tags(tags: &[u32]) -> String {
     tags.iter()
         .map(|tag| format!("{}:0x{tag:08x}", fast_transfer_marker_debug_name(*tag)))
