@@ -1326,12 +1326,11 @@ fn hierarchy_semantic_validation(
         .iter()
         .filter_map(|row| row.source_counter)
         .collect::<Vec<_>>();
-    let mut expected_change_counters = summary
+    let expected_change_counters = summary
         .rows
         .iter()
         .filter_map(|row| row.change_counter)
         .collect::<Vec<_>>();
-    expected_change_counters.push(sync_root_change_counter);
     let top_level_rows = summary
         .rows
         .iter()
@@ -2857,11 +2856,10 @@ fn sync_state_change_numbers(
     attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> Vec<u64> {
     if sync_type == SYNC_TYPE_HIERARCHY {
-        let mut change_numbers = mailboxes
+        let change_numbers = mailboxes
             .iter()
             .map(|mailbox| canonical_hierarchy_change_number(folder_id, mailbox))
             .collect::<Vec<_>>();
-        change_numbers.push(change_number_for_store_id(folder_id));
         change_numbers
     } else {
         emails
