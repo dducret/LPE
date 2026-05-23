@@ -498,8 +498,12 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 &predecessor_change_list(change_number),
             );
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
-            write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-            write_i64(&mut buffer, folder_id as i64);
+            if sync_type != SYNC_TYPE_HIERARCHY
+                || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
+            {
+                write_u32(&mut buffer, PID_TAG_FOLDER_ID);
+                write_i64(&mut buffer, folder_id as i64);
+            }
             if sync_type != SYNC_TYPE_HIERARCHY
                 || sync_flags & 0x0100 != 0
                 || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
@@ -3672,10 +3676,7 @@ mod tests {
         assert!(summary.rows[0]
             .property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert_eq!(
-            summary.rows[0].folder_id,
-            Some(crate::mapi::identity::INBOX_FOLDER_ID)
-        );
+        assert_eq!(summary.rows[0].folder_id, None);
         assert_eq!(summary.rows[0].source_key_len, 22);
         assert_eq!(summary.rows[0].parent_source_key_len, 0);
         assert!(hierarchy_identity_properties_before_display_name(
@@ -3707,7 +3708,7 @@ mod tests {
             .contains("ranges=4,42"));
         assert_eq!(validation.top_level_row_count, 1);
         assert_eq!(validation.nested_row_count, 0);
-        assert_eq!(validation.rows_without_folder_id, 0);
+        assert_eq!(validation.rows_without_folder_id, 1);
         assert_eq!(validation.rows_missing_core_property_count, 0);
         assert_eq!(validation.rows_with_content_counts_present, 0);
         assert_eq!(validation.rows_with_folder_type_present, 0);
@@ -3934,7 +3935,7 @@ mod tests {
         assert_eq!(validation.semantic_flags, "ok");
         assert_eq!(validation.top_level_row_count, 16);
         assert_eq!(validation.nested_row_count, 3);
-        assert_eq!(validation.rows_without_folder_id, 0);
+        assert_eq!(validation.rows_without_folder_id, expected_folder_count);
         assert_eq!(validation.rows_missing_core_property_count, 0);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
         assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
@@ -3983,11 +3984,8 @@ mod tests {
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
 
         assert_eq!(summary.rows.len(), 1);
-        assert_eq!(
-            summary.rows[0].folder_id,
-            Some(crate::mapi::identity::INBOX_FOLDER_ID)
-        );
-        assert!(summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
+        assert_eq!(summary.rows[0].folder_id, None);
+        assert!(!summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
     }
 
     #[test]
