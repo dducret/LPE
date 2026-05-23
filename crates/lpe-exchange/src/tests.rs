@@ -90,6 +90,37 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
 }
 
 #[tokio::test]
+async fn mapi_full_snapshot_loads_messages_without_search_index_query() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        fail_query_jmap_email_ids: true,
+        ..FakeStore::default()
+    };
+    let mailbox = FakeStore::mailbox(
+        "44444444-4444-4444-4444-444444444444",
+        "inbox",
+        "Inbox",
+    );
+    let email = FakeStore::email(
+        "99999999-9999-9999-9999-999999999999",
+        &mailbox.id.to_string(),
+        "inbox",
+        "Visible without search document",
+    );
+    store.mailboxes.lock().unwrap().push(mailbox);
+    store.emails.lock().unwrap().push(email);
+
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+
+    assert_eq!(snapshot.messages().len(), 1);
+    assert_eq!(store.queried_jmap_email_ids.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -1795,6 +1826,17 @@ impl ExchangeStore for FakeStore {
             .map(|email| email.id)
             .collect();
         Box::pin(async move { Ok(MapiContentTableQueryResult { ids, total }) })
+    }
+
+    fn fetch_all_jmap_email_ids<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
+        let ids = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|email| email.id)
+            .collect();
+        Box::pin(async move { Ok(ids) })
     }
 
     fn fetch_jmap_emails<'a>(
@@ -15804,7 +15846,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         )
         .await
         .unwrap();
-    assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 1);
+    assert_eq!(queried_jmap_email_ids.load(Ordering::SeqCst), 0);
     let response_rops = response_rops_from_execute_response(response).await;
     let get_buffer_response_offset = response_rops
         .windows(6)

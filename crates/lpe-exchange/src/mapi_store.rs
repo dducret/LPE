@@ -807,10 +807,9 @@ impl<T: ExchangeStore> MapiStore for T {
     ) -> StoreFuture<'a, MapiMailStoreSnapshot> {
         Box::pin(async move {
             let mailboxes = self.ensure_jmap_system_mailboxes(account_id).await?;
-            let query = self
-                .query_jmap_email_ids(account_id, None, None, 0, message_limit)
-                .await?;
-            let emails = self.fetch_jmap_emails(account_id, &query.ids).await?;
+            let mut message_ids = self.fetch_all_jmap_email_ids(account_id).await?;
+            message_ids.truncate(message_limit.min(usize::MAX as u64) as usize);
+            let emails = self.fetch_jmap_emails(account_id, &message_ids).await?;
             let mut attachments = Vec::with_capacity(emails.len());
             for email in &emails {
                 let message_attachments =

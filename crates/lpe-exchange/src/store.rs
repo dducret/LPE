@@ -650,6 +650,8 @@ pub trait ExchangeStore: AccountAuthStore {
         limit: u64,
     ) -> StoreFuture<'a, JmapEmailQuery>;
 
+    fn fetch_all_jmap_email_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>>;
+
     fn query_mapi_content_table_ids<'a>(
         &'a self,
         account_id: Uuid,
@@ -2292,6 +2294,10 @@ impl ExchangeStore for Storage {
                 total: total.max(0) as u64,
             })
         })
+    }
+
+    fn fetch_all_jmap_email_ids<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<Uuid>> {
+        Box::pin(async move { self.fetch_all_jmap_email_ids(account_id).await })
     }
 
     fn fetch_jmap_emails<'a>(
