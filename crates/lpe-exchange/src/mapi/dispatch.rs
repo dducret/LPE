@@ -5246,7 +5246,7 @@ where
                             completed_hierarchy_sync = Some((
                                 *folder_id,
                                 format!(
-                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
+                                    "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};state_summary={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
                                     *folder_id,
                                     checkpoint_kind.as_str(),
                                     (*mailbox_id)
@@ -5255,6 +5255,7 @@ where
                                     *checkpoint_change_sequence,
                                     *checkpoint_modseq,
                                     state.len(),
+                                    mapi_mailstore::final_sync_state_debug_summary(state),
                                     state_upload_buffer.len(),
                                     *client_state_uploaded_bytes,
                                     incremental_transfer_buffer.is_some(),
