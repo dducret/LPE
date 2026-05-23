@@ -524,7 +524,7 @@ impl Storage {
                 attendees_json::text AS attendees_json,
                 body_text AS notes
             FROM calendar_events
-            WHERE contacts.tenant_id = $1 AND contacts.owner_account_id = $2
+            WHERE tenant_id = $1 AND owner_account_id = $2
             ORDER BY starts_at ASC, id ASC
             "#,
         )
@@ -562,9 +562,9 @@ impl Storage {
                 attendees_json::text AS attendees_json,
                 body_text AS notes
             FROM calendar_events
-            WHERE contacts.tenant_id = $1
-              AND contacts.owner_account_id = $2
-              AND contacts.id = ANY($3)
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = ANY($3)
             ORDER BY starts_at ASC, id ASC
             "#,
         )

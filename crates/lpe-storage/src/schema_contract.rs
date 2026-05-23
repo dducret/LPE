@@ -1744,6 +1744,11 @@ fn activesync_sync_state_uses_v2_cursor_table() {
 
 #[test]
 fn runtime_collaboration_sql_uses_canonical_v2_columns() {
+    assert!(
+        !WORKSPACE_STORAGE.contains("FROM calendar_events\n            WHERE contacts."),
+        "workspace calendar queries must filter calendar_events, not contacts"
+    );
+
     for (name, source) in [
         ("workspace.rs", WORKSPACE_STORAGE),
         ("collaboration.rs", COLLABORATION_STORAGE),
