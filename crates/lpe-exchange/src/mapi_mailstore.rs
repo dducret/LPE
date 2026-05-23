@@ -442,7 +442,8 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 aggregate_emails,
                 aggregate_attachment_facts,
             );
-            let local_commit_time_max_present = local_commit_time_max != 0
+            let local_commit_time_max_present = sync_type != SYNC_TYPE_HIERARCHY
+                && local_commit_time_max != 0
                 && !property_tag_excluded(excluded_property_tags, PID_TAG_LOCAL_COMMIT_TIME_MAX);
             let hierarchy_core_folder_facts_forced = sync_type == SYNC_TYPE_HIERARCHY;
             let display_name = mapi_folder_display_name(mailbox);
@@ -3842,7 +3843,7 @@ mod tests {
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
         let row = summary.rows.first().expect("folder row");
 
-        assert!(summary
+        assert!(!summary
             .emitted_property_tags
             .contains(&PID_TAG_LOCAL_COMMIT_TIME_MAX));
         assert!(!summary
@@ -3854,7 +3855,7 @@ mod tests {
         assert!(summary
             .emitted_property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert!(row.local_commit_time_max.is_some());
+        assert_eq!(row.local_commit_time_max, None);
         assert_eq!(row.deleted_count_total, None);
         assert_eq!(row.change_number, None);
         assert!(row.missing_core_property_tags.is_empty());
