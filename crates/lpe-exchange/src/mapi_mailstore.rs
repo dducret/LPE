@@ -2858,7 +2858,12 @@ fn sync_state_change_numbers(
     if sync_type == SYNC_TYPE_HIERARCHY {
         let change_numbers = mailboxes
             .iter()
-            .map(|mailbox| canonical_hierarchy_change_number(folder_id, mailbox))
+            .filter_map(|mailbox| {
+                let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
+                (object_id != folder_id).then_some(canonical_hierarchy_change_number(
+                    folder_id, mailbox,
+                ))
+            })
             .collect::<Vec<_>>();
         change_numbers
     } else {
