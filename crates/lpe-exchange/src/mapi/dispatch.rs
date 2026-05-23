@@ -6918,22 +6918,26 @@ mod tests {
     }
 
     #[test]
-    fn ipm_subtree_ostid_write_is_not_retained_as_mutable_state() {
+    fn ipm_subtree_ostid_write_is_retained_as_session_mutable_state() {
         let mut ipm_subtree = MapiObject::Folder {
             folder_id: IPM_SUBTREE_FOLDER_ID,
             properties: std::collections::HashMap::new(),
         };
+        let client_ostid = vec![1; 40];
 
         apply_mapi_property_values(
             Some(&mut ipm_subtree),
-            vec![(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
+            vec![(PID_TAG_OST_OSTID, MapiValue::Binary(client_ostid.clone()))],
         )
         .unwrap();
 
         let MapiObject::Folder { properties, .. } = ipm_subtree else {
             panic!("expected folder object");
         };
-        assert!(!properties.contains_key(&PID_TAG_OST_OSTID));
+        assert_eq!(
+            properties.get(&PID_TAG_OST_OSTID),
+            Some(&MapiValue::Binary(client_ostid))
+        );
     }
 
     #[test]

@@ -3612,9 +3612,8 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             properties,
         }) => {
             properties.extend(values.into_iter().filter(|(tag, _)| {
-                !(*folder_id == IPM_SUBTREE_FOLDER_ID && *tag == PID_TAG_OST_OSTID)
-                    && !(*folder_id == ROOT_FOLDER_ID
-                        && is_default_folder_identification_property_tag(*tag))
+                !(*folder_id == ROOT_FOLDER_ID
+                    && is_default_folder_identification_property_tag(*tag))
             }));
             Ok(())
         }

@@ -2010,20 +2010,20 @@ fn serialize_session_folder_row(
     let mut row = Vec::new();
     for column in columns {
         let storage_tag = canonical_property_storage_tag(*column);
+        if let Some(value) = properties
+            .get(&storage_tag)
+            .or_else(|| properties.get(column))
+        {
+            write_mapi_value(&mut row, *column, value);
+            continue;
+        }
+
         if folder_id == IPM_SUBTREE_FOLDER_ID && storage_tag == PID_TAG_OST_OSTID {
             write_mapi_value(
                 &mut row,
                 *column,
                 &MapiValue::Binary(ipm_subtree_ost_ostid(principal)),
             );
-            continue;
-        }
-
-        if let Some(value) = properties
-            .get(&storage_tag)
-            .or_else(|| properties.get(column))
-        {
-            write_mapi_value(&mut row, *column, value);
             continue;
         }
 
@@ -4999,6 +4999,38 @@ mod tests {
         assert_eq!(row_shape.property_row_bytes, 2446);
         assert_eq!(row_shape.icon_row_bytes, 2304);
         assert_eq!(row_shape.non_icon_row_bytes, 142);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn ipm_subtree_ostid_read_prefers_session_client_write() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+        let client_ostid = vec![0x42; 40];
+        let mut folder = MapiObject::Folder {
+            folder_id: IPM_SUBTREE_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        apply_mapi_property_values(
+            Some(&mut folder),
+            vec![(PID_TAG_OST_OSTID, MapiValue::Binary(client_ostid.clone()))],
+        )
+        .unwrap();
+        let row = serialize_object_property(
+            Some(&folder),
+            &principal,
+            &[],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+            PID_TAG_OST_OSTID,
+        );
+
+        assert_eq!(u16::from_le_bytes(row[0..2].try_into().unwrap()), 40);
+        assert_eq!(&row[2..], client_ostid.as_slice());
     }
 
     #[test]
