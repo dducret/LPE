@@ -2990,7 +2990,8 @@ const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
 const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 14;
-const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
+const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
+const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_IDSET_READ: u32 = 0x402D_0102;
 const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
@@ -3141,7 +3142,7 @@ fn strict_decode_hierarchy_sync_stream(bytes: &[u8]) -> Result<StrictHierarchySy
             strict_record_folder_property(folder, property)?;
         } else if in_state {
             match property.tag {
-                META_TAG_IDSET_GIVEN => {
+                META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => {
                     if idset_given.replace(property.value).is_some() {
                         return Err("duplicate MetaTagIdsetGiven in final ICS state".into());
                     }
@@ -3214,6 +3215,10 @@ fn strict_parse_fast_transfer_property(
     let property_type = tag & 0x0000_FFFF;
     let value_start = offset + 4;
     let (value_start, value_len) = match property_type {
+        _ if tag == META_TAG_IDSET_GIVEN => {
+            let len = read_strict_u32(bytes, value_start)? as usize;
+            (value_start + 4, len)
+        }
         0x0002 => (value_start, 2),
         0x0003 => (value_start, 4),
         0x000B => {
@@ -3797,7 +3802,7 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                 tag => return Err(format!("unexpected read-state property 0x{tag:08x}")),
             },
             StrictContentSection::State => match property.tag {
-                META_TAG_IDSET_GIVEN => {
+                META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => {
                     if idset_given.replace(property.value).is_some() {
                         return Err("duplicate MetaTagIdsetGiven in final ICS state".into());
                     }
@@ -7466,7 +7471,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
     ));
     assert!(contains_bytes(
         &response_rops,
-        &0x4017_0102u32.to_le_bytes()
+        &META_TAG_IDSET_GIVEN.to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,

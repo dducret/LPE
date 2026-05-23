@@ -55,7 +55,8 @@ const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const META_TAG_IDSET_GIVEN: u32 = 0x4017_0102;
+const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
+const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
 const META_TAG_IDSET_READ: u32 = 0x402D_0102;
 const META_TAG_IDSET_UNREAD: u32 = 0x402E_0102;
@@ -1735,7 +1736,7 @@ fn collect_final_state_debug_property(
         .final_state_property_lengths
         .push(property.value.len());
     match property.tag {
-        META_TAG_IDSET_GIVEN => {
+        META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => {
             summary.final_state_idset_given_len = property.value.len();
             summary.final_state_idset_given_summary =
                 Some(format_replguid_globset_debug(&property.value));
@@ -2017,7 +2018,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FOLDER_ID => "PidTagFolderId",
         PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_CHANGE_NUMBER => "PidTagChangeNumber",
-        META_TAG_IDSET_GIVEN => "MetaTagIdsetGiven",
+        META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => "MetaTagIdsetGiven",
         META_TAG_IDSET_READ => "MetaTagIdsetRead",
         META_TAG_IDSET_UNREAD => "MetaTagIdsetUnread",
         META_TAG_CNSET_SEEN => "MetaTagCnsetSeen",
@@ -2058,6 +2059,10 @@ fn parse_debug_fast_transfer_property(
     let property_type = tag & 0x0000_FFFF;
     let value_start = offset + 4;
     let (value_start, value_len) = match property_type {
+        _ if tag == META_TAG_IDSET_GIVEN => {
+            let len = read_debug_u32(bytes, value_start)? as usize;
+            (value_start + 4, len)
+        }
         0x0002 => (value_start, 2),
         0x0003 => (value_start, 4),
         0x000B => (value_start, 2),

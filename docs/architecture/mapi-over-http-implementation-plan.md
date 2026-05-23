@@ -168,6 +168,8 @@ not by itself authorize broad client publication.
 - Hierarchy synchronization emits canonical folder identities, source keys,
   change keys, predecessor lists, special-folder fields, content counts, unread
   counts, `PidTagLocalCommitTimeMax`, `PidTagDeletedCountTotal`, and final state.
+  `MetaTagIdsetGiven` is sent as property tag `0x40170003` while its payload is
+  serialized as binary, matching the Microsoft ICS state compatibility rule.
 - Contents synchronization emits canonical message-change rows, folder-associated
   information rows for the bounded bootstrap surface, conversation action FAI
   rows, destroyed conversation actions as `IncrSyncDel`, tombstones, read-state
