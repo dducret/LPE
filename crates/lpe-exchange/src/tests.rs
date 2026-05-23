@@ -15922,9 +15922,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         &0x65E1_0102u32.to_le_bytes()
     ));
     let mut ipm_child_parent_source_key = 0x65E1_0102u32.to_le_bytes().to_vec();
-    let ipm_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
-    ipm_child_parent_source_key.extend_from_slice(&(ipm_source_key.len() as u32).to_le_bytes());
-    ipm_child_parent_source_key.extend_from_slice(&ipm_source_key);
+    ipm_child_parent_source_key.extend_from_slice(&0u32.to_le_bytes());
     assert!(contains_bytes(
         &response_rops,
         &ipm_child_parent_source_key
@@ -16091,7 +16089,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         .expect("Sync Issues folderChange");
     assert_eq!(
         sync_issues.parent_source_key,
-        mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4))
+        Vec::<u8>::new()
     );
     let sync_issues_source_key = sync_issues.source_key.clone();
     for name in ["Conflicts", "Local Failures", "Server Failures"] {
@@ -16142,7 +16140,7 @@ fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy
     assert_eq!(decoded.folder_changes[0].folder_type, Some(1));
     assert_eq!(
         decoded.folder_changes[0].parent_source_key,
-        mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4))
+        Vec::<u8>::new()
     );
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
@@ -16928,7 +16926,7 @@ async fn mapi_over_http_hierarchy_sync_fast_transfer_stream_decodes_strictly() {
         .expect("custom Archive folderChange");
     assert_eq!(
         decoded.folder_changes[projects].parent_source_key,
-        mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4))
+        Vec::<u8>::new()
     );
     assert!(decoded.folder_changes[archive]
         .parent_source_key

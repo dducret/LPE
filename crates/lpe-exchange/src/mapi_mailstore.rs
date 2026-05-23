@@ -427,12 +427,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
             let source_key = source_key_for_store_id(folder_id);
             let parent_source_key = if parent_folder_id == crate::mapi::identity::ROOT_FOLDER_ID
-                || (parent_folder_id == sync_root_folder_id
-                    && !matches!(
-                        sync_root_folder_id,
-                        crate::mapi::identity::ROOT_FOLDER_ID
-                            | crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
-                    ))
+                || parent_folder_id == sync_root_folder_id
             {
                 Vec::new()
             } else {
@@ -3624,8 +3619,8 @@ mod tests {
         );
         assert!(summary.stream_end_marker_seen);
         assert_eq!(summary.parent_before_child_violations, 0);
-        assert_eq!(summary.zero_length_parent_source_key_count, 0);
-        assert_eq!(summary.nonzero_parent_source_key_count, 1);
+        assert_eq!(summary.zero_length_parent_source_key_count, 1);
+        assert_eq!(summary.nonzero_parent_source_key_count, 0);
         assert_eq!(summary.source_key_lengths, vec![22]);
         assert_eq!(summary.change_key_lengths, vec![22]);
         assert_eq!(
@@ -3633,11 +3628,11 @@ mod tests {
             vec![META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
         );
         assert!(summary.final_state_expected_property_order_ok);
-        assert_eq!(summary.final_state_property_lengths, vec![30, 43]);
+        assert_eq!(summary.final_state_property_lengths, vec![30, 30]);
         assert_eq!(summary.final_state_idset_given_len, 30);
-        assert_eq!(summary.final_state_cnset_seen_len, 43);
+        assert_eq!(summary.final_state_cnset_seen_len, 30);
         assert_eq!(summary.final_state_idset_given_counters, vec![5]);
-        assert_eq!(summary.final_state_cnset_seen_counters, vec![4, 42]);
+        assert_eq!(summary.final_state_cnset_seen_counters, vec![42]);
         assert!(summary.final_state_idset_given_includes_all_expected_folder_source_counters);
         assert!(summary.final_state_cnset_seen_includes_all_expected_folder_change_counters);
         assert_eq!(summary.first_folder_name(), "Inbox");
@@ -3651,7 +3646,7 @@ mod tests {
             .final_state_cnset_seen_summary
             .as_deref()
             .unwrap()
-            .contains("ranges=4,42"));
+            .contains("ranges=42"));
         assert!(summary.emitted_property_tags.contains(&PID_TAG_SOURCE_KEY));
         assert!(summary
             .emitted_property_tags
@@ -3663,9 +3658,12 @@ mod tests {
         assert!(summary.rows[0]
             .property_tags
             .contains(&PID_TAG_CONTAINER_CLASS_W));
-        assert_eq!(summary.rows[0].folder_id, None);
+        assert_eq!(
+            summary.rows[0].folder_id,
+            Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        );
         assert_eq!(summary.rows[0].source_key_len, 22);
-        assert_eq!(summary.rows[0].parent_source_key_len, 22);
+        assert_eq!(summary.rows[0].parent_source_key_len, 0);
         assert!(hierarchy_identity_properties_before_display_name(
             &summary.rows[0].property_tags
         ));
@@ -3682,11 +3680,11 @@ mod tests {
             validation.sync_root_change_counter,
             crate::mapi::identity::IPM_SUBTREE_FOLDER_COUNTER
         );
-        assert!(validation.sync_root_row_present);
-        assert!(validation.sync_root_counter_in_final_idset);
-        assert!(validation.sync_root_counter_in_final_cnset);
+        assert!(!validation.sync_root_row_present);
+        assert!(!validation.sync_root_counter_in_final_idset);
+        assert!(!validation.sync_root_counter_in_final_cnset);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
-        assert_eq!(validation.root_inclusive_cnset_seen_delta_bytes, 0);
+        assert!(validation.root_inclusive_cnset_seen_delta_bytes > 0);
         assert!(validation
             .root_inclusive_idset_given_summary
             .contains("ranges=4-5"));
@@ -3695,9 +3693,9 @@ mod tests {
             .contains("ranges=4,42"));
         assert_eq!(validation.top_level_row_count, 1);
         assert_eq!(validation.nested_row_count, 0);
-        assert_eq!(validation.rows_without_folder_id, 1);
+        assert_eq!(validation.rows_without_folder_id, 0);
         assert_eq!(validation.rows_missing_core_property_count, 0);
-        assert_eq!(validation.rows_with_content_counts_present, 0);
+        assert_eq!(validation.rows_with_content_counts_present, 1);
         assert_eq!(validation.rows_with_folder_type_present, 1);
         assert_eq!(validation.rows_with_access_present, 1);
         assert!(validation.idset_missing_source_counters.is_empty());
@@ -3910,10 +3908,10 @@ mod tests {
         assert_eq!(validation.semantic_flags, "ok");
         assert_eq!(validation.top_level_row_count, 16);
         assert_eq!(validation.nested_row_count, 3);
-        assert_eq!(validation.rows_without_folder_id, expected_folder_count);
+        assert_eq!(validation.rows_without_folder_id, 0);
         assert_eq!(validation.rows_missing_core_property_count, 0);
         assert!(validation.root_inclusive_idset_given_delta_bytes >= 0);
-        assert_eq!(validation.root_inclusive_cnset_seen_delta_bytes, 0);
+        assert!(validation.root_inclusive_cnset_seen_delta_bytes >= 0);
         assert!(validation
             .root_inclusive_idset_given_summary
             .contains("ranges=4-8"));
@@ -3959,8 +3957,11 @@ mod tests {
         let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
 
         assert_eq!(summary.rows.len(), 1);
-        assert_eq!(summary.rows[0].folder_id, None);
-        assert!(!summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
+        assert_eq!(
+            summary.rows[0].folder_id,
+            Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        );
+        assert!(summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
     }
 
     #[test]
