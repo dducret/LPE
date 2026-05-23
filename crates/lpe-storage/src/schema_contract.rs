@@ -1756,6 +1756,11 @@ fn runtime_collaboration_sql_uses_canonical_v2_columns() {
         WORKSPACE_STORAGE.contains("mp.content_type"),
         "workspace attachment queries must read attachment MIME type from mime_parts"
     );
+    assert!(
+        WORKSPACE_STORAGE
+            .contains("WHERE contacts.tenant_id = $1 AND contacts.owner_account_id = $2"),
+        "workspace contact queries must qualify contact ownership columns"
+    );
 
     for (name, source) in [
         ("workspace.rs", WORKSPACE_STORAGE),

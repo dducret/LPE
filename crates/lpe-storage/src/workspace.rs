@@ -586,26 +586,26 @@ impl Storage {
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
             SELECT
-                id,
+                contacts.id,
                 CASE
                     WHEN b.role = 'suggested_contacts' THEN 'suggested_contacts'
                     WHEN b.role = 'quick_contacts' THEN 'quick_contacts'
                     WHEN b.role = 'im_contact_list' THEN 'im_contact_list'
                     ELSE 'default'
                 END AS address_book_id,
-                display_name AS name,
-                role,
-                COALESCE(emails_json->0->>'email', '') AS email,
-                COALESCE(phones_json->0->>'phone', '') AS phone,
-                organization_unit AS team,
-                notes
+                contacts.display_name AS name,
+                contacts.role,
+                COALESCE(contacts.emails_json->0->>'email', '') AS email,
+                COALESCE(contacts.phones_json->0->>'phone', '') AS phone,
+                contacts.organization_unit AS team,
+                contacts.notes
             FROM contacts
             JOIN contact_books b
               ON b.tenant_id = contacts.tenant_id
              AND b.owner_account_id = contacts.owner_account_id
              AND b.id = contacts.contact_book_id
-            WHERE tenant_id = $1 AND owner_account_id = $2
-            ORDER BY display_name ASC
+            WHERE contacts.tenant_id = $1 AND contacts.owner_account_id = $2
+            ORDER BY contacts.display_name ASC
             "#,
         )
         .bind(&tenant_id)
@@ -629,28 +629,28 @@ impl Storage {
         let rows = sqlx::query_as::<_, ClientContactRow>(
             r#"
             SELECT
-                id,
+                contacts.id,
                 CASE
                     WHEN b.role = 'suggested_contacts' THEN 'suggested_contacts'
                     WHEN b.role = 'quick_contacts' THEN 'quick_contacts'
                     WHEN b.role = 'im_contact_list' THEN 'im_contact_list'
                     ELSE 'default'
                 END AS address_book_id,
-                display_name AS name,
-                role,
-                COALESCE(emails_json->0->>'email', '') AS email,
-                COALESCE(phones_json->0->>'phone', '') AS phone,
-                organization_unit AS team,
-                notes
+                contacts.display_name AS name,
+                contacts.role,
+                COALESCE(contacts.emails_json->0->>'email', '') AS email,
+                COALESCE(contacts.phones_json->0->>'phone', '') AS phone,
+                contacts.organization_unit AS team,
+                contacts.notes
             FROM contacts
             JOIN contact_books b
               ON b.tenant_id = contacts.tenant_id
              AND b.owner_account_id = contacts.owner_account_id
              AND b.id = contacts.contact_book_id
-            WHERE tenant_id = $1
-              AND owner_account_id = $2
-              AND id = ANY($3)
-            ORDER BY display_name ASC
+            WHERE contacts.tenant_id = $1
+              AND contacts.owner_account_id = $2
+              AND contacts.id = ANY($3)
+            ORDER BY contacts.display_name ASC
             "#,
         )
         .bind(&tenant_id)
