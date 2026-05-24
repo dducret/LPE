@@ -68,6 +68,8 @@ before it is advertised.
 - `RopLongTermIdFromId` also accepts Outlook's observed conversion request
   layout with six-byte `GLOBCNT` followed by two-byte little-endian `REPLID`;
   responses still use the canonical LongTermID form with the store replica GUID.
+- `RopLongTermIdFromId` failures for unmapped or unusable `REPLID` values use
+  the documented `ecNotFound` result, not a generic invalid-parameter result.
 
 ### EMSMDB, NSPI, and FastTransfer
 

@@ -444,7 +444,7 @@ pub(in crate::mapi) fn rop_set_read_flags_response(
 
 pub(in crate::mapi) fn rop_long_term_id_from_id_response(request: &RopRequest) -> Vec<u8> {
     let Some(object_id) = request.long_term_source_object_id() else {
-        return rop_error_response(0x43, request.response_handle_index(), 0x8004_0102);
+        return rop_error_response(0x43, request.response_handle_index(), 0x8004_010F);
     };
     let Some(long_term_id) = long_term_id_from_object_id(object_id) else {
         return rop_error_response(0x43, request.response_handle_index(), 0x8004_010F);
