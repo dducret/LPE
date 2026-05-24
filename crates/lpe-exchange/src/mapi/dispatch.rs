@@ -2238,10 +2238,36 @@ where
             }
             Some(RopId::OpenFolder) => {
                 let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
-                if folder_row_for_id(folder_id, mailboxes).is_none()
-                    && snapshot.collaboration_folder_for_id(folder_id).is_none()
-                    && !is_advertised_special_folder(folder_id)
+                let mailbox_folder_found = folder_row_for_id(folder_id, mailboxes).is_some();
+                let collaboration_folder_found =
+                    snapshot.collaboration_folder_for_id(folder_id).is_some();
+                let advertised_special_folder = is_advertised_special_folder(folder_id);
+                let open_folder_result = if mailbox_folder_found
+                    || collaboration_folder_found
+                    || advertised_special_folder
                 {
+                    "success"
+                } else {
+                    "not_found"
+                };
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x02",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    response_handle_index = request.output_handle_index.unwrap_or(0),
+                    folder_id = format!("0x{folder_id:016x}"),
+                    folder_name = post_hierarchy_probe_folder_name(folder_id),
+                    role = role_for_folder_id(folder_id).unwrap_or(""),
+                    mailbox_folder_found = mailbox_folder_found,
+                    collaboration_folder_found = collaboration_folder_found,
+                    advertised_special_folder = advertised_special_folder,
+                    result = open_folder_result,
+                    message = "rca debug mapi open folder"
+                );
+                if open_folder_result == "not_found" {
                     responses.extend_from_slice(&rop_error_response(
                         0x02,
                         request.output_handle_index.unwrap_or(0),
