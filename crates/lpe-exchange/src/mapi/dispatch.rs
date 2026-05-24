@@ -7203,12 +7203,9 @@ mod tests {
         assert_eq!(
             parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
             MapiValue::Binary(
-                crate::mapi::identity::folder_entry_id_from_object_id(
-                    test_principal().account_id,
-                    CALENDAR_FOLDER_ID,
-                )
-                .unwrap()
-                .to_vec()
+                crate::mapi::identity::long_term_id_from_object_id(CALENDAR_FOLDER_ID)
+                    .unwrap()
+                    .to_vec()
             )
         );
         let MapiObject::Folder { properties, .. } = &reopened_root else {

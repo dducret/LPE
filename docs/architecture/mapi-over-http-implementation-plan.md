@@ -126,8 +126,10 @@ non-canonical LPE state.
   surfaces remain disabled until canonical write semantics are explicitly
   designed.
 - Outlook default-folder properties must be projected from canonical folder
-  identities. Generated EntryIDs for default folders must use the account-scoped
-  folder EntryID form expected by Outlook, not a bare LongTermID.
+  identities. Generated special-folder binary identifiers use the canonical
+  24-byte LongTermID form so Outlook can convert them with
+  `RopIdFromLongTermId` before opening the folder; cached 46-byte folder
+  EntryIDs written back by Outlook remain accepted and normalized.
 - Search folders are canonical persisted definitions plus folder-associated
   information rows. Bounded evaluators cover the Outlook bootstrap surfaces such
   as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
