@@ -187,7 +187,6 @@ pub(crate) fn object_id_from_long_term_id_with_replica_guids(
     global_counter_from_globcnt(&long_term_id[16..22]).map(mapi_store_id)
 }
 
-#[cfg(test)]
 pub(crate) fn folder_entry_id_from_object_id(
     mailbox_guid: Uuid,
     object_id: u64,

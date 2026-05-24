@@ -598,10 +598,9 @@ fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
     value
 }
 
-fn special_folder_entry_id(_mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {
-    crate::mapi::identity::long_term_id_from_object_id(folder_id)
+fn special_folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {
+    crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
         .expect("special folders use valid MAPI folder IDs")
-        .to_vec()
 }
 
 fn mailbox_owner_entry_id(principal: &AccountPrincipal) -> Vec<u8> {
@@ -4099,23 +4098,24 @@ mod tests {
             (PID_TAG_IPM_NOTE_ENTRY_ID, NOTES_FOLDER_ID),
             (PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
         ] {
-            let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id)
-                .unwrap()
-                .to_vec();
+            let entry_id =
+                crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
+                    .unwrap();
             assert_eq!(
                 special_folder_identification_property_value(mailbox_guid, property_tag),
                 Some(MapiValue::Binary(entry_id.clone()))
             );
-            assert_eq!(entry_id.len(), 24);
+            assert_eq!(entry_id.len(), 46);
             assert_eq!(
                 crate::mapi::identity::object_id_from_folder_identifier_bytes(&entry_id),
                 Some(folder_id)
             );
         }
-        let reminders_entry_id =
-            crate::mapi::identity::long_term_id_from_object_id(REMINDERS_FOLDER_ID)
-                .unwrap()
-                .to_vec();
+        let reminders_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            mailbox_guid,
+            REMINDERS_FOLDER_ID,
+        )
+        .unwrap();
         assert_eq!(
             special_folder_identification_property_value(mailbox_guid, PID_TAG_REM_ONLINE_ENTRY_ID),
             Some(MapiValue::Binary(reminders_entry_id.clone()))

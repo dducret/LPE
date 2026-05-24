@@ -7201,15 +7201,15 @@ mod tests {
         let mut responses = vec![0x07, 0x01];
         responses.extend_from_slice(&0u32.to_le_bytes());
         responses.push(0);
-        responses.extend_from_slice(&24u16.to_le_bytes());
-        responses.extend_from_slice(&[0xAA; 24]);
+        responses.extend_from_slice(&46u16.to_le_bytes());
+        responses.extend_from_slice(&[0xAA; 46]);
         let response_buffer = rop_buffer_with_response(responses, &[1]);
 
         let summary = summarize_first_post_hierarchy_probe(&request_buffer, &response_buffer);
 
         assert!(summary
             .get_properties_specific_response_shapes
-            .contains("values=0x36d00102:binary:bytes=24"));
+            .contains("values=0x36d00102:binary:bytes=46"));
         assert!(summary.parse_error.is_empty());
     }
 
@@ -7233,9 +7233,11 @@ mod tests {
         assert_eq!(
             parse_property_value_for_tag(&mut cursor, PID_TAG_IPM_APPOINTMENT_ENTRY_ID).unwrap(),
             MapiValue::Binary(
-                crate::mapi::identity::long_term_id_from_object_id(CALENDAR_FOLDER_ID)
-                    .unwrap()
-                    .to_vec()
+                crate::mapi::identity::folder_entry_id_from_object_id(
+                    test_principal().account_id,
+                    CALENDAR_FOLDER_ID,
+                )
+                .unwrap()
             )
         );
         let MapiObject::Folder { properties, .. } = &reopened_root else {

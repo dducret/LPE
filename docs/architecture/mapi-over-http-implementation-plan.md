@@ -137,9 +137,8 @@ non-canonical LPE state.
   surfaces remain disabled until canonical write semantics are explicitly
   designed.
 - Outlook default-folder properties must be projected from canonical folder
-  identities. Generated special-folder binary identifiers use the canonical
-  24-byte LongTermID form so Outlook can convert them with
-  `RopIdFromLongTermId` before opening the folder; cached 46-byte folder
+  identities. Generated special-folder binary identifiers use the documented
+  46-byte folder EntryID form; cached 24-byte LongTermIDs and 46-byte folder
   EntryIDs written back by Outlook remain accepted and normalized.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
