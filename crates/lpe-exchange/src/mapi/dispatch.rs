@@ -6319,6 +6319,27 @@ where
                 responses.extend_from_slice(&rop_get_receive_folder_table_response(&request))
             }
             Some(RopId::LongTermIdFromId) => {
+                let source_id_bytes = request
+                    .long_term_source_id_bytes()
+                    .map(bytes_to_hex)
+                    .unwrap_or_default();
+                let decoded_object_id = request.long_term_source_object_id();
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x43",
+                    source_id_bytes = %source_id_bytes,
+                    decoded_object_id = decoded_object_id
+                        .map(|object_id| format!("{object_id:#018x}"))
+                        .unwrap_or_default(),
+                    decoded_advertised_special_folder = decoded_object_id
+                        .map(is_advertised_special_folder)
+                        .unwrap_or(false),
+                    message = "rca debug mapi long term id from id",
+                );
                 responses.extend_from_slice(&rop_long_term_id_from_id_response(&request))
             }
             Some(RopId::IdFromLongTermId) => {

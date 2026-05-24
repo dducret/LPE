@@ -2678,6 +2678,10 @@ impl RopRequest {
             .or_else(|| stale_special_folder_object_id_from_short_id(bytes))
     }
 
+    pub(in crate::mapi) fn long_term_source_id_bytes(&self) -> Option<&[u8]> {
+        self.payload.get(..8)
+    }
+
     pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {
         if self.rop_id != 0x40 {
             return None;
