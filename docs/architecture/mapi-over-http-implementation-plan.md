@@ -158,6 +158,10 @@ non-canonical LPE state.
   folder/message global counters used by `PidTagSourceKey`. Outlook relies on
   this identity material when deriving local item-friendly identifiers during
   cached-mode sync.
+- Private-mailbox `RopLogon` responses expose exactly the documented 13
+  special-folder IDs before `ResponseFlags` and `MailboxGuid`; adding extra
+  folder IDs shifts `MailboxGuid` and causes Outlook to construct malformed
+  private-store EntryIDs.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed

@@ -19,7 +19,7 @@ pub(in crate::mapi) use super::identity::{
     TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 
-pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 14] = [
+pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     ROOT_FOLDER_ID,
     DEFERRED_ACTION_FOLDER_ID,
     SPOOLER_QUEUE_FOLDER_ID,
@@ -33,7 +33,6 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 14] = [
     SEARCH_FOLDER_ID,
     VIEWS_FOLDER_ID,
     SHORTCUTS_FOLDER_ID,
-    FREEBUSY_DATA_FOLDER_ID,
 ];
 
 const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 20] = [
