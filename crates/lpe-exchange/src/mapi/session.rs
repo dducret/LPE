@@ -671,9 +671,7 @@ impl MapiSession {
         let property = normalize_named_property(property);
         if property.guid == PS_MAPI_GUID {
             if let MapiNamedPropertyKind::Lid(lid) = &property.kind {
-                return u16::try_from(*lid)
-                    .ok()
-                    .filter(|id| *id < FIRST_NAMED_PROPERTY_ID);
+                return u16::try_from(*lid).ok();
             }
         }
         if let Some(property_id) = self.named_properties.get(&property).copied() {
@@ -1065,5 +1063,19 @@ mod tests {
         );
         assert_eq!(session.property_name_for_id(0x8001), property);
         assert_eq!(session.next_named_property_id, 0x8002);
+    }
+
+    #[test]
+    fn ps_mapi_lid_maps_directly_even_in_named_property_range() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let mut session = remove_session(&session_id).unwrap();
+        let property = MapiNamedProperty {
+            guid: PS_MAPI_GUID,
+            kind: MapiNamedPropertyKind::Lid(0x8503),
+        };
+
+        assert_eq!(session.property_id_for_name(property, false), Some(0x8503));
+        assert_eq!(session.next_named_property_id, FIRST_NAMED_PROPERTY_ID);
     }
 }
