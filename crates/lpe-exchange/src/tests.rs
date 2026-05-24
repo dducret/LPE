@@ -4430,6 +4430,11 @@ fn append_mapi_wire_id(buffer: &mut Vec<u8>, object_id: u64) {
     );
 }
 
+fn append_mapi_trailing_replid_wire_id(buffer: &mut Vec<u8>, global_counter: u64) {
+    buffer.extend_from_slice(&globcnt_bytes(global_counter));
+    buffer.extend_from_slice(&1u16.to_le_bytes());
+}
+
 fn mapi_wire_id_bytes(object_id: u64) -> [u8; 8] {
     crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap()
 }
@@ -19402,6 +19407,8 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
 
     let mut rops = vec![0x43, 0x00, 0x00];
     append_mapi_wire_id(&mut rops, object_id);
+    rops.extend_from_slice(&[0x43, 0x00, 0x00]);
+    append_mapi_trailing_replid_wire_id(&mut rops, 5);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(&long_term_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
@@ -19421,6 +19428,13 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     let mut long_term_response = vec![0x43, 0x00, 0, 0, 0, 0];
     long_term_response.extend_from_slice(&long_term_id);
     assert!(contains_bytes(&response_rops, &long_term_response));
+    let mut trailing_replid_response = vec![0x43, 0x00, 0, 0, 0, 0];
+    trailing_replid_response.extend_from_slice(&long_term_id);
+    assert!(contains_bytes(&response_rops, &trailing_replid_response));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x43, 0x00, 0x02, 0x01, 0x04, 0x80]
+    ));
     let mut object_id_response = vec![0x44, 0x00, 0, 0, 0, 0];
     append_mapi_wire_id(&mut object_id_response, object_id);
     assert!(contains_bytes(&response_rops, &object_id_response));

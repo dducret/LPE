@@ -65,6 +65,9 @@ before it is advertised.
   serializing ROP request and response fields, table identifier columns,
   FastTransfer/ICS identifier properties, and identifier-valued property rows
   such as `PidTagFolderId`, `PidTagParentFolderId`, and `PidTagMid`.
+- `RopLongTermIdFromId` also accepts Outlook's observed conversion request
+  layout with six-byte `GLOBCNT` followed by two-byte little-endian `REPLID`;
+  responses still use the canonical LongTermID form with the store replica GUID.
 
 ### EMSMDB, NSPI, and FastTransfer
 

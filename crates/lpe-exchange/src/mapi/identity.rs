@@ -125,6 +125,17 @@ pub(crate) fn object_id_from_wire_id(bytes: &[u8]) -> Option<u64> {
     global_counter_from_globcnt(&bytes[2..8]).map(mapi_store_id)
 }
 
+pub(crate) fn object_id_from_trailing_replid_wire_id(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() != 8 {
+        return None;
+    }
+    let replica_id = u16::from_le_bytes(bytes[6..8].try_into().ok()?);
+    if u64::from(replica_id) != STORE_REPLICA_ID {
+        return None;
+    }
+    global_counter_from_globcnt(&bytes[..6]).map(mapi_store_id)
+}
+
 pub(crate) fn wire_id_bytes_from_object_id(object_id: u64) -> Option<[u8; 8]> {
     let global_counter = global_counter_from_store_id(object_id)?;
     let mut bytes = [0; 8];

@@ -443,7 +443,7 @@ pub(in crate::mapi) fn rop_set_read_flags_response(
 }
 
 pub(in crate::mapi) fn rop_long_term_id_from_id_response(request: &RopRequest) -> Vec<u8> {
-    let Some(object_id) = request.object_id() else {
+    let Some(object_id) = request.long_term_source_object_id() else {
         return rop_error_response(0x43, request.response_handle_index(), 0x8004_0102);
     };
     let Some(long_term_id) = long_term_id_from_object_id(object_id) else {
@@ -2631,6 +2631,12 @@ impl RopRequest {
         crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
+    pub(in crate::mapi) fn long_term_source_object_id(&self) -> Option<u64> {
+        let bytes = self.payload.get(..8)?;
+        crate::mapi::identity::object_id_from_wire_id(bytes)
+            .or_else(|| crate::mapi::identity::object_id_from_trailing_replid_wire_id(bytes))
+    }
+
     pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {
         if self.rop_id != 0x40 {
             return None;
@@ -2957,11 +2963,6 @@ impl RopRequest {
             .and_then(|bytes| bytes.try_into().ok())
             .map(u32::from_le_bytes)
             .unwrap_or(1)
-    }
-
-    pub(in crate::mapi) fn object_id(&self) -> Option<u64> {
-        let bytes = self.payload.get(..8)?;
-        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn long_term_id(&self) -> Option<&[u8]> {
