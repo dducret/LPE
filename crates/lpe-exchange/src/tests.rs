@@ -10381,7 +10381,7 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.push(0x00);
     rops.extend_from_slice(&ps_mapi_guid);
-    rops.extend_from_slice(&0x1234u32.to_le_bytes());
+    rops.extend_from_slice(&0x8503u32.to_le_bytes());
     rops.push(0x01);
     rops.extend_from_slice(&ps_internet_headers_guid);
     rops.push(named_header.len() as u8);
@@ -10390,7 +10390,7 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
         0x55, 0x00, 0x00, // RopGetNamesFromPropertyIds
     ]);
     rops.extend_from_slice(&2u16.to_le_bytes());
-    rops.extend_from_slice(&0x1234u16.to_le_bytes());
+    rops.extend_from_slice(&0x8503u16.to_le_bytes());
     rops.extend_from_slice(&0x8001u16.to_le_bytes());
     rops.extend_from_slice(&[
         0x5F, 0x00, 0x00, 0x00, 0x00, // RopQueryNamedProperties
@@ -10408,7 +10408,7 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 2, 0, 0x34, 0x12, 0x01, 0x80]
+        &[0x56, 0x00, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x01, 0x80]
     ));
     assert!(contains_bytes(&response_rops, &utf16z("x-lpe-test")));
     assert!(contains_bytes(
