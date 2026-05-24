@@ -255,7 +255,8 @@ not by itself authorize broad client publication.
   mail modseq, and a small JSON cursor.
 - Hierarchy checkpoints are account-wide and usable only for the same sync root
   and hierarchy cursor version. Content and read-state checkpoints are
-  mailbox/folder scoped.
+  mailbox/folder scoped. Virtual collaboration folders that do not map to a
+  canonical mailbox do not persist content/read-state checkpoints.
 - On `RopSynchronizationConfigure`, the server reads the compatible checkpoint
   and replays canonical change log entries and tombstones after that cursor.
 - The durable checkpoint advances only after `RopFastTransferSourceGetBuffer`

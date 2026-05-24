@@ -15685,6 +15685,35 @@ async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages
 }
 
 #[tokio::test]
+async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_checkpoint() {
+    let calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![calendar])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 55,
+        current_modseq: 41,
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            None,
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap();
+    assert!(checkpoint.is_none());
+}
+
+#[tokio::test]
 async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes() {
     let inbox_id = Uuid::parse_str("51515151-5151-5151-5151-515151515152").unwrap();
     let first_id = Uuid::parse_str("61616161-6161-6161-6161-616161616162").unwrap();
