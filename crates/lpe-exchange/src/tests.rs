@@ -19434,10 +19434,17 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     long_term_id[16..22].copy_from_slice(&globcnt_bytes(5));
     let mut invalid_long_term_id = long_term_id;
     invalid_long_term_id[0] ^= 0xFF;
+    invalid_long_term_id[16..22].copy_from_slice(&globcnt_bytes(5_000));
     let mut account_guid_long_term_id = long_term_id;
     account_guid_long_term_id[..16].copy_from_slice(account.account_id.as_bytes());
     let mut account_guid_le_long_term_id = long_term_id;
     account_guid_le_long_term_id[..16].copy_from_slice(&account.account_id.to_bytes_le());
+    let stale_calendar_long_term_id = {
+        let mut value = [0xA5; 24];
+        value[16..22].copy_from_slice(&globcnt_bytes(16));
+        value[22..24].copy_from_slice(&[0, 0]);
+        value
+    };
 
     let mut rops = vec![0x43, 0x00, 0x00];
     append_mapi_wire_id(&mut rops, object_id);
@@ -19451,6 +19458,8 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     rops.extend_from_slice(&account_guid_long_term_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(&account_guid_le_long_term_id);
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]);
+    rops.extend_from_slice(&stale_calendar_long_term_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(&invalid_long_term_id);
 
@@ -19488,6 +19497,9 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
             .count(),
         3
     );
+    let mut stale_calendar_response = vec![0x44, 0x00, 0, 0, 0, 0];
+    append_mapi_wire_id(&mut stale_calendar_response, test_mapi_folder_id(16));
+    assert!(contains_bytes(&response_rops, &stale_calendar_response));
     assert!(contains_bytes(
         &response_rops,
         &[0x44, 0x00, 0x0F, 0x01, 0x04, 0x80]

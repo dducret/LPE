@@ -465,13 +465,37 @@ pub(in crate::mapi) fn rop_id_from_long_term_id_response(
     let Some(object_id) = crate::mapi::identity::object_id_from_long_term_id_with_replica_guids(
         long_term_id,
         replica_guid_aliases,
-    ) else {
+    )
+    .or_else(|| stale_special_folder_object_id_from_long_term_id(long_term_id)) else {
         return rop_error_response(0x44, request.response_handle_index(), 0x8004_010F);
     };
     let mut response = vec![0x44, request.response_handle_index()];
     write_u32(&mut response, 0);
     write_object_id(&mut response, object_id);
     response
+}
+
+fn stale_special_folder_object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
+    if long_term_id.len() != 24 || long_term_id[22..24] != [0, 0] {
+        return None;
+    }
+    let global_counter = crate::mapi::identity::global_counter_from_globcnt(&long_term_id[16..22])?;
+    let object_id = crate::mapi::identity::mapi_store_id(global_counter);
+    matches!(
+        object_id,
+        CALENDAR_FOLDER_ID
+            | CONTACTS_FOLDER_ID
+            | JOURNAL_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | TASKS_FOLDER_ID
+            | REMINDERS_FOLDER_ID
+            | SYNC_ISSUES_FOLDER_ID
+            | CONFLICTS_FOLDER_ID
+            | LOCAL_FAILURES_FOLDER_ID
+            | SERVER_FAILURES_FOLDER_ID
+            | JUNK_FOLDER_ID
+    )
+    .then_some(object_id)
 }
 
 pub(in crate::mapi) fn rop_get_address_types_response(request: &RopRequest) -> Vec<u8> {

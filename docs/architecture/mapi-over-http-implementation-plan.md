@@ -135,7 +135,11 @@ non-canonical LPE state.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
-  special-folder caches can resolve back to canonical LPE folder IDs.
+  special-folder caches can resolve back to canonical LPE folder IDs. If a
+  cached LongTermID carries another stale store GUID, LPE accepts it only when
+  the global counter maps to one of the Outlook special-folder identifiers
+  carried by default-folder or AdditionalRen properties; normal mailbox items
+  still require the canonical store replica GUID or authenticated mailbox GUID.
 - Search folders are canonical persisted definitions plus folder-associated
   information rows. Bounded evaluators cover the Outlook bootstrap surfaces such
   as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
