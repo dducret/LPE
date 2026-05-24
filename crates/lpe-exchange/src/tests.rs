@@ -21944,6 +21944,8 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
     let mut rops = vec![0x27, 0x00, 0x00];
     rops.extend_from_slice(b"IPM.Note.Custom\0");
     rops.extend_from_slice(&[0x27, 0x00, 0x00]);
+    rops.extend_from_slice(b"IPM.Appointment\0");
+    rops.extend_from_slice(&[0x27, 0x00, 0x00]);
     rops.extend_from_slice(b"MY.Class\0");
     rops.extend_from_slice(&[0x27, 0x00, 0x00]);
     rops.extend_from_slice(b".Invalid\0");
@@ -21959,6 +21961,10 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, b"IPM.Note\0"));
+    let mut calendar_response = vec![0x27, 0x00, 0, 0, 0, 0];
+    calendar_response.extend_from_slice(&test_mapi_folder_id(16).to_le_bytes());
+    calendar_response.extend_from_slice(b"IPM.Appointment\0");
+    assert!(contains_bytes(&response_rops, calendar_response.as_slice()));
     let mut unmatched_response = vec![0x27, 0x00, 0, 0, 0, 0];
     unmatched_response.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
     unmatched_response.push(0);

@@ -4761,6 +4761,7 @@ where
                     continue;
                 }
                 if session.hierarchy_sync_completed() {
+                    let response_folder_id = receive_folder_id_for_message_class(message_class);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -4772,12 +4773,14 @@ where
                         requested_message_class = %message_class,
                         response_message_class =
                             %explicit_receive_folder_message_class(message_class),
-                        response_folder_id = %format!("0x{INBOX_FOLDER_ID:016x}"),
+                        response_folder_id = %format!("0x{response_folder_id:016x}"),
                         "rca debug mapi post hierarchy get receive folder"
                     );
                 }
+                let response_folder_id = receive_folder_id_for_message_class(message_class);
                 responses.extend_from_slice(&rop_get_receive_folder_response(
                     &request,
+                    response_folder_id,
                     explicit_receive_folder_message_class(message_class),
                 ));
             }

@@ -2053,12 +2053,13 @@ fn serialize_session_folder_row(
 
 pub(in crate::mapi) fn rop_get_receive_folder_response(
     request: &RopRequest,
-    explicit_message_class: &str,
+    folder_id: u64,
+    response_message_class: &str,
 ) -> Vec<u8> {
     let mut response = vec![0x27, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u64(&mut response, INBOX_FOLDER_ID);
-    response.extend_from_slice(explicit_message_class.as_bytes());
+    write_u64(&mut response, folder_id);
+    response.extend_from_slice(response_message_class.as_bytes());
     response.push(0);
     response
 }
@@ -2082,8 +2083,21 @@ pub(in crate::mapi) fn explicit_receive_folder_message_class(message_class: &str
             .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Note."))
     {
         "IPM.Note"
+    } else if message_class.eq_ignore_ascii_case("IPM.Appointment")
+        || message_class
+            .get(..16)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Appointment."))
+    {
+        "IPM.Appointment"
     } else {
         ""
+    }
+}
+
+pub(in crate::mapi) fn receive_folder_id_for_message_class(message_class: &str) -> u64 {
+    match explicit_receive_folder_message_class(message_class) {
+        "IPM.Appointment" => CALENDAR_FOLDER_ID,
+        _ => INBOX_FOLDER_ID,
     }
 }
 
