@@ -69,8 +69,10 @@ before it is advertised.
   layout with six-byte `GLOBCNT` followed by two-byte little-endian `REPLID`;
   responses still use the canonical LongTermID form with the store replica GUID.
 - `RopLongTermIdFromId` also accepts stale `REPLID` values when the embedded
-  `GLOBCNT` maps to an LPE-advertised MAPI special folder; normal mailbox
-  items still require the canonical store replica id.
+  `GLOBCNT` maps to an LPE-advertised MAPI special folder, including the
+  observed stale short-ID forms that carry the six-byte counter before or after
+  the `REPLID` and in either counter byte order; normal mailbox items still
+  require the canonical store replica id.
 - `RopLongTermIdFromId` failures for unmapped or unusable `REPLID` values use
   the documented `ecNotFound` result, not a generic invalid-parameter result.
 

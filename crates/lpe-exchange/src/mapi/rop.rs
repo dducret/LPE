@@ -488,10 +488,24 @@ fn stale_special_folder_object_id_from_short_id(bytes: &[u8]) -> Option<u64> {
     if bytes.len() != 8 {
         return None;
     }
-    crate::mapi::identity::global_counter_from_globcnt(&bytes[2..8])
-        .or_else(|| crate::mapi::identity::global_counter_from_globcnt(&bytes[..6]))
-        .map(crate::mapi::identity::mapi_store_id)
-        .filter(|object_id| is_advertised_special_folder(*object_id))
+    [
+        crate::mapi::identity::global_counter_from_globcnt(&bytes[2..8]),
+        crate::mapi::identity::global_counter_from_globcnt(&bytes[..6]),
+        global_counter_from_little_endian_globcnt(&bytes[2..8]),
+        global_counter_from_little_endian_globcnt(&bytes[..6]),
+    ]
+    .into_iter()
+    .flatten()
+    .map(crate::mapi::identity::mapi_store_id)
+    .find(|object_id| is_advertised_special_folder(*object_id))
+}
+
+fn global_counter_from_little_endian_globcnt(bytes: &[u8]) -> Option<u64> {
+    let bytes: [u8; 6] = bytes.try_into().ok()?;
+    let counter = u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], 0, 0,
+    ]);
+    (counter != 0).then_some(counter)
 }
 
 pub(in crate::mapi) fn rop_get_address_types_response(request: &RopRequest) -> Vec<u8> {
