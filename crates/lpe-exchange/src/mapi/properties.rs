@@ -196,6 +196,7 @@ pub(in crate::mapi) const PID_TAG_SERVER_ACCOUNT_ICON: u32 = 0x341F_0102;
 pub(in crate::mapi) const PID_TAG_OUTLOOK_STORE_STATE: u32 = 0x346F_0003;
 pub(in crate::mapi) const PID_TAG_PRIVATE: u32 = 0x0E5C_000B;
 pub(in crate::mapi) const PID_TAG_USER_GUID: u32 = 0x6707_0102;
+pub(in crate::mapi) const PID_TAG_MAX_SUBMIT_MESSAGE_SIZE: u32 = 0x666D_0003;
 pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 pub(in crate::mapi) const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
@@ -448,6 +449,7 @@ pub(in crate::mapi) fn logon_property_value(
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
         PID_TAG_USER_GUID => Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec())),
+        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => Some(MapiValue::U32(35 * 1024)),
         _ => special_folder_identification_property_value(principal.account_id, property_tag),
     }
 }
@@ -4803,6 +4805,21 @@ mod tests {
         assert_eq!(
             logon_property_value(&principal, PID_TAG_PRIVATE),
             Some(MapiValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn logon_projects_max_submit_message_size() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_MAX_SUBMIT_MESSAGE_SIZE),
+            Some(MapiValue::U32(35 * 1024))
         );
     }
 }

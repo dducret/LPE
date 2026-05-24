@@ -196,6 +196,8 @@ not by itself authorize broad client publication.
   copies, and attachment reads/writes where backed by canonical state.
 - Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
   accepted as session-local folder metadata during cached-mode bootstrap.
+- Outlook store bootstrap metadata includes the private-store marker, store
+  state, mailbox owner, user GUID, server icons, and max submit message size.
 - `RopGetReceiveFolder` maps Outlook `IPM.Appointment` probes to the canonical
   Calendar folder so cached-mode bootstrap does not fall back to Inbox.
 - Unsupported or malformed ROPs use parseable error responses and terminate the

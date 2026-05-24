@@ -1715,6 +1715,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_OUTLOOK_STORE_STATE => "OutlookStoreState",
         PID_TAG_PRIVATE => "PidTagPrivate",
         PID_TAG_USER_GUID => "PidTagUserGuid",
+        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => "PidTagMaxSubmitMessageSize",
         PID_TAG_OST_OSTID => "PR_OST_OSTID",
         _ => "unknown",
     }
