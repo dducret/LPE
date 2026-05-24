@@ -502,14 +502,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
             if sync_type != SYNC_TYPE_HIERARCHY || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
                 write_u32(&mut buffer, PID_TAG_FOLDER_ID);
-                write_i64(&mut buffer, folder_id as i64);
+                write_object_id(&mut buffer, folder_id);
             }
             if sync_type != SYNC_TYPE_HIERARCHY
                 || sync_flags & 0x0100 != 0
                 || sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0
             {
                 write_u32(&mut buffer, PID_TAG_PARENT_FOLDER_ID);
-                write_i64(&mut buffer, parent_folder_id as i64);
+                write_object_id(&mut buffer, parent_folder_id);
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTAINER_CLASS_W) {
                 write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
@@ -579,9 +579,9 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, false);
         if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
             write_u32(&mut buffer, PID_TAG_MID);
-            write_i64(
+            write_object_id(
                 &mut buffer,
-                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0) as i64,
+                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0),
             );
         }
         if sync_extra_flags & 0x0000_0002 != 0 {
@@ -687,7 +687,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         write_bool_property(&mut buffer, PID_TAG_ASSOCIATED, object.associated);
         if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
             write_u32(&mut buffer, PID_TAG_MID);
-            write_i64(&mut buffer, object.item_id as i64);
+            write_object_id(&mut buffer, object.item_id);
         }
         if sync_extra_flags & 0x0000_0002 != 0 {
             write_i32_property(
@@ -1687,9 +1687,9 @@ fn decode_hierarchy_transfer_debug_summary(
                 PID_TAG_CONTAINER_CLASS_W => {
                     folder.container_class = decode_debug_utf16z(&property.value)
                 }
-                PID_TAG_FOLDER_ID => folder.folder_id = decode_debug_u64(&property.value),
+                PID_TAG_FOLDER_ID => folder.folder_id = decode_debug_object_id(&property.value),
                 PID_TAG_PARENT_FOLDER_ID => {
-                    folder.parent_folder_id = decode_debug_u64(&property.value)
+                    folder.parent_folder_id = decode_debug_object_id(&property.value)
                 }
                 PID_TAG_LAST_MODIFICATION_TIME => {
                     folder.last_modification_time = decode_debug_u64(&property.value)
@@ -1959,6 +1959,10 @@ fn decode_debug_i32(bytes: &[u8]) -> Option<i32> {
 
 fn decode_debug_u64(bytes: &[u8]) -> Option<u64> {
     (bytes.len() == 8).then(|| u64::from_le_bytes(bytes.try_into().unwrap()))
+}
+
+fn decode_debug_object_id(bytes: &[u8]) -> Option<u64> {
+    crate::mapi::identity::object_id_from_wire_id(bytes).or_else(|| decode_debug_u64(bytes))
 }
 
 fn decode_debug_bool(bytes: &[u8]) -> Option<bool> {
@@ -3067,6 +3071,14 @@ fn write_i64(buffer: &mut Vec<u8>, value: i64) {
     buffer.extend_from_slice(&value.to_le_bytes());
 }
 
+fn write_object_id(buffer: &mut Vec<u8>, value: u64) {
+    if let Some(bytes) = crate::mapi::identity::wire_id_bytes_from_object_id(value) {
+        buffer.extend_from_slice(&bytes);
+    } else {
+        buffer.extend_from_slice(&value.to_le_bytes());
+    }
+}
+
 fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
     write_u32(buffer, property_tag);
     write_i32(buffer, value);
@@ -3207,6 +3219,10 @@ fn globcnt_bytes(value: u64) -> [u8; 6] {
 mod tests {
     use super::*;
     use lpe_storage::{JmapEmailAddress, JmapEmailMailboxState};
+
+    fn wire_id_bytes(object_id: u64) -> [u8; 8] {
+        crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap()
+    }
 
     #[test]
     fn message_change_number_excludes_bcc_recipients() {
@@ -4072,7 +4088,7 @@ mod tests {
 
         assert!(contains_bytes(&buffer, &INCR_SYNC_CHG.to_le_bytes()));
         assert!(contains_bytes(&buffer, &INCR_SYNC_MESSAGE.to_le_bytes()));
-        assert!(contains_bytes(&buffer, &item_id.to_le_bytes()));
+        assert!(contains_bytes(&buffer, &wire_id_bytes(item_id)));
         assert!(contains_bytes(&buffer, &utf16z("IPM.StickyNote")));
         assert!(contains_bytes(&buffer, &utf16z("Remember this")));
         assert!(contains_bytes(&buffer, &0x8B00_0003u32.to_le_bytes()));

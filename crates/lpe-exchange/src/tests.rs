@@ -3302,10 +3302,10 @@ fn strict_record_folder_property(
             folder.display_name = Some(strict_decode_utf16z(&property.value)?)
         }
         PID_TAG_FOLDER_ID => {
-            folder.folder_id = Some(strict_decode_u64_property(&property)?);
+            folder.folder_id = Some(strict_decode_object_id_property(&property)?);
         }
         PID_TAG_PARENT_FOLDER_ID => {
-            folder.parent_folder_id = Some(strict_decode_u64_property(&property)?);
+            folder.parent_folder_id = Some(strict_decode_object_id_property(&property)?);
         }
         PID_TAG_FOLDER_TYPE => {
             folder.folder_type = Some(strict_decode_u32_property(&property)?);
@@ -3357,6 +3357,22 @@ fn strict_decode_u64_property(property: &StrictFastTransferProperty) -> Result<u
     Ok(u64::from_le_bytes(
         property.value.as_slice().try_into().unwrap(),
     ))
+}
+
+fn strict_decode_object_id_property(property: &StrictFastTransferProperty) -> Result<u64, String> {
+    if property.value.len() != 8 {
+        return Err(format!(
+            "property 0x{:08x} was not encoded as an eight-byte object id",
+            property.tag
+        ));
+    }
+    crate::mapi::identity::object_id_from_wire_id(&property.value)
+        .or_else(|| {
+            Some(u64::from_le_bytes(
+                property.value.as_slice().try_into().unwrap(),
+            ))
+        })
+        .ok_or_else(|| format!("property 0x{:08x} had an invalid object id", property.tag))
 }
 
 fn strict_finish_folder_change(
@@ -4412,6 +4428,10 @@ fn append_mapi_wire_id(buffer: &mut Vec<u8>, object_id: u64) {
     buffer.extend_from_slice(
         &crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap(),
     );
+}
+
+fn mapi_wire_id_bytes(object_id: u64) -> [u8; 8] {
+    crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap()
 }
 
 fn append_rop_open_folder(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
@@ -7988,11 +8008,11 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
     ));
     assert!(contains_bytes(
         properties,
-        &test_mapi_folder_id(4).to_le_bytes()
+        &mapi_wire_id_bytes(test_mapi_folder_id(4))
     ));
     assert!(contains_bytes(
         properties,
-        &test_mapi_folder_id(1).to_le_bytes()
+        &mapi_wire_id_bytes(test_mapi_folder_id(1))
     ));
     assert!(contains_bytes(properties, &utf16z("IPF.Note")));
 }
@@ -8060,11 +8080,11 @@ async fn mapi_over_http_advertised_special_folder_reports_own_identity() {
     assert!(contains_bytes(properties, &utf16z("Outbox")));
     assert!(contains_bytes(
         properties,
-        &test_mapi_folder_id(6).to_le_bytes()
+        &mapi_wire_id_bytes(test_mapi_folder_id(6))
     ));
     assert!(contains_bytes(
         properties,
-        &test_mapi_folder_id(4).to_le_bytes()
+        &mapi_wire_id_bytes(test_mapi_folder_id(4))
     ));
     assert!(contains_bytes(properties, &utf16z("IPF.Note")));
 }
@@ -16675,7 +16695,7 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
     ));
     assert!(contains_bytes(
         &response_rops,
-        &test_mapi_folder_id(4).to_le_bytes()
+        &mapi_wire_id_bytes(test_mapi_folder_id(4))
     ));
     assert!(contains_bytes(
         &response_rops,

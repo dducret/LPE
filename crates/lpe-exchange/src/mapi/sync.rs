@@ -136,7 +136,7 @@ pub(in crate::mapi) fn rop_synchronization_import_message_change_response(
 ) -> Vec<u8> {
     let mut response = vec![0x72, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_u64(&mut response, message_id);
+    write_object_id(&mut response, message_id);
     response
 }
 
@@ -146,7 +146,7 @@ pub(in crate::mapi) fn rop_synchronization_import_hierarchy_change_response(
 ) -> Vec<u8> {
     let mut response = vec![0x73, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u64(&mut response, folder_id);
+    write_object_id(&mut response, folder_id);
     response
 }
 
@@ -156,7 +156,7 @@ pub(in crate::mapi) fn rop_synchronization_import_message_move_response(
 ) -> Vec<u8> {
     let mut response = vec![0x78, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u64(&mut response, message_id);
+    write_object_id(&mut response, message_id);
     response
 }
 

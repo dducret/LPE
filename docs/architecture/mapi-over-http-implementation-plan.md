@@ -62,7 +62,9 @@ before it is advertised.
   boundary: two-byte little-endian `REPLID` followed by a six-byte big-endian
   `GLOBCNT`. LPE's internal store id remains `GLOBCNT << 16 | REPLID`, and
   conversion between the two layouts must happen only when parsing or
-  serializing ROP request and response fields.
+  serializing ROP request and response fields, table identifier columns,
+  FastTransfer/ICS identifier properties, and identifier-valued property rows
+  such as `PidTagFolderId`, `PidTagParentFolderId`, and `PidTagMid`.
 
 ### EMSMDB, NSPI, and FastTransfer
 

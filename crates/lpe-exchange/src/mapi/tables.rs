@@ -2318,8 +2318,8 @@ fn serialize_advertised_special_folder_row(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, display_name),
-            PID_TAG_FOLDER_ID => write_u64(&mut row, folder_id),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, parent_folder_id),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, folder_id),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, parent_folder_id),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, special_folder_type(folder_id)),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
@@ -2486,8 +2486,8 @@ pub(in crate::mapi) fn serialize_root_folder_row(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Root"),
-            PID_TAG_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, 0),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, 0),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
@@ -2545,8 +2545,8 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Top of Information Store"),
-            PID_TAG_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, ROOT_FOLDER_ID),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, ROOT_FOLDER_ID),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
@@ -2999,8 +2999,8 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &mailbox.name),
-            PID_TAG_FOLDER_ID => write_u64(&mut row, mapi_folder_id(mailbox)),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, mapi_parent_folder_id(mailbox)),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, mapi_folder_id(mailbox)),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, mapi_parent_folder_id(mailbox)),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(mailbox_has_subfolders(mailbox, mailboxes) as u8),
@@ -3025,8 +3025,8 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &folder.collection.display_name),
-            PID_TAG_FOLDER_ID => write_u64(&mut row, folder.id),
-            PID_TAG_PARENT_FOLDER_ID => write_u64(&mut row, IPM_SUBTREE_FOLDER_ID),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, folder.id),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
             PID_TAG_SUBFOLDERS => row.push(0),
@@ -3051,7 +3051,7 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
     let mut row = Vec::new();
     for column in columns {
         match *column {
-            PID_TAG_MID => write_u64(&mut row, mapi_message_id(email)),
+            PID_TAG_MID => write_object_id(&mut row, mapi_message_id(email)),
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                 write_utf16z(&mut row, &email.subject)
             }

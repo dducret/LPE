@@ -3699,7 +3699,13 @@ pub(in crate::mapi) fn write_mapi_value(row: &mut Vec<u8>, property_tag: u32, va
         }
         Some(MapiPropertyType::Boolean) => row.push(value.as_bool().unwrap_or_default() as u8),
         Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => {
-            write_u64(row, value.as_i64().unwrap_or_default().max(0) as u64)
+            let value = value.as_i64().unwrap_or_default().max(0) as u64;
+            match property_tag {
+                PID_TAG_FOLDER_ID | PID_TAG_PARENT_FOLDER_ID | PID_TAG_MID => {
+                    write_object_id(row, value)
+                }
+                _ => write_u64(row, value),
+            }
         }
         Some(MapiPropertyType::String8) => {
             write_ascii_z(row, &value.clone().into_text().unwrap_or_default())
@@ -4205,6 +4211,21 @@ mod tests {
         assert_eq!(
             round_trip(0x6748_0014, &MapiValue::I64(99)),
             MapiValue::I64(99)
+        );
+    }
+
+    #[test]
+    fn object_id_properties_use_mapi_wire_ids() {
+        let mut encoded = Vec::new();
+        write_mapi_value(
+            &mut encoded,
+            PID_TAG_FOLDER_ID,
+            &MapiValue::U64(crate::mapi::identity::CALENDAR_FOLDER_ID),
+        );
+
+        assert_eq!(
+            crate::mapi::identity::object_id_from_wire_id(&encoded),
+            Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
         );
     }
 

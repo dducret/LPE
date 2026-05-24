@@ -2247,7 +2247,7 @@ pub(in crate::mapi) fn write_u64(body: &mut Vec<u8>, value: u64) {
     body.extend_from_slice(&value.to_le_bytes());
 }
 
-fn write_object_id(body: &mut Vec<u8>, value: u64) {
+pub(in crate::mapi) fn write_object_id(body: &mut Vec<u8>, value: u64) {
     if let Some(bytes) = crate::mapi::identity::wire_id_bytes_from_object_id(value) {
         body.extend_from_slice(&bytes);
     } else {
