@@ -23129,7 +23129,7 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
     assert_eq!(u32::from_le_bytes(body[29..33].try_into().unwrap()), 16);
     assert_eq!(
         &body[33..49],
-        FakeStore::account().account_id.as_bytes().as_slice()
+        FakeStore::account().account_id.to_bytes_le().as_slice()
     );
     assert!(!contains_bytes(&body, &utf16z("alice@example.test")));
 

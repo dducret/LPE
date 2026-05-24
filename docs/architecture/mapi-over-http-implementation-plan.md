@@ -165,6 +165,8 @@ not by itself authorize broad client publication.
 
 - NSPI can resolve the authenticated mailbox and canonical visible contacts for
   Outlook address-book bootstrap.
+- NSPI projects `PidTagAddressBookObjectGuid` as the Windows GUID byte layout
+  expected by Outlook address book clients.
 - NSPI mutation and advanced link-table operations are intentionally deferred.
 
 ### ICS and FastTransfer Coverage
