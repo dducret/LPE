@@ -5079,6 +5079,7 @@ where
                 );
                 let transfer_buffer =
                     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+                        principal.account_id,
                         sync_type,
                         sync_flags,
                         sync_extra_flags,
@@ -5108,6 +5109,7 @@ where
                 );
                 let incremental_transfer_buffer = checkpoint.as_ref().map(|_| {
                     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
+                        principal.account_id,
                         sync_type,
                         sync_flags,
                         sync_extra_flags,

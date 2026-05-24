@@ -219,6 +219,26 @@ pub(crate) fn object_id_from_folder_identifier_bytes(bytes: &[u8]) -> Option<u64
     object_id_from_folder_entry_id(bytes).or_else(|| object_id_from_long_term_id(bytes))
 }
 
+pub(crate) fn message_entry_id_from_object_ids(
+    mailbox_guid: Uuid,
+    folder_id: u64,
+    message_id: u64,
+) -> Option<Vec<u8>> {
+    let folder_counter = global_counter_from_store_id(folder_id)?;
+    let message_counter = global_counter_from_store_id(message_id)?;
+    let mut entry_id = Vec::with_capacity(70);
+    entry_id.extend_from_slice(&0u32.to_le_bytes());
+    entry_id.extend_from_slice(&mailbox_guid.to_bytes_le());
+    entry_id.extend_from_slice(&0x0007u16.to_le_bytes());
+    entry_id.extend_from_slice(&STORE_REPLICA_GUID);
+    entry_id.extend_from_slice(&globcnt_bytes(folder_counter));
+    entry_id.extend_from_slice(&0u16.to_le_bytes());
+    entry_id.extend_from_slice(&STORE_REPLICA_GUID);
+    entry_id.extend_from_slice(&globcnt_bytes(message_counter));
+    entry_id.extend_from_slice(&0u16.to_le_bytes());
+    Some(entry_id)
+}
+
 pub(crate) fn source_key_for_object_id(object_id: u64) -> Vec<u8> {
     let mut key = STORE_REPLICA_GUID.to_vec();
     let global_counter = global_counter_from_store_id(object_id)

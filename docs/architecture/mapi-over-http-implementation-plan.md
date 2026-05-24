@@ -152,6 +152,12 @@ non-canonical LPE state.
 - Search folders are canonical persisted definitions plus folder-associated
   information rows. Bounded evaluators cover the Outlook bootstrap surfaces such
   as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
+- Content synchronization emits long-term `PidTagEntryId` values for message
+  and FAI rows using the documented private mailbox Message EntryID shape:
+  mailbox account GUID as provider UID, canonical store replica GUIDs, and the
+  folder/message global counters used by `PidTagSourceKey`. Outlook relies on
+  this identity material when deriving local item-friendly identifiers during
+  cached-mode sync.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed

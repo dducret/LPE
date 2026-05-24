@@ -26,6 +26,7 @@ const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
+const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
@@ -311,6 +312,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
     final_change_sequence: u64,
 ) -> Vec<u8> {
     sync_manifest_buffer_with_final_state(
+        Uuid::nil(),
         sync_type,
         sync_flags,
         sync_extra_flags,
@@ -332,6 +334,7 @@ pub(crate) fn sync_manifest_buffer_with_attachments(
 
 #[allow(clippy::too_many_arguments, dead_code)]
 pub(crate) fn sync_manifest_buffer_with_final_state(
+    mailbox_guid: Uuid,
     sync_type: u8,
     sync_flags: u16,
     sync_extra_flags: u32,
@@ -350,6 +353,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
     _final_change_sequence: u64,
 ) -> Vec<u8> {
     sync_manifest_buffer_with_special_objects_and_final_state(
+        mailbox_guid,
         sync_type,
         sync_flags,
         sync_extra_flags,
@@ -373,6 +377,7 @@ pub(crate) fn sync_manifest_buffer_with_final_state(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
+    mailbox_guid: Uuid,
     sync_type: u8,
     sync_flags: u16,
     sync_extra_flags: u32,
@@ -597,6 +602,15 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             PID_TAG_PARENT_SOURCE_KEY,
             &source_key_for_store_id(folder_id),
         );
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_ENTRY_ID) {
+            if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_guid,
+                folder_id,
+                crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0),
+            ) {
+                write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
+            }
+        }
         if content_property_in_scope(
             sync_type,
             sync_flags,
@@ -706,6 +720,15 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             PID_TAG_PARENT_SOURCE_KEY,
             &source_key_for_store_id(object.folder_id),
         );
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_ENTRY_ID) {
+            if let Some(entry_id) = crate::mapi::identity::message_entry_id_from_object_ids(
+                mailbox_guid,
+                object.folder_id,
+                object.item_id,
+            ) {
+                write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
+            }
+        }
         if content_property_in_scope(
             sync_type,
             sync_flags,
@@ -3836,6 +3859,7 @@ mod tests {
         };
         let email = test_email();
         let buffer = sync_manifest_buffer_with_final_state(
+            Uuid::nil(),
             SYNC_TYPE_HIERARCHY,
             SYNC_FLAG_NO_FOREIGN_IDENTIFIERS,
             0,
@@ -4066,6 +4090,7 @@ mod tests {
             named_properties: vec![(0x8B00_0003, SpecialMessagePropertyValue::I32(3))],
         };
         let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
             SYNC_TYPE_CONTENTS,
             0,
             SYNC_EXTRA_FLAG_EID,
@@ -4121,6 +4146,7 @@ mod tests {
         };
         let email = test_email();
         let buffer = sync_manifest_buffer_with_final_state(
+            Uuid::nil(),
             0x02,
             0x0100,
             0,
@@ -4171,6 +4197,7 @@ mod tests {
         };
         let email = test_email();
         let buffer = sync_manifest_buffer_with_final_state(
+            Uuid::nil(),
             0x02,
             0x0100,
             0,

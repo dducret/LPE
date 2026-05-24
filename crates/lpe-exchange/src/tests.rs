@@ -15111,6 +15111,14 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
     );
     assert!(message.mid.is_some());
     assert!(message.change_number.is_some());
+    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+        account.account_id,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        message.mid.unwrap(),
+    )
+    .expect("Common Views message EntryID");
+    assert_eq!(entry_id.len(), 70);
+    assert!(contains_bytes(&response_rops, &entry_id));
     assert!(message
         .body_tags
         .contains(&PID_TAG_SEARCH_FOLDER_STORAGE_TYPE));
@@ -15741,8 +15749,9 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
     second.mailbox_states[0].unread = true;
     second.modseq = 49;
     second.mailbox_states[0].modseq = 49;
+    let account = FakeStore::account();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
         emails: Arc::new(Mutex::new(vec![first, second])),
         ..Default::default()
@@ -15775,6 +15784,14 @@ async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_change
         assert!(message.mid.is_some());
         assert!(message.change_number.is_some());
         assert!(!message.associated);
+        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account.account_id,
+            test_mapi_folder_id(5),
+            message.mid.unwrap(),
+        )
+        .expect("message EntryID");
+        assert_eq!(entry_id.len(), 70);
+        assert!(contains_bytes(&response_rops, &entry_id));
         assert_eq!(
             message.predecessor_change_list,
             mapi_mailstore::predecessor_change_list(message.change_number.unwrap())
@@ -16977,6 +16994,7 @@ fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy
         mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::REMINDERS_FOLDER_ID)
             .expect("Reminders mailbox");
     let buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
+        Uuid::nil(),
         0x02,
         0x0101,
         0,
@@ -17021,6 +17039,7 @@ fn mapi_hierarchy_sync_projects_outlook_special_folder_display_names() {
     let trash = FakeStore::mailbox("77777777-7777-4777-8777-777777777777", "trash", "Trash");
     let mailboxes = vec![inbox, sent, trash];
     let buffer = mapi_mailstore::sync_manifest_buffer_with_final_state(
+        Uuid::nil(),
         0x02,
         0x0101,
         0,
