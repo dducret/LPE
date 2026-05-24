@@ -498,6 +498,16 @@ fn stale_special_folder_object_id_from_short_id(bytes: &[u8]) -> Option<u64> {
     .flatten()
     .map(crate::mapi::identity::mapi_store_id)
     .find(|object_id| is_advertised_special_folder(*object_id))
+    .or_else(|| dynamic_object_id_from_bare_little_endian_short_id(bytes))
+}
+
+fn dynamic_object_id_from_bare_little_endian_short_id(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() != 8 || bytes[6..8] != [0, 0] {
+        return None;
+    }
+    let counter = global_counter_from_little_endian_globcnt(&bytes[..6])?;
+    (counter >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
+        .then(|| crate::mapi::identity::mapi_store_id(counter))
 }
 
 fn global_counter_from_little_endian_globcnt(bytes: &[u8]) -> Option<u64> {

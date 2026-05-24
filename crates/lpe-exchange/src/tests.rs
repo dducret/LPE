@@ -19457,6 +19457,11 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         value[2..8].copy_from_slice(&16_u64.to_le_bytes()[..6]);
         value
     };
+    let dynamic_bare_little_endian_short_id = {
+        let mut value = [0; 8];
+        value[..6].copy_from_slice(&75_u64.to_le_bytes()[..6]);
+        value
+    };
 
     let mut rops = vec![0x43, 0x00, 0x00];
     append_mapi_wire_id(&mut rops, object_id);
@@ -19466,6 +19471,8 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     rops.extend_from_slice(&stale_calendar_short_id);
     rops.extend_from_slice(&[0x43, 0x00, 0x00]);
     rops.extend_from_slice(&stale_calendar_little_endian_short_id);
+    rops.extend_from_slice(&[0x43, 0x00, 0x00]);
+    rops.extend_from_slice(&dynamic_bare_little_endian_short_id);
     rops.extend_from_slice(&[0x43, 0x00, 0x00]);
     rops.extend_from_slice(&[0; 8]);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
@@ -19507,6 +19514,11 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
             .count(),
         2
     );
+    let mut dynamic_short_id_response = vec![0x43, 0x00, 0, 0, 0, 0];
+    dynamic_short_id_response.extend_from_slice(
+        &crate::mapi::identity::long_term_id_from_object_id(test_mapi_folder_id(75)).unwrap(),
+    );
+    assert!(contains_bytes(&response_rops, &dynamic_short_id_response));
     assert!(contains_bytes(
         &response_rops,
         &[0x43, 0x00, 0x0F, 0x01, 0x04, 0x80]
