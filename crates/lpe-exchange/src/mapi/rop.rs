@@ -481,21 +481,17 @@ fn stale_special_folder_object_id_from_long_term_id(long_term_id: &[u8]) -> Opti
     }
     let global_counter = crate::mapi::identity::global_counter_from_globcnt(&long_term_id[16..22])?;
     let object_id = crate::mapi::identity::mapi_store_id(global_counter);
-    matches!(
-        object_id,
-        CALENDAR_FOLDER_ID
-            | CONTACTS_FOLDER_ID
-            | JOURNAL_FOLDER_ID
-            | NOTES_FOLDER_ID
-            | TASKS_FOLDER_ID
-            | REMINDERS_FOLDER_ID
-            | SYNC_ISSUES_FOLDER_ID
-            | CONFLICTS_FOLDER_ID
-            | LOCAL_FAILURES_FOLDER_ID
-            | SERVER_FAILURES_FOLDER_ID
-            | JUNK_FOLDER_ID
-    )
-    .then_some(object_id)
+    is_advertised_special_folder(object_id).then_some(object_id)
+}
+
+fn stale_special_folder_object_id_from_short_id(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() != 8 {
+        return None;
+    }
+    crate::mapi::identity::global_counter_from_globcnt(&bytes[2..8])
+        .or_else(|| crate::mapi::identity::global_counter_from_globcnt(&bytes[..6]))
+        .map(crate::mapi::identity::mapi_store_id)
+        .filter(|object_id| is_advertised_special_folder(*object_id))
 }
 
 pub(in crate::mapi) fn rop_get_address_types_response(request: &RopRequest) -> Vec<u8> {
@@ -2665,6 +2661,7 @@ impl RopRequest {
         let bytes = self.payload.get(..8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
             .or_else(|| crate::mapi::identity::object_id_from_trailing_replid_wire_id(bytes))
+            .or_else(|| stale_special_folder_object_id_from_short_id(bytes))
     }
 
     pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {

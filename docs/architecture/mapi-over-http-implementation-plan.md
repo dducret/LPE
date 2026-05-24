@@ -68,6 +68,9 @@ before it is advertised.
 - `RopLongTermIdFromId` also accepts Outlook's observed conversion request
   layout with six-byte `GLOBCNT` followed by two-byte little-endian `REPLID`;
   responses still use the canonical LongTermID form with the store replica GUID.
+- `RopLongTermIdFromId` also accepts stale `REPLID` values when the embedded
+  `GLOBCNT` maps to an LPE-advertised MAPI special folder; normal mailbox
+  items still require the canonical store replica id.
 - `RopLongTermIdFromId` failures for unmapped or unusable `REPLID` values use
   the documented `ecNotFound` result, not a generic invalid-parameter result.
 
@@ -137,9 +140,9 @@ non-canonical LPE state.
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
   special-folder caches can resolve back to canonical LPE folder IDs. If a
   cached LongTermID carries another stale store GUID, LPE accepts it only when
-  the global counter maps to one of the Outlook special-folder identifiers
-  carried by default-folder or AdditionalRen properties; normal mailbox items
-  still require the canonical store replica GUID or authenticated mailbox GUID.
+  the global counter maps to an LPE-advertised MAPI special folder; normal
+  mailbox items still require the canonical store replica GUID or authenticated
+  mailbox GUID.
 - Search folders are canonical persisted definitions plus folder-associated
   information rows. Bounded evaluators cover the Outlook bootstrap surfaces such
   as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
