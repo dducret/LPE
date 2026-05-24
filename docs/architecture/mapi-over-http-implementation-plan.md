@@ -132,6 +132,10 @@ non-canonical LPE state.
   24-byte LongTermID form so Outlook can convert them with
   `RopIdFromLongTermId` before opening the folder; cached 46-byte folder
   EntryIDs written back by Outlook remain accepted and normalized.
+- `RopIdFromLongTermId` advertises the canonical store replica GUID in
+  `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
+  mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
+  special-folder caches can resolve back to canonical LPE folder IDs.
 - Search folders are canonical persisted definitions plus folder-associated
   information rows. Bounded evaluators cover the Outlook bootstrap surfaces such
   as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.

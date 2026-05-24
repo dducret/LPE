@@ -6322,7 +6322,14 @@ where
                 responses.extend_from_slice(&rop_long_term_id_from_id_response(&request))
             }
             Some(RopId::IdFromLongTermId) => {
-                responses.extend_from_slice(&rop_id_from_long_term_id_response(&request))
+                let replica_guid_aliases = [
+                    *principal.account_id.as_bytes(),
+                    principal.account_id.to_bytes_le(),
+                ];
+                responses.extend_from_slice(&rop_id_from_long_term_id_response(
+                    &request,
+                    &replica_guid_aliases,
+                ))
             }
             Some(RopId::PublicFolderIsGhosted) => {
                 responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request))

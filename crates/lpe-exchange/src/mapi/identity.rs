@@ -170,10 +170,18 @@ pub(crate) fn long_term_id_from_object_id(object_id: u64) -> Option<[u8; 24]> {
 }
 
 pub(crate) fn object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
-    if long_term_id.len() != 24
-        || long_term_id[..16] != STORE_REPLICA_GUID
-        || long_term_id[22..24] != [0, 0]
-    {
+    object_id_from_long_term_id_with_replica_guids(long_term_id, &[])
+}
+
+pub(crate) fn object_id_from_long_term_id_with_replica_guids(
+    long_term_id: &[u8],
+    replica_guid_aliases: &[[u8; 16]],
+) -> Option<u64> {
+    if long_term_id.len() != 24 || long_term_id[22..24] != [0, 0] {
+        return None;
+    }
+    let replica_guid: [u8; 16] = long_term_id[..16].try_into().ok()?;
+    if replica_guid != STORE_REPLICA_GUID && !replica_guid_aliases.contains(&replica_guid) {
         return None;
     }
     global_counter_from_globcnt(&long_term_id[16..22]).map(mapi_store_id)

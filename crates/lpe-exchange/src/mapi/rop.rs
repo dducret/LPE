@@ -455,11 +455,17 @@ pub(in crate::mapi) fn rop_long_term_id_from_id_response(request: &RopRequest) -
     response
 }
 
-pub(in crate::mapi) fn rop_id_from_long_term_id_response(request: &RopRequest) -> Vec<u8> {
+pub(in crate::mapi) fn rop_id_from_long_term_id_response(
+    request: &RopRequest,
+    replica_guid_aliases: &[[u8; 16]],
+) -> Vec<u8> {
     let Some(long_term_id) = request.long_term_id() else {
         return rop_error_response(0x44, request.response_handle_index(), 0x8004_0102);
     };
-    let Some(object_id) = object_id_from_long_term_id(long_term_id) else {
+    let Some(object_id) = crate::mapi::identity::object_id_from_long_term_id_with_replica_guids(
+        long_term_id,
+        replica_guid_aliases,
+    ) else {
         return rop_error_response(0x44, request.response_handle_index(), 0x8004_010F);
     };
     let mut response = vec![0x44, request.response_handle_index()];
