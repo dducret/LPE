@@ -21,6 +21,7 @@ const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests.rs");
 const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
+const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -559,6 +560,18 @@ fn mapi_property_store_runtime_sql_matches_durable_schema() {
             "SELECT property_tag, property_type, property_value",
             "DELETE FROM mapi_custom_property_values",
         ],
+    );
+}
+
+#[test]
+fn update_script_repairs_mapi_property_store_tables() {
+    assert!(
+        UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.mapi_named_properties")
+            && UPDATE_LPE_SCRIPT.contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_lid_idx")
+            && UPDATE_LPE_SCRIPT.contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_name_idx")
+            && UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values")
+            && UPDATE_LPE_SCRIPT.contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx"),
+        "update-lpe.sh must add durable MAPI named/custom property tables for existing databases"
     );
 }
 

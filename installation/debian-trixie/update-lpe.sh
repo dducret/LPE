@@ -209,6 +209,47 @@ END $$;
 CREATE INDEX IF NOT EXISTS conversation_actions_account_idx
   ON public.conversation_actions (tenant_id, account_id, updated_at DESC, id);
 
+CREATE TABLE IF NOT EXISTS public.mapi_named_properties (
+  tenant_id UUID NOT NULL,
+  account_id UUID NOT NULL,
+  property_id INTEGER NOT NULL CHECK (property_id BETWEEN 32769 AND 65534),
+  property_guid BYTEA NOT NULL CHECK (octet_length(property_guid) = 16),
+  property_kind TEXT NOT NULL CHECK (property_kind IN ('lid', 'name')),
+  property_lid INTEGER CHECK (property_lid IS NULL OR property_lid >= 0),
+  property_name TEXT CHECK (property_name IS NULL OR btrim(property_name) <> ''),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, account_id, property_id),
+  CHECK (
+    (property_kind = 'lid' AND property_lid IS NOT NULL AND property_name IS NULL)
+    OR (property_kind = 'name' AND property_lid IS NULL AND property_name IS NOT NULL)
+  ),
+  FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_lid_idx
+  ON public.mapi_named_properties (tenant_id, account_id, property_guid, property_lid)
+  WHERE property_kind = 'lid';
+
+CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_name_idx
+  ON public.mapi_named_properties (tenant_id, account_id, property_guid, property_name)
+  WHERE property_kind = 'name';
+
+CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values (
+  tenant_id UUID NOT NULL,
+  account_id UUID NOT NULL,
+  object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment')),
+  canonical_id UUID NOT NULL,
+  property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295),
+  property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535),
+  property_value BYTEA NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, account_id, object_kind, canonical_id, property_tag, property_type),
+  FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx
+  ON public.mapi_custom_property_values (tenant_id, account_id, object_kind, canonical_id);
+
 ALTER TABLE public.mailbox_messages
   ADD COLUMN IF NOT EXISTS followup_flag_status TEXT NOT NULL DEFAULT 'none'
     CHECK (followup_flag_status IN ('none', 'flagged', 'complete')),

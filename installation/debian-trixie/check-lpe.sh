@@ -93,6 +93,14 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.searcha
   || fail "View public.searchable_mail_documents is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 pass "Found view public.searchable_mail_documents"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_named_properties');" | grep -qx 'mapi_named_properties' \
+  || fail "Table public.mapi_named_properties is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh or intentionally reset the schema with init-schema.sh."
+pass "Found table public.mapi_named_properties"
+
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_custom_property_values');" | grep -qx 'mapi_custom_property_values' \
+  || fail "Table public.mapi_custom_property_values is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh or intentionally reset the schema with init-schema.sh."
+pass "Found table public.mapi_custom_property_values"
+
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 expected_schema_version="$(
