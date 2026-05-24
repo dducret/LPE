@@ -58,6 +58,11 @@ before it is advertised.
 - Private mailbox logon is the supported mailbox logon mode. Public-folder
   logons return a parseable unsupported response and must not create
   protocol-local public-folder state.
+- ROP folder and message identifiers use the MAPI wire layout at the protocol
+  boundary: two-byte little-endian `REPLID` followed by a six-byte big-endian
+  `GLOBCNT`. LPE's internal store id remains `GLOBCNT << 16 | REPLID`, and
+  conversion between the two layouts must happen only when parsing or
+  serializing ROP request and response fields.
 
 ### EMSMDB, NSPI, and FastTransfer
 

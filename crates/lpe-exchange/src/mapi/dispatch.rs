@@ -2060,7 +2060,10 @@ fn summarize_logon_response_rop(
         summary.logon_flags = format!("{:#04x}", cursor.read_u8()?);
         let mut folder_ids = Vec::with_capacity(PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len());
         for _ in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
-            folder_ids.push(format!("{:#018x}", read_u64(&mut cursor)?));
+            let bytes = cursor.read_bytes(8)?;
+            let folder_id = crate::mapi::identity::object_id_from_wire_id(bytes)
+                .unwrap_or_else(|| u64::from_le_bytes(bytes.try_into().unwrap_or_default()));
+            folder_ids.push(format!("{folder_id:#018x}"));
         }
         summary.special_folder_ids = folder_ids.join(",");
         summary.response_flags = format!("{:#04x}", cursor.read_u8()?);
@@ -6846,7 +6849,9 @@ mod tests {
     #[test]
     fn execute_rop_debug_summary_decodes_ids_and_return_codes() {
         let mut request_bytes = vec![0x02, 0, 0, 1];
-        request_bytes.extend_from_slice(&ROOT_FOLDER_ID.to_le_bytes());
+        request_bytes.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
+        );
         request_bytes.push(0);
         let request_buffer = rop_buffer_with_response(request_bytes, &[0]);
         let request_summary = summarize_request_rop_buffer(&request_buffer);
@@ -7084,7 +7089,9 @@ mod tests {
     #[test]
     fn first_post_hierarchy_probe_summary_identifies_open_folder_and_getprops_shapes() {
         let mut request_bytes = vec![0x02, 0x00, 0x00, 0x01];
-        request_bytes.extend_from_slice(&CALENDAR_FOLDER_ID.to_le_bytes());
+        request_bytes.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(CALENDAR_FOLDER_ID).unwrap(),
+        );
         request_bytes.push(0);
         request_bytes.extend_from_slice(&[0x07, 0x00, 0x01]);
         request_bytes.extend_from_slice(&4096u16.to_le_bytes());

@@ -114,6 +114,25 @@ pub(crate) fn global_counter_from_globcnt(bytes: &[u8]) -> Option<u64> {
     (global_counter != 0).then_some(global_counter)
 }
 
+pub(crate) fn object_id_from_wire_id(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() != 8 {
+        return None;
+    }
+    let replica_id = u16::from_le_bytes(bytes[..2].try_into().ok()?);
+    if u64::from(replica_id) != STORE_REPLICA_ID {
+        return None;
+    }
+    global_counter_from_globcnt(&bytes[2..8]).map(mapi_store_id)
+}
+
+pub(crate) fn wire_id_bytes_from_object_id(object_id: u64) -> Option<[u8; 8]> {
+    let global_counter = global_counter_from_store_id(object_id)?;
+    let mut bytes = [0; 8];
+    bytes[..2].copy_from_slice(&(STORE_REPLICA_ID as u16).to_le_bytes());
+    bytes[2..8].copy_from_slice(&globcnt_bytes(global_counter));
+    Some(bytes)
+}
+
 pub(crate) fn remember_mapi_identity(canonical_id: Uuid, object_id: u64) {
     let mut ids = MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -258,6 +277,17 @@ mod tests {
         assert_eq!(
             object_id_from_folder_identifier_bytes(&entry_id),
             Some(object_id)
+        );
+    }
+
+    #[test]
+    fn wire_id_round_trips_replica_id_and_big_endian_global_counter() {
+        let wire_id = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10];
+
+        assert_eq!(object_id_from_wire_id(&wire_id), Some(CALENDAR_FOLDER_ID));
+        assert_eq!(
+            wire_id_bytes_from_object_id(CALENDAR_FOLDER_ID),
+            Some(wire_id)
         );
     }
 

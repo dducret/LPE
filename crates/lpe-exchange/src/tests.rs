@@ -4408,23 +4408,29 @@ fn append_mapi_i64_property(values: &mut Vec<u8>, property_tag: u32, value: i64)
     values.extend_from_slice(&value.to_le_bytes());
 }
 
+fn append_mapi_wire_id(buffer: &mut Vec<u8>, object_id: u64) {
+    buffer.extend_from_slice(
+        &crate::mapi::identity::wire_id_bytes_from_object_id(object_id).unwrap(),
+    );
+}
+
 fn append_rop_open_folder(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
     rops.extend_from_slice(&[0x02, input, 0x00, output]);
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(rops, folder_id);
     rops.push(0);
 }
 
 fn append_rop_create_message(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
     rops.extend_from_slice(&[0x06, input, 0x01, output]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(rops, folder_id);
     rops.push(0);
 }
 
 fn append_rop_create_associated_message(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
     rops.extend_from_slice(&[0x06, input, 0x01, output]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(rops, folder_id);
     rops.push(1);
 }
 
@@ -4614,7 +4620,7 @@ fn append_rop_set_read_flags(rops: &mut Vec<u8>, input: u8, read_flags: u8, mess
     rops.extend_from_slice(&[0x66, 0x00, input, 0x00, read_flags]);
     rops.extend_from_slice(&(message_ids.len() as u16).to_le_bytes());
     for message_id in message_ids {
-        rops.extend_from_slice(&message_id.to_le_bytes());
+        append_mapi_wire_id(rops, *message_id);
     }
 }
 
@@ -4627,9 +4633,9 @@ fn append_rop_open_message(
 ) {
     rops.extend_from_slice(&[0x03, 0x00, input, output]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(rops, folder_id);
     rops.push(0);
-    rops.extend_from_slice(&message_id.to_le_bytes());
+    append_mapi_wire_id(rops, message_id);
 }
 
 fn append_rop_submit_message(rops: &mut Vec<u8>, input: u8) {
@@ -4736,7 +4742,7 @@ fn append_rop_delete_messages(rops: &mut Vec<u8>, input: u8, message_ids: &[u64]
     rops.extend_from_slice(&[0x1E, 0x00, input, 0x00, 0x00]);
     rops.extend_from_slice(&(message_ids.len() as u16).to_le_bytes());
     for message_id in message_ids {
-        rops.extend_from_slice(&message_id.to_le_bytes());
+        append_mapi_wire_id(rops, *message_id);
     }
 }
 
@@ -5376,7 +5382,7 @@ async fn mapi_over_http_task_contents_table_lists_canonical_tasks() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(19).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(19));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -7234,7 +7240,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
 
     renew_mapi_request_id(&mut execute_headers);
     let ipm_subtree_property_request = hex_bytes(
-        "020000002c00000000000400240024001c00020000010100040000000000000700010000000001000201047c01000000ffffffff0780000000000000",
+        "020000002c00000000000400240024001c00020000010100000000000004000700010000000001000201047c01000000ffffffff0780000000000000",
     );
     let ipm_subtree_property_response = service
         .handle_mapi(
@@ -7380,7 +7386,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         0
     );
     assert_eq!(
-        u64::from_le_bytes(response_rop[6..14].try_into().unwrap()),
+        crate::mapi::identity::object_id_from_wire_id(&response_rop[6..14]).unwrap(),
         test_mapi_folder_id(5)
     );
     assert_eq!(&response_rop[14..], b"IPM.Note\0");
@@ -7708,7 +7714,7 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
@@ -7797,7 +7803,7 @@ async fn mapi_over_http_query_columns_all_reports_canonical_table_columns() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -7867,7 +7873,7 @@ async fn mapi_over_http_query_columns_all_folder_columns_omit_note_geometry() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, root
     ];
-    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x00, // RopGetHierarchyTable
@@ -7935,7 +7941,7 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, IPM subtree
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(4).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(4));
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -8016,7 +8022,7 @@ async fn mapi_over_http_advertised_special_folder_reports_own_identity() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Outbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(6).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(6));
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -8090,7 +8096,7 @@ async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x1C, 0x00, 0x01, 0x02, // RopCreateFolder
@@ -8168,13 +8174,13 @@ async fn mapi_over_http_delete_folder_removes_custom_canonical_mailbox() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x1D, 0x00, 0x01, // RopDeleteFolder
         0x00, // deletion flags
     ]);
-    rops.extend_from_slice(&test_mapi_uuid_id(&custom_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_uuid_id(&custom_id));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -8232,13 +8238,13 @@ async fn mapi_over_http_delete_folder_rejects_system_mailbox() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x1D, 0x00, 0x01, // RopDeleteFolder
         0x00, // deletion flags
     ]);
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -8284,7 +8290,7 @@ async fn mapi_over_http_folder_move_copy_rops_return_parseable_errors_without_co
         0x00, // synchronous
         0x01, // Unicode name
     ];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.extend_from_slice(&utf16z("Moved Folder"));
     rops.extend_from_slice(&[
         0x36, 0x00, 0x00, 0x01, // RopCopyFolder
@@ -8292,7 +8298,7 @@ async fn mapi_over_http_folder_move_copy_rops_return_parseable_errors_without_co
         0x01, // recursive
         0x00, // multibyte name
     ]);
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.extend_from_slice(b"Copied Folder\0");
     rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // RopGetStoreState proves the batch stayed aligned.
 
@@ -8346,7 +8352,7 @@ async fn mapi_over_http_execute_sets_columns_and_queries_empty_rows() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -8408,7 +8414,7 @@ async fn mapi_over_http_query_rows_lists_canonical_mailbox_folders() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
@@ -8479,7 +8485,7 @@ async fn mapi_over_http_sort_table_orders_combined_hierarchy_rows() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Root
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
@@ -8574,7 +8580,7 @@ async fn mapi_over_http_contents_table_lists_canonical_messages() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -8678,7 +8684,7 @@ async fn mapi_over_http_query_rows_advances_table_position() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -8779,7 +8785,7 @@ async fn mapi_over_http_query_position_reports_table_cursor() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -8866,7 +8872,7 @@ async fn mapi_over_http_seek_row_fractional_moves_table_cursor() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -8922,7 +8928,7 @@ async fn mapi_over_http_categorized_table_rops_return_rop_specific_protocol_erro
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
     rops.extend_from_slice(&[0x59, 0x00, 0x02]);
@@ -9018,7 +9024,7 @@ async fn mapi_over_http_query_rows_no_advance_preserves_table_position() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -9093,7 +9099,7 @@ async fn mapi_over_http_sort_table_orders_contents_rows() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -9186,7 +9192,7 @@ async fn mapi_over_http_query_rows_reads_backward_from_table_position() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -9286,7 +9292,7 @@ async fn mapi_over_http_restrict_filters_contents_table_rows() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -9382,7 +9388,7 @@ async fn mapi_over_http_find_row_returns_matching_contents_row() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -9465,7 +9471,7 @@ async fn mapi_over_http_table_bookmarks_restore_contents_cursor() {
     let mut first_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    first_rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut first_rops, test_mapi_folder_id(5));
     first_rops.push(0);
     first_rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -9601,13 +9607,13 @@ async fn mapi_over_http_create_set_save_message_imports_canonical_email() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x06, 0x00, 0x01, 0x02, // RopCreateMessage
     ]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x02, // RopSetProperties
@@ -9935,7 +9941,7 @@ async fn mapi_over_http_conversation_action_applies_to_future_matching_message()
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
     rops.extend_from_slice(&[0x06, 0x01, 0x01, 0x02]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&crate::mapi::identity::INBOX_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
     rops.push(0);
     append_rop_set_properties(&mut rops, 2, 3, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 2);
@@ -10031,7 +10037,7 @@ async fn mapi_over_http_conversation_action_cross_store_keeps_local_message_in_p
     append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
     rops.extend_from_slice(&[0x06, 0x01, 0x01, 0x02]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&crate::mapi::identity::INBOX_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
     rops.push(0);
     append_rop_set_properties(&mut rops, 2, 3, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 2);
@@ -10111,11 +10117,12 @@ async fn mapi_over_http_conversation_action_fai_is_listed_and_openable() {
     rops.extend_from_slice(&[0, 0, 1, 0]);
     rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x03]); // RopOpenMessage
     rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(
-        &crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID.to_le_bytes(),
+    append_mapi_wire_id(
+        &mut rops,
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     );
     rops.push(0);
-    rops.extend_from_slice(&message_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, message_id);
     rops.extend_from_slice(&[0x07, 0x00, 0x03]); // GetPropertiesSpecific
     rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&5u16.to_le_bytes());
@@ -10252,13 +10259,13 @@ async fn mapi_over_http_delete_properties_no_replicate_clears_pending_message_pr
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x06, 0x00, 0x01, 0x02, // RopCreateMessage
     ]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x79, 0x00, 0x02, // RopSetPropertiesNoReplicate
@@ -10532,13 +10539,13 @@ async fn mapi_over_http_modify_recipients_imports_pending_message_recipients() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x06, 0x00, 0x01, 0x02, // RopCreateMessage
     ]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x02, // RopSetProperties
@@ -10647,13 +10654,13 @@ async fn mapi_over_http_modify_recipients_string8_rows_save_canonically() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x06, 0x00, 0x01, 0x02, // RopCreateMessage
     ]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x02, // RopSetProperties
@@ -10737,11 +10744,11 @@ async fn mapi_over_http_remove_all_recipients_clears_pending_message_recipients(
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x0E, 0x00, 0x02]);
     rops.extend_from_slice(&3u16.to_le_bytes());
@@ -10825,13 +10832,13 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x06, 0x00, 0x01, 0x02, // RopCreateMessage
     ]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x02, // RopSetProperties
@@ -11403,15 +11410,15 @@ async fn mapi_over_http_submit_opened_draft_uses_source_draft_id() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Drafts
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(14).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(14));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(14).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(14));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(&draft_id.to_string()).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(&draft_id.to_string()));
     rops.extend_from_slice(&[
         0x32, 0x00, 0x02, 0x00, // RopSubmitMessage
     ]);
@@ -11694,11 +11701,11 @@ async fn mapi_over_http_reload_cached_information_returns_pending_message_summar
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x0A, 0x00, 0x02]);
     rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
@@ -11789,7 +11796,7 @@ async fn mapi_over_http_message_status_is_session_local() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x1F, 0x00, 0x01]); // RopGetMessageStatus
     rops.extend_from_slice(&mapi_message_id.to_le_bytes());
@@ -11877,25 +11884,31 @@ async fn mapi_over_http_move_copy_messages_uses_canonical_store() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x02, 0x00, 0x00, 0x02, // RopOpenFolder, Archive
     ]);
-    rops.extend_from_slice(&crate::mapi::identity::ARCHIVE_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ARCHIVE_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, move
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(&move_message_id.to_string()).to_le_bytes());
+    append_mapi_wire_id(
+        &mut rops,
+        test_mapi_message_id(&move_message_id.to_string()),
+    );
     rops.push(0);
     rops.push(0);
     rops.extend_from_slice(&[
         0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, copy
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(&copy_message_id.to_string()).to_le_bytes());
+    append_mapi_wire_id(
+        &mut rops,
+        test_mapi_message_id(&copy_message_id.to_string()),
+    );
     rops.push(0);
     rops.push(1);
 
@@ -12011,26 +12024,31 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x1E, 0x00, 0x01, 0x00, 0x00, // RopDeleteMessages
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(&soft_message_id.to_string()).to_le_bytes());
+    append_mapi_wire_id(
+        &mut rops,
+        test_mapi_message_id(&soft_message_id.to_string()),
+    );
     rops.extend_from_slice(&[
         0x59, 0x00, 0x01, // RopHardDeleteMessages
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(
-        &test_mapi_message_id(&legacy_hard_message_id.to_string()).to_le_bytes(),
+    append_mapi_wire_id(
+        &mut rops,
+        test_mapi_message_id(&legacy_hard_message_id.to_string()),
     );
     rops.extend_from_slice(&[
         0x91, 0x00, 0x01, 0x00, 0x00, // RopHardDeleteMessagesExtended
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(
-        &test_mapi_message_id(&extended_hard_message_id.to_string()).to_le_bytes(),
+    append_mapi_wire_id(
+        &mut rops,
+        test_mapi_message_id(&extended_hard_message_id.to_string()),
     );
 
     let mut execute_headers = mapi_headers("Execute");
@@ -12240,7 +12258,7 @@ async fn mapi_over_http_seek_row_moves_contents_table_cursor() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -12322,15 +12340,15 @@ async fn mapi_over_http_open_message_then_gets_canonical_message_properties() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x07, 0x00, 0x02, // RopGetPropertiesSpecific
     ]);
@@ -12425,15 +12443,15 @@ async fn mapi_over_http_get_properties_all_returns_message_projection() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x08, 0x00, 0x02, // RopGetPropertiesAll
     ]);
@@ -12510,15 +12528,15 @@ async fn mapi_over_http_read_recipients_returns_canonical_message_recipients() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x0F, 0x00, 0x02, // RopReadRecipients
     ]);
@@ -12604,15 +12622,15 @@ async fn mapi_over_http_read_recipients_hides_sent_message_bcc_by_default() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(7).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(7).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x0F, 0x00, 0x02, // RopReadRecipients
     ]);
@@ -12691,15 +12709,15 @@ async fn mapi_over_http_attachment_table_lists_canonical_message_attachments() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x21, 0x00, 0x02, 0x03, 0x00, // RopGetAttachmentTable
         0x12, 0x00, 0x03, 0x00, // RopSetColumns
@@ -12791,15 +12809,15 @@ async fn mapi_over_http_open_attachment_returns_canonical_attachment_properties(
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x22, 0x00, 0x02, 0x03, 0x00, // RopOpenAttachment
     ]);
@@ -12896,15 +12914,15 @@ async fn mapi_over_http_reads_canonical_attachment_data_stream() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x22, 0x00, 0x02, 0x03, 0x00, // RopOpenAttachment
     ]);
@@ -13037,15 +13055,15 @@ async fn mapi_over_http_reads_canonical_message_body_stream() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x2B, 0x00, 0x02, 0x03, // RopOpenStream
     ]);
@@ -13214,15 +13232,15 @@ async fn mapi_over_http_copy_to_stream_saves_canonical_message_body() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage, source
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(source_message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(source_message_id));
     rops.extend_from_slice(&[
         0x2B, 0x00, 0x02, 0x03, // RopOpenStream, source body
     ]);
@@ -13232,7 +13250,7 @@ async fn mapi_over_http_copy_to_stream_saves_canonical_message_body() {
         0x06, 0x00, 0x01, 0x04, // RopCreateMessage, destination
     ]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x04, // RopSetProperties, destination subject
@@ -13346,15 +13364,15 @@ async fn mapi_over_http_create_attachment_saves_canonical_attachment_from_proper
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x23, 0x00, 0x02, 0x03, // RopCreateAttachment
         0x0A, 0x00, 0x03, // RopSetProperties
@@ -13467,15 +13485,15 @@ async fn mapi_over_http_write_stream_saves_canonical_attachment() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x23, 0x00, 0x02, 0x03, // RopCreateAttachment
         0x0A, 0x00, 0x03, // RopSetProperties
@@ -13617,15 +13635,15 @@ async fn mapi_over_http_copy_to_stream_saves_canonical_attachment() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x22, 0x00, 0x02, 0x03, 0x00, // RopOpenAttachment
     ]);
@@ -13776,15 +13794,15 @@ async fn mapi_over_http_delete_attachment_removes_canonical_attachment() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x24, 0x00, 0x02, // RopDeleteAttachment
     ]);
@@ -13879,15 +13897,15 @@ async fn mapi_over_http_get_valid_attachments_lists_canonical_attachment_numbers
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x52, 0x00, 0x02, // RopGetValidAttachments
     ]);
@@ -13947,13 +13965,13 @@ async fn mapi_over_http_set_read_flags_updates_canonical_message_state() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x66, 0x00, 0x01, 0x00, 0x01, // RopSetReadFlags, sync, rfSuppressReceipt
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -14014,15 +14032,15 @@ async fn mapi_over_http_set_message_read_flag_updates_open_message_state() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x11, 0x00, 0x02, 0x02, 0x01, // RopSetMessageReadFlag
     ]);
@@ -14091,15 +14109,15 @@ async fn mapi_over_http_set_properties_updates_open_message_flags() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x02, // RopSetProperties on opened message
     ]);
@@ -14172,15 +14190,15 @@ async fn mapi_over_http_set_properties_updates_canonical_mail_reminder_state() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x02, // RopSetProperties on opened message
     ]);
@@ -14483,7 +14501,7 @@ async fn mapi_over_http_ipm_subtree_returns_stable_ost_identity() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(4).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(4));
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the IPM subtree
@@ -14538,7 +14556,7 @@ async fn mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(4).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(4));
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on the IPM subtree
@@ -14609,7 +14627,7 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the folder
@@ -14625,9 +14643,9 @@ async fn mapi_over_http_cached_mode_properties_include_canonical_change_keys() {
         0x03, 0x00, 0x01, 0x02, // RopOpenMessage
     ]);
     rops.extend_from_slice(&0x0FFFu16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[
         0x07, 0x00, 0x02, // RopGetPropertiesSpecific
     ]);
@@ -14718,7 +14736,7 @@ async fn mapi_over_http_sync_configure_returns_canonical_manifest_buffer() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -14782,7 +14800,7 @@ async fn mapi_over_http_content_sync_only_specified_properties_limits_message_pr
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -14859,7 +14877,7 @@ async fn mapi_over_http_content_sync_only_specified_body_returns_body_property()
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -14940,7 +14958,7 @@ async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -15032,7 +15050,7 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::COMMON_VIEWS_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::COMMON_VIEWS_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -15123,8 +15141,9 @@ async fn mapi_over_http_conversation_action_content_sync_exports_fai_rows() {
         .to_string();
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(
-        &crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID.to_le_bytes(),
+    append_mapi_wire_id(
+        &mut rops,
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     );
     rops.push(0);
     rops.extend_from_slice(&[
@@ -15278,7 +15297,7 @@ async fn mapi_over_http_content_sync_uses_mailbox_state_membership() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -15335,7 +15354,7 @@ async fn mapi_over_http_tell_version_accepts_fast_transfer_sync_context() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -17199,7 +17218,7 @@ async fn mapi_over_http_logon_advertises_openable_additional_ren_entryids_ex() {
     let response_rops = response_rops_from_execute_response(response).await;
     let get_props_offset = response_rops
         .windows(7)
-        .position(|window| window == [0x07, 0x01, 0, 0, 0, 0, 0])
+        .rposition(|window| window == [0x07, 0x01, 0, 0, 0, 0, 0])
         .expect("AdditionalRenEntryIdsEx GetProperties response");
     let value_offset = get_props_offset + 7;
     let value_len = u16::from_le_bytes(
@@ -18165,13 +18184,13 @@ async fn mapi_over_http_fast_transfer_copy_to_message_returns_canonical_manifest
 
     let folder_id = test_mapi_folder_id(5);
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
     rops.push(0);
     rops.extend_from_slice(&0u32.to_le_bytes());
@@ -18233,11 +18252,11 @@ async fn mapi_over_http_fast_transfer_copy_messages_filters_to_requested_canonic
 
     let folder_id = test_mapi_folder_id(5);
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x4B, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(selected_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(selected_id));
     rops.push(0);
     rops.push(0x01);
     rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
@@ -18289,7 +18308,7 @@ async fn mapi_over_http_fast_transfer_copy_folder_returns_canonical_folder_manif
 
     let folder_id = test_mapi_folder_id(5);
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x4C, 0x00, 0x01, 0x02]);
     rops.push(0);
@@ -18347,13 +18366,13 @@ async fn mapi_over_http_fast_transfer_copy_properties_message_returns_canonical_
 
     let folder_id = test_mapi_folder_id(5);
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&1200u16.to_le_bytes());
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&[0x69, 0x00, 0x02, 0x03]);
     rops.push(0);
     rops.push(0);
@@ -18410,7 +18429,7 @@ async fn mapi_over_http_fast_transfer_upload_rops_return_rop_specific_protocol_e
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x53, 0x00, 0x01, 0x02, 0x01, 0x00]);
     rops.extend_from_slice(&[0x54, 0x00, 0x01]);
@@ -18469,7 +18488,7 @@ async fn mapi_over_http_per_user_information_rops_return_rop_specific_protocol_e
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x60, 0x00, 0x01]);
     rops.extend_from_slice(&[0x11; 16]);
@@ -18542,7 +18561,7 @@ async fn mapi_over_http_rule_rops_return_rop_specific_protocol_errors() {
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x3F, 0x00, 0x01, 0x02, 0x00]);
     rops.extend_from_slice(&[0x41, 0x00, 0x01, 0x00]);
@@ -18677,7 +18696,7 @@ async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x3E, 0x00, 0x01, 0x02, 0x00]);
     rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
@@ -18730,7 +18749,7 @@ async fn mapi_over_http_modify_permissions_mutation_is_explicitly_unsupported() 
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]);
     rops.extend_from_slice(&1u16.to_le_bytes());
@@ -18789,7 +18808,7 @@ async fn mapi_over_http_denies_mutation_without_folder_write_permission() {
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
 
@@ -18839,7 +18858,7 @@ async fn mapi_over_http_denies_contents_table_without_folder_read_permission() {
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
 
@@ -18882,12 +18901,12 @@ async fn mapi_over_http_search_criteria_rops_return_rop_specific_protocol_errors
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(11).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(11));
     rops.push(0);
     rops.extend_from_slice(&[0x30, 0x00, 0x01]);
     rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&0x0004_0002u32.to_le_bytes());
     rops.extend_from_slice(&[0x31, 0x00, 0x01, 0x01, 0x01, 0x01]);
 
@@ -18938,7 +18957,7 @@ async fn mapi_over_http_register_notification_returns_protocol_success_handles()
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&0x0001u16.to_le_bytes());
@@ -18947,7 +18966,7 @@ async fn mapi_over_http_register_notification_returns_protocol_success_handles()
     rops.extend_from_slice(&0x0401u16.to_le_bytes());
     rops.push(0);
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&0u64.to_le_bytes());
 
     let response = service
@@ -18996,16 +19015,16 @@ async fn mapi_over_http_notification_wait_reports_content_event_after_registered
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&0x0008u16.to_le_bytes());
     rops.push(0);
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&0u64.to_le_bytes());
     rops.extend_from_slice(&[0x1E, 0x00, 0x01, 0x00, 0x01]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -19109,7 +19128,7 @@ async fn mapi_over_http_notification_wait_polls_canonical_change_cursor() {
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&0x0010u16.to_le_bytes());
@@ -19150,7 +19169,7 @@ async fn mapi_over_http_notification_wait_reports_hierarchy_event_after_register
     let cookie = mapi_cookie_header(&connect);
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&0x0104u16.to_le_bytes());
@@ -19204,7 +19223,7 @@ async fn mapi_over_http_async_table_control_rops_return_rop_specific_protocol_er
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
     rops.extend_from_slice(&[0x38, 0x00, 0x02]);
@@ -19258,7 +19277,7 @@ async fn mapi_over_http_whole_folder_delete_rops_return_rop_specific_protocol_er
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x58, 0x00, 0x01, 0x00, 0x00]);
     rops.extend_from_slice(&[0x92, 0x00, 0x01, 0x00, 0x00]);
@@ -19306,9 +19325,9 @@ async fn mapi_over_http_public_folder_replica_rops_return_rop_specific_protocol_
     );
 
     let mut rops = vec![0x42, 0x00, 0x00];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&[0x45, 0x00, 0x00]);
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&[0x7B, 0x00, 0x00]);
 
     let response = service
@@ -19362,7 +19381,7 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     invalid_long_term_id[0] ^= 0xFF;
 
     let mut rops = vec![0x43, 0x00, 0x00];
-    rops.extend_from_slice(&object_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, object_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(&long_term_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
@@ -19383,7 +19402,7 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     long_term_response.extend_from_slice(&long_term_id);
     assert!(contains_bytes(&response_rops, &long_term_response));
     let mut object_id_response = vec![0x44, 0x00, 0, 0, 0, 0];
-    object_id_response.extend_from_slice(&object_id.to_le_bytes());
+    append_mapi_wire_id(&mut object_id_response, object_id);
     assert!(contains_bytes(&response_rops, &object_id_response));
     assert!(contains_bytes(
         &response_rops,
@@ -19560,7 +19579,7 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -19737,7 +19756,7 @@ async fn mapi_over_http_sync_upload_state_round_trips_as_transfer_state() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
@@ -19841,7 +19860,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
         0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
-    rops.extend_from_slice(&test_mapi_message_id(&imported_id.to_string()).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(&imported_id.to_string()));
     rops.extend_from_slice(&((values.len() + 2) as u16).to_le_bytes());
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&values);
@@ -19917,7 +19936,7 @@ async fn mapi_over_http_sync_upload_state_accumulates_multiple_streams() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
@@ -20002,7 +20021,7 @@ async fn mapi_over_http_set_local_replica_midset_deleted_round_trips_in_transfer
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
@@ -20077,13 +20096,13 @@ async fn mapi_over_http_sync_import_message_change_updates_canonical_flags() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
@@ -20145,7 +20164,7 @@ async fn mapi_over_http_sync_import_new_message_saves_canonical_email() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
@@ -20232,21 +20251,21 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
         0x80, 0x00, 0x02, // RopSynchronizationImportReadStateChanges
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(read_message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(read_message_id));
     rops.push(1);
     rops.extend_from_slice(&[
         0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
         0x02,
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(delete_message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(delete_message_id));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -20306,7 +20325,7 @@ async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
@@ -20314,7 +20333,7 @@ async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
         0x00,
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -20369,14 +20388,14 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
         0x78, 0x00, 0x02, // RopSynchronizationImportMessageMove
     ]);
-    rops.extend_from_slice(&test_mapi_message_id(message_id).to_le_bytes());
-    rops.extend_from_slice(&crate::mapi::identity::ARCHIVE_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ARCHIVE_FOLDER_ID);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -20444,7 +20463,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
@@ -20508,7 +20527,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_rejects_system_folder_mutat
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
@@ -20566,7 +20585,7 @@ async fn mapi_over_http_get_properties_specific_returns_folder_properties() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -20641,7 +20660,7 @@ async fn mapi_over_http_folder_set_properties_rejects_protocol_local_values() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on opened folder
@@ -20718,7 +20737,7 @@ async fn mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids()
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on opened folder
@@ -20776,7 +20795,7 @@ async fn mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state()
     let mut set_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    set_rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut set_rops, folder_id);
     set_rops.push(0);
     set_rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on opened folder
@@ -20813,7 +20832,7 @@ async fn mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state()
     let mut get_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    get_rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut get_rops, folder_id);
     get_rops.push(0);
     get_rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on reopened folder
@@ -20866,7 +20885,7 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
     let mut set_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    set_rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut set_rops, crate::mapi::identity::ROOT_FOLDER_ID);
     set_rops.push(0);
     set_rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -20903,7 +20922,7 @@ async fn mapi_over_http_root_default_folder_set_properties_do_not_override_compu
     let mut get_rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    get_rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut get_rops, crate::mapi::identity::ROOT_FOLDER_ID);
     get_rops.push(0);
     get_rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific on reopened root
@@ -20961,7 +20980,7 @@ async fn mapi_over_http_root_default_folder_set_properties_reject_invalid_entry_
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -21026,7 +21045,7 @@ async fn mapi_over_http_root_default_folder_set_properties_accept_valid_entry_id
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -21086,7 +21105,7 @@ async fn mapi_over_http_root_default_folder_set_properties_accepts_cached_rem_on
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x0A, 0x00, 0x01, // RopSetProperties on root
@@ -21138,7 +21157,7 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -21207,7 +21226,7 @@ async fn mapi_over_http_folder_get_properties_specific_flags_unknown_properties(
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::INBOX_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -21283,7 +21302,7 @@ async fn mapi_over_http_folder_get_properties_ignores_stale_protocol_local_folde
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::INBOX_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -21334,7 +21353,7 @@ async fn mapi_over_http_reminders_folder_open_uses_canonical_search_projection()
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::REMINDERS_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::REMINDERS_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -21386,7 +21405,7 @@ async fn mapi_over_http_root_rem_online_entry_id_projects_reminders_folder() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&crate::mapi::identity::ROOT_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
@@ -21533,7 +21552,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
         .to_string();
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
-    rops.extend_from_slice(&crate::mapi::identity::REMINDERS_FOLDER_ID.to_le_bytes());
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::REMINDERS_FOLDER_ID);
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -21651,7 +21670,7 @@ async fn mapi_over_http_execute_handles_mailbox_store_bootstrap_rops() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x09, 0x00, 0x01, // RopGetPropertiesList
@@ -21772,7 +21791,7 @@ async fn mapi_over_http_table_control_rops_require_table_handles() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[
         0x12, 0x00, 0x01, 0x00, // RopSetColumns on the folder handle.
@@ -21890,7 +21909,7 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
 
     assert_eq!(response_rops[0], 0x27);
     assert_eq!(
-        u64::from_le_bytes(response_rops[6..14].try_into().unwrap()),
+        crate::mapi::identity::object_id_from_wire_id(&response_rops[6..14]).unwrap(),
         test_mapi_folder_id(5)
     );
     assert!(contains_bytes(response_rops, b"IPM.Note\0"));
@@ -21962,11 +21981,11 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, b"IPM.Note\0"));
     let mut calendar_response = vec![0x27, 0x00, 0, 0, 0, 0];
-    calendar_response.extend_from_slice(&test_mapi_folder_id(16).to_le_bytes());
+    append_mapi_wire_id(&mut calendar_response, test_mapi_folder_id(16));
     calendar_response.extend_from_slice(b"IPM.Appointment\0");
     assert!(contains_bytes(&response_rops, calendar_response.as_slice()));
     let mut unmatched_response = vec![0x27, 0x00, 0, 0, 0, 0];
-    unmatched_response.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut unmatched_response, test_mapi_folder_id(5));
     unmatched_response.push(0);
     assert!(contains_bytes(
         &response_rops,
@@ -22013,7 +22032,7 @@ async fn mapi_over_http_get_receive_folder_empty_class_returns_default_message_c
     let response_rops = response_rops_from_execute_response(response).await;
     assert_eq!(response_rops[0], 0x27);
     assert_eq!(
-        u64::from_le_bytes(response_rops[6..14].try_into().unwrap()),
+        crate::mapi::identity::object_id_from_wire_id(&response_rops[6..14]).unwrap(),
         test_mapi_folder_id(5)
     );
     assert!(contains_bytes(&response_rops, b"IPM.Note\0"));
@@ -22065,11 +22084,10 @@ async fn mapi_over_http_execute_returns_transport_folder_without_protocol_outbox
         0
     );
     assert_eq!(
-        u64::from_le_bytes(
-            response_rops[transport_offset + 6..transport_offset + 14]
-                .try_into()
-                .unwrap()
-        ),
+        crate::mapi::identity::object_id_from_wire_id(
+            &response_rops[transport_offset + 6..transport_offset + 14]
+        )
+        .unwrap(),
         test_mapi_folder_id(6)
     );
 }
@@ -22091,7 +22109,7 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
 
     let mut rops = Vec::new();
     rops.extend_from_slice(&[0x34, 0x00, 0x00]); // RopAbortSubmit.
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.extend_from_slice(&message_id.to_le_bytes());
     rops.extend_from_slice(&[0x47, 0x00, 0x00]); // RopSetSpooler.
     rops.extend_from_slice(&[0x48, 0x00, 0x00]); // RopSpoolerLockMessage.
@@ -22099,7 +22117,7 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
     rops.push(1);
     rops.extend_from_slice(&[0x51, 0x00, 0x00]); // RopTransportNewMail.
     rops.extend_from_slice(&message_id.to_le_bytes());
-    rops.extend_from_slice(&folder_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, folder_id);
     rops.extend_from_slice(b"IPM.Note\0");
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // RopGetStoreState proves the batch stayed aligned.
@@ -22280,7 +22298,7 @@ async fn mapi_over_http_set_receive_folder_returns_rop_specific_protocol_error()
         .to_string();
 
     let mut rops = vec![0x26, 0x00, 0x00];
-    rops.extend_from_slice(&test_mapi_folder_id(5).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(b"IPM.Note\0");
 
     let mut execute_headers = mapi_headers("Execute");
@@ -24564,7 +24582,7 @@ async fn rpc_proxy_emsmdb_query_rows_reads_canonical_mailboxes() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
     ];
-    rops.extend_from_slice(&test_mapi_folder_id(1).to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(1));
     rops.push(0);
     rops.extend_from_slice(&[
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable

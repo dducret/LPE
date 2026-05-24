@@ -82,7 +82,7 @@ pub(in crate::mapi) fn rop_logon_response_body(
     write_u32(&mut response, 0);
     response.push(logon_flags);
     for folder_id in PRIVATE_LOGON_SPECIAL_FOLDER_IDS {
-        write_u64(&mut response, folder_id);
+        write_object_id(&mut response, folder_id);
     }
     response.push(0x07);
     response.extend_from_slice(&principal.account_id.to_bytes_le());
@@ -282,7 +282,7 @@ pub(in crate::mapi) fn rop_create_folder_response(
 ) -> Vec<u8> {
     let mut response = vec![0x1C, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_u64(&mut response, folder_id);
+    write_object_id(&mut response, folder_id);
     response.push(existing as u8);
     response.push(0);
     response
@@ -464,7 +464,7 @@ pub(in crate::mapi) fn rop_id_from_long_term_id_response(request: &RopRequest) -
     };
     let mut response = vec![0x44, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u64(&mut response, object_id);
+    write_object_id(&mut response, object_id);
     response
 }
 
@@ -581,7 +581,7 @@ pub(in crate::mapi) fn rop_save_changes_message_response(
     let mut response = vec![0x0C, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.push(request.input_handle_index().unwrap_or(0));
-    write_u64(&mut response, message_id);
+    write_object_id(&mut response, message_id);
     response
 }
 
@@ -2058,7 +2058,7 @@ pub(in crate::mapi) fn rop_get_receive_folder_response(
 ) -> Vec<u8> {
     let mut response = vec![0x27, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u64(&mut response, folder_id);
+    write_object_id(&mut response, folder_id);
     response.extend_from_slice(response_message_class.as_bytes());
     response.push(0);
     response
@@ -2106,7 +2106,7 @@ pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopReques
     write_u32(&mut response, 0);
     write_u32(&mut response, 1);
     response.push(0);
-    write_u64(&mut response, INBOX_FOLDER_ID);
+    write_object_id(&mut response, INBOX_FOLDER_ID);
     write_utf16z(&mut response, "IPM.Note");
     write_u64(&mut response, 0);
     response
@@ -2115,7 +2115,7 @@ pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopReques
 pub(in crate::mapi) fn rop_get_transport_folder_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x6D, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_u64(&mut response, OUTBOX_FOLDER_ID);
+    write_object_id(&mut response, OUTBOX_FOLDER_ID);
     response
 }
 
@@ -2245,6 +2245,14 @@ pub(in crate::mapi) fn read_u16_prefixed_string(bytes: &[u8], offset: usize) -> 
 
 pub(in crate::mapi) fn write_u64(body: &mut Vec<u8>, value: u64) {
     body.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_object_id(body: &mut Vec<u8>, value: u64) {
+    if let Some(bytes) = crate::mapi::identity::wire_id_bytes_from_object_id(value) {
+        body.extend_from_slice(&bytes);
+    } else {
+        write_u64(body, value);
+    }
 }
 
 pub(in crate::mapi) fn write_utf16z(body: &mut Vec<u8>, value: &str) {
@@ -2620,7 +2628,7 @@ impl RopRequest {
 
     pub(in crate::mapi) fn folder_id(&self) -> Option<u64> {
         let bytes = self.payload.get(..8)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {
@@ -2669,12 +2677,12 @@ impl RopRequest {
             3
         };
         let bytes = self.payload.get(offset..offset + 8)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn message_id(&self) -> Option<u64> {
         let bytes = self.payload.get(9..17)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn row_id(&self) -> Option<u32> {
@@ -2837,7 +2845,7 @@ impl RopRequest {
 
     pub(in crate::mapi) fn import_message_id(&self) -> Option<u64> {
         let bytes = self.payload.get(..8)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn import_property_values(&self) -> Result<Vec<(u32, MapiValue)>> {
@@ -2883,7 +2891,7 @@ impl RopRequest {
             .unwrap_or_default()
             .chunks_exact(8)
             .take(count)
-            .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))
+            .filter_map(crate::mapi::identity::object_id_from_wire_id)
             .collect()
     }
 
@@ -2904,13 +2912,14 @@ impl RopRequest {
             .unwrap_or_default()
             .chunks_exact(8)
             .take(count)
-            .filter_map(|bytes| bytes.try_into().ok().map(u64::from_le_bytes))
+            .filter_map(crate::mapi::identity::object_id_from_wire_id)
             .collect()
     }
 
     pub(in crate::mapi) fn import_move(&self) -> Option<(u64, u64)> {
-        let message_id = u64::from_le_bytes(self.payload.get(..8)?.try_into().ok()?);
-        let target_folder_id = u64::from_le_bytes(self.payload.get(8..16)?.try_into().ok()?);
+        let message_id = crate::mapi::identity::object_id_from_wire_id(self.payload.get(..8)?)?;
+        let target_folder_id =
+            crate::mapi::identity::object_id_from_wire_id(self.payload.get(8..16)?)?;
         Some((message_id, target_folder_id))
     }
 
@@ -2926,10 +2935,9 @@ impl RopRequest {
             .unwrap_or_default()
             .chunks_exact(9)
             .take(count)
-            .map(|bytes| {
-                let message_id = u64::from_le_bytes(bytes[0..8].try_into().unwrap_or_default());
-                let unread = bytes[8] == 0;
-                (message_id, unread)
+            .filter_map(|bytes| {
+                let message_id = crate::mapi::identity::object_id_from_wire_id(&bytes[0..8])?;
+                Some((message_id, bytes[8] == 0))
             })
             .collect()
     }
@@ -2953,7 +2961,7 @@ impl RopRequest {
 
     pub(in crate::mapi) fn object_id(&self) -> Option<u64> {
         let bytes = self.payload.get(..8)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn long_term_id(&self) -> Option<&[u8]> {
@@ -2973,13 +2981,13 @@ impl RopRequest {
         self.payload[ids_offset..]
             .chunks_exact(8)
             .take(count)
-            .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))
+            .filter_map(crate::mapi::identity::object_id_from_wire_id)
             .collect()
     }
 
     pub(in crate::mapi) fn status_message_id(&self) -> Option<u64> {
         let bytes = self.payload.get(..8)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn message_status_flags(&self) -> u32 {
@@ -3014,7 +3022,7 @@ impl RopRequest {
 
     pub(in crate::mapi) fn delete_folder_id(&self) -> Option<u64> {
         let bytes = self.payload.get(1..9)?;
-        Some(u64::from_le_bytes(bytes.try_into().ok()?))
+        crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn move_copy_message_ids(&self) -> Vec<u64> {
@@ -3025,7 +3033,7 @@ impl RopRequest {
         self.payload[2..]
             .chunks_exact(8)
             .take(count)
-            .map(|bytes| u64::from_le_bytes(bytes.try_into().unwrap_or_default()))
+            .filter_map(crate::mapi::identity::object_id_from_wire_id)
             .collect()
     }
 
@@ -4839,16 +4847,25 @@ pub(in crate::mapi) fn serialize_rop_request(request: &RopRequest) -> Result<Vec
         TypedRopRequest::OpenFolder(request) => {
             buffer.push(request.input_handle_index);
             buffer.push(request.output_handle_index);
-            write_u64(&mut buffer, request.folder_id);
+            buffer.extend_from_slice(
+                &crate::mapi::identity::wire_id_bytes_from_object_id(request.folder_id)
+                    .ok_or_else(|| anyhow!("invalid OpenFolder folder id"))?,
+            );
             buffer.push(request.open_mode_flags);
         }
         TypedRopRequest::OpenMessage(request) => {
             buffer.push(request.input_handle_index);
             buffer.push(request.output_handle_index);
             write_u16(&mut buffer, 0);
-            write_u64(&mut buffer, request.folder_id);
+            buffer.extend_from_slice(
+                &crate::mapi::identity::wire_id_bytes_from_object_id(request.folder_id)
+                    .ok_or_else(|| anyhow!("invalid OpenMessage folder id"))?,
+            );
             buffer.push(request.open_mode_flags);
-            write_u64(&mut buffer, request.message_id);
+            buffer.extend_from_slice(
+                &crate::mapi::identity::wire_id_bytes_from_object_id(request.message_id)
+                    .ok_or_else(|| anyhow!("invalid OpenMessage message id"))?,
+            );
         }
         TypedRopRequest::OpenTable(request) => {
             buffer.push(request.input_handle_index);
@@ -4859,7 +4876,10 @@ pub(in crate::mapi) fn serialize_rop_request(request: &RopRequest) -> Result<Vec
             buffer.push(request.input_handle_index);
             buffer.push(request.output_handle_index);
             write_u16(&mut buffer, 0);
-            write_u64(&mut buffer, request.folder_id);
+            buffer.extend_from_slice(
+                &crate::mapi::identity::wire_id_bytes_from_object_id(request.folder_id)
+                    .ok_or_else(|| anyhow!("invalid CreateMessage folder id"))?,
+            );
             buffer.push(request.associated_flag);
         }
         TypedRopRequest::SaveChangesMessage(request) => {
@@ -5049,9 +5069,11 @@ mod tests {
 
     #[test]
     pub(in crate::mapi) fn golden_open_folder_rop_round_trips_through_typed_parser() {
-        let folder_id = 0x1122_3344_5566_7788u64;
+        let folder_id = crate::mapi::identity::mapi_store_id(0x1122_3344_5566);
         let mut golden = vec![0x02, 0x00, 0x00, 0x01];
-        golden.extend_from_slice(&folder_id.to_le_bytes());
+        golden.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(folder_id).unwrap(),
+        );
         golden.push(0x00);
 
         let mut cursor = Cursor::new(&golden);
