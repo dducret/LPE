@@ -15754,6 +15754,23 @@ async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_che
         &response_rops,
         &0x0061_0040u32.to_le_bytes()
     ));
+    for property_tag in [
+        0x0003_0102u32,
+        0x0023_0102,
+        0x820D_0040,
+        0x820E_0040,
+        0x8215_000B,
+        0x8217_0003,
+    ] {
+        assert!(contains_bytes(&response_rops, &property_tag.to_le_bytes()));
+    }
+    assert!(contains_bytes(
+        &response_rops,
+        &[
+            0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82,
+            0xE0, 0x08,
+        ]
+    ));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,

@@ -396,9 +396,11 @@ rule that a folder directly below the configured hierarchy sync root is
 represented by a zero-length `PidTagParentSourceKey`; this is expected for
 Calendar when Outlook syncs the IPM subtree root. Calendar content sync must
 load canonical calendar events for the Calendar folder and emit them as normal
-`IPM.Appointment` message changes with appointment timing/location properties;
-an advertised Calendar folder with state-only content sync is not a valid
-Outlook interoperability result.
+`IPM.Appointment` message changes with appointment timing/location properties,
+`PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day/state flags,
+and stable `PidLidGlobalObjectId` / `PidLidCleanGlobalObjectId` values; an
+advertised Calendar folder with state-only or generic-message-only content sync
+is not a valid Outlook interoperability result.
 
 ### Publication Gate
 

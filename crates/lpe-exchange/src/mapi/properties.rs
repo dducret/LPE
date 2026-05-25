@@ -249,10 +249,18 @@ pub(in crate::mapi) const PSETID_NOTE_GUID: [u8; 16] = [
 pub(in crate::mapi) const PSETID_TASK_GUID: [u8; 16] = [
     0x03, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
+pub(in crate::mapi) const PSETID_APPOINTMENT_GUID: [u8; 16] = [
+    0x02, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
+pub(in crate::mapi) const PSETID_MEETING_GUID: [u8; 16] = [
+    0x90, 0xDA, 0xD8, 0x6E, 0x0B, 0x45, 0x1B, 0x10, 0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13, 0x05,
+];
 pub(in crate::mapi) const PSETID_POST_RSS_GUID: [u8; 16] = [
     0x41, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
 
+pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID: u32 = 0x0000_0003;
+pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID: u32 = 0x0000_0023;
 pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
@@ -265,6 +273,10 @@ pub(in crate::mapi) const PID_LID_FLAG_REQUEST: u32 = 0x0000_8530;
 pub(in crate::mapi) const PID_LID_REMINDER_SIGNAL_TIME: u32 = 0x0000_8560;
 pub(in crate::mapi) const PID_LID_TASK_START_DATE: u32 = 0x0000_8104;
 pub(in crate::mapi) const PID_LID_TASK_DUE_DATE: u32 = 0x0000_8105;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE: u32 = 0x0000_820D;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE: u32 = 0x0000_820E;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE: u32 = 0x0000_8215;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS: u32 = 0x0000_8217;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME: u32 = 0x0000_8586;
@@ -295,6 +307,12 @@ pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION: u32 = 0x0000_8906;
 
 pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
 pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
+pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x0003_0102;
+pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x0023_0102;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE_TAG: u32 = 0x820E_0040;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS_TAG: u32 = 0x8217_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
 pub(in crate::mapi) const PID_LID_REMINDER_DELTA_TAG: u32 = 0x8501_0003;
@@ -345,6 +363,8 @@ pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty
 
 fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
     [
+        (PID_LID_GLOBAL_OBJECT_ID, PSETID_MEETING_GUID),
+        (PID_LID_CLEAN_GLOBAL_OBJECT_ID, PSETID_MEETING_GUID),
         (PID_LID_COMMON_START, PSETID_COMMON_GUID),
         (PID_LID_COMMON_END, PSETID_COMMON_GUID),
         (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
@@ -357,6 +377,10 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
         (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
         (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
         (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
+        (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
+        (PID_LID_APPOINTMENT_END_WHOLE, PSETID_APPOINTMENT_GUID),
+        (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
+        (PID_LID_APPOINTMENT_STATE_FLAGS, PSETID_APPOINTMENT_GUID),
         (PID_LID_COMPANIES, PSETID_COMMON_GUID),
         (PID_LID_CONTACTS, PSETID_COMMON_GUID),
         (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
@@ -1365,16 +1389,26 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
             Some(MapiValue::String(event.title.clone()))
         }
         PID_TAG_BODY_W => Some(MapiValue::String(event.notes.clone())),
-        PID_TAG_START_DATE | PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+        PID_TAG_START_DATE
+        | PID_LID_APPOINTMENT_START_WHOLE_TAG
+        | PID_TAG_MESSAGE_DELIVERY_TIME
+        | PID_TAG_LAST_MODIFICATION_TIME => {
             Some(MapiValue::I64(event_start_filetime(event) as i64))
         }
-        PID_TAG_END_DATE => Some(MapiValue::I64(event_end_filetime(event) as i64)),
+        PID_TAG_END_DATE | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
+            Some(MapiValue::I64(event_end_filetime(event) as i64))
+        }
         PID_TAG_LOCATION_W => Some(MapiValue::String(event.location.clone())),
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(event_size(event))),
+        PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(false)),
+        PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(0)),
+        PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
+            Some(MapiValue::Binary(calendar_global_object_id(event)))
+        }
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(item_id),
         )),
@@ -1393,6 +1427,28 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
+    let uid = if event.uid.is_empty() {
+        event.id.to_string()
+    } else {
+        event.uid.clone()
+    };
+    let mut data = b"vCal-Uid".to_vec();
+    data.extend_from_slice(&1u32.to_le_bytes());
+    data.extend_from_slice(uid.as_bytes());
+
+    let mut value = vec![
+        0x04, 0x00, 0x00, 0x00, 0x82, 0x00, 0xE0, 0x00, 0x74, 0xC5, 0xB7, 0x10, 0x1A, 0x82, 0xE0,
+        0x08,
+    ];
+    value.extend_from_slice(&[0, 0, 0, 0]);
+    value.extend_from_slice(&0u64.to_le_bytes());
+    value.extend_from_slice(&0u64.to_le_bytes());
+    value.extend_from_slice(&(data.len().min(u32::MAX as usize) as u32).to_le_bytes());
+    value.extend_from_slice(&data);
+    value
 }
 
 pub(in crate::mapi) fn task_property_value(
