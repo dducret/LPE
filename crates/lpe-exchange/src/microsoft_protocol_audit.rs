@@ -217,13 +217,13 @@ pub(crate) const FAST_TRANSFER_MARKER_GAP_MANIFEST: &[(u32, GapStatus)] = &[
     (0x4013_0003, GapStatus::Implemented),
     (0x4014_0003, GapStatus::Implemented),
     (0x4015_0003, GapStatus::Implemented),
-    (0x4016_0003, GapStatus::KnownUnsupported),
-    (0x4017_0003, GapStatus::KnownUnsupported),
-    (0x4023_0003, GapStatus::KnownUnsupported),
+    (0x4018_0003, GapStatus::KnownUnsupported),
     (0x402F_0003, GapStatus::Implemented),
     (0x403A_0003, GapStatus::Implemented),
     (0x403B_0003, GapStatus::Implemented),
     (0x4074_000B, GapStatus::KnownUnsupported),
+    (0x4075_000B, GapStatus::KnownUnsupported),
+    (0x407B_0102, GapStatus::KnownUnsupported),
     (0x407D_0003, GapStatus::KnownUnsupported),
 ];
 
@@ -282,7 +282,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcfxics/e8e45630-33dd-4974-84d0-7b68a037a724",
         anchor: "`crates/lpe-exchange/src/microsoft_protocol_audit.rs::FAST_TRANSFER_MARKER_GAP_MANIFEST`",
         implemented: "Incremental sync markers used by LPE are manifest-checked.",
-        gaps: "Folder/message/embed/recipient/attachment markers and partial/progress markers are explicitly `KnownUnsupported`.",
+        gaps: "All other MS-OXCFXICS markers in the documented marker table are explicitly `KnownUnsupported`, including folder/message/embed/recipient/attachment markers, progress/group markers, partial change markers, and `FXErrorInfo`.",
     },
     ReportRow {
         surface: "NSPI request/property constants",
@@ -290,7 +290,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         source: "https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/cb1f2c87-eb69-418f-9e59-c30c179615a0",
         anchor: "`crates/lpe-exchange/src/mapi/nspi.rs::nspi_request_and_property_manifests_cover_implemented_static_values`",
         implemented: "Supported NSPI request types, bootstrap property tags, and additional requested property tags are manifest-checked.",
-        gaps: "Common address-book properties such as `PidTagGivenName`, phone/address/title/department/location fields, and phonetic fields are explicitly `KnownUnsupported`.",
+        gaps: "MS-NSPI required properties not projected by LPE plus common MS-OXPROPS address-book name, organization, phone, postal, phonetic, and manager fields are explicitly `KnownUnsupported`.",
     },
     ReportRow {
         surface: "EWS simple schema enums",
@@ -298,7 +298,7 @@ const REPORT_ROWS: &[ReportRow] = &[
         source: "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/ews-xml-elements-in-exchange",
         anchor: "`crates/lpe-exchange/src/ews_types.rs::ews_simple_type_enums_accept_documented_mvp_values`",
         implemented: "Delete type, distinguished folder IDs used by LPE, external audience, month, OOF state, response type, task status, and weekday values are manifest-checked.",
-        gaps: "Additional distinguished folders such as archive, recoverable items, sync issue folders, junk email, journal, notes, outbox, and related folders are explicitly `KnownUnsupported`.",
+        gaps: "Every DistinguishedFolderIdNameType value documented by Microsoft but not implemented by LPE is explicitly `KnownUnsupported`.",
     },
 ];
 

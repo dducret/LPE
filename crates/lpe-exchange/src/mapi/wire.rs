@@ -784,10 +784,10 @@ impl FastTransferMarker {
             0x4000_0003 => Some("NewAttach"),
             0x400E_0003 => Some("EndAttach"),
             0x407D_0003 => Some("IncrSyncChgPartial"),
-            0x4016_0003 => Some("IncrSyncProgressMode"),
-            0x4017_0003 => Some("IncrSyncProgressPerMsg"),
-            0x4023_0003 => Some("IncrSyncGroupInfo"),
-            0x4074_000B => Some("IncrSyncMessagePartial"),
+            0x4074_000B => Some("IncrSyncProgressMode"),
+            0x4075_000B => Some("IncrSyncProgressPerMsg"),
+            0x407B_0102 => Some("IncrSyncGroupInfo"),
+            0x4018_0003 => Some("FXErrorInfo"),
             _ => None,
         }
     }
@@ -986,6 +986,22 @@ mod tests {
         assert_eq!(
             FastTransferMarker::known_unsupported_name(0x4009_0003),
             Some("StartTopFld")
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4074_000B),
+            Some("IncrSyncProgressMode")
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4075_000B),
+            Some("IncrSyncProgressPerMsg")
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x407B_0102),
+            Some("IncrSyncGroupInfo")
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4018_0003),
+            Some("FXErrorInfo")
         );
         assert_eq!(FastTransferMarker::from_u32(0xDEAD_BEEF), None);
         assert_eq!(

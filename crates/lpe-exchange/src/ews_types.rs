@@ -91,9 +91,48 @@ impl EwsDistinguishedFolderIdName {
     }
 
     #[allow(dead_code)]
+    pub(crate) const DOCUMENTED_KNOWN_UNSUPPORTED_VALUES: &'static [&'static str] = &[
+        "journal",
+        "notes",
+        "outbox",
+        "publicfoldersroot",
+        "junkemail",
+        "searchfolders",
+        "voicemail",
+        "recoverableitemsroot",
+        "recoverableitemsdeletions",
+        "recoverableitemsversions",
+        "recoverableitemspurges",
+        "archiveroot",
+        "archivemsgfolderroot",
+        "archivedeleteditems",
+        "archiverecoverableitemsroot",
+        "archiverecoverableitemsdeletions",
+        "archiverecoverableitemsversions",
+        "archiverecoverableitemspurges",
+        "syncissues",
+        "conflicts",
+        "localfailures",
+        "serverfailures",
+        "recipientcache",
+        "quickcontacts",
+        "conversationhistory",
+        "adminauditlogs",
+        "todosearch",
+        "mycontacts",
+        "directory",
+        "imcontactlist",
+        "peopleconnect",
+    ];
+
+    #[allow(dead_code)]
     pub(crate) fn known_unsupported_name(value: &str) -> Option<&'static str> {
         match normalized(value).as_str() {
+            "journal" => Some("journal"),
+            "notes" => Some("notes"),
+            "outbox" => Some("outbox"),
             "publicfoldersroot" => Some("publicfoldersroot"),
+            "junkemail" => Some("junkemail"),
             "searchfolders" => Some("searchfolders"),
             "voicemail" => Some("voicemail"),
             "recoverableitemsroot" => Some("recoverableitemsroot"),
@@ -126,10 +165,6 @@ impl EwsDistinguishedFolderIdName {
             "imcontactlist" => Some("imcontactlist"),
             "peopleconnect" => Some("peopleconnect"),
             "favorites" => Some("favorites"),
-            "junkemail" => Some("junkemail"),
-            "journal" => Some("journal"),
-            "notes" => Some("notes"),
-            "outbox" => Some("outbox"),
             _ => None,
         }
     }
@@ -417,6 +452,17 @@ mod tests {
         }
         for (value, expected) in EwsDistinguishedFolderIdName::DOCUMENTED_SUPPORTED_VALUES {
             assert_eq!(EwsDistinguishedFolderIdName::parse(value), Some(*expected));
+        }
+        for value in EwsDistinguishedFolderIdName::DOCUMENTED_KNOWN_UNSUPPORTED_VALUES {
+            assert_eq!(
+                EwsDistinguishedFolderIdName::parse(value),
+                None,
+                "{value} should remain unsupported"
+            );
+            assert_eq!(
+                EwsDistinguishedFolderIdName::known_unsupported_name(value),
+                Some(*value)
+            );
         }
         for (value, expected) in EwsExternalAudience::DOCUMENTED_VALUES {
             assert_eq!(EwsExternalAudience::parse(value).unwrap(), *expected);

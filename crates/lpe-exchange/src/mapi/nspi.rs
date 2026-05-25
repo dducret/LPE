@@ -171,30 +171,73 @@ const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
 ];
 
 const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
-    (0x39FF_001F, "PidTagAddressBookDisplayNamePrintable"),
+    (0x0FF6_0102, "PidTagInstanceKey"),
+    (0x0FF8_0102, "PidTagMappingSignature"),
+    (0x0FF9_0102, "PidTagRecordKey"),
+    (0x0FFF_0102, "PidTagEntryId"),
+    (0x300B_0102, "PidTagSearchKey"),
+    (0x3902_0102, "PidTagTemplateid"),
+    (0x39FF_001E, "PidTag7BitDisplayName"),
+    (0x39FF_001F, "PidTag7BitDisplayName"),
+    (0x3A06_001E, "PidTagGivenName"),
     (0x3A06_001F, "PidTagGivenName"),
+    (0x3A08_001E, "PidTagBusinessTelephoneNumber"),
     (0x3A08_001F, "PidTagBusinessTelephoneNumber"),
+    (0x3A09_001E, "PidTagHomeTelephoneNumber"),
     (0x3A09_001F, "PidTagHomeTelephoneNumber"),
+    (0x3A0B_001E, "PidTagSurname"),
     (0x3A0B_001F, "PidTagSurname"),
+    (0x3A15_001E, "PidTagPostalAddress"),
     (0x3A15_001F, "PidTagPostalAddress"),
+    (0x3A16_001E, "PidTagCompanyName"),
     (0x3A16_001F, "PidTagCompanyName"),
+    (0x3A17_001E, "PidTagTitle"),
     (0x3A17_001F, "PidTagTitle"),
+    (0x3A18_001E, "PidTagDepartmentName"),
     (0x3A18_001F, "PidTagDepartmentName"),
+    (0x3A19_001E, "PidTagOfficeLocation"),
     (0x3A19_001F, "PidTagOfficeLocation"),
+    (0x3A1A_001E, "PidTagPrimaryTelephoneNumber"),
     (0x3A1A_001F, "PidTagPrimaryTelephoneNumber"),
     (0x3A1B_001F, "PidTagBusiness2TelephoneNumbers"),
+    (0x3A1B_101F, "PidTagBusiness2TelephoneNumbers"),
+    (0x3A1C_001E, "PidTagMobileTelephoneNumber"),
     (0x3A1C_001F, "PidTagMobileTelephoneNumber"),
+    (0x3A20_001E, "PidTagTransmittableDisplayName"),
+    (0x3A20_001F, "PidTagTransmittableDisplayName"),
+    (0x3A26_001E, "PidTagCountry"),
     (0x3A26_001F, "PidTagCountry"),
+    (0x3A27_001E, "PidTagLocality"),
     (0x3A27_001F, "PidTagLocality"),
+    (0x3A28_001E, "PidTagStateOrProvince"),
     (0x3A28_001F, "PidTagStateOrProvince"),
+    (0x3A29_001E, "PidTagStreetAddress"),
     (0x3A29_001F, "PidTagStreetAddress"),
+    (0x3A2A_001E, "PidTagPostalCode"),
     (0x3A2A_001F, "PidTagPostalCode"),
+    (0x3A4F_001E, "PidTagNickname"),
     (0x3A4F_001F, "PidTagNickname"),
     (0x3A71_001F, "PidTagSendRichInfo"),
+    (0x3A8C_001E, "PidTagAddressBookPhoneticDisplayName"),
     (0x3A8C_001F, "PidTagAddressBookPhoneticDisplayName"),
+    (0x3A8D_001E, "PidTagAddressBookPhoneticGivenName"),
     (0x3A8D_001F, "PidTagAddressBookPhoneticGivenName"),
+    (0x3A8E_001E, "PidTagAddressBookPhoneticSurname"),
     (0x3A8E_001F, "PidTagAddressBookPhoneticSurname"),
+    (0x3A8F_001E, "PidTagAddressBookPhoneticCompanyName"),
     (0x3A8F_001F, "PidTagAddressBookPhoneticCompanyName"),
+    (0x3A4E_001E, "PidTagManagerName"),
+    (0x3A4E_001F, "PidTagManagerName"),
+    (0x3A73_001E, "PidTagHomeAddressStreet"),
+    (0x3A73_001F, "PidTagHomeAddressStreet"),
+    (0x3A74_001E, "PidTagHomeAddressCity"),
+    (0x3A74_001F, "PidTagHomeAddressCity"),
+    (0x3A75_001E, "PidTagHomeAddressStateOrProvince"),
+    (0x3A75_001F, "PidTagHomeAddressStateOrProvince"),
+    (0x3A76_001E, "PidTagHomeAddressPostalCode"),
+    (0x3A76_001F, "PidTagHomeAddressPostalCode"),
+    (0x3A77_001E, "PidTagHomeAddressCountry"),
+    (0x3A77_001F, "PidTagHomeAddressCountry"),
 ];
 
 #[allow(dead_code)]
@@ -1607,6 +1650,18 @@ mod tests {
         assert_eq!(
             nspi_known_unsupported_property_tag_name(0x3A06_001F),
             Some("PidTagGivenName")
+        );
+        assert_eq!(
+            nspi_known_unsupported_property_tag_name(0x0FFF_0102),
+            Some("PidTagEntryId")
+        );
+        assert_eq!(
+            nspi_known_unsupported_property_tag_name(0x3A20_001F),
+            Some("PidTagTransmittableDisplayName")
+        );
+        assert_eq!(
+            nspi_known_unsupported_property_tag_name(0x3A1B_101F),
+            Some("PidTagBusiness2TelephoneNumbers")
         );
     }
 
