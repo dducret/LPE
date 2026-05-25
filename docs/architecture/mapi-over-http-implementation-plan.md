@@ -389,6 +389,13 @@ Success criteria for each version:
    account and tenant used, public host, endpoint flags, autodiscover response,
    RCA result, local harness result, and relevant server/client logs.
 
+Calendar troubleshooting diagnostics log the Calendar default folder contract,
+projected canonical calendar counts, and hierarchy-sync `PidTagParentSourceKey`
+role for each folder row. The hierarchy diagnostic follows the Microsoft ICS
+rule that a folder directly below the configured hierarchy sync root is
+represented by a zero-length `PidTagParentSourceKey`; this is expected for
+Calendar when Outlook syncs the IPM subtree root.
+
 ### Publication Gate
 
 - MAPI endpoint publication requires the local harness gate, RCA gate, and both

@@ -1003,6 +1003,13 @@ fn log_set_properties_specific_debug(
             ..
         })
     ) && !probe.default_folder_entry_id_values.is_empty();
+    let default_folder_entry_id_storage_mode = if root_default_folder_values_stripped {
+        "accepted_canonical_projection_not_persisted"
+    } else if probe.default_folder_entry_id_values.is_empty() {
+        "not_default_folder_entry_ids"
+    } else {
+        "normal_property_validation"
+    };
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -1019,6 +1026,7 @@ fn log_set_properties_specific_debug(
         property_value_shapes = %probe.property_value_shapes,
         default_folder_entry_id_values = %probe.default_folder_entry_id_values,
         root_default_folder_values_stripped = root_default_folder_values_stripped,
+        default_folder_entry_id_storage_mode = default_folder_entry_id_storage_mode,
         parse_error = %probe.parse_error,
         "rca debug mapi set properties specific"
     );

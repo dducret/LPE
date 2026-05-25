@@ -439,6 +439,11 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             } else {
                 source_key_for_store_id(parent_folder_id)
             };
+            let parent_source_key_role = hierarchy_parent_source_key_role(
+                parent_folder_id,
+                sync_root_folder_id,
+                parent_source_key.is_empty(),
+            );
             let container_class = mapi_folder_message_class(mailbox);
             let (content_count, content_unread_count, content_count_source) =
                 folder_content_counts(folder_id, mailbox, mailboxes, aggregate_emails);
@@ -465,8 +470,13 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 sync_type = format_args!("0x{sync_type:02x}"),
                 folder_id = format_args!("0x{folder_id:016x}"),
                 parent_folder_id = format_args!("0x{parent_folder_id:016x}"),
+                sync_root_folder_id = format_args!("0x{sync_root_folder_id:016x}"),
                 source_key_len = source_key.len(),
                 parent_source_key_len = parent_source_key.len(),
+                parent_source_key_role,
+                microsoft_ics_parent_source_key_rule_ok = parent_source_key_role
+                    != "unexpected_zero_parent_source_key"
+                    && parent_source_key_role != "unexpected_nonzero_sync_root_child",
                 display_name,
                 container_class,
                 change_number,
@@ -811,6 +821,24 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     ));
     write_u32(&mut buffer, INCR_SYNC_END);
     buffer
+}
+
+fn hierarchy_parent_source_key_role(
+    parent_folder_id: u64,
+    sync_root_folder_id: u64,
+    parent_source_key_empty: bool,
+) -> &'static str {
+    if parent_folder_id == sync_root_folder_id {
+        if parent_source_key_empty {
+            "sync_root_child_zero_length"
+        } else {
+            "unexpected_nonzero_sync_root_child"
+        }
+    } else if parent_source_key_empty {
+        "unexpected_zero_parent_source_key"
+    } else {
+        "nested_child_source_key"
+    }
 }
 
 pub(crate) fn log_hierarchy_transfer_debug(
@@ -3761,6 +3789,34 @@ mod tests {
         assert!(validation.cnset_extra_change_counters.is_empty());
         assert_eq!(validation.top_level_row_names, "Inbox");
         assert!(validation.rows_missing_core_property_names.is_empty());
+    }
+
+    #[test]
+    fn hierarchy_parent_source_key_role_matches_microsoft_ics_root_child_rule() {
+        assert_eq!(
+            hierarchy_parent_source_key_role(
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                true,
+            ),
+            "sync_root_child_zero_length"
+        );
+        assert_eq!(
+            hierarchy_parent_source_key_role(
+                crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                false,
+            ),
+            "nested_child_source_key"
+        );
+        assert_eq!(
+            hierarchy_parent_source_key_role(
+                crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+                crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                true,
+            ),
+            "unexpected_zero_parent_source_key"
+        );
     }
 
     #[test]
