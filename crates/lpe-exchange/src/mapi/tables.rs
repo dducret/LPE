@@ -3657,7 +3657,7 @@ pub(in crate::mapi) fn event_start_filetime(event: &AccessibleEvent) -> u64 {
 
 pub(in crate::mapi) fn event_end_filetime(event: &AccessibleEvent) -> u64 {
     let start = event_start_filetime(event);
-    let duration = event.duration_minutes.max(0) as u64 * 60 * 10_000_000;
+    let duration = event.duration_minutes.max(1) as u64 * 60 * 10_000_000;
     start.saturating_add(duration)
 }
 

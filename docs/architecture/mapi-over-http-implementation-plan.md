@@ -404,7 +404,10 @@ is not a valid Outlook interoperability result. Low-LID Calendar named
 properties such as `PidLidGlobalObjectId` must be exposed through
 `RopGetPropertyIdsFromNames` with assigned named-property IDs in the
 named-property range; the LID itself is the property name, not the wire property
-ID.
+ID. Outlook's MAPI Calendar property model also requires appointment start time
+to be strictly earlier than end time, so zero-duration canonical events are
+projected to MAPI with a minimum one-minute appointment window while leaving the
+canonical event unchanged.
 
 ### Publication Gate
 

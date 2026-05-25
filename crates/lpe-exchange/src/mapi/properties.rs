@@ -4848,6 +4848,40 @@ mod tests {
     }
 
     #[test]
+    fn zero_duration_events_project_non_zero_mapi_appointment_window() {
+        let event = lpe_storage::AccessibleEvent {
+            id: Uuid::from_u128(0x5555),
+            uid: "zero-duration".to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: Uuid::nil(),
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            rights: lpe_storage::CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: false,
+            },
+            date: "2026-05-21".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 0,
+            recurrence_rule: String::new(),
+            title: "Zero duration".to_string(),
+            location: String::new(),
+            attendees: String::new(),
+            attendees_json: "[]".to_string(),
+            notes: String::new(),
+        };
+
+        assert!(event_end_filetime(&event) > event_start_filetime(&event));
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_END_DATE),
+            Some(MapiValue::I64(event_end_filetime(&event) as i64))
+        );
+    }
+
+    #[test]
     fn unsupported_property_types_fail_explicitly() {
         let result = parse_mapi_property_value(&mut Cursor::new(&[]), 0x0037_000D);
 
