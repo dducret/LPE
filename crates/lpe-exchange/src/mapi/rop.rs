@@ -514,7 +514,19 @@ fn stale_special_folder_object_id_from_short_id(bytes: &[u8]) -> Option<u64> {
         .filter_map(|(_, counter)| counter)
         .map(crate::mapi::identity::mapi_store_id)
         .find(|object_id| is_advertised_special_folder(*object_id))
+        .or_else(|| advertised_virtual_object_id_from_bare_little_endian_short_id(bytes))
         .or_else(|| dynamic_object_id_from_bare_little_endian_short_id(bytes))
+}
+
+fn advertised_virtual_object_id_from_bare_little_endian_short_id(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() != 8 || bytes[6..8] != [0, 0] {
+        return None;
+    }
+    let counter = global_counter_from_little_endian_globcnt(&bytes[..6])?;
+    let object_id = crate::mapi::identity::mapi_store_id(counter);
+    (counter >= crate::mapi::identity::SYNC_ISSUES_FOLDER_COUNTER
+        && is_advertised_special_folder(object_id))
+    .then_some(object_id)
 }
 
 fn dynamic_object_id_from_bare_little_endian_short_id(bytes: &[u8]) -> Option<u64> {
@@ -5216,6 +5228,17 @@ mod tests {
                     bytes
                 },
                 canonical_id,
+            ),
+            (
+                {
+                    let mut bytes = Vec::new();
+                    bytes.extend_from_slice(
+                        &crate::mapi::identity::CONFLICTS_FOLDER_COUNTER.to_le_bytes()[..6],
+                    );
+                    bytes.extend_from_slice(&0u16.to_le_bytes());
+                    bytes
+                },
+                crate::mapi::identity::CONFLICTS_FOLDER_ID,
             ),
             (
                 {

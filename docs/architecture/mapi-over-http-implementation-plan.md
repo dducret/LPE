@@ -74,9 +74,10 @@ before it is advertised.
   the `REPLID` and in either counter byte order; normal mailbox items still
   require the canonical store replica id.
 - `RopLongTermIdFromId` also accepts Outlook's observed bare little-endian
-  six-byte dynamic counter form for content objects already emitted by
-  FastTransfer/ICS, such as Common Views FAI/search objects and message change
-  counters; zero and reserved counters still fail with `ecNotFound`.
+  six-byte counter form for advertised IPM subtree virtual folders and dynamic
+  content objects already emitted by FastTransfer/ICS, such as `Conflicts`,
+  Common Views FAI/search objects, and message change counters; zero and
+  private-logon-only reserved counters still fail with `ecNotFound`.
 - `RopLongTermIdFromId` failures for unmapped or unusable `REPLID` values use
   the documented `ecNotFound` result, not a generic invalid-parameter result.
 
