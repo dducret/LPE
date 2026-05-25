@@ -1,7 +1,7 @@
 use lpe_storage::{
-    AuthenticatedAccount, ClientNote, ClientReminder, ClientTask, JmapEmail, JmapEmailQuery,
-    JmapMailbox, JmapUploadBlob, JournalEntry, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage,
+    AuthenticatedAccount, CalendarEventAttachment, ClientNote, ClientReminder, ClientTask,
+    JmapEmail, JmapEmailQuery, JmapMailbox, JmapUploadBlob, JournalEntry, SieveScriptDocument,
+    Storage, SubmitMessageInput, SubmittedMessage,
 };
 use serde_json::{json, Value};
 use sqlx::{
@@ -23,15 +23,16 @@ use anyhow::{anyhow, bail, Context, Result};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_storage::mail::parse_rfc822_message;
 use lpe_storage::{
-    serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent, AuditEntryInput,
-    CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    CanonicalChangeCategory, CanonicalChangeReplay, CanonicalPushChangeSet, ClientContact,
-    ClientEvent, ClientTaskList, CollaborationCollection, CollaborationRights, CreateTaskListInput,
-    JmapEmailAddress, JmapEmailMailboxState, JmapEmailSubmission, JmapImportedEmailInput,
-    JmapMailObjectChange, JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota,
-    JmapStoredQueryState, JmapStringObjectChange, MailboxAccountAccess, SavedDraftMessage,
-    SenderIdentity, UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
+    AttachmentUploadInput, AuditEntryInput, CalendarOrganizerMetadata, CalendarParticipantMetadata,
+    CalendarParticipantsMetadata, CanonicalChangeCategory, CanonicalChangeReplay,
+    CanonicalPushChangeSet, ClientContact, ClientEvent, ClientTaskList, CollaborationCollection,
+    CollaborationRights, CreateTaskListInput, JmapEmailAddress, JmapEmailMailboxState,
+    JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
+    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, UpdateTaskListInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertJournalEntryInput,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -54,6 +55,7 @@ struct FakeStore {
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<ClientContact>>>,
     events: Arc<Mutex<Vec<ClientEvent>>>,
+    calendar_attachments: Arc<Mutex<HashMap<Uuid, Vec<CalendarEventAttachment>>>>,
     task_lists: Arc<Mutex<Vec<ClientTaskList>>>,
     tasks: Arc<Mutex<Vec<ClientTask>>>,
     notes: Arc<Mutex<Vec<ClientNote>>>,
@@ -1615,6 +1617,45 @@ impl JmapStore for FakeStore {
             bail!("event not found");
         }
         Ok(())
+    }
+
+    async fn fetch_calendar_attachments_for_events(
+        &self,
+        _principal_account_id: Uuid,
+        event_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, Vec<CalendarEventAttachment>)>> {
+        let attachments = self.calendar_attachments.lock().unwrap();
+        Ok(event_ids
+            .iter()
+            .map(|event_id| {
+                (
+                    *event_id,
+                    attachments.get(event_id).cloned().unwrap_or_default(),
+                )
+            })
+            .collect())
+    }
+
+    async fn add_calendar_event_attachment(
+        &self,
+        _principal_account_id: Uuid,
+        event_id: Uuid,
+        attachment: AttachmentUploadInput,
+        _audit: AuditEntryInput,
+    ) -> Result<Option<CalendarEventAttachment>> {
+        let mut attachments = self.calendar_attachments.lock().unwrap();
+        let event_attachments = attachments.entry(event_id).or_default();
+        let id = Uuid::new_v4();
+        let stored = CalendarEventAttachment {
+            id,
+            event_id,
+            file_name: attachment.file_name,
+            media_type: attachment.media_type,
+            size_octets: attachment.blob_bytes.len() as u64,
+            file_reference: lpe_storage::calendar_attachment_file_reference(event_id, id),
+        };
+        event_attachments.push(stored.clone());
+        Ok(Some(stored))
     }
 
     async fn fetch_jmap_task_lists(&self, _account_id: Uuid) -> Result<Vec<ClientTaskList>> {
@@ -11792,6 +11833,96 @@ async fn calendar_event_round_trips_schema_backed_fields() {
         event["bodyHtml"],
         Value::String("<p>HTML body</p>".to_string())
     );
+}
+
+#[tokio::test]
+async fn calendar_event_links_write_and_project_canonical_attachments() {
+    let upload_id = Uuid::parse_str("7a7a7a7a-7a7a-7a7a-7a7a-7a7a7a7a7a7a").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        uploads: Arc::new(Mutex::new(vec![JmapUploadBlob {
+            id: upload_id,
+            account_id: FakeStore::account().account_id,
+            media_type: "text/plain".to_string(),
+            octet_size: 6,
+            blob_bytes: b"agenda".to_vec(),
+        }])),
+        ..Default::default()
+    };
+    let service = JmapService::new_with_validator(
+        store.clone(),
+        validator_ok("text/plain", "text", "txt", 0.99),
+    );
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "CalendarEvent/set".to_string(),
+                    json!({
+                        "create": {
+                            "ev": {
+                                "@type": "Event",
+                                "uid": "calendar-attachment-link",
+                                "title": "Attachment planning",
+                                "start": "2026-06-02T09:00:00",
+                                "duration": "PT30M",
+                                "links": {
+                                    "agenda": {
+                                        "@type": "Link",
+                                        "blobId": format!("upload:{upload_id}"),
+                                        "title": "agenda.txt",
+                                        "type": "text/plain"
+                                    }
+                                },
+                                "calendarIds": {"default": true}
+                            }
+                        }
+                    }),
+                    "set".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.method_responses[0].1["notCreated"], json!({}));
+    let event_id = response.method_responses[0].1["created"]["ev"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let event_uuid = Uuid::parse_str(&event_id).unwrap();
+    let stored = store.calendar_attachments.lock().unwrap();
+    assert_eq!(stored.get(&event_uuid).unwrap()[0].file_name, "agenda.txt");
+    drop(stored);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "CalendarEvent/get".to_string(),
+                    json!({"ids": [event_id], "properties": ["id", "links"]}),
+                    "get".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let links = response.method_responses[0].1["list"][0]["links"]
+        .as_object()
+        .unwrap();
+    let link = links.values().next().unwrap();
+    assert_eq!(link["title"], Value::String("agenda.txt".to_string()));
+    assert_eq!(link["type"], Value::String("text/plain".to_string()));
+    assert!(link["blobId"]
+        .as_str()
+        .unwrap()
+        .starts_with("calendar-attachment:"));
 }
 
 #[tokio::test]

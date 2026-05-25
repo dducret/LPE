@@ -89,6 +89,13 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "source_etag TEXT",
         "CREATE TABLE calendars",
         "CREATE TABLE calendar_events",
+        "CREATE TABLE calendar_event_attachments",
+        "FOREIGN KEY (tenant_id, owner_account_id, calendar_id, event_id)",
+        "REFERENCES calendar_events (tenant_id, owner_account_id, calendar_id, id)",
+        "FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)",
+        "REFERENCES blobs (tenant_id, domain_id, id, blob_kind)",
+        "CREATE INDEX calendar_event_attachments_event_idx",
+        "CREATE INDEX calendar_event_attachments_blob_idx",
         "uid TEXT NOT NULL CHECK (btrim(uid) <> '')",
         "sequence INTEGER NOT NULL DEFAULT 0 CHECK (sequence >= 0)",
         "organizer_json JSONB NOT NULL DEFAULT '{}'::jsonb",
@@ -113,6 +120,21 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "color TEXT NOT NULL DEFAULT '' CHECK (color IN ('', 'blue', 'green', 'pink', 'white', 'yellow'))",
         "message_class TEXT NOT NULL DEFAULT 'IPM.Activity'",
         "entry_type TEXT NOT NULL DEFAULT ''",
+    ]);
+}
+
+#[test]
+fn calendar_event_attachments_use_canonical_event_and_blob_tables() {
+    assert_schema_contains_all(&[
+        "CREATE TABLE calendar_event_attachments",
+        "blob_kind TEXT NOT NULL DEFAULT 'attachment' CHECK (blob_kind = 'attachment')",
+        "UNIQUE (tenant_id, owner_account_id, event_id, ordinal)",
+        "FOREIGN KEY (tenant_id, owner_account_id, calendar_id, event_id)",
+        "REFERENCES calendar_events (tenant_id, owner_account_id, calendar_id, id)",
+        "FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)",
+        "REFERENCES blobs (tenant_id, domain_id, id, blob_kind)",
+        "CREATE INDEX calendar_event_attachments_event_idx",
+        "CREATE INDEX calendar_event_attachments_blob_idx",
     ]);
 }
 
@@ -576,6 +598,23 @@ fn update_script_repairs_mapi_property_store_tables() {
             && UPDATE_LPE_SCRIPT
                 .contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx"),
         "update-lpe.sh must add durable MAPI named/custom property tables for existing databases"
+    );
+}
+
+#[test]
+fn update_script_repairs_calendar_event_attachment_table() {
+    assert!(
+        UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.calendar_event_attachments")
+            && UPDATE_LPE_SCRIPT.contains(
+                "REFERENCES public.calendar_events (tenant_id, owner_account_id, calendar_id, id)"
+            )
+            && UPDATE_LPE_SCRIPT
+                .contains("REFERENCES public.blobs (tenant_id, domain_id, id, blob_kind)")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE INDEX IF NOT EXISTS calendar_event_attachments_event_idx")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE INDEX IF NOT EXISTS calendar_event_attachments_blob_idx"),
+        "update-lpe.sh must add canonical calendar event attachments for existing databases"
     );
 }
 

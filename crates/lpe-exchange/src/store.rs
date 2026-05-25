@@ -2,13 +2,13 @@ use anyhow::Result;
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CanonicalChangeCategory, ClientNote, ClientReminder,
-    ClientTask, CollaborationCollection, ConversationAction, JmapEmail, JmapEmailFollowupUpdate,
-    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput,
+    AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CanonicalChangeCategory,
+    ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction, JmapEmail,
+    JmapEmailFollowupUpdate, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JournalEntry, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -678,6 +678,12 @@ pub trait ExchangeStore: AccountAuthStore {
         message_id: Uuid,
     ) -> StoreFuture<'a, Vec<ActiveSyncAttachment>>;
 
+    fn fetch_calendar_attachments_for_events<'a>(
+        &'a self,
+        account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<(Uuid, Vec<CalendarEventAttachment>)>>;
+
     fn fetch_attachment_content<'a>(
         &'a self,
         account_id: Uuid,
@@ -691,6 +697,14 @@ pub trait ExchangeStore: AccountAuthStore {
         attachment: AttachmentUploadInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, Option<(JmapEmail, ActiveSyncAttachment)>>;
+
+    fn add_calendar_event_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        event_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<CalendarEventAttachment>>;
 
     fn delete_message_attachment<'a>(
         &'a self,
@@ -2352,13 +2366,30 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_calendar_attachments_for_events<'a>(
+        &'a self,
+        account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<(Uuid, Vec<CalendarEventAttachment>)>> {
+        Box::pin(async move {
+            self.fetch_calendar_attachments_for_events(account_id, event_ids)
+                .await
+        })
+    }
+
     fn fetch_attachment_content<'a>(
         &'a self,
         account_id: Uuid,
         file_reference: &'a str,
     ) -> StoreFuture<'a, Option<ActiveSyncAttachmentContent>> {
         Box::pin(async move {
-            self.fetch_activesync_attachment_content(account_id, file_reference)
+            if let Some(content) = self
+                .fetch_activesync_attachment_content(account_id, file_reference)
+                .await?
+            {
+                return Ok(Some(content));
+            }
+            self.fetch_calendar_attachment_content(account_id, file_reference)
                 .await
         })
     }
@@ -2372,6 +2403,19 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Option<(JmapEmail, ActiveSyncAttachment)>> {
         Box::pin(async move {
             self.add_message_attachment(account_id, message_id, attachment, audit)
+                .await
+        })
+    }
+
+    fn add_calendar_event_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        event_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<CalendarEventAttachment>> {
+        Box::pin(async move {
+            self.add_calendar_event_attachment(account_id, event_id, attachment, audit)
                 .await
         })
     }

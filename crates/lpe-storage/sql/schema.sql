@@ -2102,6 +2102,38 @@ CREATE INDEX calendar_events_owner_reminder_idx
     ON calendar_events (tenant_id, owner_account_id, reminder_set, reminder_at)
     WHERE reminder_set;
 
+CREATE TABLE calendar_event_attachments (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    calendar_id UUID NOT NULL,
+    event_id UUID NOT NULL,
+    domain_id UUID NOT NULL,
+    blob_id UUID NOT NULL,
+    blob_kind TEXT NOT NULL DEFAULT 'attachment' CHECK (blob_kind = 'attachment'),
+    file_name TEXT NOT NULL CHECK (btrim(file_name) <> ''),
+    media_type TEXT NOT NULL CHECK (btrim(media_type) <> ''),
+    disposition TEXT NOT NULL DEFAULT 'attachment' CHECK (disposition IN ('attachment', 'inline')),
+    content_id TEXT,
+    ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
+    size_octets BIGINT NOT NULL CHECK (size_octets >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, owner_account_id, event_id, ordinal),
+    FOREIGN KEY (tenant_id, owner_account_id, calendar_id, event_id)
+        REFERENCES calendar_events (tenant_id, owner_account_id, calendar_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)
+        REFERENCES blobs (tenant_id, domain_id, id, blob_kind)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX calendar_event_attachments_event_idx
+    ON calendar_event_attachments (tenant_id, owner_account_id, event_id, ordinal);
+
+CREATE INDEX calendar_event_attachments_blob_idx
+    ON calendar_event_attachments (tenant_id, blob_id);
+
 CREATE TABLE task_lists (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,

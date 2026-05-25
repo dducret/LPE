@@ -7,7 +7,11 @@ use super::*;
 use crate::mapi_store::{
     MapiConversationActionMessage, MapiMessage, MapiSearchFolderDefinitionMessage,
 };
-use lpe_storage::parse_calendar_participants_metadata;
+use lpe_storage::{
+    calendar_attendee_labels, normalize_calendar_email, parse_calendar_participants_metadata,
+    serialize_calendar_participants_metadata, CalendarOrganizerMetadata,
+    CalendarParticipantMetadata,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MapiNamedProperty {
@@ -2834,6 +2838,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<UpsertClientEventInput> {
     reject_unsupported_mapi_event_properties(properties)?;
+    let participants = event_participants_from_mapi(existing, properties);
     let start = properties
         .get(&PID_TAG_START_DATE)
         .and_then(MapiValue::as_i64)
@@ -2871,7 +2876,11 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .get(&PID_LID_APPOINTMENT_SUB_TYPE_TAG)
             .and_then(MapiValue::as_bool)
             .unwrap_or(existing.all_day),
-        status: existing.status.clone(),
+        status: properties
+            .get(&PID_LID_BUSY_STATUS_TAG)
+            .and_then(MapiValue::as_i64)
+            .map(calendar_status_from_mapi_busy_status)
+            .unwrap_or_else(|| existing.status.clone()),
         sequence: existing.sequence,
         recurrence_rule: existing.recurrence_rule.clone(),
         recurrence_json: existing.recurrence_json.clone(),
@@ -2887,13 +2896,9 @@ pub(in crate::mapi) fn event_input_from_mapi(
         .unwrap_or_else(|| existing.title.clone()),
         location: optional_pending_text_property(properties, &[PID_TAG_LOCATION_W])
             .unwrap_or_else(|| existing.location.clone()),
-        organizer_json: existing.organizer_json.clone(),
-        attendees: existing.attendees.clone(),
-        attendees_json: if existing.attendees_json.trim().is_empty() {
-            serialize_calendar_participants_metadata(&CalendarParticipantsMetadata::default())
-        } else {
-            existing.attendees_json.clone()
-        },
+        organizer_json: participants.organizer_json,
+        attendees: participants.attendees,
+        attendees_json: participants.attendees_json,
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
         body_html: optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
@@ -2901,31 +2906,110 @@ pub(in crate::mapi) fn event_input_from_mapi(
     })
 }
 
+struct MapiEventParticipants {
+    organizer_json: String,
+    attendees: String,
+    attendees_json: String,
+}
+
+fn event_participants_from_mapi(
+    existing: &AccessibleEvent,
+    properties: &HashMap<u32, MapiValue>,
+) -> MapiEventParticipants {
+    let mut metadata = parse_calendar_participants_metadata(&existing.attendees_json);
+    if let Some(organizer) = organizer_from_mapi(properties) {
+        metadata.organizer = Some(organizer);
+    }
+    if let Some(attendees) = attendees_from_mapi(properties) {
+        metadata.attendees = attendees;
+    }
+    let attendees_json = serialize_calendar_participants_metadata(&metadata);
+    let organizer_json = metadata
+        .organizer
+        .as_ref()
+        .and_then(|organizer| serde_json::to_string(organizer).ok())
+        .unwrap_or_else(|| existing.organizer_json.clone());
+    MapiEventParticipants {
+        organizer_json,
+        attendees: calendar_attendee_labels(&metadata),
+        attendees_json,
+    }
+}
+
+fn organizer_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<CalendarOrganizerMetadata> {
+    let email = optional_pending_text_property(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
+        .map(|value| normalize_calendar_email(&value))
+        .unwrap_or_default();
+    let common_name = optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    (!email.is_empty() || !common_name.is_empty())
+        .then_some(CalendarOrganizerMetadata { email, common_name })
+}
+
+fn attendees_from_mapi(
+    properties: &HashMap<u32, MapiValue>,
+) -> Option<Vec<CalendarParticipantMetadata>> {
+    let display_to = optional_pending_text_property(properties, &[PID_TAG_DISPLAY_TO_W])?;
+    Some(
+        display_to
+            .split([',', ';'])
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| CalendarParticipantMetadata {
+                email: if value.contains('@') {
+                    normalize_calendar_email(value)
+                } else {
+                    String::new()
+                },
+                common_name: value.to_string(),
+                role: "REQ-PARTICIPANT".to_string(),
+                partstat: "needs-action".to_string(),
+                rsvp: false,
+            })
+            .collect(),
+    )
+}
+
+fn calendar_status_from_mapi_busy_status(value: i64) -> String {
+    match value {
+        0 => "cancelled",
+        1 => "tentative",
+        _ => "confirmed",
+    }
+    .to_string()
+}
+
 pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
     properties: &HashMap<u32, MapiValue>,
 ) -> Result<()> {
     for (tag, value) in properties {
+        if matches!(value, MapiValue::Binary(_)) {
+            return Err(anyhow!(
+                "MAPI binary calendar recurrence or meeting payloads are not supported"
+            ));
+        }
         let supported = matches!(
             *tag,
             PID_TAG_SUBJECT_W
                 | PID_TAG_NORMALIZED_SUBJECT_W
                 | PID_TAG_DISPLAY_NAME_W
                 | PID_TAG_BODY_W
+                | PID_TAG_SENDER_NAME_W
+                | PID_TAG_SENDER_EMAIL_ADDRESS_W
+                | PID_TAG_DISPLAY_TO_W
                 | PID_TAG_START_DATE
                 | PID_TAG_END_DATE
                 | PID_TAG_LOCATION_W
                 | PID_TAG_BODY_HTML_W
+                | PID_LID_BUSY_STATUS_TAG
                 | PID_LID_APPOINTMENT_SUB_TYPE_TAG
                 | PID_TAG_MESSAGE_CLASS_W
         );
         if !supported {
             return Err(anyhow!(
                 "MAPI calendar property {tag:#010X} is outside the canonical calendar subset"
-            ));
-        }
-        if matches!(value, MapiValue::Binary(_)) {
-            return Err(anyhow!(
-                "MAPI binary calendar recurrence or meeting payloads are not supported"
             ));
         }
     }
@@ -5023,14 +5107,31 @@ mod tests {
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_LOCATION_W),
             Some(MapiValue::String("Room A".to_string()))
         );
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_HAS_ATTACHMENTS),
+            Some(MapiValue::Bool(false))
+        );
     }
 
     #[test]
-    fn calendar_writes_preserve_canonical_fields_and_accept_all_day_html() {
+    fn mapi_over_http_calendar_writes_map_supported_mapi_fields_to_canonical_event_fields() {
         let existing = default_event_for_mapping(Uuid::nil(), "default");
         let mut properties = HashMap::new();
         properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Updated".to_string()));
         properties.insert(PID_LID_APPOINTMENT_SUB_TYPE_TAG, MapiValue::Bool(true));
+        properties.insert(PID_LID_BUSY_STATUS_TAG, MapiValue::I32(1));
+        properties.insert(
+            PID_TAG_SENDER_NAME_W,
+            MapiValue::String("Alice Owner".to_string()),
+        );
+        properties.insert(
+            PID_TAG_SENDER_EMAIL_ADDRESS_W,
+            MapiValue::String("Alice@Example.Test".to_string()),
+        );
+        properties.insert(
+            PID_TAG_DISPLAY_TO_W,
+            MapiValue::String("Bob One; Cara Two".to_string()),
+        );
         properties.insert(
             PID_TAG_BODY_HTML_W,
             MapiValue::String("<p>Updated</p>".to_string()),
@@ -5047,10 +5148,23 @@ mod tests {
         assert_eq!(input.title, "Updated");
         assert!(input.all_day);
         assert_eq!(input.body_html, "<p>Updated</p>");
-        assert_eq!(input.status, existing.status);
+        assert_eq!(input.status, "tentative");
         assert_eq!(input.recurrence_rule, existing.recurrence_rule);
-        assert_eq!(input.attendees_json, existing.attendees_json);
-        assert_eq!(input.organizer_json, existing.organizer_json);
+        assert_eq!(input.attendees, "Bob One, Cara Two");
+        assert!(input.organizer_json.contains("alice@example.test"));
+        assert!(input.attendees_json.contains("Bob One"));
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_binary_payloads_fail_explicitly() {
+        let mut properties = HashMap::new();
+        properties.insert(0x8216_0102, MapiValue::Binary(vec![1, 2, 3]));
+
+        let error = reject_unsupported_mapi_event_properties(&properties).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("MAPI binary calendar recurrence or meeting payloads are not supported"));
     }
 
     #[test]

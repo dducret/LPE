@@ -5,13 +5,14 @@ use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
-    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount, ClientReminder,
-    ClientTask, CollaborationCollection, CollaborationRights, ConversationAction, JmapEmail,
-    JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput, UpsertConversationActionInput,
+    ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
+    CalendarEventAttachment, ClientReminder, ClientTask, CollaborationCollection,
+    CollaborationRights, ConversationAction, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    UpsertConversationActionInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -309,6 +310,7 @@ struct FakeStore {
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
+    calendar_attachments: Arc<Mutex<HashMap<Uuid, Vec<CalendarEventAttachment>>>>,
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
     created_attachments: Arc<Mutex<Vec<AttachmentUploadInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
@@ -1456,19 +1458,19 @@ impl ExchangeStore for FakeStore {
             time: input.time,
             time_zone: input.time_zone,
             duration_minutes: input.duration_minutes,
-            all_day: false,
-            status: "confirmed".to_string(),
-            sequence: 0,
+            all_day: input.all_day,
+            status: input.status,
+            sequence: input.sequence,
             recurrence_rule: input.recurrence_rule,
             recurrence_json: "{}".to_string(),
             recurrence_exceptions_json: "[]".to_string(),
             title: input.title,
             location: input.location,
-            organizer_json: "{}".to_string(),
+            organizer_json: input.organizer_json,
             attendees: input.attendees,
             attendees_json: input.attendees_json,
             notes: input.notes,
-            body_html: String::new(),
+            body_html: input.body_html,
         };
         self.event_versions.lock().unwrap().insert(event.id, 1);
         self.events.lock().unwrap().push(event.clone());
@@ -2024,6 +2026,24 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(attachments) })
     }
 
+    fn fetch_calendar_attachments_for_events<'a>(
+        &'a self,
+        _account_id: Uuid,
+        event_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<(Uuid, Vec<CalendarEventAttachment>)>> {
+        let attachments = self.calendar_attachments.lock().unwrap();
+        let result = event_ids
+            .iter()
+            .map(|event_id| {
+                (
+                    *event_id,
+                    attachments.get(event_id).cloned().unwrap_or_default(),
+                )
+            })
+            .collect();
+        Box::pin(async move { Ok(result) })
+    }
+
     fn fetch_attachment_content<'a>(
         &'a self,
         _account_id: Uuid,
@@ -2084,6 +2104,43 @@ impl ExchangeStore for FakeStore {
         );
 
         Box::pin(async move { Ok(Some((email, stored_attachment))) })
+    }
+
+    fn add_calendar_event_attachment<'a>(
+        &'a self,
+        _account_id: Uuid,
+        event_id: Uuid,
+        attachment: AttachmentUploadInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<CalendarEventAttachment>> {
+        if !self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|event| event.id == event_id)
+        {
+            return Box::pin(async move { Ok(None) });
+        }
+        let attachment_id = Uuid::parse_str("cececece-cece-cece-cece-cececececece").unwrap();
+        let stored = CalendarEventAttachment {
+            id: attachment_id,
+            event_id,
+            file_name: attachment.file_name,
+            media_type: attachment.media_type,
+            size_octets: attachment.blob_bytes.len() as u64,
+            file_reference: lpe_storage::calendar_attachment_file_reference(
+                event_id,
+                attachment_id,
+            ),
+        };
+        self.calendar_attachments
+            .lock()
+            .unwrap()
+            .entry(event_id)
+            .or_default()
+            .push(stored.clone());
+        Box::pin(async move { Ok(Some(stored)) })
     }
 
     fn delete_message_attachment<'a>(
@@ -5316,9 +5373,17 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
     );
     append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 1");
     append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Agenda");
+    append_mapi_i32_property(&mut property_values, 0x8205_0003, 1);
+    append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, "Alice Organizer");
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x0C1F_001F,
+        "Alice.Organizer@Example.Test",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Attendee");
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_set_properties(&mut rops, 1, 5, &property_values);
+    append_rop_set_properties(&mut rops, 1, 9, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x0061_0040]);
     let mut execute_headers = mapi_headers("Execute");
@@ -5341,6 +5406,12 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         assert_eq!(stored[0].duration_minutes, 45);
         assert_eq!(stored[0].location, "Room 1");
         assert_eq!(stored[0].notes, "Agenda");
+        assert_eq!(stored[0].status, "tentative");
+        assert_eq!(stored[0].attendees, "Bob Attendee");
+        assert!(stored[0]
+            .organizer_json
+            .contains("alice.organizer@example.test"));
+        assert!(stored[0].attendees_json.contains("Bob Attendee"));
         assert!(stored[0].recurrence_rule.is_empty());
     }
 
@@ -5421,6 +5492,115 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     assert!(events.lock().unwrap().is_empty());
     assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_attachment_save_uses_canonical_event_attachments() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Attached Calendar".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let calendar_attachments = store.calendar_attachments.clone();
+    let service =
+        ExchangeService::new_with_validator(store, Validator::new(FakeDetector::pdf(), 0.8));
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+
+    let mut attachment_properties = Vec::new();
+    append_mapi_utf16_property(&mut attachment_properties, 0x3707_001F, "agenda.pdf");
+    append_mapi_utf16_property(&mut attachment_properties, 0x370E_001F, "application/pdf");
+    append_mapi_binary_property(&mut attachment_properties, 0x3701_0102, b"%PDF-calendar");
+    let mut attachment_rops = Vec::new();
+    append_rop_open_folder(&mut attachment_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut attachment_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    attachment_rops.extend_from_slice(&[
+        0x23, 0x00, 0x02, 0x03, // RopCreateAttachment
+        0x0A, 0x00, 0x03, // RopSetProperties
+    ]);
+    attachment_rops.extend_from_slice(&((attachment_properties.len() + 2) as u16).to_le_bytes());
+    attachment_rops.extend_from_slice(&3u16.to_le_bytes());
+    attachment_rops.extend_from_slice(&attachment_properties);
+    attachment_rops.extend_from_slice(&[
+        0x25, 0x00, 0x02, 0x03, 0x00, // RopSaveChangesAttachment
+    ]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &attachment_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x23, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x25, 0x02, 0, 0, 0, 0]));
+
+    let stored = calendar_attachments.lock().unwrap();
+    let event_attachments = stored.get(&event_id).unwrap();
+    assert_eq!(event_attachments.len(), 1);
+    assert_eq!(event_attachments[0].file_name, "agenda.pdf");
+    assert_eq!(event_attachments[0].media_type, "application/pdf");
+    assert!(event_attachments[0]
+        .file_reference
+        .starts_with("calendar-attachment:"));
 }
 
 #[tokio::test]

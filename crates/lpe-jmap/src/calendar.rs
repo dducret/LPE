@@ -1,9 +1,11 @@
 use anyhow::{anyhow, bail, Result};
+use lpe_magika::{IngressContext, PolicyDecision, ValidationRequest};
 use lpe_storage::{
     calendar_attendee_labels, normalize_calendar_email, normalize_calendar_participation_status,
     parse_calendar_participants_metadata, serialize_calendar_participants_metadata,
-    AccessibleEvent, AuthenticatedAccount, CalendarOrganizerMetadata, CalendarParticipantMetadata,
-    CalendarParticipantsMetadata, CollaborationCollection, UpsertClientEventInput,
+    AccessibleEvent, AttachmentUploadInput, AuthenticatedAccount, CalendarEventAttachment,
+    CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
+    CollaborationCollection, UpsertClientEventInput,
 };
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -342,10 +344,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .as_ref()
             .map(|ids| ids.iter().copied().collect::<HashSet<Uuid>>())
             .unwrap_or_default();
+        let attachments = self
+            .calendar_attachments_by_event(account_id, &events, properties.contains("links"))
+            .await?;
         let list = events
             .iter()
             .filter(|event| requested_ids.is_none() || requested_set.contains(&event.id))
-            .map(|event| calendar_event_to_value(event, &properties))
+            .map(|event| {
+                calendar_event_to_value(
+                    event,
+                    &properties,
+                    attachments.get(&event.id).map(Vec::as_slice).unwrap_or(&[]),
+                )
+            })
             .collect::<Vec<_>>();
         let not_found = requested_ids
             .unwrap_or_default()
@@ -484,12 +495,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         if let Some(create) = arguments.create {
             for (creation_id, value) in create {
                 match parse_calendar_event_input(None, account_id, value) {
-                    Ok((collection_id, input)) => match self
+                    Ok((collection_id, input, attachments)) => match self
                         .store
                         .create_accessible_event(account_id, collection_id.as_deref(), input)
                         .await
                     {
                         Ok(event) => {
+                            if let Err(error) = self
+                                .attach_calendar_uploads(account_id, event.id, attachments, account)
+                                .await
+                            {
+                                not_created.insert(creation_id, set_error(&error.to_string()));
+                                continue;
+                            }
                             created_ids.insert(creation_id.clone(), event.id.to_string());
                             created.insert(creation_id, json!({ "id": event.id.to_string() }));
                         }
@@ -510,14 +528,26 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     Ok(event_id) => match self
                         .calendar_event_update_input(account_id, event_id, value)
                         .await
-                        .map(|input| (event_id, input))
+                        .map(|(input, attachments)| (event_id, input, attachments))
                     {
-                        Ok((event_id, input)) => match self
+                        Ok((event_id, input, attachments)) => match self
                             .store
                             .update_accessible_event(account_id, event_id, input)
                             .await
                         {
                             Ok(_) => {
+                                if let Err(error) = self
+                                    .attach_calendar_uploads(
+                                        account_id,
+                                        event_id,
+                                        attachments,
+                                        account,
+                                    )
+                                    .await
+                                {
+                                    not_updated.insert(id, set_error(&error.to_string()));
+                                    continue;
+                                }
                                 updated.insert(id, Value::Object(Map::new()));
                             }
                             Err(error) => {
@@ -574,13 +604,13 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         account_id: Uuid,
         event_id: Uuid,
         value: Value,
-    ) -> Result<UpsertClientEventInput> {
+    ) -> Result<(UpsertClientEventInput, Vec<CalendarAttachmentInput>)> {
         let object = value
             .as_object()
             .ok_or_else(|| anyhow!("calendar event arguments must be an object"))?;
         if !has_jmap_property_patch(object) {
             return parse_calendar_event_input(Some(event_id), account_id, value)
-                .map(|(_, input)| input);
+                .map(|(_, input, attachments)| (input, attachments));
         }
 
         let existing = self
@@ -590,9 +620,105 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             .into_iter()
             .next()
             .ok_or_else(|| anyhow!("event not found"))?;
-        let mut patched = calendar_event_to_value(&existing, &calendar_event_properties(None));
+        let attachments = self
+            .calendar_attachments_by_event(account_id, std::slice::from_ref(&existing), true)
+            .await?;
+        let mut patched = calendar_event_to_value(
+            &existing,
+            &calendar_event_properties(None),
+            attachments
+                .get(&existing.id)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        );
         apply_jmap_property_patch(&mut patched, object)?;
-        parse_calendar_event_input(Some(event_id), account_id, patched).map(|(_, input)| input)
+        parse_calendar_event_input(Some(event_id), account_id, patched)
+            .map(|(_, input, attachments)| (input, attachments))
+    }
+
+    async fn calendar_attachments_by_event(
+        &self,
+        account_id: Uuid,
+        events: &[AccessibleEvent],
+        include: bool,
+    ) -> Result<HashMap<Uuid, Vec<CalendarEventAttachment>>> {
+        if !include {
+            return Ok(HashMap::new());
+        }
+        Ok(self
+            .store
+            .fetch_calendar_attachments_for_events(
+                account_id,
+                &events.iter().map(|event| event.id).collect::<Vec<_>>(),
+            )
+            .await?
+            .into_iter()
+            .collect())
+    }
+
+    async fn attach_calendar_uploads(
+        &self,
+        account_id: Uuid,
+        event_id: Uuid,
+        attachments: Vec<CalendarAttachmentInput>,
+        account: &AuthenticatedAccount,
+    ) -> Result<()> {
+        for attachment in attachments {
+            let upload = self
+                .store
+                .fetch_jmap_upload_blob(account_id, attachment.blob_id)
+                .await?
+                .ok_or_else(|| anyhow!("calendar attachment blob not found"))?;
+            let media_type = attachment
+                .media_type
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| upload.media_type.clone());
+            let validation = self.validator.validate_bytes(
+                ValidationRequest {
+                    ingress_context: IngressContext::AttachmentParsing,
+                    declared_mime: Some(media_type.clone()),
+                    filename: Some(attachment.name.clone()),
+                    expected_kind: crate::upload::expected_attachment_kind(
+                        &media_type,
+                        &attachment.name,
+                    ),
+                },
+                &upload.blob_bytes,
+            )?;
+            if validation.policy_decision != PolicyDecision::Accept {
+                bail!(
+                    "calendar attachment '{}' blocked by Magika validation: {}",
+                    attachment.name,
+                    validation.reason
+                );
+            }
+            let media_type = if media_type == "application/octet-stream"
+                && !validation.detected_mime.trim().is_empty()
+            {
+                validation.detected_mime
+            } else {
+                media_type
+            };
+            self.store
+                .add_calendar_event_attachment(
+                    account_id,
+                    event_id,
+                    AttachmentUploadInput {
+                        file_name: attachment.name,
+                        media_type,
+                        disposition: Some("attachment".to_string()),
+                        content_id: None,
+                        blob_bytes: upload.blob_bytes,
+                    },
+                    lpe_storage::AuditEntryInput {
+                        actor: account.email.clone(),
+                        action: "jmap-calendar-attachment-create".to_string(),
+                        subject: format!("calendar-event:{event_id}"),
+                    },
+                )
+                .await?;
+        }
+        Ok(())
     }
 }
 
@@ -677,6 +803,7 @@ fn calendar_event_properties(properties: Option<Vec<String>>) -> HashSet<String>
                 "description".to_string(),
                 "descriptionContentType".to_string(),
                 "bodyHtml".to_string(),
+                "links".to_string(),
                 "calendarIds".to_string(),
             ]
         })
@@ -684,7 +811,11 @@ fn calendar_event_properties(properties: Option<Vec<String>>) -> HashSet<String>
         .collect()
 }
 
-fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>) -> Value {
+fn calendar_event_to_value(
+    event: &AccessibleEvent,
+    properties: &HashSet<String>,
+    attachments: &[CalendarEventAttachment],
+) -> Value {
     let mut object = Map::new();
     insert_if(properties, &mut object, "id", event.id.to_string());
     insert_if(properties, &mut object, "uid", event.uid.clone());
@@ -780,7 +911,30 @@ fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>
             json!({event.collection_id.clone(): true}),
         );
     }
+    if properties.contains("links") && !attachments.is_empty() {
+        object.insert("links".to_string(), calendar_attachment_links(attachments));
+    }
     Value::Object(object)
+}
+
+fn calendar_attachment_links(attachments: &[CalendarEventAttachment]) -> Value {
+    Value::Object(
+        attachments
+            .iter()
+            .map(|attachment| {
+                (
+                    attachment.id.to_string(),
+                    json!({
+                        "@type": "Link",
+                        "title": attachment.file_name,
+                        "type": attachment.media_type,
+                        "size": attachment.size_octets,
+                        "blobId": attachment.file_reference,
+                    }),
+                )
+            })
+            .collect(),
+    )
 }
 
 fn insert_json_if(
@@ -980,7 +1134,11 @@ fn parse_calendar_event_input(
     id: Option<Uuid>,
     account_id: Uuid,
     value: Value,
-) -> Result<(Option<String>, UpsertClientEventInput)> {
+) -> Result<(
+    Option<String>,
+    UpsertClientEventInput,
+    Vec<CalendarAttachmentInput>,
+)> {
     let object = value
         .as_object()
         .ok_or_else(|| anyhow!("calendar event arguments must be an object"))?;
@@ -1010,6 +1168,7 @@ fn parse_calendar_event_input(
             .ok_or_else(|| anyhow!("start is required"))?,
     )?;
 
+    let attachments = parse_calendar_attachment_inputs(object.get("links"))?;
     Ok((
         collection_id,
         UpsertClientEventInput {
@@ -1052,7 +1211,42 @@ fn parse_calendar_event_input(
             notes: parse_optional_string(object.get("description"))?.unwrap_or_default(),
             body_html: parse_optional_string(object.get("bodyHtml"))?.unwrap_or_default(),
         },
+        attachments,
     ))
+}
+
+#[derive(Debug, Clone)]
+struct CalendarAttachmentInput {
+    blob_id: Uuid,
+    name: String,
+    media_type: Option<String>,
+}
+
+fn parse_calendar_attachment_inputs(value: Option<&Value>) -> Result<Vec<CalendarAttachmentInput>> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("links must be an object"))?;
+    object
+        .values()
+        .map(|value| {
+            let link = value
+                .as_object()
+                .ok_or_else(|| anyhow!("calendar attachment link must be an object"))?;
+            let blob_id = link
+                .get("blobId")
+                .or_else(|| link.get("href"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| anyhow!("calendar attachment blobId is required"))?;
+            Ok(CalendarAttachmentInput {
+                blob_id: crate::upload::parse_upload_blob_id(blob_id)?,
+                name: parse_required_string(link.get("title"), "title")?,
+                media_type: parse_optional_string(link.get("type"))?,
+            })
+        })
+        .collect()
 }
 
 fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Result<()> {
@@ -1077,6 +1271,7 @@ fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Resu
             | "description"
             | "descriptionContentType"
             | "bodyHtml"
+            | "links"
             | "calendarIds" => {}
             _ => bail!("unsupported calendar event property: {key}"),
         }

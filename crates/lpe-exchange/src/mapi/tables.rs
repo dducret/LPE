@@ -717,10 +717,11 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         sort_events(&mut rows, sort_orders);
                         rows.into_iter()
                             .map(|event| {
-                                serialize_event_row(
+                                serialize_event_row_with_attachments(
                                     &event.event,
                                     event.id,
                                     event.folder_id,
+                                    !event.attachments.is_empty(),
                                     &columns,
                                 )
                             })
@@ -1364,9 +1365,13 @@ fn serialize_search_content_row(
             snapshot.reminder_for_source("calendar", event.canonical_id),
             columns,
         ),
-        SearchContentRow::Event(event) => {
-            serialize_event_row(&event.event, event.id, event.folder_id, columns)
-        }
+        SearchContentRow::Event(event) => serialize_event_row_with_attachments(
+            &event.event,
+            event.id,
+            event.folder_id,
+            !event.attachments.is_empty(),
+            columns,
+        ),
         SearchContentRow::Message(message) => serialize_message_row(&message.email, columns),
         SearchContentRow::Task(task) if reminder_projection => serialize_reminder_task_row(
             task,
@@ -3151,9 +3156,23 @@ pub(in crate::mapi) fn serialize_event_row(
     folder_id: u64,
     columns: &[u32],
 ) -> Vec<u8> {
+    serialize_event_row_with_attachments(event, item_id, folder_id, false, columns)
+}
+
+pub(in crate::mapi) fn serialize_event_row_with_attachments(
+    event: &AccessibleEvent,
+    item_id: u64,
+    folder_id: u64,
+    has_attachments: bool,
+    columns: &[u32],
+) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
-        match event_property_value(event, item_id, folder_id, *column) {
+        match if canonical_property_storage_tag(*column) == PID_TAG_HAS_ATTACHMENTS {
+            Some(MapiValue::Bool(has_attachments))
+        } else {
+            event_property_value(event, item_id, folder_id, *column)
+        } {
             Some(value) => write_mapi_value(&mut row, *column, &value),
             None => write_property_default(&mut row, *column),
         }

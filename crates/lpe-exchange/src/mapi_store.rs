@@ -1,8 +1,8 @@
 use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ClientNote, ClientReminder,
-    ClientTask, CollaborationCollection, ConversationAction, JmapEmail, JmapMailbox, JournalEntry,
-    ReminderQuery, SearchFolderDefinition,
+    AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
+    ClientReminder, ClientTask, CollaborationCollection, ConversationAction, JmapEmail,
+    JmapMailbox, JournalEntry, ReminderQuery, SearchFolderDefinition,
 };
 use uuid::Uuid;
 
@@ -77,6 +77,7 @@ pub(crate) struct MapiEvent {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) event: AccessibleEvent,
+    pub(crate) attachments: Vec<MapiAttachment>,
 }
 
 #[derive(Debug, Clone)]
@@ -287,6 +288,7 @@ impl MapiMailStoreSnapshot {
                     folder_id,
                     canonical_id: event.id,
                     event,
+                    attachments: Vec::new(),
                 })
             })
             .collect();
@@ -396,6 +398,31 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn with_calendar_attachments(
+        mut self,
+        calendar_attachments: Vec<(Uuid, Vec<CalendarEventAttachment>)>,
+    ) -> Self {
+        for event in &mut self.events {
+            event.attachments = calendar_attachments
+                .iter()
+                .find(|(event_id, _)| *event_id == event.canonical_id)
+                .map(|(_, attachments)| attachments.as_slice())
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+                .map(|(index, attachment)| MapiAttachment {
+                    attach_num: index as u32,
+                    canonical_id: attachment.id,
+                    file_reference: attachment.file_reference.clone(),
+                    file_name: attachment.file_name.clone(),
+                    media_type: attachment.media_type.clone(),
+                    size_octets: attachment.size_octets,
+                })
+                .collect();
+        }
+        self
+    }
+
     pub(crate) fn mailboxes(&self) -> Vec<JmapMailbox> {
         self.folders
             .iter()
@@ -449,10 +476,17 @@ impl MapiMailStoreSnapshot {
         folder_id: u64,
         message_id: u64,
     ) -> Option<&[MapiAttachment]> {
-        self.messages
+        if let Some(message) = self
+            .messages
             .iter()
             .find(|message| message.folder_id == folder_id && message.id == message_id)
-            .map(|message| message.attachments.as_slice())
+        {
+            return Some(message.attachments.as_slice());
+        }
+        self.events
+            .iter()
+            .find(|event| event.folder_id == folder_id && event.id == message_id)
+            .map(|event| event.attachments.as_slice())
     }
 
     pub(crate) fn attachment_for_message(

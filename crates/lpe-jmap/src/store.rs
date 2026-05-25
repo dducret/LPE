@@ -1,13 +1,13 @@
 use anyhow::Result;
 use lpe_storage::{
-    AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount,
-    CanonicalChangeCategory, CanonicalChangeListener, CanonicalChangeReplay,
-    CanonicalPushChangeSet, ClientNote, ClientReminder, ClientTask, ClientTaskList,
-    CollaborationCollection, CollaborationGrantInput, CollaborationResourceKind,
-    CreateTaskListInput, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapEmailSubmission,
-    JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
+    AccessibleContact, AccessibleEvent, AttachmentUploadInput, AuditEntryInput,
+    AuthenticatedAccount, CalendarEventAttachment, CanonicalChangeCategory,
+    CanonicalChangeListener, CanonicalChangeReplay, CanonicalPushChangeSet, ClientNote,
+    ClientReminder, ClientTask, ClientTaskList, CollaborationCollection, CollaborationGrantInput,
+    CollaborationResourceKind, CreateTaskListInput, JmapEmail, JmapEmailFollowupUpdate,
+    JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
+    JmapStringObjectChange, JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
     MailboxDelegationGrantInput, ReminderQuery, SavedDraftMessage, SenderDelegationGrantInput,
     SenderDelegationRight, SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput,
     SubmittedMessage, TaskListGrantInput, UpdateTaskListInput, UpsertClientContactInput,
@@ -223,6 +223,14 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         let _ = (account_id, message_id);
         Ok(None)
     }
+    async fn fetch_calendar_attachment_blob(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+    ) -> Result<Option<JmapUploadBlob>> {
+        let _ = (account_id, file_reference);
+        Ok(None)
+    }
     async fn save_draft_message(
         &self,
         input: SubmitMessageInput,
@@ -330,6 +338,18 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         principal_account_id: Uuid,
         event_id: Uuid,
     ) -> Result<()>;
+    async fn fetch_calendar_attachments_for_events(
+        &self,
+        principal_account_id: Uuid,
+        event_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, Vec<CalendarEventAttachment>)>>;
+    async fn add_calendar_event_attachment(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> Result<Option<CalendarEventAttachment>>;
     async fn fetch_jmap_task_lists(&self, account_id: Uuid) -> Result<Vec<ClientTaskList>>;
     async fn fetch_jmap_task_lists_by_ids(
         &self,
@@ -746,6 +766,15 @@ impl JmapStore for Storage {
         self.fetch_jmap_message_blob(account_id, message_id).await
     }
 
+    async fn fetch_calendar_attachment_blob(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+    ) -> Result<Option<JmapUploadBlob>> {
+        self.fetch_calendar_attachment_blob(account_id, file_reference)
+            .await
+    }
+
     async fn save_draft_message(
         &self,
         input: SubmitMessageInput,
@@ -936,6 +965,26 @@ impl JmapStore for Storage {
         event_id: Uuid,
     ) -> Result<()> {
         self.delete_accessible_event(principal_account_id, event_id)
+            .await
+    }
+
+    async fn fetch_calendar_attachments_for_events(
+        &self,
+        principal_account_id: Uuid,
+        event_ids: &[Uuid],
+    ) -> Result<Vec<(Uuid, Vec<CalendarEventAttachment>)>> {
+        self.fetch_calendar_attachments_for_events(principal_account_id, event_ids)
+            .await
+    }
+
+    async fn add_calendar_event_attachment(
+        &self,
+        principal_account_id: Uuid,
+        event_id: Uuid,
+        attachment: AttachmentUploadInput,
+        audit: AuditEntryInput,
+    ) -> Result<Option<CalendarEventAttachment>> {
+        self.add_calendar_event_attachment(principal_account_id, event_id, attachment, audit)
             .await
     }
 

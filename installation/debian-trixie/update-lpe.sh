@@ -250,6 +250,38 @@ CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values (
 CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx
   ON public.mapi_custom_property_values (tenant_id, account_id, object_kind, canonical_id);
 
+CREATE TABLE IF NOT EXISTS public.calendar_event_attachments (
+  id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  owner_account_id UUID NOT NULL,
+  calendar_id UUID NOT NULL,
+  event_id UUID NOT NULL,
+  domain_id UUID NOT NULL,
+  blob_id UUID NOT NULL,
+  blob_kind TEXT NOT NULL DEFAULT 'attachment' CHECK (blob_kind = 'attachment'),
+  file_name TEXT NOT NULL CHECK (btrim(file_name) <> ''),
+  media_type TEXT NOT NULL CHECK (btrim(media_type) <> ''),
+  disposition TEXT NOT NULL DEFAULT 'attachment' CHECK (disposition IN ('attachment', 'inline')),
+  content_id TEXT,
+  ordinal INTEGER NOT NULL DEFAULT 0 CHECK (ordinal >= 0),
+  size_octets BIGINT NOT NULL CHECK (size_octets >= 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (tenant_id, id),
+  UNIQUE (tenant_id, owner_account_id, event_id, ordinal),
+  FOREIGN KEY (tenant_id, owner_account_id, calendar_id, event_id)
+    REFERENCES public.calendar_events (tenant_id, owner_account_id, calendar_id, id)
+    ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, domain_id, blob_id, blob_kind)
+    REFERENCES public.blobs (tenant_id, domain_id, id, blob_kind)
+    ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS calendar_event_attachments_event_idx
+  ON public.calendar_event_attachments (tenant_id, owner_account_id, event_id, ordinal);
+
+CREATE INDEX IF NOT EXISTS calendar_event_attachments_blob_idx
+  ON public.calendar_event_attachments (tenant_id, blob_id);
+
 ALTER TABLE public.mailbox_messages
   ADD COLUMN IF NOT EXISTS followup_flag_status TEXT NOT NULL DEFAULT 'none'
     CHECK (followup_flag_status IN ('none', 'flagged', 'complete')),

@@ -397,6 +397,13 @@ where
             .await
             .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
     };
+    let calendar_attachments = store
+        .fetch_calendar_attachments_for_events(
+            account_id,
+            &events.iter().map(|event| event.id).collect::<Vec<_>>(),
+        )
+        .await
+        .context("fetch MAPI calendar attachments")?;
     let tasks = if snapshot_backed_contents {
         log_mapi_store_load_step(
             account_id,
@@ -576,7 +583,8 @@ where
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
     .with_reminders(reminders)
-    .with_content_windows(content_windows))
+    .with_content_windows(content_windows)
+    .with_calendar_attachments(calendar_attachments))
 }
 
 fn log_mapi_store_load_step(

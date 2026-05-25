@@ -407,10 +407,17 @@ named-property range; the LID itself is the property name, not the wire property
 ID. Outlook's MAPI Calendar property model also requires appointment start time
 to be strictly earlier than end time, so zero-duration canonical events are
 projected to MAPI with a minimum one-minute appointment window while leaving the
-canonical event unchanged. Calendar attachments are intentionally not projected
-until a canonical calendar attachment table exists; `PidTagHasAttachments` for
-calendar appointment rows remains false rather than inventing a protocol-local
-attachment store.
+canonical event unchanged. Bounded MAPI calendar writes update only existing
+canonical `calendar_events` columns: subject/display name, body, HTML body,
+start/end, location, all-day, busy-status-derived canonical status, organizer,
+and display attendees. Binary recurrence and meeting payloads remain unsupported
+until they have a parser-backed canonical mapping; the server rejects them with a
+deterministic parseable error instead of storing opaque MAPI blobs. Calendar
+attachments are projected only through canonical `calendar_event_attachments`:
+`PidTagHasAttachments`, `RopGetAttachmentTable`, and `RopOpenAttachment` read
+that table, while bounded `RopCreateAttachment`/`RopSaveChangesAttachment`
+writes validated attachment blobs into the same canonical event attachment
+state. Outlook-only attachment state is not stored.
 
 ### Publication Gate
 

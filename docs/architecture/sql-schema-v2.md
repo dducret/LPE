@@ -456,7 +456,7 @@ those generated keys instead of duplicating ad hoc `lower(...)` comparisons.
 Contacts, calendars, and tasks use canonical collections and items:
 
 - `contact_books`, `contacts`
-- `calendars`, `calendar_events`
+- `calendars`, `calendar_events`, `calendar_event_attachments`
 - `task_lists`, `tasks`
 - `notes`
 - `journal_entries`
@@ -487,8 +487,12 @@ organization/title fields, notes, raw vCard text, and source/import metadata so
 JMAP, DAV, EWS, and MAPI can project from one canonical row. Calendar events
 store `UID`, `SEQUENCE`, organizer, attendees, recurrence, recurrence
 exceptions, timezone, location, reminder metadata, and body fields without
-adapter-local event tables. Tasks store start, due, completed, priority,
-recurrence, and reminder fields where the documented adapters expose them.
+adapter-local event tables. Calendar event attachments live in
+`calendar_event_attachments`, point at durable attachment blobs, and participate
+in calendar-category change logging; protocol adapters must project them from
+that table instead of keeping Outlook or JMAP-local attachment state. Tasks
+store start, due, completed, priority, recurrence, and reminder fields where the
+documented adapters expose them.
 Completed tasks must carry `completed_at`, while non-completed tasks must not.
 Notes store sticky-note title/body, color, categories, and source metadata.
 Journal entries store subject/body, entry type, MAPI message-class projection
@@ -630,6 +634,7 @@ collaboration, rights, or user-visible state.
 - `contacts`
 - `calendars`
 - `calendar_events`
+- `calendar_event_attachments`
 - `task_lists`
 - `tasks`
 - `notes`

@@ -28,7 +28,10 @@ pub mod workspace;
 #[cfg(test)]
 mod schema_contract;
 
-pub use crate::attachments::ClientAttachment;
+pub use crate::attachments::{
+    calendar_attachment_file_reference, parse_calendar_attachment_file_reference,
+    CalendarEventAttachment, ClientAttachment,
+};
 pub use crate::auth::{
     AccountAppPassword, AccountAuthFactor, AccountCredentialInput, AccountLogin, AccountOidcClaims,
     AdminAuthFactor, AdminCredentialInput, AdminLogin, AdminOidcClaims, AuthenticatedAccount,
