@@ -661,8 +661,17 @@ fn log_nspi_get_props_debug(
         returned_property_tags = %returned_property_tags,
         dropped_property_tag_count = dropped_tags.len(),
         dropped_property_tags = %format_nspi_property_tags_for_debug(dropped_tags),
+        dropped_known_unsupported_property_tags = %format_nspi_known_unsupported_property_tags_for_debug(dropped_tags),
         message = message,
     );
+}
+
+fn format_nspi_known_unsupported_property_tags_for_debug(tags: &[u32]) -> String {
+    tags.iter()
+        .filter_map(|tag| nspi_known_unsupported_property_tag_name(*tag).map(|name| (*tag, name)))
+        .map(|(tag, name)| format!("{tag:#010x}:{name}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn nspi_raw_property_tag_candidates(request: &[u8]) -> Vec<u32> {

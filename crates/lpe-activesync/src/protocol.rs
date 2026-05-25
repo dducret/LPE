@@ -74,10 +74,13 @@ impl ActiveSyncCommand {
             "ValidateCert" => Ok(Self::ValidateCert),
             "Find" => Ok(Self::Find),
             _ => {
+                let known_unsupported_name = Self::known_unsupported_name_for_str(value);
                 tracing::warn!(
                     adapter = "activesync",
                     enum_name = "ActiveSyncCommand",
                     raw_value = value,
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
                     "unsupported ActiveSync command"
                 );
                 bail!("unsupported ActiveSync command: {value}")
@@ -108,10 +111,13 @@ impl ActiveSyncCommand {
             22 => Ok(Self::ValidateCert),
             23 => Ok(Self::Find),
             _ => {
+                let known_unsupported_name = Self::known_unsupported_name(value);
                 tracing::warn!(
                     adapter = "activesync",
                     enum_name = "ActiveSyncCommand",
                     raw_value = value,
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
                     "unsupported ActiveSync command code"
                 );
                 bail!("unsupported ActiveSync command code")
@@ -127,6 +133,17 @@ impl ActiveSyncCommand {
             17 => Some("Settings"),
             21 => Some("ResolveRecipients"),
             22 => Some("ValidateCert"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn known_unsupported_name_for_str(value: &str) -> Option<&'static str> {
+        match value {
+            "GetAttachment" => Some("GetAttachment"),
+            "MeetingResponse" => Some("MeetingResponse"),
+            "Settings" => Some("Settings"),
+            "ResolveRecipients" => Some("ResolveRecipients"),
+            "ValidateCert" => Some("ValidateCert"),
             _ => None,
         }
     }
@@ -315,10 +332,13 @@ impl TryFrom<u8> for WbxmlCodePage {
             20 => Ok(Self::ItemOperations),
             21 => Ok(Self::ComposeMail),
             _ => {
+                let known_unsupported_name = Self::known_unsupported_name(value);
                 tracing::warn!(
                     adapter = "activesync",
                     enum_name = "WbxmlCodePage",
                     raw_value = value,
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
                     "unsupported WBXML code page"
                 );
                 bail!("unsupported WBXML code page")

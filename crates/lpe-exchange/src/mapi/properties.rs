@@ -3835,11 +3835,15 @@ pub(in crate::mapi) fn parse_mapi_property_value(
         }
         None => {
             let tag = MapiPropertyTag::new(property_tag);
+            let known_unsupported_name =
+                MapiPropertyType::known_unsupported_name(tag.property_type_code());
             tracing::warn!(
                 adapter = "mapi",
                 enum_name = "MapiPropertyType",
                 raw_value = tag.property_type_code(),
                 property_id = tag.property_id(),
+                known_unsupported = known_unsupported_name.is_some(),
+                known_unsupported_name = known_unsupported_name.unwrap_or(""),
                 "unsupported MAPI property type rejected at parser boundary"
             );
             Err(anyhow!(

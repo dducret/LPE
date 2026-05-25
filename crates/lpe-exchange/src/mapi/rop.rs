@@ -2239,6 +2239,15 @@ impl RopResponseError {
 }
 
 pub(in crate::mapi) fn unsupported_rop_response(rop_id: u8, handle_index: u8) -> Vec<u8> {
+    let known_unsupported_name = RopId::known_unsupported_name(rop_id);
+    tracing::warn!(
+        adapter = "mapi",
+        enum_name = "RopId",
+        raw_value = rop_id,
+        known_unsupported = known_unsupported_name.is_some(),
+        known_unsupported_name = known_unsupported_name.unwrap_or(""),
+        "unsupported MAPI ROP response"
+    );
     rop_error_response(rop_id, handle_index, ROP_ERROR_NOT_SUPPORTED)
 }
 

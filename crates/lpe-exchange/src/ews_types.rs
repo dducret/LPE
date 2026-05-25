@@ -63,7 +63,20 @@ impl EwsDistinguishedFolderIdName {
             "contacts" => Some(Self::Contacts),
             "calendar" => Some(Self::Calendar),
             "tasks" => Some(Self::Tasks),
-            _ => None,
+            _ => {
+                let known_unsupported_name = Self::known_unsupported_name(value);
+                if known_unsupported_name.is_some() {
+                    tracing::warn!(
+                        adapter = "ews",
+                        enum_name = "DistinguishedFolderIdName",
+                        raw_value = value,
+                        known_unsupported = true,
+                        known_unsupported_name = known_unsupported_name.unwrap_or(""),
+                        "unsupported EWS distinguished folder id"
+                    );
+                }
+                None
+            }
         }
     }
 

@@ -324,7 +324,19 @@ impl<S: ActiveSyncStore> ActiveSyncService<S> {
                 )
                 .await
             }
-            other => bail!("unsupported ActiveSync command: {other}"),
+            other => {
+                let known_unsupported_name =
+                    ActiveSyncCommand::known_unsupported_name_for_str(other.as_str());
+                tracing::warn!(
+                    adapter = "activesync",
+                    enum_name = "ActiveSyncCommand",
+                    raw_value = other.as_str(),
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
+                    "unsupported ActiveSync command reached service dispatcher"
+                );
+                bail!("unsupported ActiveSync command: {other}")
+            }
         }
     }
 

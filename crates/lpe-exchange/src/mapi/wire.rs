@@ -394,10 +394,13 @@ impl RopId {
             0xA3 => Some(Self::WriteStreamExtended),
             0xFE => Some(Self::Logon),
             _ => {
+                let known_unsupported_name = Self::known_unsupported_name(value);
                 tracing::warn!(
                     adapter = "mapi",
                     enum_name = "RopId",
                     raw_value = value,
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
                     "unsupported MAPI ROP id"
                 );
                 None
@@ -606,10 +609,13 @@ impl MapiPropertyType {
             0x1048 => Some(Self::MultipleGuid),
             0x1102 => Some(Self::MultipleBinary),
             _ => {
+                let known_unsupported_name = Self::known_unsupported_name(value);
                 tracing::warn!(
                     adapter = "mapi",
                     enum_name = "MapiPropertyType",
                     raw_value = value,
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
                     "unsupported MAPI property type"
                 );
                 None
@@ -748,10 +754,13 @@ impl FastTransferMarker {
             0x403A_0003 => Some(Self::IncrSyncStateBegin),
             0x403B_0003 => Some(Self::IncrSyncStateEnd),
             _ => {
+                let known_unsupported_name = Self::known_unsupported_name(value);
                 tracing::warn!(
                     adapter = "mapi",
                     enum_name = "FastTransferMarker",
                     raw_value = value,
+                    known_unsupported = known_unsupported_name.is_some(),
+                    known_unsupported_name = known_unsupported_name.unwrap_or(""),
                     "unsupported MAPI FastTransfer marker"
                 );
                 None
@@ -850,234 +859,12 @@ impl MapiError {
 
 #[cfg(test)]
 mod tests {
+    use crate::microsoft_protocol_audit::{
+        gap_status_u16, gap_status_u32, gap_status_u8, GapStatus,
+        FAST_TRANSFER_MARKER_GAP_MANIFEST, PROPERTY_TYPE_GAP_MANIFEST, ROP_ID_GAP_MANIFEST,
+    };
+
     use super::*;
-
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    enum GapStatus {
-        Implemented,
-        KnownUnsupported,
-        Reserved,
-        NotInScope,
-    }
-
-    const ROP_ID_GAP_MANIFEST: &[(u8, GapStatus)] = &[
-        (0x01, GapStatus::Implemented),
-        (0x02, GapStatus::Implemented),
-        (0x03, GapStatus::Implemented),
-        (0x04, GapStatus::Implemented),
-        (0x05, GapStatus::Implemented),
-        (0x06, GapStatus::Implemented),
-        (0x07, GapStatus::Implemented),
-        (0x08, GapStatus::Implemented),
-        (0x09, GapStatus::Implemented),
-        (0x0A, GapStatus::Implemented),
-        (0x0B, GapStatus::Implemented),
-        (0x0C, GapStatus::Implemented),
-        (0x0D, GapStatus::Implemented),
-        (0x0E, GapStatus::Implemented),
-        (0x0F, GapStatus::Implemented),
-        (0x10, GapStatus::Implemented),
-        (0x11, GapStatus::Implemented),
-        (0x12, GapStatus::Implemented),
-        (0x13, GapStatus::Implemented),
-        (0x14, GapStatus::Implemented),
-        (0x15, GapStatus::Implemented),
-        (0x16, GapStatus::Implemented),
-        (0x17, GapStatus::Implemented),
-        (0x18, GapStatus::Implemented),
-        (0x19, GapStatus::Implemented),
-        (0x1A, GapStatus::Implemented),
-        (0x1B, GapStatus::Implemented),
-        (0x1C, GapStatus::Implemented),
-        (0x1D, GapStatus::Implemented),
-        (0x1E, GapStatus::Implemented),
-        (0x1F, GapStatus::Implemented),
-        (0x20, GapStatus::Implemented),
-        (0x21, GapStatus::Implemented),
-        (0x22, GapStatus::Implemented),
-        (0x23, GapStatus::Implemented),
-        (0x24, GapStatus::Implemented),
-        (0x25, GapStatus::Implemented),
-        (0x26, GapStatus::Implemented),
-        (0x27, GapStatus::Implemented),
-        (0x28, GapStatus::Reserved),
-        (0x29, GapStatus::Implemented),
-        (0x2A, GapStatus::NotInScope),
-        (0x2B, GapStatus::Implemented),
-        (0x2C, GapStatus::Implemented),
-        (0x2D, GapStatus::Implemented),
-        (0x2E, GapStatus::Implemented),
-        (0x2F, GapStatus::Implemented),
-        (0x30, GapStatus::Implemented),
-        (0x31, GapStatus::Implemented),
-        (0x32, GapStatus::Implemented),
-        (0x33, GapStatus::Implemented),
-        (0x34, GapStatus::Implemented),
-        (0x35, GapStatus::Implemented),
-        (0x36, GapStatus::Implemented),
-        (0x37, GapStatus::Implemented),
-        (0x38, GapStatus::Implemented),
-        (0x39, GapStatus::KnownUnsupported),
-        (0x3A, GapStatus::Implemented),
-        (0x3B, GapStatus::Implemented),
-        (0x3E, GapStatus::Implemented),
-        (0x3F, GapStatus::Implemented),
-        (0x40, GapStatus::Implemented),
-        (0x41, GapStatus::Implemented),
-        (0x42, GapStatus::Implemented),
-        (0x43, GapStatus::Implemented),
-        (0x44, GapStatus::Implemented),
-        (0x45, GapStatus::Implemented),
-        (0x46, GapStatus::KnownUnsupported),
-        (0x47, GapStatus::KnownUnsupported),
-        (0x48, GapStatus::KnownUnsupported),
-        (0x49, GapStatus::Implemented),
-        (0x4A, GapStatus::Implemented),
-        (0x4B, GapStatus::Implemented),
-        (0x4C, GapStatus::Implemented),
-        (0x4D, GapStatus::Implemented),
-        (0x4E, GapStatus::Implemented),
-        (0x4F, GapStatus::Implemented),
-        (0x50, GapStatus::Implemented),
-        (0x51, GapStatus::Implemented),
-        (0x52, GapStatus::Implemented),
-        (0x53, GapStatus::Implemented),
-        (0x54, GapStatus::Implemented),
-        (0x55, GapStatus::Implemented),
-        (0x56, GapStatus::Implemented),
-        (0x57, GapStatus::Implemented),
-        (0x58, GapStatus::Implemented),
-        (0x59, GapStatus::KnownUnsupported),
-        (0x5A, GapStatus::KnownUnsupported),
-        (0x5B, GapStatus::KnownUnsupported),
-        (0x5C, GapStatus::KnownUnsupported),
-        (0x5D, GapStatus::Implemented),
-        (0x5E, GapStatus::Implemented),
-        (0x5F, GapStatus::Implemented),
-        (0x60, GapStatus::Implemented),
-        (0x61, GapStatus::Implemented),
-        (0x63, GapStatus::Implemented),
-        (0x64, GapStatus::Implemented),
-        (0x66, GapStatus::Implemented),
-        (0x67, GapStatus::Implemented),
-        (0x68, GapStatus::Implemented),
-        (0x69, GapStatus::Implemented),
-        (0x6B, GapStatus::Implemented),
-        (0x6C, GapStatus::Implemented),
-        (0x6D, GapStatus::Implemented),
-        (0x6E, GapStatus::NotInScope),
-        (0x6F, GapStatus::Implemented),
-        (0x70, GapStatus::Implemented),
-        (0x72, GapStatus::Implemented),
-        (0x73, GapStatus::Implemented),
-        (0x74, GapStatus::Implemented),
-        (0x75, GapStatus::Implemented),
-        (0x76, GapStatus::Implemented),
-        (0x77, GapStatus::Implemented),
-        (0x78, GapStatus::Implemented),
-        (0x79, GapStatus::Implemented),
-        (0x7A, GapStatus::Implemented),
-        (0x7B, GapStatus::Implemented),
-        (0x7E, GapStatus::Implemented),
-        (0x7F, GapStatus::Implemented),
-        (0x80, GapStatus::Implemented),
-        (0x81, GapStatus::Implemented),
-        (0x82, GapStatus::Implemented),
-        (0x83, GapStatus::Implemented),
-        (0x84, GapStatus::Implemented),
-        (0x85, GapStatus::Implemented),
-        (0x86, GapStatus::KnownUnsupported),
-        (0x87, GapStatus::Implemented),
-        (0x89, GapStatus::Implemented),
-        (0x90, GapStatus::Implemented),
-        (0x91, GapStatus::Implemented),
-        (0x92, GapStatus::Implemented),
-        (0x93, GapStatus::Implemented),
-        (0xA3, GapStatus::Implemented),
-        (0xFE, GapStatus::Implemented),
-    ];
-
-    const PROPERTY_TYPE_GAP_MANIFEST: &[(u16, GapStatus)] = &[
-        (0x0000, GapStatus::KnownUnsupported),
-        (0x0001, GapStatus::KnownUnsupported),
-        (0x0002, GapStatus::Implemented),
-        (0x0003, GapStatus::Implemented),
-        (0x0004, GapStatus::KnownUnsupported),
-        (0x0005, GapStatus::KnownUnsupported),
-        (0x0006, GapStatus::KnownUnsupported),
-        (0x0007, GapStatus::KnownUnsupported),
-        (0x000A, GapStatus::Implemented),
-        (0x000B, GapStatus::Implemented),
-        (0x000D, GapStatus::KnownUnsupported),
-        (0x0014, GapStatus::Implemented),
-        (0x001E, GapStatus::Implemented),
-        (0x001F, GapStatus::Implemented),
-        (0x0040, GapStatus::Implemented),
-        (0x0048, GapStatus::Implemented),
-        (0x00FB, GapStatus::KnownUnsupported),
-        (0x00FD, GapStatus::KnownUnsupported),
-        (0x00FE, GapStatus::KnownUnsupported),
-        (0x0102, GapStatus::Implemented),
-        (0x1002, GapStatus::Implemented),
-        (0x1003, GapStatus::Implemented),
-        (0x1004, GapStatus::KnownUnsupported),
-        (0x1005, GapStatus::KnownUnsupported),
-        (0x1006, GapStatus::KnownUnsupported),
-        (0x1007, GapStatus::KnownUnsupported),
-        (0x1014, GapStatus::Implemented),
-        (0x101E, GapStatus::Implemented),
-        (0x101F, GapStatus::Implemented),
-        (0x1048, GapStatus::Implemented),
-        (0x10FB, GapStatus::KnownUnsupported),
-        (0x10FD, GapStatus::KnownUnsupported),
-        (0x10FE, GapStatus::KnownUnsupported),
-        (0x1102, GapStatus::Implemented),
-    ];
-
-    const FAST_TRANSFER_MARKER_GAP_MANIFEST: &[(u32, GapStatus)] = &[
-        (0x4000_0003, GapStatus::KnownUnsupported),
-        (0x4001_0003, GapStatus::KnownUnsupported),
-        (0x4002_0003, GapStatus::KnownUnsupported),
-        (0x4003_0003, GapStatus::KnownUnsupported),
-        (0x4004_0003, GapStatus::KnownUnsupported),
-        (0x4009_0003, GapStatus::KnownUnsupported),
-        (0x400A_0003, GapStatus::KnownUnsupported),
-        (0x400B_0003, GapStatus::KnownUnsupported),
-        (0x400C_0003, GapStatus::KnownUnsupported),
-        (0x400D_0003, GapStatus::KnownUnsupported),
-        (0x400E_0003, GapStatus::KnownUnsupported),
-        (0x4010_0003, GapStatus::KnownUnsupported),
-        (0x4012_0003, GapStatus::Implemented),
-        (0x4013_0003, GapStatus::Implemented),
-        (0x4014_0003, GapStatus::Implemented),
-        (0x4015_0003, GapStatus::Implemented),
-        (0x4016_0003, GapStatus::KnownUnsupported),
-        (0x4017_0003, GapStatus::KnownUnsupported),
-        (0x4023_0003, GapStatus::KnownUnsupported),
-        (0x402F_0003, GapStatus::Implemented),
-        (0x403A_0003, GapStatus::Implemented),
-        (0x403B_0003, GapStatus::Implemented),
-        (0x4074_000B, GapStatus::KnownUnsupported),
-        (0x407D_0003, GapStatus::KnownUnsupported),
-    ];
-
-    fn gap_status_u8(manifest: &[(u8, GapStatus)], value: u8) -> Option<GapStatus> {
-        manifest
-            .iter()
-            .find_map(|(manifest_value, status)| (*manifest_value == value).then_some(*status))
-    }
-
-    fn gap_status_u16(manifest: &[(u16, GapStatus)], value: u16) -> Option<GapStatus> {
-        manifest
-            .iter()
-            .find_map(|(manifest_value, status)| (*manifest_value == value).then_some(*status))
-    }
-
-    fn gap_status_u32(manifest: &[(u32, GapStatus)], value: u32) -> Option<GapStatus> {
-        manifest
-            .iter()
-            .find_map(|(manifest_value, status)| (*manifest_value == value).then_some(*status))
-    }
 
     #[test]
     fn typed_wire_values_match_documented_constants() {
