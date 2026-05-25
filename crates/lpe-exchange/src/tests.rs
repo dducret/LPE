@@ -2883,15 +2883,27 @@ fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
 }
 
 fn assert_content_final_state_includes(bytes: &[u8], message_ids: &[Uuid], change_numbers: &[u64]) {
+    let message_counters = message_ids
+        .iter()
+        .map(mapi_message_global_counter)
+        .collect::<Vec<_>>();
+    assert_content_final_state_includes_counters(bytes, &message_counters, change_numbers);
+}
+
+fn assert_content_final_state_includes_counters(
+    bytes: &[u8],
+    message_counters: &[u64],
+    change_numbers: &[u64],
+) {
     let idset_given = mapi_binary_property_value(bytes, META_TAG_IDSET_GIVEN);
-    for message_id in message_ids {
+    for message_counter in message_counters {
         assert!(
             strict_replguid_globset_contains_counter(
                 idset_given,
-                &globcnt_bytes(mapi_message_global_counter(message_id))
+                &globcnt_bytes(*message_counter)
             )
             .unwrap(),
-            "final MetaTagIdsetGiven missing message {message_id}"
+            "final MetaTagIdsetGiven missing message counter {message_counter}"
         );
     }
 
@@ -3587,7 +3599,9 @@ fn mapi_binary_property(tag: u32, value: &[u8]) -> Vec<u8> {
 }
 
 fn mapi_message_global_counter(id: &Uuid) -> u64 {
-    test_mapi_uuid_id(id) >> 16
+    crate::mapi::identity::mapped_mapi_object_id(id)
+        .unwrap_or_else(|| test_mapi_uuid_id(id))
+        >> 16
 }
 
 fn mapi_message_cnset_property(tag: u32, changes: &[u64]) -> Vec<u8> {
@@ -16131,11 +16145,18 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
 
     let source_rops = content_sync_response_rops(store.clone(), 5, b"client-content-state").await;
     let target_rops = content_sync_response_rops(
-        store,
+        store.clone(),
         crate::mapi::identity::ARCHIVE_FOLDER_ID >> 16,
         b"client-content-state",
     )
     .await;
+    let moved_counter = store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .get(&moved_id)
+        .and_then(|object_id| crate::mapi::identity::global_counter_from_store_id(*object_id))
+        .unwrap();
 
     assert_eq!(mapi_sync_manifest_counts(&source_rops), None);
     assert!(contains_bytes(
@@ -16145,7 +16166,7 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
     assert_content_final_state_includes(&source_rops, &[], &[]);
     assert_eq!(mapi_sync_manifest_counts(&target_rops), Some((0, 1)));
     assert!(contains_bytes(&target_rops, b"Moved canonical message"));
-    assert_content_final_state_includes(&target_rops, &[moved_id], &[41]);
+    assert_content_final_state_includes_counters(&target_rops, &[moved_counter], &[41]);
 }
 
 #[tokio::test]
