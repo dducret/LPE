@@ -473,6 +473,16 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .into_iter()
             .map(|entry| journal_sync_object(entry))
             .collect(),
+        CALENDAR_FOLDER_ID => snapshot
+            .events_for_folder(folder_id)
+            .into_iter()
+            .map(|event| {
+                calendar_sync_object(
+                    event,
+                    snapshot.reminder_for_source("calendar", event.canonical_id),
+                )
+            })
+            .collect(),
         COMMON_VIEWS_FOLDER_ID => snapshot
             .search_folder_definition_messages()
             .iter()
@@ -678,7 +688,11 @@ fn special_message_property_value(
         MapiValue::Binary(value) => {
             Some(mapi_mailstore::SpecialMessagePropertyValue::Binary(value))
         }
+        MapiValue::Bool(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::Bool(value)),
         MapiValue::I32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I32(value)),
+        MapiValue::I64(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I64(value)),
+        MapiValue::U32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::U32(value)),
+        MapiValue::U64(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::U64(value)),
         MapiValue::String(value) => {
             Some(mapi_mailstore::SpecialMessagePropertyValue::String(value))
         }
@@ -686,6 +700,52 @@ fn special_message_property_value(
             mapi_mailstore::SpecialMessagePropertyValue::MultiString(values),
         ),
         _ => None,
+    }
+}
+
+fn calendar_sync_object(
+    event: &crate::mapi_store::MapiEvent,
+    reminder: Option<&lpe_storage::ClientReminder>,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut properties = Vec::new();
+    for property_tag in [
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_TAG_LOCATION_W,
+        PID_TAG_ACCESS,
+        PID_TAG_HAS_ATTACHMENTS,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_DELTA_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_REMINDER_OVERRIDE_TAG,
+        PID_LID_REMINDER_PLAY_SOUND_TAG,
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
+    ] {
+        if let Some(value) = event_property_value_with_reminder(
+            &event.event,
+            event.id,
+            event.folder_id,
+            property_tag,
+            reminder,
+        )
+        .and_then(special_message_property_value)
+        {
+            properties.push((property_tag, value));
+        }
+    }
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: event.folder_id,
+        item_id: event.id,
+        canonical_id: event.canonical_id,
+        associated: false,
+        subject: event.event.title.clone(),
+        body_text: event.event.notes.clone(),
+        message_class: "IPM.Appointment".to_string(),
+        last_modified_filetime: event_start_filetime(&event.event),
+        message_size: event_size(&event.event),
+        named_properties: properties,
     }
 }
 

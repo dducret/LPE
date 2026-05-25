@@ -15703,10 +15703,31 @@ async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages
 
 #[tokio::test]
 async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_checkpoint() {
+    let account = FakeStore::account();
     let calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171717171").unwrap();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
         calendar_collections: Arc::new(Mutex::new(vec![calendar])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: FakeStore::rights(),
+            date: "2026-05-25".to_string(),
+            time: "14:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 45,
+            recurrence_rule: String::new(),
+            title: "Calendar sync appointment".to_string(),
+            location: "Conference room".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: "Calendar sync body".to_string(),
+        }])),
         ..Default::default()
     };
     *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
@@ -15718,7 +15739,21 @@ async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_che
     let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert!(stream.message_changes.is_empty());
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].subject,
+        "Calendar sync appointment"
+    );
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0060_0040u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0061_0040u32.to_le_bytes()
+    ));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,

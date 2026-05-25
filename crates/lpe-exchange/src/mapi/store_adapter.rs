@@ -1,7 +1,7 @@
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
-use super::sync::{INBOX_FOLDER_ID, ROOT_FOLDER_ID};
+use super::sync::{CALENDAR_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
 use super::tables::*;
 use super::*;
 use crate::mapi_store;
@@ -334,7 +334,8 @@ where
     let snapshot_backed_contents = plan
         .content_queries
         .iter()
-        .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none());
+        .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none())
+        || plan.object_ids.contains(&CALENDAR_FOLDER_ID);
     let contact_ids = identities
         .iter()
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Contact)

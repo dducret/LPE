@@ -108,7 +108,11 @@ pub(crate) struct SpecialMessageSyncFact {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SpecialMessagePropertyValue {
     Binary(Vec<u8>),
+    Bool(bool),
     I32(i32),
+    I64(i64),
+    U32(u32),
+    U64(u64),
     String(String),
     MultiString(Vec<String>),
     Time(String),
@@ -3188,7 +3192,22 @@ fn write_special_message_property(
         SpecialMessagePropertyValue::Binary(value) => {
             write_binary_property(buffer, property_tag, value)
         }
+        SpecialMessagePropertyValue::Bool(value) => {
+            write_bool_property(buffer, property_tag, *value)
+        }
         SpecialMessagePropertyValue::I32(value) => write_i32_property(buffer, property_tag, *value),
+        SpecialMessagePropertyValue::I64(value) => {
+            write_u32(buffer, property_tag);
+            write_i64(buffer, *value);
+        }
+        SpecialMessagePropertyValue::U32(value) => {
+            write_u32(buffer, property_tag);
+            write_u32(buffer, *value);
+        }
+        SpecialMessagePropertyValue::U64(value) => {
+            write_u32(buffer, property_tag);
+            write_i64(buffer, *value as i64);
+        }
         SpecialMessagePropertyValue::String(value) => {
             write_utf16_property(buffer, property_tag, value)
         }
