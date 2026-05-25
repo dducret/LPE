@@ -567,10 +567,14 @@ fn mapi_property_store_runtime_sql_matches_durable_schema() {
 fn update_script_repairs_mapi_property_store_tables() {
     assert!(
         UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.mapi_named_properties")
-            && UPDATE_LPE_SCRIPT.contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_lid_idx")
-            && UPDATE_LPE_SCRIPT.contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_name_idx")
-            && UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values")
-            && UPDATE_LPE_SCRIPT.contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx"),
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_lid_idx")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_name_idx")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx"),
         "update-lpe.sh must add durable MAPI named/custom property tables for existing databases"
     );
 }

@@ -107,12 +107,12 @@ pub(in crate::mapi) enum RopId {
     SortTable = 0x13,
     Restrict = 0x14,
     QueryRows = 0x15,
-    Abort = 0x16,
-    GetStatus = 0x17,
-    QueryPosition = 0x18,
-    SeekRow = 0x19,
-    SeekRowBookmark = 0x1A,
-    SeekRowFractional = 0x1B,
+    GetStatus = 0x16,
+    QueryPosition = 0x17,
+    SeekRow = 0x18,
+    SeekRowBookmark = 0x19,
+    SeekRowFractional = 0x1A,
+    CreateBookmark = 0x1B,
     CreateFolder = 0x1C,
     DeleteFolder = 0x1D,
     DeleteMessages = 0x1E,
@@ -141,7 +141,8 @@ pub(in crate::mapi) enum RopId {
     MoveFolder = 0x35,
     CopyFolder = 0x36,
     QueryColumnsAll = 0x37,
-    AbortSearch = 0x38,
+    Abort = 0x38,
+    CopyTo = 0x39,
     GetPermissionsTable = 0x3E,
     GetRulesTable = 0x3F,
     ModifyPermissions = 0x40,
@@ -163,11 +164,11 @@ pub(in crate::mapi) enum RopId {
     GetPropertyIdsFromNames = 0x56,
     UpdateDeferredActionMessages = 0x57,
     EmptyFolder = 0x58,
-    HardDeleteMessages = 0x59,
-    HardDeleteMessagesAndSubfolders = 0x5A,
-    SetLocalReplicaMidsetDeleted = 0x5B,
-    SetLocalReplicaMidsetExpired = 0x5C,
-    GetDeletedMessages = 0x5D,
+    ExpandRow = 0x59,
+    CollapseRow = 0x5A,
+    LockRegionStream = 0x5B,
+    UnlockRegionStream = 0x5C,
+    CommitStream = 0x5D,
     GetStreamSize = 0x5E,
     QueryNamedProperties = 0x5F,
     GetPerUserLongTermIds = 0x60,
@@ -196,26 +197,27 @@ pub(in crate::mapi) enum RopId {
     GetStoreState = 0x7B,
     SynchronizationOpenCollector = 0x7E,
     GetLocalReplicaIds = 0x7F,
-    SetLocalReplicaMidsetDeletedNoReplicate = 0x80,
+    SynchronizationImportReadStateChanges = 0x80,
     ResetTable = 0x81,
     LongTermIdFromId = 0x43,
     IdFromLongTermId = 0x44,
     PublicFolderIsGhosted = 0x45,
-    TransportDeliverMessage = 0x47,
-    TransportDoneWithMessage = 0x48,
-    GetPerUserGuidLongTermIds = 0x82,
+    OpenEmbeddedMessage = 0x46,
+    SetSpooler = 0x47,
+    SpoolerLockMessage = 0x48,
+    SynchronizationGetTransferState = 0x82,
     ReadPerUserInformationByLongTermId = 0x83,
     WritePerUserInformationByLongTermId = 0x84,
     QueryRowsExtended = 0x85,
-    SynchronizationImportReadStateChanges = 0x86,
+    TellVersion = 0x86,
     SetMessageFlags = 0x87,
     CopyToStream = 0x3A,
     CloneStream = 0x3B,
-    GetAttachmentTableExtended = 0x89,
-    WriteStreamExtended2 = 0x90,
-    HardDeleteMessagesExtended = 0x91,
-    EmptyFolderExtended = 0x92,
-    SetLocalReplicaMidsetDeletedExtended = 0x93,
+    FreeBookmark = 0x89,
+    WriteAndCommitStream = 0x90,
+    HardDeleteMessages = 0x91,
+    HardDeleteMessagesAndSubfolders = 0x92,
+    SetLocalReplicaMidsetDeleted = 0x93,
     WriteStreamExtended = 0xA3,
     Logon = 0xFE,
 }
@@ -250,12 +252,12 @@ impl RopId {
             0x13 => Some(Self::SortTable),
             0x14 => Some(Self::Restrict),
             0x15 => Some(Self::QueryRows),
-            0x16 => Some(Self::Abort),
-            0x17 => Some(Self::GetStatus),
-            0x18 => Some(Self::QueryPosition),
-            0x19 => Some(Self::SeekRow),
-            0x1A => Some(Self::SeekRowBookmark),
-            0x1B => Some(Self::SeekRowFractional),
+            0x16 => Some(Self::GetStatus),
+            0x17 => Some(Self::QueryPosition),
+            0x18 => Some(Self::SeekRow),
+            0x19 => Some(Self::SeekRowBookmark),
+            0x1A => Some(Self::SeekRowFractional),
+            0x1B => Some(Self::CreateBookmark),
             0x1C => Some(Self::CreateFolder),
             0x1D => Some(Self::DeleteFolder),
             0x1E => Some(Self::DeleteMessages),
@@ -284,7 +286,8 @@ impl RopId {
             0x35 => Some(Self::MoveFolder),
             0x36 => Some(Self::CopyFolder),
             0x37 => Some(Self::QueryColumnsAll),
-            0x38 => Some(Self::AbortSearch),
+            0x38 => Some(Self::Abort),
+            0x39 => Some(Self::CopyTo),
             0x3E => Some(Self::GetPermissionsTable),
             0x3F => Some(Self::GetRulesTable),
             0x40 => Some(Self::ModifyPermissions),
@@ -295,8 +298,9 @@ impl RopId {
             0x43 => Some(Self::LongTermIdFromId),
             0x44 => Some(Self::IdFromLongTermId),
             0x45 => Some(Self::PublicFolderIsGhosted),
-            0x47 => Some(Self::TransportDeliverMessage),
-            0x48 => Some(Self::TransportDoneWithMessage),
+            0x46 => Some(Self::OpenEmbeddedMessage),
+            0x47 => Some(Self::SetSpooler),
+            0x48 => Some(Self::SpoolerLockMessage),
             0x49 => Some(Self::GetAddressTypes),
             0x4A => Some(Self::TransportSend),
             0x4B => Some(Self::FastTransferSourceCopyMessages),
@@ -313,11 +317,11 @@ impl RopId {
             0x56 => Some(Self::GetPropertyIdsFromNames),
             0x57 => Some(Self::UpdateDeferredActionMessages),
             0x58 => Some(Self::EmptyFolder),
-            0x59 => Some(Self::HardDeleteMessages),
-            0x5A => Some(Self::HardDeleteMessagesAndSubfolders),
-            0x5B => Some(Self::SetLocalReplicaMidsetDeleted),
-            0x5C => Some(Self::SetLocalReplicaMidsetExpired),
-            0x5D => Some(Self::GetDeletedMessages),
+            0x59 => Some(Self::ExpandRow),
+            0x5A => Some(Self::CollapseRow),
+            0x5B => Some(Self::LockRegionStream),
+            0x5C => Some(Self::UnlockRegionStream),
+            0x5D => Some(Self::CommitStream),
             0x5E => Some(Self::GetStreamSize),
             0x5F => Some(Self::QueryNamedProperties),
             0x60 => Some(Self::GetPerUserLongTermIds),
@@ -346,19 +350,19 @@ impl RopId {
             0x7B => Some(Self::GetStoreState),
             0x7E => Some(Self::SynchronizationOpenCollector),
             0x7F => Some(Self::GetLocalReplicaIds),
-            0x80 => Some(Self::SetLocalReplicaMidsetDeletedNoReplicate),
+            0x80 => Some(Self::SynchronizationImportReadStateChanges),
             0x81 => Some(Self::ResetTable),
-            0x82 => Some(Self::GetPerUserGuidLongTermIds),
+            0x82 => Some(Self::SynchronizationGetTransferState),
             0x83 => Some(Self::ReadPerUserInformationByLongTermId),
             0x84 => Some(Self::WritePerUserInformationByLongTermId),
             0x85 => Some(Self::QueryRowsExtended),
-            0x86 => Some(Self::SynchronizationImportReadStateChanges),
+            0x86 => Some(Self::TellVersion),
             0x87 => Some(Self::SetMessageFlags),
-            0x89 => Some(Self::GetAttachmentTableExtended),
-            0x90 => Some(Self::WriteStreamExtended2),
-            0x91 => Some(Self::HardDeleteMessagesExtended),
-            0x92 => Some(Self::EmptyFolderExtended),
-            0x93 => Some(Self::SetLocalReplicaMidsetDeletedExtended),
+            0x89 => Some(Self::FreeBookmark),
+            0x90 => Some(Self::WriteAndCommitStream),
+            0x91 => Some(Self::HardDeleteMessages),
+            0x92 => Some(Self::HardDeleteMessagesAndSubfolders),
+            0x93 => Some(Self::SetLocalReplicaMidsetDeleted),
             0xA3 => Some(Self::WriteStreamExtended),
             0xFE => Some(Self::Logon),
             _ => {
@@ -434,7 +438,7 @@ impl RopId {
                 | Self::MoveFolder
                 | Self::CopyFolder
                 | Self::QueryColumnsAll
-                | Self::AbortSearch
+                | Self::CreateBookmark
                 | Self::CopyToStream
                 | Self::CloneStream
                 | Self::GetPermissionsTable
@@ -446,8 +450,9 @@ impl RopId {
                 | Self::IdFromLongTermId
                 | Self::PublicFolderIsGhosted
                 | Self::ResetTable
-                | Self::TransportDeliverMessage
-                | Self::TransportDoneWithMessage
+                | Self::OpenEmbeddedMessage
+                | Self::SetSpooler
+                | Self::SpoolerLockMessage
                 | Self::GetAddressTypes
                 | Self::TransportSend
                 | Self::FastTransferSourceCopyMessages
@@ -466,9 +471,11 @@ impl RopId {
                 | Self::EmptyFolder
                 | Self::HardDeleteMessages
                 | Self::HardDeleteMessagesAndSubfolders
-                | Self::SetLocalReplicaMidsetDeleted
-                | Self::SetLocalReplicaMidsetExpired
-                | Self::GetDeletedMessages
+                | Self::ExpandRow
+                | Self::CollapseRow
+                | Self::LockRegionStream
+                | Self::UnlockRegionStream
+                | Self::CommitStream
                 | Self::GetStreamSize
                 | Self::QueryNamedProperties
                 | Self::GetPerUserLongTermIds
@@ -495,17 +502,31 @@ impl RopId {
                 | Self::GetStoreState
                 | Self::SynchronizationOpenCollector
                 | Self::GetLocalReplicaIds
-                | Self::SetLocalReplicaMidsetDeletedNoReplicate
-                | Self::GetPerUserGuidLongTermIds
                 | Self::SynchronizationImportReadStateChanges
-                | Self::GetAttachmentTableExtended
-                | Self::WriteStreamExtended2
-                | Self::HardDeleteMessagesExtended
-                | Self::EmptyFolderExtended
-                | Self::SetLocalReplicaMidsetDeletedExtended
+                | Self::SynchronizationGetTransferState
+                | Self::TellVersion
+                | Self::FreeBookmark
+                | Self::WriteAndCommitStream
+                | Self::SetLocalReplicaMidsetDeleted
                 | Self::WriteStreamExtended
                 | Self::Logon
         )
+    }
+
+    #[allow(dead_code)]
+    pub(in crate::mapi) fn known_unsupported_name(value: u8) -> Option<&'static str> {
+        match value {
+            0x39 => Some("RopCopyTo"),
+            0x46 => Some("RopOpenEmbeddedMessage"),
+            0x47 => Some("RopSetSpooler"),
+            0x48 => Some("RopSpoolerLockMessage"),
+            0x59 => Some("RopExpandRow"),
+            0x5A => Some("RopCollapseRow"),
+            0x5B => Some("RopLockRegionStream"),
+            0x5C => Some("RopUnlockRegionStream"),
+            0x86 => Some("RopTellVersion"),
+            _ => None,
+        }
     }
 }
 
@@ -565,6 +586,30 @@ impl MapiPropertyType {
                 );
                 None
             }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub(in crate::mapi) fn known_unsupported_name(value: u16) -> Option<&'static str> {
+        match value {
+            0x0000 => Some("PtypUnspecified"),
+            0x0001 => Some("PtypNull"),
+            0x0004 => Some("PtypFloating32"),
+            0x0005 => Some("PtypFloating64"),
+            0x0006 => Some("PtypCurrency"),
+            0x0007 => Some("PtypFloatingTime"),
+            0x000D => Some("PtypObject"),
+            0x00FB => Some("PtypServerId"),
+            0x00FD => Some("PtypRestriction"),
+            0x00FE => Some("PtypRuleAction"),
+            0x1004 => Some("PtypMultipleFloating32"),
+            0x1005 => Some("PtypMultipleFloating64"),
+            0x1006 => Some("PtypMultipleCurrency"),
+            0x1007 => Some("PtypMultipleFloatingTime"),
+            0x10FB => Some("PtypMultipleServerId"),
+            0x10FD => Some("PtypMultipleRestriction"),
+            0x10FE => Some("PtypMultipleRuleAction"),
+            _ => None,
         }
     }
 }
@@ -685,6 +730,30 @@ impl FastTransferMarker {
             }
         }
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn known_unsupported_name(value: u32) -> Option<&'static str> {
+        match value {
+            0x4009_0003 => Some("StartTopFld"),
+            0x400A_0003 => Some("StartSubFld"),
+            0x400B_0003 => Some("EndFolder"),
+            0x400C_0003 => Some("StartMessage"),
+            0x400D_0003 => Some("EndMessage"),
+            0x4010_0003 => Some("StartFAIMsg"),
+            0x4001_0003 => Some("StartEmbed"),
+            0x4002_0003 => Some("EndEmbed"),
+            0x4003_0003 => Some("StartRecip"),
+            0x4004_0003 => Some("EndToRecip"),
+            0x4000_0003 => Some("NewAttach"),
+            0x400E_0003 => Some("EndAttach"),
+            0x407D_0003 => Some("IncrSyncChgPartial"),
+            0x4016_0003 => Some("IncrSyncProgressMode"),
+            0x4017_0003 => Some("IncrSyncProgressPerMsg"),
+            0x4023_0003 => Some("IncrSyncGroupInfo"),
+            0x4074_000B => Some("IncrSyncMessagePartial"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -757,6 +826,38 @@ mod tests {
 
     #[test]
     fn typed_wire_values_match_documented_constants() {
+        assert_eq!(
+            MapiHttpRequestType::NotificationWait.header_value(),
+            "NotificationWait"
+        );
+        assert_eq!(
+            MapiHttpRequestType::CompareMids.header_value(),
+            "CompareMIds"
+        );
+        assert_eq!(MapiHttpRequestType::DnToMid.header_value(), "DNToMId");
+        assert_eq!(MapiHttpRequestType::Ping.header_value(), "PING");
+        assert_eq!(RopId::GetStatus.as_u8(), 0x16);
+        assert_eq!(RopId::QueryPosition.as_u8(), 0x17);
+        assert_eq!(RopId::SeekRow.as_u8(), 0x18);
+        assert_eq!(RopId::CreateBookmark.as_u8(), 0x1B);
+        assert_eq!(RopId::Abort.as_u8(), 0x38);
+        assert_eq!(RopId::CopyTo.as_u8(), 0x39);
+        assert_eq!(RopId::OpenEmbeddedMessage.as_u8(), 0x46);
+        assert_eq!(RopId::SetSpooler.as_u8(), 0x47);
+        assert_eq!(RopId::SpoolerLockMessage.as_u8(), 0x48);
+        assert_eq!(RopId::ExpandRow.as_u8(), 0x59);
+        assert_eq!(RopId::CollapseRow.as_u8(), 0x5A);
+        assert_eq!(RopId::LockRegionStream.as_u8(), 0x5B);
+        assert_eq!(RopId::UnlockRegionStream.as_u8(), 0x5C);
+        assert_eq!(RopId::CommitStream.as_u8(), 0x5D);
+        assert_eq!(RopId::SynchronizationImportReadStateChanges.as_u8(), 0x80);
+        assert_eq!(RopId::SynchronizationGetTransferState.as_u8(), 0x82);
+        assert_eq!(RopId::TellVersion.as_u8(), 0x86);
+        assert_eq!(RopId::FreeBookmark.as_u8(), 0x89);
+        assert_eq!(RopId::WriteAndCommitStream.as_u8(), 0x90);
+        assert_eq!(RopId::HardDeleteMessages.as_u8(), 0x91);
+        assert_eq!(RopId::HardDeleteMessagesAndSubfolders.as_u8(), 0x92);
+        assert_eq!(RopId::SetLocalReplicaMidsetDeleted.as_u8(), 0x93);
         assert_eq!(RopId::SynchronizationConfigure.as_u8(), 0x70);
         assert_eq!(RopId::Logon.as_u8(), 0xFE);
         assert_eq!(MapiPropertyType::Boolean.as_u16(), 0x000B);
@@ -770,17 +871,28 @@ mod tests {
     #[test]
     fn typed_wire_values_decode_known_values_only() {
         assert_eq!(RopId::from_u8(0x02), Some(RopId::OpenFolder));
+        assert_eq!(RopId::from_u8(0x39), Some(RopId::CopyTo));
+        assert_eq!(RopId::from_u8(0xA3), Some(RopId::WriteStreamExtended));
         assert_eq!(RopId::from_u8(0xAA), None);
         assert!(RopId::is_reserved(0x28));
         assert!(!RopId::is_reserved(0x70));
+        assert_eq!(RopId::known_unsupported_name(0x39), Some("RopCopyTo"));
         assert_eq!(
             MapiPropertyType::from_code(0x001F),
             Some(MapiPropertyType::String)
         );
         assert_eq!(MapiPropertyType::from_code(0x000D), None);
         assert_eq!(
+            MapiPropertyType::known_unsupported_name(0x000D),
+            Some("PtypObject")
+        );
+        assert_eq!(
             FastTransferMarker::from_u32(0x4012_0003),
             Some(FastTransferMarker::IncrSyncChg)
+        );
+        assert_eq!(
+            FastTransferMarker::known_unsupported_name(0x4009_0003),
+            Some("StartTopFld")
         );
         assert_eq!(FastTransferMarker::from_u32(0xDEAD_BEEF), None);
         assert_eq!(

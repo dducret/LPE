@@ -118,6 +118,18 @@ impl ActiveSyncCommand {
             }
         }
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn known_unsupported_name(value: u8) -> Option<&'static str> {
+        match value {
+            4 => Some("GetAttachment"),
+            15 => Some("MeetingResponse"),
+            17 => Some("Settings"),
+            21 => Some("ResolveRecipients"),
+            22 => Some("ValidateCert"),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ActiveSyncCommand {
@@ -315,8 +327,95 @@ impl TryFrom<u8> for WbxmlCodePage {
     }
 }
 
+impl WbxmlCodePage {
+    #[allow(dead_code)]
+    pub(crate) fn known_unsupported_name(value: u8) -> Option<&'static str> {
+        match value {
+            3 => Some("AirNotify"),
+            8 => Some("MeetingResponse"),
+            10 => Some("ResolveRecipients"),
+            11 => Some("ValidateCert"),
+            12 => Some("Contacts2"),
+            16 => Some("GAL"),
+            19 => Some("DocumentLibrary"),
+            22 => Some("Email2"),
+            23 => Some("Notes"),
+            24 => Some("RightsManagement"),
+            25 => Some("Find"),
+            _ => None,
+        }
+    }
+}
+
 impl From<WbxmlCodePage> for u8 {
     fn from(value: WbxmlCodePage) -> Self {
         value.as_u8()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn activesync_command_codes_match_ms_ashttp() {
+        let commands = [
+            (0, ActiveSyncCommand::Sync),
+            (1, ActiveSyncCommand::SendMail),
+            (2, ActiveSyncCommand::SmartForward),
+            (3, ActiveSyncCommand::SmartReply),
+            (4, ActiveSyncCommand::GetAttachment),
+            (9, ActiveSyncCommand::FolderSync),
+            (10, ActiveSyncCommand::FolderCreate),
+            (11, ActiveSyncCommand::FolderDelete),
+            (12, ActiveSyncCommand::FolderUpdate),
+            (13, ActiveSyncCommand::MoveItems),
+            (14, ActiveSyncCommand::GetItemEstimate),
+            (15, ActiveSyncCommand::MeetingResponse),
+            (16, ActiveSyncCommand::Search),
+            (17, ActiveSyncCommand::Settings),
+            (18, ActiveSyncCommand::Ping),
+            (19, ActiveSyncCommand::ItemOperations),
+            (20, ActiveSyncCommand::Provision),
+            (21, ActiveSyncCommand::ResolveRecipients),
+            (22, ActiveSyncCommand::ValidateCert),
+            (23, ActiveSyncCommand::Find),
+        ];
+
+        for (code, command) in commands {
+            assert_eq!(ActiveSyncCommand::from_code(code).unwrap(), command);
+        }
+        assert!(ActiveSyncCommand::from_code(5).is_err());
+        assert_eq!(
+            ActiveSyncCommand::known_unsupported_name(15),
+            Some("MeetingResponse")
+        );
+    }
+
+    #[test]
+    fn wbxml_code_pages_match_bounded_ms_aswbxml_manifest() {
+        let supported = [
+            (0, WbxmlCodePage::AirSync),
+            (1, WbxmlCodePage::Contacts),
+            (2, WbxmlCodePage::Email),
+            (4, WbxmlCodePage::Calendar),
+            (5, WbxmlCodePage::Move),
+            (6, WbxmlCodePage::GetItemEstimate),
+            (7, WbxmlCodePage::FolderHierarchy),
+            (9, WbxmlCodePage::Tasks),
+            (13, WbxmlCodePage::Ping),
+            (14, WbxmlCodePage::Provision),
+            (15, WbxmlCodePage::Search),
+            (17, WbxmlCodePage::AirSyncBase),
+            (18, WbxmlCodePage::Settings),
+            (20, WbxmlCodePage::ItemOperations),
+            (21, WbxmlCodePage::ComposeMail),
+        ];
+
+        for (code_page, expected) in supported {
+            assert_eq!(WbxmlCodePage::try_from(code_page).unwrap(), expected);
+        }
+        assert!(WbxmlCodePage::try_from(25).is_err());
+        assert_eq!(WbxmlCodePage::known_unsupported_name(25), Some("Find"));
     }
 }

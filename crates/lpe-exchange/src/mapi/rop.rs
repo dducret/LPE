@@ -488,17 +488,33 @@ fn stale_special_folder_object_id_from_short_id(bytes: &[u8]) -> Option<u64> {
     if bytes.len() != 8 {
         return None;
     }
-    [
-        crate::mapi::identity::global_counter_from_globcnt(&bytes[2..8]),
-        crate::mapi::identity::global_counter_from_globcnt(&bytes[..6]),
-        global_counter_from_little_endian_globcnt(&bytes[2..8]),
-        global_counter_from_little_endian_globcnt(&bytes[..6]),
-    ]
-    .into_iter()
-    .flatten()
-    .map(crate::mapi::identity::mapi_store_id)
-    .find(|object_id| is_advertised_special_folder(*object_id))
-    .or_else(|| dynamic_object_id_from_bare_little_endian_short_id(bytes))
+    let leading_replid = u16::from_le_bytes(bytes[..2].try_into().ok()?);
+    let trailing_replid = u16::from_le_bytes(bytes[6..8].try_into().ok()?);
+    let candidates = [
+        (
+            leading_replid,
+            crate::mapi::identity::global_counter_from_globcnt(&bytes[2..8]),
+        ),
+        (
+            trailing_replid,
+            crate::mapi::identity::global_counter_from_globcnt(&bytes[..6]),
+        ),
+        (
+            leading_replid,
+            global_counter_from_little_endian_globcnt(&bytes[2..8]),
+        ),
+        (
+            trailing_replid,
+            global_counter_from_little_endian_globcnt(&bytes[..6]),
+        ),
+    ];
+    candidates
+        .into_iter()
+        .filter(|(replica_id, _)| *replica_id != 0)
+        .filter_map(|(_, counter)| counter)
+        .map(crate::mapi::identity::mapi_store_id)
+        .find(|object_id| is_advertised_special_folder(*object_id))
+        .or_else(|| dynamic_object_id_from_bare_little_endian_short_id(bytes))
 }
 
 fn dynamic_object_id_from_bare_little_endian_short_id(bytes: &[u8]) -> Option<u64> {
@@ -3030,7 +3046,7 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn message_ids(&self) -> Vec<u64> {
-        let (count_offset, ids_offset) = if self.rop_id == RopId::HardDeleteMessages.as_u8() {
+        let (count_offset, ids_offset) = if self.rop_id == 0x59 {
             (0, 2)
         } else {
             (2, 4)
@@ -3680,7 +3696,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::WriteStream | RopId::WriteStreamExtended2 | RopId::WriteStreamExtended) => {
+        Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
             let input_handle_index = cursor.read_u8()?;
             let size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -3782,7 +3798,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::AbortSearch) => {
+        Some(RopId::Abort) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -3864,21 +3880,9 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::EmptyFolder | RopId::EmptyFolderExtended) => {
+        Some(RopId::EmptyFolder) => {
             let input_handle_index = cursor.read_u8()?;
             let payload = vec![cursor.read_u8()?, cursor.read_u8()?];
-            Ok(RopRequest {
-                rop_id,
-                input_handle_index: Some(input_handle_index),
-                output_handle_index: None,
-                payload,
-            })
-        }
-        Some(RopId::HardDeleteMessages) => {
-            let input_handle_index = cursor.read_u8()?;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
-            payload.extend_from_slice(cursor.read_bytes(8)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -3892,10 +3896,19 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: None,
+                payload: vec![cursor.read_u8()?, cursor.read_u8()?],
+            })
+        }
+        Some(RopId::CollapseRow) => {
+            let input_handle_index = cursor.read_u8()?;
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
                 payload: cursor.read_bytes(8)?.to_vec(),
             })
         }
-        Some(RopId::SetLocalReplicaMidsetDeleted | RopId::SetLocalReplicaMidsetExpired) => {
+        Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -3908,7 +3921,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::GetDeletedMessages | RopId::GetStreamSize) => {
+        Some(RopId::CommitStream | RopId::GetStreamSize) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -4173,7 +4186,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        Some(RopId::SynchronizationOpenCollector | RopId::GetPerUserGuidLongTermIds) => {
+        Some(RopId::SynchronizationOpenCollector | RopId::SynchronizationGetTransferState) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
@@ -4248,7 +4261,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::SetLocalReplicaMidsetDeletedNoReplicate) => {
+        Some(RopId::SynchronizationImportReadStateChanges) => {
             let input_handle_index = cursor.read_u8()?;
             let change_count = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -4264,7 +4277,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::SetLocalReplicaMidsetDeletedExtended) => {
+        Some(RopId::SetLocalReplicaMidsetDeleted) => {
             let input_handle_index = cursor.read_u8()?;
             let size = cursor.read_u16()? as usize;
             Ok(RopRequest {
@@ -4274,7 +4287,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: cursor.read_bytes(size)?.to_vec(),
             })
         }
-        Some(RopId::SynchronizationImportReadStateChanges) => {
+        Some(RopId::TellVersion) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -4296,10 +4309,10 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         }
         Some(
             RopId::GetPropertiesList
-            | RopId::Abort
             | RopId::GetStatus
+            | RopId::QueryPosition
             | RopId::QueryColumnsAll
-            | RopId::TransportDeliverMessage
+            | RopId::SetSpooler
             | RopId::TransportSend
             | RopId::GetValidAttachments
             | RopId::GetReceiveFolderTable
@@ -4339,7 +4352,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        Some(RopId::QueryPosition) => {
+        Some(RopId::SeekRow) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.push(cursor.read_u8()?);
@@ -4352,7 +4365,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::SeekRow) => {
+        Some(RopId::SeekRowBookmark) => {
             let input_handle_index = cursor.read_u8()?;
             let bookmark_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -4367,7 +4380,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::SeekRowBookmark) => {
+        Some(RopId::SeekRowFractional) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(&cursor.read_u32()?.to_le_bytes());
@@ -4403,7 +4416,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::SeekRowFractional) => {
+        Some(RopId::CreateBookmark) => {
             let input_handle_index = cursor.read_u8()?;
             Ok(RopRequest {
                 rop_id,
@@ -4450,7 +4463,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::DeleteMessages | RopId::HardDeleteMessagesExtended) => {
+        Some(RopId::DeleteMessages | RopId::HardDeleteMessages) => {
             let input_handle_index = cursor.read_u8()?;
             let want_asynchronous = cursor.read_u8()?;
             let notify_non_read = cursor.read_u8()?;
@@ -4458,6 +4471,18 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let mut payload = vec![want_asynchronous, notify_non_read];
             payload.extend_from_slice(&(message_id_count as u16).to_le_bytes());
             payload.extend_from_slice(cursor.read_bytes(message_id_count * 8)?);
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: None,
+                payload,
+            })
+        }
+        Some(RopId::ExpandRow) => {
+            let input_handle_index = cursor.read_u8()?;
+            let mut payload = Vec::new();
+            payload.extend_from_slice(&cursor.read_u16()?.to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(8)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -4729,7 +4754,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::TransportDoneWithMessage) => {
+        Some(RopId::SpoolerLockMessage) => {
             let input_handle_index = cursor.read_u8()?;
             let mut payload = Vec::new();
             payload.extend_from_slice(cursor.read_bytes(8)?);
@@ -4846,7 +4871,7 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::GetAttachmentTableExtended) => {
+        Some(RopId::FreeBookmark) => {
             let input_handle_index = cursor.read_u8()?;
             let bookmark_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
@@ -5096,6 +5121,186 @@ mod tests {
         assert_eq!(row_shape.property_row_bytes, 2450);
         assert_eq!(row_shape.icon_row_bytes, 2304);
         assert_eq!(row_shape.non_icon_row_bytes, 146);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn private_logon_places_exactly_13_folder_ids_before_response_flags() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+        let request = RopRequest {
+            rop_id: 0xFE,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0x01],
+        };
+
+        let response = rop_logon_response_body(&principal, &request);
+        let response_flags_offset = 7 + PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len() * 8;
+
+        assert_eq!(PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len(), 13);
+        assert_eq!(response[response_flags_offset], 0x07);
+        assert_eq!(
+            &response[response_flags_offset + 1..response_flags_offset + 17],
+            &principal.account_id.to_bytes_le()
+        );
+        assert_eq!(
+            &response[7..response_flags_offset],
+            PRIVATE_LOGON_SPECIAL_FOLDER_IDS
+                .iter()
+                .flat_map(|folder_id| {
+                    crate::mapi::identity::wire_id_bytes_from_object_id(*folder_id)
+                        .unwrap()
+                        .to_vec()
+                })
+                .collect::<Vec<_>>()
+                .as_slice()
+        );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn long_term_id_from_id_accepts_outlook_and_emitted_counter_forms() {
+        let canonical_id = crate::mapi::identity::CALENDAR_FOLDER_ID;
+        let dynamic_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 3,
+        );
+        let cases = [
+            (
+                crate::mapi::identity::wire_id_bytes_from_object_id(canonical_id)
+                    .unwrap()
+                    .to_vec(),
+                canonical_id,
+            ),
+            (
+                {
+                    let mut bytes = Vec::new();
+                    bytes.extend_from_slice(&crate::mapi::identity::globcnt_bytes(
+                        crate::mapi::identity::CALENDAR_FOLDER_COUNTER,
+                    ));
+                    bytes.extend_from_slice(&1u16.to_le_bytes());
+                    bytes
+                },
+                canonical_id,
+            ),
+            (
+                {
+                    let mut bytes = Vec::new();
+                    bytes.extend_from_slice(&999u16.to_le_bytes());
+                    bytes.extend_from_slice(&crate::mapi::identity::globcnt_bytes(
+                        crate::mapi::identity::CALENDAR_FOLDER_COUNTER,
+                    ));
+                    bytes
+                },
+                canonical_id,
+            ),
+            (
+                {
+                    let mut bytes = crate::mapi::identity::globcnt_bytes(
+                        crate::mapi::identity::CALENDAR_FOLDER_COUNTER,
+                    )
+                    .to_vec();
+                    bytes.reverse();
+                    bytes.extend_from_slice(&999u16.to_le_bytes());
+                    bytes
+                },
+                canonical_id,
+            ),
+            (
+                {
+                    let mut bytes = Vec::new();
+                    bytes.extend_from_slice(
+                        &crate::mapi::identity::global_counter_from_store_id(dynamic_id)
+                            .unwrap()
+                            .to_le_bytes()[..6],
+                    );
+                    bytes.extend_from_slice(&0u16.to_le_bytes());
+                    bytes
+                },
+                dynamic_id,
+            ),
+        ];
+
+        for (bytes, expected_id) in cases {
+            let request = RopRequest {
+                rop_id: 0x43,
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: bytes,
+            };
+            let response = rop_long_term_id_from_id_response(&request);
+
+            assert_eq!(&response[..6], &[0x43, 0x00, 0, 0, 0, 0]);
+            assert_eq!(
+                &response[6..30],
+                &crate::mapi::identity::long_term_id_from_object_id(expected_id).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    pub(in crate::mapi) fn long_term_id_from_id_unmapped_values_return_ec_not_found() {
+        for bytes in [[0; 8], [0xFF; 8], [0x01, 0, 0, 0, 0, 0, 0, 0]] {
+            let request = RopRequest {
+                rop_id: 0x43,
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: bytes.to_vec(),
+            };
+
+            assert_eq!(
+                rop_long_term_id_from_id_response(&request),
+                vec![0x43, 0x00, 0x0F, 0x01, 0x04, 0x80]
+            );
+        }
+    }
+
+    #[test]
+    pub(in crate::mapi) fn id_from_long_term_id_accepts_mailbox_guid_aliases_and_special_stale_guid(
+    ) {
+        let principal_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let aliases = [*principal_guid.as_bytes(), principal_guid.to_bytes_le()];
+        let normal_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 4,
+        );
+        let special_id = crate::mapi::identity::CALENDAR_FOLDER_ID;
+        let mut aliased = crate::mapi::identity::long_term_id_from_object_id(normal_id).unwrap();
+        aliased[..16].copy_from_slice(&principal_guid.to_bytes_le());
+        let mut stale_special =
+            crate::mapi::identity::long_term_id_from_object_id(special_id).unwrap();
+        stale_special[..16].copy_from_slice(&[0xA5; 16]);
+        let mut stale_normal =
+            crate::mapi::identity::long_term_id_from_object_id(normal_id).unwrap();
+        stale_normal[..16].copy_from_slice(&[0xA5; 16]);
+
+        for (long_term_id, expected_id) in [(aliased, normal_id), (stale_special, special_id)] {
+            let request = RopRequest {
+                rop_id: 0x44,
+                input_handle_index: Some(0),
+                output_handle_index: None,
+                payload: long_term_id.to_vec(),
+            };
+            let response = rop_id_from_long_term_id_response(&request, &aliases);
+
+            assert_eq!(&response[..6], &[0x44, 0x00, 0, 0, 0, 0]);
+            assert_eq!(
+                &response[6..14],
+                &crate::mapi::identity::wire_id_bytes_from_object_id(expected_id).unwrap()
+            );
+        }
+
+        let request = RopRequest {
+            rop_id: 0x44,
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: stale_normal.to_vec(),
+        };
+        assert_eq!(
+            rop_id_from_long_term_id_response(&request, &aliases),
+            vec![0x44, 0x00, 0x0F, 0x01, 0x04, 0x80]
+        );
     }
 
     #[test]

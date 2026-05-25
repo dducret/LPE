@@ -3527,25 +3527,20 @@ where
                 emails,
                 snapshot,
             )),
-            Some(RopId::Abort) => responses.extend_from_slice(&rop_get_status_response(
+            Some(RopId::GetStatus) => responses.extend_from_slice(&rop_get_status_response(
                 &request,
                 input_object(session, &handle_slots, &request),
             )),
-            Some(RopId::GetStatus) => responses.extend_from_slice(&rop_query_position_response(
-                &request,
-                input_object(session, &handle_slots, &request),
-                mailboxes,
-                emails,
-                snapshot,
-            )),
-            Some(RopId::QueryPosition) => responses.extend_from_slice(&rop_seek_row_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
-                mailboxes,
-                emails,
-                snapshot,
-            )),
-            Some(RopId::SeekRow) => responses.extend_from_slice(&rop_seek_row_bookmark_response(
+            Some(RopId::QueryPosition) => {
+                responses.extend_from_slice(&rop_query_position_response(
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                ))
+            }
+            Some(RopId::SeekRow) => responses.extend_from_slice(&rop_seek_row_response(
                 &request,
                 input_object_mut(session, &handle_slots, &request),
                 mailboxes,
@@ -3553,7 +3548,7 @@ where
                 snapshot,
             )),
             Some(RopId::SeekRowBookmark) => {
-                responses.extend_from_slice(&rop_seek_row_fractional_response(
+                responses.extend_from_slice(&rop_seek_row_bookmark_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
                     mailboxes,
@@ -3562,6 +3557,15 @@ where
                 ))
             }
             Some(RopId::SeekRowFractional) => {
+                responses.extend_from_slice(&rop_seek_row_fractional_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                ))
+            }
+            Some(RopId::CreateBookmark) => {
                 responses.extend_from_slice(&rop_create_bookmark_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -3759,14 +3763,15 @@ where
                     partial_completion,
                 ));
             }
-            Some(
-                RopId::DeleteMessages
-                | RopId::HardDeleteMessages
-                | RopId::HardDeleteMessagesExtended,
-            ) => {
+            Some(RopId::DeleteMessages | RopId::HardDeleteMessages) | Some(RopId::ExpandRow)
+                if request.rop_id != RopId::ExpandRow.as_u8()
+                    || !request.message_ids().is_empty() =>
+            {
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
-                    _ if request.rop_id == RopId::HardDeleteMessages.as_u8() => {
+                    _ if request.rop_id == RopId::ExpandRow.as_u8()
+                        || request.rop_id == RopId::HardDeleteMessages.as_u8() =>
+                    {
                         responses.extend_from_slice(&unsupported_rop_response(
                             request.rop_id,
                             request.response_handle_index(),
@@ -4320,7 +4325,7 @@ where
                     )),
                 }
             }
-            Some(RopId::WriteStream | RopId::WriteStreamExtended2 | RopId::WriteStreamExtended) => {
+            Some(RopId::WriteStream | RopId::WriteAndCommitStream | RopId::WriteStreamExtended) => {
                 let Some(stream_handle) = input_handle(&handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
@@ -4418,15 +4423,13 @@ where
                     )),
                 }
             }
-            Some(RopId::SetLocalReplicaMidsetDeleted | RopId::SetLocalReplicaMidsetExpired) => {
-                responses.extend_from_slice(&rop_error_response(
+            Some(RopId::LockRegionStream | RopId::UnlockRegionStream) => responses
+                .extend_from_slice(&rop_error_response(
                     request.rop_id,
                     request.response_handle_index(),
                     0x8004_0102,
-                ))
-            }
-            Some(RopId::GetDeletedMessages) => match input_object(session, &handle_slots, &request)
-            {
+                )),
+            Some(RopId::CommitStream) => match input_object(session, &handle_slots, &request) {
                 Some(MapiObject::AttachmentStream { .. }) => {
                     responses.extend_from_slice(&rop_simple_success_response(&request))
                 }
@@ -5550,19 +5553,17 @@ where
                     )),
                 }
             }
-            Some(RopId::SynchronizationImportReadStateChanges) => {
-                match input_object(session, &handle_slots, &request) {
-                    Some(MapiObject::SynchronizationSource { .. })
-                    | Some(MapiObject::SynchronizationCollector { .. }) => {
-                        responses.extend_from_slice(&rop_simple_success_response(&request));
-                    }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x86,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    )),
+            Some(RopId::TellVersion) => match input_object(session, &handle_slots, &request) {
+                Some(MapiObject::SynchronizationSource { .. })
+                | Some(MapiObject::SynchronizationCollector { .. }) => {
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
-            }
+                _ => responses.extend_from_slice(&rop_error_response(
+                    0x86,
+                    request.response_handle_index(),
+                    0x8004_0102,
+                )),
+            },
             Some(RopId::SynchronizationUploadStateStreamBegin) => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::SynchronizationSource {
@@ -5734,7 +5735,7 @@ where
                 responses.extend_from_slice(&rop_simple_success_response(&request));
                 output_handles.push(handle);
             }
-            Some(RopId::GetPerUserGuidLongTermIds) => {
+            Some(RopId::SynchronizationGetTransferState) => {
                 let Some((
                     folder_id,
                     mailbox_id,
@@ -6245,7 +6246,7 @@ where
                     )),
                 }
             }
-            Some(RopId::SetLocalReplicaMidsetDeletedNoReplicate) => {
+            Some(RopId::SynchronizationImportReadStateChanges) => {
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(MapiObject::folder_id)
                     .unwrap_or(INBOX_FOLDER_ID);
@@ -6280,7 +6281,7 @@ where
                     partial_completion,
                 ));
             }
-            Some(RopId::SetLocalReplicaMidsetDeletedExtended) => {
+            Some(RopId::SetLocalReplicaMidsetDeleted) => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::SynchronizationSource { state, .. })
                     | Some(MapiObject::SynchronizationCollector { state, .. }) => {
@@ -6564,12 +6565,10 @@ where
                     ));
                 }
             }
-            Some(RopId::GetAttachmentTableExtended) => {
-                responses.extend_from_slice(&rop_free_bookmark_response(
-                    &request,
-                    input_object_mut(session, &handle_slots, &request),
-                ))
-            }
+            Some(RopId::FreeBookmark) => responses.extend_from_slice(&rop_free_bookmark_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+            )),
             Some(RopId::Logon) => {
                 if request.payload.first().copied().unwrap_or(0) & 0x01 == 0 {
                     responses.extend_from_slice(&unsupported_rop_response(

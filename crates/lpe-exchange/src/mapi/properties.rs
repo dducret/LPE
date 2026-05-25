@@ -4809,6 +4809,40 @@ mod tests {
     }
 
     #[test]
+    fn logon_projects_outlook_bootstrap_identity_metadata() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "Test User".to_string(),
+        };
+
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_OUTLOOK_STORE_STATE),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_MAILBOX_OWNER_NAME_W),
+            Some(MapiValue::String("Test User".to_string()))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_USER_GUID),
+            Some(MapiValue::Binary(principal.account_id.as_bytes().to_vec()))
+        );
+        let Some(MapiValue::Binary(owner_entry_id)) =
+            logon_property_value(&principal, PID_TAG_MAILBOX_OWNER_ENTRY_ID)
+        else {
+            panic!("expected mailbox owner EntryID");
+        };
+        assert_eq!(&owner_entry_id[..4], &[0, 0, 0, 0]);
+        assert_eq!(
+            &owner_entry_id[4..20],
+            &NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID
+        );
+        assert!(owner_entry_id.ends_with(&[0]));
+    }
+
+    #[test]
     fn logon_projects_max_submit_message_size() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),

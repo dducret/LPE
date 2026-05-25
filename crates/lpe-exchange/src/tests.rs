@@ -57,12 +57,12 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
         ..FakeStore::default()
     };
     let mailbox = FakeStore::mailbox(
-        "44444444-4444-4444-4444-444444444444",
+        "10101010-2020-3030-4040-505050505050",
         "custom",
         "Durable IDs",
     );
     let email = FakeStore::email(
-        "99999999-9999-9999-9999-999999999999",
+        "60606060-7070-8080-9090-a0a0a0a0a0a0",
         &mailbox.id.to_string(),
         "custom",
         "Stable identity",
@@ -22474,6 +22474,36 @@ async fn mapi_over_http_set_receive_folder_returns_rop_specific_protocol_error()
         u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
         0x8004_0102
     );
+}
+
+#[tokio::test]
+async fn mapi_over_http_get_receive_folder_maps_appointments_to_calendar() {
+    let mut rops = vec![0x27, 0x00, 0x00];
+    rops.extend_from_slice(b"IPM.Appointment\0");
+
+    let response_rops = execute_rops_response_rops(&rops, &[1]).await;
+
+    assert_eq!(&response_rops[..6], &[0x27, 0x00, 0, 0, 0, 0]);
+    assert_eq!(
+        &response_rops[6..14],
+        &mapi_wire_id_bytes(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+    assert_eq!(&response_rops[14..], b"IPM.Appointment\0");
+}
+
+#[tokio::test]
+async fn mapi_over_http_get_receive_folder_preserves_ipm_note_inbox_mapping() {
+    let mut rops = vec![0x27, 0x00, 0x00];
+    rops.extend_from_slice(b"IPM.Note\0");
+
+    let response_rops = execute_rops_response_rops(&rops, &[1]).await;
+
+    assert_eq!(&response_rops[..6], &[0x27, 0x00, 0, 0, 0, 0]);
+    assert_eq!(
+        &response_rops[6..14],
+        &mapi_wire_id_bytes(crate::mapi::identity::INBOX_FOLDER_ID)
+    );
+    assert_eq!(&response_rops[14..], b"IPM.Note\0");
 }
 
 #[tokio::test]
