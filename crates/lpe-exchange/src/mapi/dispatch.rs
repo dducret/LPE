@@ -2174,6 +2174,120 @@ fn log_calendar_folder_contract(
     );
 }
 
+fn log_calendar_special_sync_objects(
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    sync_type: u8,
+    objects: &[mapi_mailstore::SpecialMessageSyncFact],
+) {
+    if folder_id != CALENDAR_FOLDER_ID || sync_type != 0x01 {
+        return;
+    }
+    let item_ids = objects
+        .iter()
+        .map(|object| format!("0x{:016x}", object.item_id))
+        .collect::<Vec<_>>()
+        .join(",");
+    let source_keys = objects
+        .iter()
+        .map(|object| bytes_to_hex(&mapi_mailstore::source_key_for_store_id(object.item_id)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let canonical_ids = objects
+        .iter()
+        .map(|object| object.canonical_id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let message_classes = objects
+        .iter()
+        .map(|object| object.message_class.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let subject_lengths = objects
+        .iter()
+        .map(|object| object.subject.chars().count().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let body_lengths = objects
+        .iter()
+        .map(|object| object.body_text.chars().count().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let property_tag_count = objects
+        .iter()
+        .map(|object| object.named_properties.len())
+        .sum::<usize>();
+    let property_tags = objects
+        .iter()
+        .flat_map(|object| object.named_properties.iter().map(|(tag, _)| *tag))
+        .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let property_shapes = objects
+        .iter()
+        .flat_map(|object| {
+            object
+                .named_properties
+                .iter()
+                .map(|(tag, value)| format!("0x{tag:08x}:{}", special_property_shape(value)))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x70",
+        folder_id = "0x0000000000100001",
+        sync_type = "0x01",
+        calendar_object_count = objects.len(),
+        calendar_item_ids = %item_ids,
+        calendar_source_keys = %source_keys,
+        calendar_canonical_ids = %canonical_ids,
+        calendar_message_classes = %message_classes,
+        calendar_subject_char_counts = %subject_lengths,
+        calendar_body_char_counts = %body_lengths,
+        calendar_property_tag_count = property_tag_count,
+        calendar_property_tags = %property_tags,
+        calendar_property_shapes = %property_shapes,
+        message = "rca debug mapi calendar special sync objects"
+    );
+}
+
+fn special_property_shape(value: &mapi_mailstore::SpecialMessagePropertyValue) -> String {
+    match value {
+        mapi_mailstore::SpecialMessagePropertyValue::Binary(value) => {
+            format!("binary:bytes={}", value.len())
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::Bool(value) => {
+            format!("bool={value}")
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::I32(value) => {
+            format!("i32={value}")
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::I64(value) => {
+            format!("i64={value}")
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::U32(value) => {
+            format!("u32={value}")
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::U64(value) => {
+            format!("u64={value}")
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::String(value) => {
+            format!("string:chars={}", value.chars().count())
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::MultiString(values) => {
+            format!("multistring:count={}", values.len())
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::Time(value) => {
+            format!("time:chars={}", value.chars().count())
+        }
+    }
+}
+
 fn summarize_handle_table(handle_table: &[u8], parse_error: &mut String) -> (usize, String) {
     match read_handle_table(handle_table) {
         Ok(handles) => {
@@ -5063,6 +5177,12 @@ where
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                 let all_special_sync_objects =
                     special_sync_objects_for(folder_id, sync_type, snapshot);
+                log_calendar_special_sync_objects(
+                    principal,
+                    folder_id,
+                    sync_type,
+                    &all_special_sync_objects,
+                );
                 let available_sync_mailbox_count = all_sync_mailboxes.len();
                 let available_sync_email_count = all_sync_emails.len();
                 let available_special_sync_object_count = all_special_sync_objects.len();

@@ -152,7 +152,7 @@ where
     S: ExchangeStore,
 {
     if plan.requires_full_snapshot {
-        log_mapi_store_load_step(account_id, plan, "full snapshot", 0);
+        log_mapi_store_full_snapshot(account_id, plan);
         return store
             .load_mapi_mail_store(account_id, full_message_limit)
             .await
@@ -290,22 +290,6 @@ where
         .fetch_accessible_calendar_collections(account_id)
         .await
         .context("fetch MAPI calendar collections")?;
-    tracing::info!(
-        rca_debug = true,
-        adapter = "mapi",
-        request_type = "Execute",
-        account_id = %account_id,
-        calendar_collection_count = calendar_collections.len(),
-        calendar_collection_ids = %calendar_collections
-            .iter()
-            .map(|collection| collection.id.as_str())
-            .collect::<Vec<_>>()
-            .join(","),
-        default_calendar_collection_loaded = calendar_collections
-            .iter()
-            .any(|collection| matches!(collection.id.as_str(), "default" | "calendar")),
-        message = "rca debug mapi calendar collections loaded"
-    );
     log_mapi_store_load_step(account_id, plan, "fetch task collections", 0);
     let task_collections = store
         .fetch_accessible_task_collections(account_id)
@@ -413,20 +397,6 @@ where
             .await
             .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
     };
-    tracing::info!(
-        rca_debug = true,
-        adapter = "mapi",
-        request_type = "Execute",
-        account_id = %account_id,
-        snapshot_backed_contents = snapshot_backed_contents,
-        requested_calendar_event_identity_count = event_ids.len(),
-        loaded_calendar_event_count = events.len(),
-        loaded_default_calendar_event_count = events
-            .iter()
-            .filter(|event| matches!(event.collection_id.as_str(), "default" | "calendar"))
-            .count(),
-        message = "rca debug mapi calendar events loaded"
-    );
     let tasks = if snapshot_backed_contents {
         log_mapi_store_load_step(
             account_id,
@@ -561,7 +531,35 @@ where
         .await
         .context("fetch MAPI folder permissions")?;
 
-    log_mapi_store_load_step(account_id, plan, "complete", 0);
+    log_mapi_store_load_summary(
+        account_id,
+        plan,
+        snapshot_backed_contents,
+        mailboxes.len(),
+        emails.len(),
+        attachments.len(),
+        contact_collections.len(),
+        calendar_collections.len(),
+        task_collections.len(),
+        contacts.len(),
+        events.len(),
+        tasks.len(),
+        notes.len(),
+        journal_entries.len(),
+        search_folder_definitions.len(),
+        conversation_actions.len(),
+        reminders.len(),
+        folder_permissions.len(),
+        content_windows.len(),
+        event_ids.len(),
+        calendar_collections
+            .iter()
+            .any(|collection| matches!(collection.id.as_str(), "default" | "calendar")),
+        events
+            .iter()
+            .filter(|event| matches!(event.collection_id.as_str(), "default" | "calendar"))
+            .count(),
+    );
     Ok(MapiMailStoreSnapshot::new(
         mailboxes,
         emails,
@@ -587,7 +585,7 @@ fn log_mapi_store_load_step(
     step: &'static str,
     item_count: usize,
 ) {
-    tracing::info!(
+    tracing::debug!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",
@@ -598,6 +596,76 @@ fn log_mapi_store_load_step(
         step = step,
         item_count = item_count,
         message = "rca debug mapi execute store load step",
+    );
+}
+
+fn log_mapi_store_full_snapshot(account_id: Uuid, plan: &MapiAccessPlan) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        full_snapshot = true,
+        object_id_count = plan.object_ids.len(),
+        content_query_count = plan.content_queries.len(),
+        message = "rca debug mapi execute store load summary",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_mapi_store_load_summary(
+    account_id: Uuid,
+    plan: &MapiAccessPlan,
+    snapshot_backed_contents: bool,
+    mailbox_count: usize,
+    email_count: usize,
+    attachment_set_count: usize,
+    contact_collection_count: usize,
+    calendar_collection_count: usize,
+    task_collection_count: usize,
+    contact_count: usize,
+    calendar_event_count: usize,
+    task_count: usize,
+    note_count: usize,
+    journal_entry_count: usize,
+    search_folder_count: usize,
+    conversation_action_count: usize,
+    reminder_count: usize,
+    folder_permission_count: usize,
+    content_window_count: usize,
+    requested_calendar_event_identity_count: usize,
+    default_calendar_collection_loaded: bool,
+    loaded_default_calendar_event_count: usize,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        full_snapshot = false,
+        object_id_count = plan.object_ids.len(),
+        content_query_count = plan.content_queries.len(),
+        snapshot_backed_contents,
+        mailbox_count,
+        email_count,
+        attachment_set_count,
+        contact_collection_count,
+        calendar_collection_count,
+        default_calendar_collection_loaded,
+        requested_calendar_event_identity_count,
+        calendar_event_count,
+        loaded_default_calendar_event_count,
+        task_collection_count,
+        contact_count,
+        task_count,
+        note_count,
+        journal_entry_count,
+        search_folder_count,
+        conversation_action_count,
+        reminder_count,
+        folder_permission_count,
+        content_window_count,
+        message = "rca debug mapi execute store load summary",
     );
 }
 
