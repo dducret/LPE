@@ -147,6 +147,63 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x8C6D_0102, // PidTagAddressBookObjectGuid
 ];
 
+#[allow(dead_code)]
+const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
+    MapiRequestType::Bind,
+    MapiRequestType::Unbind,
+    MapiRequestType::CompareMids,
+    MapiRequestType::DnToMid,
+    MapiRequestType::GetMatches,
+    MapiRequestType::GetPropList,
+    MapiRequestType::GetProps,
+    MapiRequestType::GetSpecialTable,
+    MapiRequestType::GetTemplateInfo,
+    MapiRequestType::ModLinkAtt,
+    MapiRequestType::ModProps,
+    MapiRequestType::GetAddressBookUrl,
+    MapiRequestType::GetMailboxUrl,
+    MapiRequestType::QueryColumns,
+    MapiRequestType::QueryRows,
+    MapiRequestType::ResolveNames,
+    MapiRequestType::ResortRestriction,
+    MapiRequestType::SeekEntries,
+    MapiRequestType::UpdateStat,
+];
+
+const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
+    (0x39FF_001F, "PidTagAddressBookDisplayNamePrintable"),
+    (0x3A06_001F, "PidTagGivenName"),
+    (0x3A08_001F, "PidTagBusinessTelephoneNumber"),
+    (0x3A09_001F, "PidTagHomeTelephoneNumber"),
+    (0x3A0B_001F, "PidTagSurname"),
+    (0x3A15_001F, "PidTagPostalAddress"),
+    (0x3A16_001F, "PidTagCompanyName"),
+    (0x3A17_001F, "PidTagTitle"),
+    (0x3A18_001F, "PidTagDepartmentName"),
+    (0x3A19_001F, "PidTagOfficeLocation"),
+    (0x3A1A_001F, "PidTagPrimaryTelephoneNumber"),
+    (0x3A1B_001F, "PidTagBusiness2TelephoneNumbers"),
+    (0x3A1C_001F, "PidTagMobileTelephoneNumber"),
+    (0x3A26_001F, "PidTagCountry"),
+    (0x3A27_001F, "PidTagLocality"),
+    (0x3A28_001F, "PidTagStateOrProvince"),
+    (0x3A29_001F, "PidTagStreetAddress"),
+    (0x3A2A_001F, "PidTagPostalCode"),
+    (0x3A4F_001F, "PidTagNickname"),
+    (0x3A71_001F, "PidTagSendRichInfo"),
+    (0x3A8C_001F, "PidTagAddressBookPhoneticDisplayName"),
+    (0x3A8D_001F, "PidTagAddressBookPhoneticGivenName"),
+    (0x3A8E_001F, "PidTagAddressBookPhoneticSurname"),
+    (0x3A8F_001F, "PidTagAddressBookPhoneticCompanyName"),
+];
+
+#[allow(dead_code)]
+pub(in crate::mapi) fn nspi_known_unsupported_property_tag_name(tag: u32) -> Option<&'static str> {
+    NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS
+        .iter()
+        .find_map(|(known_tag, name)| (*known_tag == tag).then_some(*name))
+}
+
 pub(in crate::mapi) async fn resolve_names_response<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -1518,6 +1575,31 @@ pub(in crate::mapi) fn public_endpoint_url(headers: &HeaderMap, path: &str) -> S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nspi_request_and_property_manifests_cover_implemented_static_values() {
+        for request_type in NSPI_SUPPORTED_REQUEST_TYPES {
+            assert!(
+                request_type.requires_nspi_session()
+                    || matches!(
+                        request_type,
+                        MapiRequestType::Bind | MapiRequestType::Unbind
+                    )
+            );
+            assert_ne!(request_type.header_value(), "");
+        }
+
+        for tag in NSPI_BOOTSTRAP_PROPERTY_TAGS {
+            assert!(nspi_property_tag_is_supported(*tag));
+        }
+        for tag in NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS {
+            assert!(nspi_property_tag_is_supported(*tag));
+        }
+        assert_eq!(
+            nspi_known_unsupported_property_tag_name(0x3A06_001F),
+            Some("PidTagGivenName")
+        );
+    }
 
     #[test]
     fn get_props_stat_current_rec_is_parsed_from_documented_stat_field() {

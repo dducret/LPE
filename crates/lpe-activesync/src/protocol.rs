@@ -418,4 +418,62 @@ mod tests {
         assert!(WbxmlCodePage::try_from(25).is_err());
         assert_eq!(WbxmlCodePage::known_unsupported_name(25), Some("Find"));
     }
+
+    #[test]
+    fn active_sync_status_folder_and_body_values_are_manifest_checked() {
+        let statuses = [
+            (ActiveSyncStatus::Success, "1"),
+            (ActiveSyncStatus::ProtocolError, "2"),
+            (ActiveSyncStatus::ServerError, "6"),
+            (ActiveSyncStatus::InvalidSyncKey, "3"),
+            (ActiveSyncStatus::InvalidRequest, "4"),
+            (ActiveSyncStatus::NotFound, "8"),
+            (ActiveSyncStatus::InvalidDestination, "2"),
+            (ActiveSyncStatus::SameSourceAndDestination, "4"),
+            (ActiveSyncStatus::FolderExists, "2"),
+            (ActiveSyncStatus::FolderSyncRequired, "9"),
+            (ActiveSyncStatus::FolderParentNotFound, "5"),
+            (ActiveSyncStatus::FolderSystemRejected, "10"),
+            (ActiveSyncStatus::HierarchyChanged, "12"),
+            (ActiveSyncStatus::PolicyRequired, "142"),
+            (ActiveSyncStatus::SendMailInvalidMime, "107"),
+            (ActiveSyncStatus::SendMailServerError, "120"),
+            (ActiveSyncStatus::SendMailSourceNotFound, "150"),
+            (ActiveSyncStatus::SendMailMailboxAccessDenied, "166"),
+            (ActiveSyncStatus::ItemOperationsNotFound, "15"),
+            (ActiveSyncStatus::ItemOperationsInvalidStore, "6"),
+            (ActiveSyncStatus::PingChanges, "2"),
+            (ActiveSyncStatus::PingMissingParameters, "3"),
+            (ActiveSyncStatus::PingIntervalOutOfRange, "5"),
+            (ActiveSyncStatus::PingTooManyFolders, "6"),
+            (ActiveSyncStatus::PingFolderSyncRequired, "7"),
+        ];
+        for (status, value) in statuses {
+            assert_eq!(status.as_str(), value);
+        }
+
+        let folder_types = [
+            (ActiveSyncFolderType::Inbox, "2"),
+            (ActiveSyncFolderType::Drafts, "3"),
+            (ActiveSyncFolderType::DeletedItems, "4"),
+            (ActiveSyncFolderType::SentItems, "5"),
+            (ActiveSyncFolderType::Calendar, "8"),
+            (ActiveSyncFolderType::Contacts, "9"),
+            (ActiveSyncFolderType::UserCreatedMail, "12"),
+        ];
+        for (folder_type, value) in folder_types {
+            assert_eq!(folder_type.as_str(), value);
+        }
+
+        let body_preferences = [
+            (1, BodyPreferenceType::PlainText),
+            (2, BodyPreferenceType::Html),
+            (4, BodyPreferenceType::Mime),
+        ];
+        for (value, expected) in body_preferences {
+            assert_eq!(BodyPreferenceType::from_u8(value), Some(expected));
+            assert_eq!(expected.as_str(), value.to_string());
+        }
+        assert_eq!(BodyPreferenceType::from_u8(3), None);
+    }
 }

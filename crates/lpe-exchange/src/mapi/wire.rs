@@ -28,6 +28,34 @@ pub(in crate::mapi) enum MapiHttpRequestType {
 }
 
 impl MapiHttpRequestType {
+    #[allow(dead_code)]
+    pub(in crate::mapi) const DOCUMENTED_SUPPORTED_VALUES: &'static [(&'static str, Self)] = &[
+        ("Connect", Self::Connect),
+        ("Disconnect", Self::Disconnect),
+        ("Execute", Self::Execute),
+        ("NotificationWait", Self::NotificationWait),
+        ("Bind", Self::Bind),
+        ("Unbind", Self::Unbind),
+        ("CompareMIds", Self::CompareMids),
+        ("DNToMId", Self::DnToMid),
+        ("GetMatches", Self::GetMatches),
+        ("GetPropList", Self::GetPropList),
+        ("GetProps", Self::GetProps),
+        ("GetSpecialTable", Self::GetSpecialTable),
+        ("GetTemplateInfo", Self::GetTemplateInfo),
+        ("ModLinkAtt", Self::ModLinkAtt),
+        ("ModProps", Self::ModProps),
+        ("GetAddressBookUrl", Self::GetAddressBookUrl),
+        ("GetMailboxUrl", Self::GetMailboxUrl),
+        ("QueryColumns", Self::QueryColumns),
+        ("QueryRows", Self::QueryRows),
+        ("ResolveNames", Self::ResolveNames),
+        ("ResortRestriction", Self::ResortRestriction),
+        ("SeekEntries", Self::SeekEntries),
+        ("UpdateStat", Self::UpdateStat),
+        ("PING", Self::Ping),
+    ];
+
     pub(in crate::mapi) fn header_value(&self) -> &str {
         match self {
             Self::Connect => "Connect",
@@ -826,16 +854,9 @@ mod tests {
 
     #[test]
     fn typed_wire_values_match_documented_constants() {
-        assert_eq!(
-            MapiHttpRequestType::NotificationWait.header_value(),
-            "NotificationWait"
-        );
-        assert_eq!(
-            MapiHttpRequestType::CompareMids.header_value(),
-            "CompareMIds"
-        );
-        assert_eq!(MapiHttpRequestType::DnToMid.header_value(), "DNToMId");
-        assert_eq!(MapiHttpRequestType::Ping.header_value(), "PING");
+        for (value, request_type) in MapiHttpRequestType::DOCUMENTED_SUPPORTED_VALUES {
+            assert_eq!(request_type.header_value(), *value);
+        }
         assert_eq!(RopId::GetStatus.as_u8(), 0x16);
         assert_eq!(RopId::QueryPosition.as_u8(), 0x17);
         assert_eq!(RopId::SeekRow.as_u8(), 0x18);
@@ -870,6 +891,52 @@ mod tests {
 
     #[test]
     fn typed_wire_values_decode_known_values_only() {
+        for value in 0..=u8::MAX {
+            if let Some(rop_id) = RopId::from_u8(value) {
+                assert_eq!(rop_id.as_u8(), value);
+                assert!(!RopId::is_reserved(value) || rop_id == RopId::Reserved);
+            }
+        }
+
+        let property_types = [
+            MapiPropertyType::Integer16,
+            MapiPropertyType::Integer32,
+            MapiPropertyType::Error,
+            MapiPropertyType::Boolean,
+            MapiPropertyType::Integer64,
+            MapiPropertyType::String8,
+            MapiPropertyType::String,
+            MapiPropertyType::Time,
+            MapiPropertyType::Guid,
+            MapiPropertyType::Binary,
+            MapiPropertyType::MultipleInteger16,
+            MapiPropertyType::MultipleInteger32,
+            MapiPropertyType::MultipleInteger64,
+            MapiPropertyType::MultipleString8,
+            MapiPropertyType::MultipleString,
+            MapiPropertyType::MultipleGuid,
+            MapiPropertyType::MultipleBinary,
+        ];
+        for property_type in property_types {
+            assert_eq!(
+                MapiPropertyType::from_code(property_type.as_u16()),
+                Some(property_type)
+            );
+        }
+
+        let markers = [
+            FastTransferMarker::IncrSyncChg,
+            FastTransferMarker::IncrSyncDel,
+            FastTransferMarker::IncrSyncEnd,
+            FastTransferMarker::IncrSyncMessage,
+            FastTransferMarker::IncrSyncRead,
+            FastTransferMarker::IncrSyncStateBegin,
+            FastTransferMarker::IncrSyncStateEnd,
+        ];
+        for marker in markers {
+            assert_eq!(FastTransferMarker::from_u32(marker.as_u32()), Some(marker));
+        }
+
         assert_eq!(RopId::from_u8(0x02), Some(RopId::OpenFolder));
         assert_eq!(RopId::from_u8(0x39), Some(RopId::CopyTo));
         assert_eq!(RopId::from_u8(0xA3), Some(RopId::WriteStreamExtended));
