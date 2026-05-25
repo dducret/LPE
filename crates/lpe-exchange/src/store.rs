@@ -14,7 +14,9 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
-use crate::mapi::properties::{MapiNamedProperty, MapiNamedPropertyKind};
+use crate::mapi::properties::{
+    is_reserved_named_property_id, MapiNamedProperty, MapiNamedPropertyKind,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MapiIdentityObjectKind {
@@ -2705,23 +2707,32 @@ async fn allocate_next_mapi_named_property_id(
     tenant_id: Uuid,
     account_id: Uuid,
 ) -> Result<u16> {
-    let next = sqlx::query_scalar::<_, i32>(
+    let existing = sqlx::query_scalar::<_, i32>(
         r#"
-        SELECT COALESCE(MAX(property_id), $3 - 1) + 1
+        SELECT property_id
         FROM mapi_named_properties
         WHERE tenant_id = $1
           AND account_id = $2
+        ORDER BY property_id
         "#,
     )
     .bind(tenant_id)
     .bind(account_id)
-    .bind(i32::from(crate::mapi::properties::FIRST_NAMED_PROPERTY_ID))
-    .fetch_one(&mut **tx)
+    .fetch_all(&mut **tx)
     .await?;
-    if next > i32::from(crate::mapi::properties::MAX_NAMED_PROPERTY_ID) {
-        anyhow::bail!("MAPI named property id space exhausted");
+    let existing = existing
+        .into_iter()
+        .filter_map(|id| u16::try_from(id).ok())
+        .collect::<std::collections::HashSet<_>>();
+    for property_id in crate::mapi::properties::FIRST_NAMED_PROPERTY_ID
+        ..=crate::mapi::properties::MAX_NAMED_PROPERTY_ID
+    {
+        if existing.contains(&property_id) || is_reserved_named_property_id(property_id) {
+            continue;
+        }
+        return Ok(property_id);
     }
-    Ok(next as u16)
+    anyhow::bail!("MAPI named property id space exhausted");
 }
 
 fn mapi_named_property_parts(

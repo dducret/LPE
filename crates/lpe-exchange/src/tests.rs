@@ -710,13 +710,15 @@ impl ExchangeStore for FakeStore {
                 }
 
                 let mut property_id = FIRST_NAMED_PROPERTY_ID;
-                while store.by_id.contains_key(&(account_id, property_id))
+                while (store.by_id.contains_key(&(account_id, property_id))
+                    || crate::mapi::properties::is_reserved_named_property_id(property_id))
                     && property_id < MAX_NAMED_PROPERTY_ID
                 {
                     property_id = property_id.saturating_add(1);
                 }
                 if property_id > MAX_NAMED_PROPERTY_ID
                     || store.by_id.contains_key(&(account_id, property_id))
+                    || crate::mapi::properties::is_reserved_named_property_id(property_id)
                 {
                     return Err(anyhow::anyhow!("MAPI named property id space exhausted"));
                 }
@@ -10400,7 +10402,7 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     ]);
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&0x8503u16.to_le_bytes());
-    rops.extend_from_slice(&0x8001u16.to_le_bytes());
+    rops.extend_from_slice(&0x8003u16.to_le_bytes());
     rops.extend_from_slice(&[
         0x5F, 0x00, 0x00, 0x00, 0x00, // RopQueryNamedProperties
     ]);
@@ -10417,12 +10419,12 @@ async fn mapi_over_http_named_property_bootstrap_maps_session_property_ids() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x01, 0x80]
+        &[0x56, 0x00, 0, 0, 0, 0, 2, 0, 0x03, 0x85, 0x03, 0x80]
     ));
     assert!(contains_bytes(&response_rops, &utf16z("x-lpe-test")));
     assert!(contains_bytes(
         &response_rops,
-        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x01, 0x80]
+        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
     ));
 }
 
@@ -10478,7 +10480,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
     let first_response_rops = response_rops_from_execute_response(first_response).await;
     assert!(contains_bytes(
         &first_response_rops,
-        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x01, 0x80]
+        &[0x56, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
     ));
 
     let restarted_service = ExchangeService::new(store);
@@ -10506,7 +10508,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
         0x55, 0x00, 0x00, // RopGetNamesFromPropertyIds
     ]);
     restarted_rops.extend_from_slice(&1u16.to_le_bytes());
-    restarted_rops.extend_from_slice(&0x8001u16.to_le_bytes());
+    restarted_rops.extend_from_slice(&0x8003u16.to_le_bytes());
     restarted_rops.extend_from_slice(&[
         0x5F, 0x00, 0x00, 0x00, 0x00, // RopQueryNamedProperties
     ]);
@@ -10530,7 +10532,7 @@ async fn mapi_over_http_named_property_mapping_survives_restart_style_session() 
     ));
     assert!(contains_bytes(
         &restarted_response_rops,
-        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x01, 0x80]
+        &[0x5F, 0x00, 0, 0, 0, 0, 1, 0, 0x03, 0x80]
     ));
 }
 
@@ -15755,8 +15757,8 @@ async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_che
         &0x0061_0040u32.to_le_bytes()
     ));
     for property_tag in [
-        0x0003_0102u32,
-        0x0023_0102,
+        0x8001_0102u32,
+        0x8002_0102,
         0x820D_0040,
         0x820E_0040,
         0x8215_000B,

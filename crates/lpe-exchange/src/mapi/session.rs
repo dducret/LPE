@@ -687,9 +687,10 @@ impl MapiSession {
         }
 
         while self.next_named_property_id <= MAX_NAMED_PROPERTY_ID
-            && self
+            && (self
                 .named_property_ids
                 .contains_key(&self.next_named_property_id)
+                || is_reserved_named_property_id(self.next_named_property_id))
         {
             self.next_named_property_id = self.next_named_property_id.saturating_add(1);
         }
@@ -720,6 +721,7 @@ impl MapiSession {
         self.named_property_ids
             .get(&property_id)
             .cloned()
+            .or_else(|| well_known_named_property_for_id(property_id))
             .unwrap_or(MapiNamedProperty {
                 guid: PS_MAPI_GUID,
                 kind: MapiNamedPropertyKind::Lid(u32::from(property_id)),

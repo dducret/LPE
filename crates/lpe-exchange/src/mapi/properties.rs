@@ -261,6 +261,8 @@ pub(in crate::mapi) const PSETID_POST_RSS_GUID: [u8; 16] = [
 
 pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID: u32 = 0x0000_0003;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID: u32 = 0x0000_0023;
+pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8001;
+pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8002;
 pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
@@ -307,8 +309,8 @@ pub(in crate::mapi) const PID_LID_POST_RSS_SUBSCRIPTION: u32 = 0x0000_8906;
 
 pub(in crate::mapi) const PID_LID_COMMON_START_TAG: u32 = 0x8516_0040;
 pub(in crate::mapi) const PID_LID_COMMON_END_TAG: u32 = 0x8517_0040;
-pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x0003_0102;
-pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x0023_0102;
+pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x8001_0102;
+pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x8002_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE_TAG: u32 = 0x820E_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
@@ -361,70 +363,96 @@ pub(in crate::mapi) fn well_known_named_property_id(property: &MapiNamedProperty
         .find_map(|(property_id, candidate)| (candidate == *property).then_some(property_id))
 }
 
+pub(in crate::mapi) fn well_known_named_property_for_id(
+    property_id: u16,
+) -> Option<MapiNamedProperty> {
+    well_known_named_properties()
+        .into_iter()
+        .find_map(|(candidate_id, property)| (candidate_id == property_id).then_some(property))
+}
+
+pub(crate) fn is_reserved_named_property_id(property_id: u16) -> bool {
+    well_known_named_property_for_id(property_id).is_some()
+}
+
 fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
     [
-        (PID_LID_GLOBAL_OBJECT_ID, PSETID_MEETING_GUID),
-        (PID_LID_CLEAN_GLOBAL_OBJECT_ID, PSETID_MEETING_GUID),
-        (PID_LID_COMMON_START, PSETID_COMMON_GUID),
-        (PID_LID_COMMON_END, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_SET, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_DELTA, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_OVERRIDE, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_PLAY_SOUND, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_FILE_PARAMETER, PSETID_COMMON_GUID),
-        (PID_LID_FLAG_REQUEST, PSETID_COMMON_GUID),
-        (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
-        (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
-        (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
-        (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
-        (PID_LID_APPOINTMENT_END_WHOLE, PSETID_APPOINTMENT_GUID),
-        (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
-        (PID_LID_APPOINTMENT_STATE_FLAGS, PSETID_APPOINTMENT_GUID),
-        (PID_LID_COMPANIES, PSETID_COMMON_GUID),
-        (PID_LID_CONTACTS, PSETID_COMMON_GUID),
-        (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
         (
-            PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID,
-            PSETID_COMMON_GUID,
+            PID_LID_GLOBAL_OBJECT_ID_NAMED_ID,
+            PID_LID_GLOBAL_OBJECT_ID,
+            PSETID_MEETING_GUID,
         ),
         (
-            PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID,
-            PSETID_COMMON_GUID,
+            PID_LID_CLEAN_GLOBAL_OBJECT_ID_NAMED_ID,
+            PID_LID_CLEAN_GLOBAL_OBJECT_ID,
+            PSETID_MEETING_GUID,
         ),
-        (
-            PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME,
-            PSETID_COMMON_GUID,
-        ),
-        (PID_LID_CONVERSATION_PROCESSED, PSETID_COMMON_GUID),
-        (
-            PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME,
-            PSETID_COMMON_GUID,
-        ),
-        (PID_LID_CONVERSATION_ACTION_VERSION, PSETID_COMMON_GUID),
-        (PID_LID_LOG_TYPE, PSETID_LOG_GUID),
-        (PID_LID_LOG_START, PSETID_LOG_GUID),
-        (PID_LID_LOG_DURATION, PSETID_LOG_GUID),
-        (PID_LID_LOG_END, PSETID_LOG_GUID),
-        (PID_LID_LOG_FLAGS, PSETID_LOG_GUID),
-        (PID_LID_LOG_TYPE_DESC, PSETID_LOG_GUID),
-        (PID_LID_NOTE_COLOR, PSETID_NOTE_GUID),
-        (PID_LID_NOTE_HEIGHT, PSETID_NOTE_GUID),
-        (PID_LID_NOTE_WIDTH, PSETID_NOTE_GUID),
-        (PID_LID_NOTE_X, PSETID_NOTE_GUID),
-        (PID_LID_NOTE_Y, PSETID_NOTE_GUID),
-        (PID_LID_POST_RSS_CHANNEL_LINK, PSETID_POST_RSS_GUID),
-        (PID_LID_POST_RSS_ITEM_LINK, PSETID_POST_RSS_GUID),
-        (PID_LID_POST_RSS_ITEM_HASH, PSETID_POST_RSS_GUID),
-        (PID_LID_POST_RSS_ITEM_GUID, PSETID_POST_RSS_GUID),
-        (PID_LID_POST_RSS_CHANNEL, PSETID_POST_RSS_GUID),
-        (PID_LID_POST_RSS_ITEM_XML, PSETID_POST_RSS_GUID),
-        (PID_LID_POST_RSS_SUBSCRIPTION, PSETID_POST_RSS_GUID),
     ]
     .into_iter()
-    .map(|(lid, guid)| {
+    .chain(
+        [
+            (PID_LID_COMMON_START, PSETID_COMMON_GUID),
+            (PID_LID_COMMON_END, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_TIME, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_SET, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_DELTA, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_OVERRIDE, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_PLAY_SOUND, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_FILE_PARAMETER, PSETID_COMMON_GUID),
+            (PID_LID_FLAG_REQUEST, PSETID_COMMON_GUID),
+            (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
+            (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
+            (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
+            (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
+            (PID_LID_APPOINTMENT_END_WHOLE, PSETID_APPOINTMENT_GUID),
+            (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
+            (PID_LID_APPOINTMENT_STATE_FLAGS, PSETID_APPOINTMENT_GUID),
+            (PID_LID_COMPANIES, PSETID_COMMON_GUID),
+            (PID_LID_CONTACTS, PSETID_COMMON_GUID),
+            (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
+            (
+                PID_LID_CONVERSATION_ACTION_MOVE_FOLDER_EID,
+                PSETID_COMMON_GUID,
+            ),
+            (
+                PID_LID_CONVERSATION_ACTION_MOVE_STORE_EID,
+                PSETID_COMMON_GUID,
+            ),
+            (
+                PID_LID_CONVERSATION_ACTION_MAX_DELIVERY_TIME,
+                PSETID_COMMON_GUID,
+            ),
+            (PID_LID_CONVERSATION_PROCESSED, PSETID_COMMON_GUID),
+            (
+                PID_LID_CONVERSATION_ACTION_LAST_APPLIED_TIME,
+                PSETID_COMMON_GUID,
+            ),
+            (PID_LID_CONVERSATION_ACTION_VERSION, PSETID_COMMON_GUID),
+            (PID_LID_LOG_TYPE, PSETID_LOG_GUID),
+            (PID_LID_LOG_START, PSETID_LOG_GUID),
+            (PID_LID_LOG_DURATION, PSETID_LOG_GUID),
+            (PID_LID_LOG_END, PSETID_LOG_GUID),
+            (PID_LID_LOG_FLAGS, PSETID_LOG_GUID),
+            (PID_LID_LOG_TYPE_DESC, PSETID_LOG_GUID),
+            (PID_LID_NOTE_COLOR, PSETID_NOTE_GUID),
+            (PID_LID_NOTE_HEIGHT, PSETID_NOTE_GUID),
+            (PID_LID_NOTE_WIDTH, PSETID_NOTE_GUID),
+            (PID_LID_NOTE_X, PSETID_NOTE_GUID),
+            (PID_LID_NOTE_Y, PSETID_NOTE_GUID),
+            (PID_LID_POST_RSS_CHANNEL_LINK, PSETID_POST_RSS_GUID),
+            (PID_LID_POST_RSS_ITEM_LINK, PSETID_POST_RSS_GUID),
+            (PID_LID_POST_RSS_ITEM_HASH, PSETID_POST_RSS_GUID),
+            (PID_LID_POST_RSS_ITEM_GUID, PSETID_POST_RSS_GUID),
+            (PID_LID_POST_RSS_CHANNEL, PSETID_POST_RSS_GUID),
+            (PID_LID_POST_RSS_ITEM_XML, PSETID_POST_RSS_GUID),
+            (PID_LID_POST_RSS_SUBSCRIPTION, PSETID_POST_RSS_GUID),
+        ]
+        .into_iter()
+        .map(|(lid, guid)| (lid as u16, lid, guid)),
+    )
+    .map(|(property_id, lid, guid)| {
         (
-            lid as u16,
+            property_id,
             MapiNamedProperty {
                 guid,
                 kind: MapiNamedPropertyKind::Lid(lid),

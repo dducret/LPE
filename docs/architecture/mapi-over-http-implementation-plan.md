@@ -400,7 +400,11 @@ load canonical calendar events for the Calendar folder and emit them as normal
 `PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day/state flags,
 and stable `PidLidGlobalObjectId` / `PidLidCleanGlobalObjectId` values; an
 advertised Calendar folder with state-only or generic-message-only content sync
-is not a valid Outlook interoperability result.
+is not a valid Outlook interoperability result. Low-LID Calendar named
+properties such as `PidLidGlobalObjectId` must be exposed through
+`RopGetPropertyIdsFromNames` with assigned named-property IDs in the
+named-property range; the LID itself is the property name, not the wire property
+ID.
 
 ### Publication Gate
 
