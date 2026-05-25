@@ -7,6 +7,7 @@ use super::*;
 use crate::mapi_store::{
     MapiConversationActionMessage, MapiMessage, MapiSearchFolderDefinitionMessage,
 };
+use lpe_storage::parse_calendar_participants_metadata;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct MapiNamedProperty {
@@ -277,6 +278,7 @@ pub(in crate::mapi) const PID_LID_TASK_START_DATE: u32 = 0x0000_8104;
 pub(in crate::mapi) const PID_LID_TASK_DUE_DATE: u32 = 0x0000_8105;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE: u32 = 0x0000_820D;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE: u32 = 0x0000_820E;
+pub(in crate::mapi) const PID_LID_BUSY_STATUS: u32 = 0x0000_8205;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE: u32 = 0x0000_8215;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS: u32 = 0x0000_8217;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
@@ -313,6 +315,7 @@ pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_TAG: u32 = 0x8001_0102;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x8002_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE_TAG: u32 = 0x820E_0040;
+pub(in crate::mapi) const PID_LID_BUSY_STATUS_TAG: u32 = 0x8205_0003;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS_TAG: u32 = 0x8217_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
@@ -403,6 +406,7 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_REMINDER_SIGNAL_TIME, PSETID_COMMON_GUID),
             (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
             (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
+            (PID_LID_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_END_WHOLE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
@@ -1432,8 +1436,9 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(event_size(event))),
-        PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(false)),
-        PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(0)),
+        PID_LID_BUSY_STATUS_TAG => Some(MapiValue::I32(appointment_busy_status(event))),
+        PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
+        PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
             Some(MapiValue::Binary(calendar_global_object_id(event)))
         }
@@ -1455,6 +1460,28 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ => None,
     }
+}
+
+fn appointment_busy_status(event: &AccessibleEvent) -> i32 {
+    if event.status.eq_ignore_ascii_case("cancelled") {
+        0
+    } else if event.status.eq_ignore_ascii_case("tentative") {
+        1
+    } else {
+        2
+    }
+}
+
+fn appointment_state_flags(event: &AccessibleEvent) -> i32 {
+    let participants = parse_calendar_participants_metadata(&event.attendees_json);
+    let mut flags = 0;
+    if participants.organizer.is_some() || !participants.attendees.is_empty() {
+        flags |= 0x0000_0001;
+    }
+    if event.status.eq_ignore_ascii_case("cancelled") {
+        flags |= 0x0000_0004;
+    }
+    flags
 }
 
 fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
@@ -2400,14 +2427,21 @@ pub(in crate::mapi) fn default_event_for_mapping(
         time: "00:00".to_string(),
         time_zone: "UTC".to_string(),
         duration_minutes: 0,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
         recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
         title: String::new(),
         location: String::new(),
+        organizer_json: "{}".to_string(),
         attendees: String::new(),
         attendees_json: serialize_calendar_participants_metadata(
             &CalendarParticipantsMetadata::default(),
         ),
         notes: String::new(),
+        body_html: String::new(),
     }
 }
 
@@ -2423,14 +2457,21 @@ pub(in crate::mapi) fn default_event_input(
         time: "00:00".to_string(),
         time_zone: "UTC".to_string(),
         duration_minutes: 0,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
         recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
         title: String::new(),
         location: String::new(),
+        organizer_json: "{}".to_string(),
         attendees: String::new(),
         attendees_json: serialize_calendar_participants_metadata(
             &CalendarParticipantsMetadata::default(),
         ),
         notes: String::new(),
+        body_html: String::new(),
     }
 }
 
@@ -2826,7 +2867,15 @@ pub(in crate::mapi) fn event_input_from_mapi(
         duration_minutes: end
             .map(|_| duration_minutes)
             .unwrap_or(existing.duration_minutes),
+        all_day: properties
+            .get(&PID_LID_APPOINTMENT_SUB_TYPE_TAG)
+            .and_then(MapiValue::as_bool)
+            .unwrap_or(existing.all_day),
+        status: existing.status.clone(),
+        sequence: existing.sequence,
         recurrence_rule: existing.recurrence_rule.clone(),
+        recurrence_json: existing.recurrence_json.clone(),
+        recurrence_exceptions_json: existing.recurrence_exceptions_json.clone(),
         title: optional_pending_text_property(
             properties,
             &[
@@ -2838,6 +2887,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
         .unwrap_or_else(|| existing.title.clone()),
         location: optional_pending_text_property(properties, &[PID_TAG_LOCATION_W])
             .unwrap_or_else(|| existing.location.clone()),
+        organizer_json: existing.organizer_json.clone(),
         attendees: existing.attendees.clone(),
         attendees_json: if existing.attendees_json.trim().is_empty() {
             serialize_calendar_participants_metadata(&CalendarParticipantsMetadata::default())
@@ -2846,6 +2896,8 @@ pub(in crate::mapi) fn event_input_from_mapi(
         },
         notes: optional_pending_text_property(properties, &[PID_TAG_BODY_W])
             .unwrap_or_else(|| existing.notes.clone()),
+        body_html: optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
+            .unwrap_or_else(|| existing.body_html.clone()),
     })
 }
 
@@ -2862,6 +2914,8 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
                 | PID_TAG_START_DATE
                 | PID_TAG_END_DATE
                 | PID_TAG_LOCATION_W
+                | PID_TAG_BODY_HTML_W
+                | PID_LID_APPOINTMENT_SUB_TYPE_TAG
                 | PID_TAG_MESSAGE_CLASS_W
         );
         if !supported {
@@ -4723,12 +4777,19 @@ mod tests {
             time: "09:00".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Standup".to_string(),
             location: String::new(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: "[]".to_string(),
             notes: String::new(),
+            body_html: String::new(),
         };
         let reminder = lpe_storage::ClientReminder {
             source_type: "calendar".to_string(),
@@ -4866,12 +4927,19 @@ mod tests {
             time: "09:00".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 0,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Zero duration".to_string(),
             location: String::new(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: "[]".to_string(),
             notes: String::new(),
+            body_html: String::new(),
         };
 
         assert!(event_end_filetime(&event) > event_start_filetime(&event));
@@ -4879,6 +4947,110 @@ mod tests {
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_END_DATE),
             Some(MapiValue::I64(event_end_filetime(&event) as i64))
         );
+    }
+
+    #[test]
+    fn calendar_projection_uses_canonical_all_day_status_and_participants() {
+        let event = lpe_storage::AccessibleEvent {
+            id: Uuid::from_u128(0x7777),
+            uid: "canonical-calendar".to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: Uuid::nil(),
+            owner_email: "alice@example.test".to_string(),
+            owner_display_name: "Alice".to_string(),
+            rights: lpe_storage::CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: false,
+            },
+            date: "2026-05-21".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 60,
+            all_day: true,
+            status: "cancelled".to_string(),
+            sequence: 3,
+            recurrence_rule: "FREQ=WEEKLY;COUNT=2".to_string(),
+            recurrence_json: "{\"frequency\":\"weekly\"}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Canonical appointment".to_string(),
+            location: "Room A".to_string(),
+            organizer_json: "{\"email\":\"alice@example.test\"}".to_string(),
+            attendees: "Bob".to_string(),
+            attendees_json: serialize_calendar_participants_metadata(
+                &CalendarParticipantsMetadata {
+                    organizer: Some(lpe_storage::CalendarOrganizerMetadata {
+                        email: "alice@example.test".to_string(),
+                        common_name: "Alice".to_string(),
+                    }),
+                    attendees: vec![lpe_storage::CalendarParticipantMetadata {
+                        email: "bob@example.test".to_string(),
+                        common_name: "Bob".to_string(),
+                        role: "REQ-PARTICIPANT".to_string(),
+                        partstat: "accepted".to_string(),
+                        rsvp: false,
+                    }],
+                },
+            ),
+            notes: "Body".to_string(),
+            body_html: "<p>Body</p>".to_string(),
+        };
+
+        assert_eq!(
+            event_property_value(
+                &event,
+                1,
+                CALENDAR_FOLDER_ID,
+                PID_LID_APPOINTMENT_SUB_TYPE_TAG
+            ),
+            Some(MapiValue::Bool(true))
+        );
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_BUSY_STATUS_TAG),
+            Some(MapiValue::I32(0))
+        );
+        assert_eq!(
+            event_property_value(
+                &event,
+                1,
+                CALENDAR_FOLDER_ID,
+                PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            ),
+            Some(MapiValue::I32(0x0000_0005))
+        );
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_LOCATION_W),
+            Some(MapiValue::String("Room A".to_string()))
+        );
+    }
+
+    #[test]
+    fn calendar_writes_preserve_canonical_fields_and_accept_all_day_html() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(PID_TAG_SUBJECT_W, MapiValue::String("Updated".to_string()));
+        properties.insert(PID_LID_APPOINTMENT_SUB_TYPE_TAG, MapiValue::Bool(true));
+        properties.insert(
+            PID_TAG_BODY_HTML_W,
+            MapiValue::String("<p>Updated</p>".to_string()),
+        );
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x8888)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(input.title, "Updated");
+        assert!(input.all_day);
+        assert_eq!(input.body_html, "<p>Updated</p>");
+        assert_eq!(input.status, existing.status);
+        assert_eq!(input.recurrence_rule, existing.recurrence_rule);
+        assert_eq!(input.attendees_json, existing.attendees_json);
+        assert_eq!(input.organizer_json, existing.organizer_json);
     }
 
     #[test]

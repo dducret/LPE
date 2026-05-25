@@ -51,12 +51,19 @@ pub struct ClientEvent {
     pub time: String,
     pub time_zone: String,
     pub duration_minutes: i32,
+    pub all_day: bool,
+    pub status: String,
+    pub sequence: i32,
     pub recurrence_rule: String,
+    pub recurrence_json: String,
+    pub recurrence_exceptions_json: String,
     pub title: String,
     pub location: String,
+    pub organizer_json: String,
     pub attendees: String,
     pub attendees_json: String,
     pub notes: String,
+    pub body_html: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -92,12 +99,19 @@ pub struct UpsertClientEventInput {
     pub time: String,
     pub time_zone: String,
     pub duration_minutes: i32,
+    pub all_day: bool,
+    pub status: String,
+    pub sequence: i32,
     pub recurrence_rule: String,
+    pub recurrence_json: String,
+    pub recurrence_exceptions_json: String,
     pub title: String,
     pub location: String,
+    pub organizer_json: String,
     pub attendees: String,
     pub attendees_json: String,
     pub notes: String,
+    pub body_html: String,
 }
 
 impl Storage {
@@ -406,24 +420,42 @@ impl Storage {
             r#"
             INSERT INTO calendar_events (
                 id, tenant_id, owner_account_id, calendar_id, uid,
-                starts_at, ends_at, time_zone, recurrence_rule,
-                title, location, attendees_json, body_text, source_payload_json
+                starts_at, ends_at, time_zone, all_day, status, sequence,
+                recurrence_rule, recurrence_json, recurrence_exceptions_json,
+                title, location, organizer_json, attendees_json, body_text, body_html,
+                source_payload_json
             )
             VALUES (
                 $1, $2, $3, $4, COALESCE(NULLIF($5, ''), $1::text),
                 (($6::date + $7::time) AT TIME ZONE COALESCE(NULLIF($8, ''), 'UTC')),
                 ((($6::date + $7::time) AT TIME ZONE COALESCE(NULLIF($8, ''), 'UTC')) + make_interval(mins => GREATEST($9, 0))),
                 $8,
-                NULLIF($10, ''),
-                $11,
-                $12,
+                $10,
+                COALESCE(NULLIF($11, ''), 'confirmed'),
+                GREATEST($12, 0),
+                NULLIF($13, ''),
                 CASE
                     WHEN NULLIF($14, '') IS NOT NULL THEN $14::jsonb
-                    WHEN NULLIF($13, '') IS NOT NULL THEN jsonb_build_object('attendees', jsonb_build_array(jsonb_build_object('email', $13::text)))
                     ELSE '{}'::jsonb
                 END,
-                $15,
-                jsonb_build_object('attendees', $13::text)
+                CASE
+                    WHEN NULLIF($15, '') IS NOT NULL THEN $15::jsonb
+                    ELSE '[]'::jsonb
+                END,
+                $16,
+                $17,
+                CASE
+                    WHEN NULLIF($18, '') IS NOT NULL THEN $18::jsonb
+                    ELSE '{}'::jsonb
+                END,
+                CASE
+                    WHEN NULLIF($20, '') IS NOT NULL THEN $20::jsonb
+                    WHEN NULLIF($19, '') IS NOT NULL THEN jsonb_build_object('attendees', jsonb_build_array(jsonb_build_object('email', $19::text)))
+                    ELSE '{}'::jsonb
+                END,
+                $21,
+                NULLIF($22, ''),
+                jsonb_build_object('attendees', $19::text)
             )
             ON CONFLICT (id) DO UPDATE SET
                 calendar_id = EXCLUDED.calendar_id,
@@ -431,11 +463,18 @@ impl Storage {
                 starts_at = EXCLUDED.starts_at,
                 ends_at = EXCLUDED.ends_at,
                 time_zone = EXCLUDED.time_zone,
+                all_day = EXCLUDED.all_day,
+                status = EXCLUDED.status,
+                sequence = EXCLUDED.sequence,
                 recurrence_rule = EXCLUDED.recurrence_rule,
+                recurrence_json = EXCLUDED.recurrence_json,
+                recurrence_exceptions_json = EXCLUDED.recurrence_exceptions_json,
                 title = EXCLUDED.title,
                 location = EXCLUDED.location,
+                organizer_json = EXCLUDED.organizer_json,
                 attendees_json = EXCLUDED.attendees_json,
                 body_text = EXCLUDED.body_text,
+                body_html = EXCLUDED.body_html,
                 source_payload_json = EXCLUDED.source_payload_json,
                 updated_at = NOW()
             WHERE calendar_events.tenant_id = EXCLUDED.tenant_id
@@ -447,12 +486,19 @@ impl Storage {
                 to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 time_zone,
                 GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes,
+                all_day,
+                status,
+                sequence,
                 COALESCE(recurrence_rule, '') AS recurrence_rule,
+                recurrence_json::text AS recurrence_json,
+                recurrence_exceptions_json::text AS recurrence_exceptions_json,
                 title,
                 location,
+                organizer_json::text AS organizer_json,
                 COALESCE(source_payload_json->>'attendees', '') AS attendees,
                 attendees_json::text AS attendees_json,
-                body_text AS notes
+                body_text AS notes,
+                COALESCE(body_html, '') AS body_html
             "#,
         )
         .bind(event_id)
@@ -464,12 +510,19 @@ impl Storage {
         .bind(input.time.trim())
         .bind(input.time_zone.trim())
         .bind(input.duration_minutes.max(0))
+        .bind(input.all_day)
+        .bind(input.status.trim())
+        .bind(input.sequence)
         .bind(input.recurrence_rule.trim())
+        .bind(input.recurrence_json.trim())
+        .bind(input.recurrence_exceptions_json.trim())
         .bind(input.title.trim())
         .bind(input.location.trim())
+        .bind(input.organizer_json.trim())
         .bind(input.attendees.trim())
         .bind(input.attendees_json.trim())
         .bind(input.notes.trim())
+        .bind(input.body_html.trim())
         .fetch_one(&mut *tx)
         .await?;
 
@@ -521,12 +574,19 @@ impl Storage {
                 to_char(starts_at AT TIME ZONE COALESCE(NULLIF(time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 time_zone,
                 GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes,
+                all_day,
+                status,
+                sequence,
                 COALESCE(recurrence_rule, '') AS recurrence_rule,
+                recurrence_json::text AS recurrence_json,
+                recurrence_exceptions_json::text AS recurrence_exceptions_json,
                 title,
                 location,
+                organizer_json::text AS organizer_json,
                 COALESCE(source_payload_json->>'attendees', '') AS attendees,
                 attendees_json::text AS attendees_json,
-                body_text AS notes
+                body_text AS notes,
+                COALESCE(body_html, '') AS body_html
             FROM calendar_events
             WHERE tenant_id = $1 AND owner_account_id = $2
             ORDER BY starts_at ASC, id ASC
@@ -725,12 +785,19 @@ fn map_event(row: ClientEventRow) -> ClientEvent {
         time: row.time,
         time_zone: row.time_zone,
         duration_minutes: row.duration_minutes,
+        all_day: row.all_day,
+        status: row.status,
+        sequence: row.sequence,
         recurrence_rule: row.recurrence_rule,
+        recurrence_json: row.recurrence_json,
+        recurrence_exceptions_json: row.recurrence_exceptions_json,
         title: row.title,
         location: row.location,
+        organizer_json: row.organizer_json,
         attendees: row.attendees,
         attendees_json: row.attendees_json,
         notes: row.notes,
+        body_html: row.body_html,
     }
 }
 

@@ -1800,6 +1800,7 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_TASK_DUE_DATE_TAG
             | PID_LID_GLOBAL_OBJECT_ID_TAG
             | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG
+            | PID_LID_BUSY_STATUS_TAG
             | PID_LID_APPOINTMENT_START_WHOLE_TAG
             | PID_LID_APPOINTMENT_END_WHOLE_TAG
             | PID_LID_APPOINTMENT_SUB_TYPE_TAG

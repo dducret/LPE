@@ -9,12 +9,16 @@ use lpe_storage::{
     ClientTask, CollaborationCollection, CollaborationRights, ConversationAction, JmapEmail,
     JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
     JmapMailboxCreateInput, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
     SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientTaskInput, UpsertConversationActionInput,
 };
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::PgPool;
 use std::{
     collections::HashMap,
+    env,
+    str::FromStr,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -48,6 +52,119 @@ use crate::{
 };
 
 static MAPI_TEST_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+const STORAGE_SCHEMA_SQL: &str = include_str!("../../lpe-storage/sql/schema.sql");
+
+struct PostgresMapiFixture {
+    storage: Storage,
+    admin_pool: PgPool,
+    schema_name: String,
+    account_id: Uuid,
+}
+
+impl PostgresMapiFixture {
+    async fn cleanup(self) -> anyhow::Result<()> {
+        self.storage.pool().close().await;
+        sqlx::query(&format!(
+            "DROP SCHEMA IF EXISTS {} CASCADE",
+            self.schema_name
+        ))
+        .execute(&self.admin_pool)
+        .await?;
+        self.admin_pool.close().await;
+        Ok(())
+    }
+}
+
+async fn postgres_mapi_calendar_fixture() -> anyhow::Result<Option<PostgresMapiFixture>> {
+    let Some(database_url) = env::var("TEST_DATABASE_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
+        eprintln!("skipping PostgreSQL-backed MAPI calendar test; TEST_DATABASE_URL is not set");
+        return Ok(None);
+    };
+
+    let schema_name = format!("lpe_mapi_calendar_{}", Uuid::new_v4().simple());
+    let admin_pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(PgConnectOptions::from_str(&database_url)?)
+        .await?;
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+        .execute(&admin_pool)
+        .await?;
+    sqlx::query(&format!("CREATE SCHEMA {schema_name}"))
+        .execute(&admin_pool)
+        .await?;
+
+    let search_path = format!("{schema_name},public");
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            PgConnectOptions::from_str(&database_url)?.options([("search_path", &search_path)]),
+        )
+        .await?;
+    sqlx::raw_sql(STORAGE_SCHEMA_SQL).execute(&pool).await?;
+
+    let tenant_id = Uuid::parse_str("10000000-0000-0000-0000-000000000001").unwrap();
+    let domain_id = Uuid::parse_str("10000000-0000-0000-0000-000000000002").unwrap();
+    let account_id = Uuid::parse_str("10000000-0000-0000-0000-000000000003").unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO tenants (id, slug, display_name)
+        VALUES ($1, 'mapi-calendar', 'MAPI Calendar')
+        "#,
+    )
+    .bind(tenant_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO domains (id, tenant_id, name)
+        VALUES ($1, $2, 'example.test')
+        "#,
+    )
+    .bind(domain_id)
+    .bind(tenant_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, 'alice@example.test', 'Alice Calendar')
+        "#,
+    )
+    .bind(account_id)
+    .bind(tenant_id)
+    .bind(domain_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO account_credentials (tenant_id, account_email, password_hash)
+        VALUES ($1, 'alice@example.test', 'test-hash')
+        "#,
+    )
+    .bind(tenant_id)
+    .execute(&pool)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO account_sessions (id, tenant_id, token, account_email, expires_at)
+        VALUES ($1, $2, 'token', 'alice@example.test', NOW() + INTERVAL '1 hour')
+        "#,
+    )
+    .bind(Uuid::parse_str("10000000-0000-0000-0000-000000000004").unwrap())
+    .bind(tenant_id)
+    .execute(&pool)
+    .await?;
+
+    Ok(Some(PostgresMapiFixture {
+        storage: Storage::new(pool),
+        admin_pool,
+        schema_name,
+        account_id,
+    }))
+}
 
 #[tokio::test]
 async fn mapi_identity_mapping_survives_restart_style_store_reload() {
@@ -1339,12 +1456,19 @@ impl ExchangeStore for FakeStore {
             time: input.time,
             time_zone: input.time_zone,
             duration_minutes: input.duration_minutes,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: input.recurrence_rule,
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: input.title,
             location: input.location,
+            organizer_json: "{}".to_string(),
             attendees: input.attendees,
             attendees_json: input.attendees_json,
             notes: input.notes,
+            body_html: String::new(),
         };
         self.event_versions.lock().unwrap().insert(event.id, 1);
         self.events.lock().unwrap().push(event.clone());
@@ -4555,6 +4679,22 @@ async fn content_sync_response_rops(
     folder_global_counter: u64,
     client_state: &[u8],
 ) -> Vec<u8> {
+    content_sync_response_rops_for_store(
+        store,
+        test_mapi_folder_id(folder_global_counter),
+        client_state,
+    )
+    .await
+}
+
+async fn content_sync_response_rops_for_store<S>(
+    store: S,
+    folder_id: u64,
+    client_state: &[u8],
+) -> Vec<u8>
+where
+    S: ExchangeStore + Clone + Send + Sync + 'static,
+{
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -4572,7 +4712,7 @@ async fn content_sync_response_rops(
         .to_string();
 
     let mut rops = Vec::new();
-    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(folder_global_counter));
+    append_rop_open_folder(&mut rops, 0, 1, folder_id);
     append_rop_sync_manifest_get_buffer_with_state(&mut rops, 1, 2, 4096, client_state);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -7269,8 +7409,8 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         u16::from_le_bytes(response_rop[6..8].try_into().unwrap()),
         2
     );
-    assert_eq!(&response_rop[8..10], &0x8001u16.to_le_bytes());
-    assert_eq!(&response_rop[10..12], &0x8002u16.to_le_bytes());
+    assert_eq!(&response_rop[8..10], &0x8003u16.to_le_bytes());
+    assert_eq!(&response_rop[10..12], &0x8004u16.to_le_bytes());
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(&payload[response_rop_size..], &1u32.to_le_bytes());
 
@@ -14388,12 +14528,19 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
             time: "09:00".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Calendar reminder source".to_string(),
             location: String::new(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: String::new(),
             notes: String::new(),
+            body_html: String::new(),
         }])),
         tasks: Arc::new(Mutex::new(vec![FakeStore::task(
             &task_id.to_string(),
@@ -15723,12 +15870,19 @@ async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_che
             time: "14:30".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 45,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Calendar sync appointment".to_string(),
             location: "Conference room".to_string(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: String::new(),
             notes: "Calendar sync body".to_string(),
+            body_html: String::new(),
         }])),
         ..Default::default()
     };
@@ -15782,6 +15936,196 @@ async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_che
         .await
         .unwrap();
     assert!(checkpoint.is_none());
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_properties(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let account_id = fixture.account_id;
+    storage
+        .upsert_client_event(UpsertClientEventInput {
+            id: Some(Uuid::parse_str("71717171-7171-4171-9171-717171717171").unwrap()),
+            account_id,
+            uid: "mapi-calendar-postgres".to_string(),
+            date: "2026-05-25".to_string(),
+            time: "14:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 0,
+            all_day: true,
+            status: "tentative".to_string(),
+            sequence: 7,
+            recurrence_rule: "FREQ=DAILY;COUNT=2".to_string(),
+            recurrence_json: r#"{"frequency":"daily","count":2}"#.to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "PostgreSQL calendar appointment".to_string(),
+            location: "Room 420".to_string(),
+            organizer_json: r#"{"email":"alice@example.test","common_name":"Alice Calendar"}"#.to_string(),
+            attendees: "bob@example.test".to_string(),
+            attendees_json: r#"{"organizer":{"email":"alice@example.test","common_name":"Alice Calendar"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false}]}"#.to_string(),
+            notes: "Canonical body text".to_string(),
+            body_html: "<p>Canonical body text</p>".to_string(),
+        })
+        .await?;
+
+    let response_rops = content_sync_response_rops_for_store(
+        storage,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+    )
+    .await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].subject,
+        "PostgreSQL calendar appointment"
+    );
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 420")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Canonical body text")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8205_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(&response_rops, &1i32.to_le_bytes()));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8215_000Bu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(&response_rops, &[1]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8217_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(&response_rops, &1i32.to_le_bytes()));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8001_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8002_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:30:00Z").to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:31:00Z").to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0E1B_000Bu32.to_le_bytes()
+    ));
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_event_properties(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    storage
+        .upsert_client_event(UpsertClientEventInput {
+            id: Some(Uuid::parse_str("72727272-7272-4272-9272-727272727272").unwrap()),
+            account_id: fixture.account_id,
+            uid: "mapi-calendar-table-postgres".to_string(),
+            date: "2026-05-25".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 45,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 1,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Contents table appointment".to_string(),
+            location: "Room 421".to_string(),
+            organizer_json: r#"{"email":"alice@example.test","common_name":"Alice Calendar"}"#
+                .to_string(),
+            attendees: String::new(),
+            attendees_json: "{}".to_string(),
+            notes: "Contents table body".to_string(),
+            body_html: String::new(),
+        })
+        .await?;
+
+    let service = ExchangeService::new(storage);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    let columns = [
+        0x001A_001Fu32, // PidTagMessageClass
+        0x0037_001Fu32, // PidTagSubject
+        0x1000_001Fu32, // PidTagBody
+        0x820D_0040u32, // PidLidAppointmentStartWhole
+        0x820E_0040u32, // PidLidAppointmentEndWhole
+        0x8205_0003u32, // PidLidBusyStatus
+        0x8215_000Bu32, // PidLidAppointmentSubType
+        0x8217_0003u32, // PidLidAppointmentStateFlags
+        0x8001_0102u32, // PidLidGlobalObjectId
+        0x8002_0102u32, // PidLidCleanGlobalObjectId
+        0x3FFB_001Fu32, // PidTagLocation
+        0x0E1B_000Bu32, // PidTagHasAttachments
+    ];
+    rops.extend_from_slice(&(columns.len() as u16).to_le_bytes());
+    for column in columns {
+        rops.extend_from_slice(&column.to_le_bytes());
+    }
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Contents table appointment")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Contents table body")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 421")));
+    assert!(contains_bytes(&response_rops, &2i32.to_le_bytes()));
+    assert!(contains_bytes(&response_rops, &[0]));
+
+    fixture.cleanup().await?;
+    Ok(())
 }
 
 #[tokio::test]
@@ -21693,12 +22037,19 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
             time: "09:00".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Calendar reminder".to_string(),
             location: String::new(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: String::new(),
             notes: String::new(),
+            body_html: String::new(),
         }])),
         tasks: Arc::new(Mutex::new(vec![FakeStore::task(
             &task_id.to_string(),
@@ -26210,12 +26561,19 @@ async fn get_user_availability_returns_canonical_busy_events() {
                 time: "09:30".to_string(),
                 time_zone: "UTC".to_string(),
                 duration_minutes: 45,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 0,
                 recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
                 title: "Planning".to_string(),
                 location: "Room 1".to_string(),
+                organizer_json: "{}".to_string(),
                 attendees: String::new(),
                 attendees_json: String::new(),
                 notes: "Agenda".to_string(),
+                body_html: String::new(),
             },
             AccessibleEvent {
                 id: Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap(),
@@ -26229,12 +26587,19 @@ async fn get_user_availability_returns_canonical_busy_events() {
                 time: "09:30".to_string(),
                 time_zone: "UTC".to_string(),
                 duration_minutes: 45,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 0,
                 recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
                 title: "Outside window".to_string(),
                 location: String::new(),
+                organizer_json: "{}".to_string(),
                 attendees: String::new(),
                 attendees_json: String::new(),
                 notes: String::new(),
+                body_html: String::new(),
             },
         ])),
         ..Default::default()
@@ -29255,12 +29620,19 @@ async fn find_item_returns_calendar_items_from_canonical_store() {
             time: "09:30".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 45,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Planning".to_string(),
             location: "Room 1".to_string(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: String::new(),
             notes: "Agenda".to_string(),
+            body_html: String::new(),
         }])),
         ..Default::default()
     };

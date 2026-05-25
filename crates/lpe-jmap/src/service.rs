@@ -686,13 +686,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             .await
                         }
                         "Calendar/set" | "Calendar/import" | "Calendar/copy" => {
-                            self.handle_canonical_unsupported_write(
-                                account,
-                                arguments,
-                                "Calendar",
-                                &method_name,
-                            )
-                            .await
+                            Ok(method_error("unknownMethod", "method is not supported"))
                         }
                         "CalendarEvent/import" | "CalendarEvent/copy" => {
                             self.handle_canonical_import_or_copy(
@@ -2497,9 +2491,6 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Calendar/query"
         | "Calendar/queryChanges"
         | "Calendar/changes"
-        | "Calendar/set"
-        | "Calendar/import"
-        | "Calendar/copy"
         | "CalendarEvent/get"
         | "CalendarEvent/query"
         | "CalendarEvent/queryChanges"
@@ -2664,7 +2655,6 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "EmailSubmission/set"
         | "ContactCard/set"
         | "AddressBook/set"
-        | "Calendar/set"
         | "CalendarEvent/set"
         | "TaskList/set"
         | "Task/set"
@@ -2683,7 +2673,6 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "EmailSubmission/copy"
         | "AddressBook/copy"
         | "ContactCard/copy"
-        | "Calendar/copy"
         | "CalendarEvent/copy"
         | "TaskList/copy"
         | "Task/copy"
@@ -2699,7 +2688,6 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "EmailSubmission/import"
         | "AddressBook/import"
         | "ContactCard/import"
-        | "Calendar/import"
         | "CalendarEvent/import"
         | "TaskList/import"
         | "Task/import"

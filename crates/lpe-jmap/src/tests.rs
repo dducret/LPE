@@ -6,7 +6,7 @@ use lpe_storage::{
 use serde_json::{json, Value};
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions},
-    PgPool,
+    PgPool, Row,
 };
 use std::str::FromStr;
 use uuid::Uuid;
@@ -316,12 +316,19 @@ impl FakeStore {
             time: event.time,
             time_zone: event.time_zone,
             duration_minutes: event.duration_minutes,
+            all_day: event.all_day,
+            status: event.status,
+            sequence: event.sequence,
             recurrence_rule: event.recurrence_rule,
+            recurrence_json: event.recurrence_json,
+            recurrence_exceptions_json: event.recurrence_exceptions_json,
             title: event.title,
             location: event.location,
+            organizer_json: event.organizer_json,
             attendees: event.attendees,
             attendees_json: event.attendees_json,
             notes: event.notes,
+            body_html: event.body_html,
         }
     }
 
@@ -525,9 +532,15 @@ impl FakeStore {
             time: "09:30".to_string(),
             time_zone: "".to_string(),
             duration_minutes: 0,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: "".to_string(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Standup".to_string(),
             location: "Room A".to_string(),
+            organizer_json: "{}".to_string(),
             attendees: "bob@example.test".to_string(),
             attendees_json: serialize_calendar_participants_metadata(
                 &CalendarParticipantsMetadata {
@@ -545,6 +558,7 @@ impl FakeStore {
                 },
             ),
             notes: "Daily sync".to_string(),
+            body_html: String::new(),
         }
     }
 
@@ -1514,12 +1528,19 @@ impl JmapStore for FakeStore {
             time: input.time,
             time_zone: input.time_zone,
             duration_minutes: input.duration_minutes,
+            all_day: input.all_day,
+            status: input.status,
+            sequence: input.sequence,
             recurrence_rule: input.recurrence_rule,
+            recurrence_json: input.recurrence_json,
+            recurrence_exceptions_json: input.recurrence_exceptions_json,
             title: input.title,
             location: input.location,
+            organizer_json: input.organizer_json,
             attendees: input.attendees,
             attendees_json: input.attendees_json,
             notes: input.notes,
+            body_html: input.body_html,
         };
         let mut events = self.events.lock().unwrap();
         events.retain(|entry| entry.id != event.id);
@@ -4891,12 +4912,19 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
         time: "09:00".to_string(),
         time_zone: "".to_string(),
         duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
         recurrence_rule: "".to_string(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
         title: "Same".to_string(),
         location: "".to_string(),
+        organizer_json: "{}".to_string(),
         attendees: "".to_string(),
         attendees_json: "".to_string(),
         notes: "".to_string(),
+        body_html: String::new(),
     };
     let second_event = ClientEvent {
         id: Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap(),
@@ -4905,12 +4933,19 @@ async fn big_three_query_changes_ignore_backend_order_for_equal_sort_keys() {
         time: "09:00".to_string(),
         time_zone: "".to_string(),
         duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
         recurrence_rule: "".to_string(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
         title: "Same".to_string(),
         location: "".to_string(),
+        organizer_json: "{}".to_string(),
         attendees: "".to_string(),
         attendees_json: "".to_string(),
         notes: "".to_string(),
+        body_html: String::new(),
     };
 
     let initial = JmapService::new(FakeStore {
@@ -7746,8 +7781,15 @@ async fn canonical_jmap_object_families_expose_full_method_matrix_without_mapi_s
             .iter()
             .map(|response| response.0.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(
-            response_names,
+        let expected_response_names = if family == "Calendar" {
+            vec![
+                "Calendar/get".to_string(),
+                "Calendar/query".to_string(),
+                "error".to_string(),
+                "error".to_string(),
+                "error".to_string(),
+            ]
+        } else {
             vec![
                 format!("{family}/get"),
                 format!("{family}/query"),
@@ -7755,7 +7797,8 @@ async fn canonical_jmap_object_families_expose_full_method_matrix_without_mapi_s
                 format!("{family}/import"),
                 format!("{family}/copy"),
             ]
-        );
+        };
+        assert_eq!(response_names, expected_response_names);
         let state = match first.method_responses[0].1["state"].as_str() {
             Some(state) => state.to_string(),
             None => service
@@ -8475,6 +8518,391 @@ async fn storage_backed_jmap_import_copy_get_changes_and_query_changes_round_tri
         .fetch_one(&fixture.pool)
         .await?;
         assert_eq!(storage_count, 5);
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    fixture.cleanup().await?;
+    result
+}
+
+#[tokio::test]
+async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Result<()> {
+    let Some(fixture) = storage_jmap_fixture().await? else {
+        return Ok(());
+    };
+    let result = async {
+        let storage = Storage::new(fixture.pool.clone());
+        let service = JmapService::new(storage);
+        let account_id = fixture.account_id.to_string();
+        let authorization = format!("Bearer {}", fixture.token);
+        let using = vec![
+            JMAP_CALENDARS_CAPABILITY.to_string(),
+            JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+        ];
+
+        let initial = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "CalendarEvent/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "event-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "event-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/get".to_string(),
+                            json!({"accountId": account_id, "ids": []}),
+                            "reminder-get".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let initial_event_state = initial.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let initial_event_query_state = initial.method_responses[1].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let initial_reminder_state = initial.method_responses[2].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let create = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![JmapMethodCall(
+                        "CalendarEvent/set".to_string(),
+                        json!({
+                            "accountId": account_id,
+                            "create": {
+                                "eventA": {
+                                    "@type": "Event",
+                                    "uid": "storage-calendar-lifecycle",
+                                    "title": "Lifecycle Planning",
+                                    "start": "2026-05-25T14:30:00",
+                                    "duration": "PT0S",
+                                    "timeZone": "UTC",
+                                    "allDay": true,
+                                    "status": "tentative",
+                                    "sequence": 2,
+                                    "recurrenceRule": "FREQ=DAILY;COUNT=2",
+                                    "recurrence": {"frequency": "daily", "count": 2},
+                                    "recurrenceOverrides": [{"recurrenceId": "2026-05-26"}],
+                                    "locations": {"main": {"name": "Room 500"}},
+                                    "participants": {
+                                        "owner": {
+                                            "name": "Alice Storage",
+                                            "email": "alice@example.test",
+                                            "roles": {"owner": true}
+                                        },
+                                        "p1": {
+                                            "name": "Bob Storage",
+                                            "email": "bob@example.test",
+                                            "roles": {"attendee": true},
+                                            "participationStatus": "accepted",
+                                            "expectReply": true
+                                        }
+                                    },
+                                    "description": "Canonical lifecycle body",
+                                    "bodyHtml": "<p>Canonical lifecycle body</p>",
+                                    "calendarIds": {"default": true}
+                                }
+                            }
+                        }),
+                        "event-create".to_string(),
+                    )],
+                },
+            )
+            .await?;
+        let event_id = create.created_ids["eventA"].clone();
+        assert_eq!(create.method_responses[0].1["notCreated"], json!({}));
+
+        let created_view = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "CalendarEvent/get".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "ids": [event_id],
+                                "properties": [
+                                    "id",
+                                    "uid",
+                                    "title",
+                                    "start",
+                                    "duration",
+                                    "allDay",
+                                    "status",
+                                    "sequence",
+                                    "recurrenceRule",
+                                    "recurrence",
+                                    "recurrenceOverrides",
+                                    "locations",
+                                    "participants",
+                                    "description",
+                                    "bodyHtml",
+                                    "calendarIds"
+                                ]
+                            }),
+                            "event-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({"accountId": account_id, "filter": {"text": "lifecycle"}}),
+                            "event-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": initial_event_state}),
+                            "event-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": initial_event_query_state}),
+                            "event-query-changes".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let created_event = &created_view.method_responses[0].1["list"][0];
+        assert_eq!(created_event["uid"], "storage-calendar-lifecycle");
+        assert_eq!(created_event["duration"], "PT0S");
+        assert_eq!(created_event["allDay"], true);
+        assert_eq!(created_event["status"], "tentative");
+        assert_eq!(created_event["sequence"], 2);
+        assert_eq!(created_event["recurrence"]["frequency"], "daily");
+        assert_eq!(created_event["locations"]["main"]["name"], "Room 500");
+        assert_eq!(created_event["participants"]["p1"]["participationStatus"], "accepted");
+        assert_eq!(created_event["bodyHtml"], "<p>Canonical lifecycle body</p>");
+        assert!(created_view.method_responses[1].1["ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(event_id.clone())));
+        assert!(created_view.method_responses[2].1["created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(event_id.clone())));
+        assert!(created_view.method_responses[3].1["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["id"] == Value::String(event_id.clone())));
+
+        let canonical_row = sqlx::query(
+            r#"
+            SELECT title, all_day, status, sequence, location, body_text, body_html,
+                   GREATEST(0, EXTRACT(EPOCH FROM (ends_at - starts_at))::int / 60) AS duration_minutes
+            FROM calendar_events
+            WHERE owner_account_id = $1 AND id = $2
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(Uuid::parse_str(&event_id)?)
+        .fetch_one(&fixture.pool)
+        .await?;
+        assert_eq!(canonical_row.get::<String, _>("title"), "Lifecycle Planning");
+        assert!(canonical_row.get::<bool, _>("all_day"));
+        assert_eq!(canonical_row.get::<String, _>("status"), "tentative");
+        assert_eq!(canonical_row.get::<i32, _>("sequence"), 2);
+        assert_eq!(canonical_row.get::<String, _>("location"), "Room 500");
+        assert_eq!(canonical_row.get::<String, _>("body_text"), "Canonical lifecycle body");
+        assert_eq!(
+            canonical_row.get::<Option<String>, _>("body_html").unwrap(),
+            "<p>Canonical lifecycle body</p>"
+        );
+        assert_eq!(canonical_row.get::<i32, _>("duration_minutes"), 0);
+
+        let reminder = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Reminder/import".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {
+                                    "reminderA": {
+                                        "sourceType": "calendar",
+                                        "sourceId": event_id,
+                                        "reminderAt": "2026-05-25T14:00:00Z"
+                                    }
+                                }
+                            }),
+                            "reminder-import".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": initial_reminder_state}),
+                            "reminder-changes".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let reminder_id = reminder.created_ids["reminderA"].clone();
+        assert!(reminder_id.starts_with("calendar:"));
+        assert!(reminder.method_responses[1].1["created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(reminder_id.clone())));
+
+        let after_create_state = created_view.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let after_create_query = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![JmapMethodCall(
+                        "CalendarEvent/query".to_string(),
+                        json!({"accountId": account_id}),
+                        "event-query".to_string(),
+                    )],
+                },
+            )
+            .await?;
+        let after_create_query_state = after_create_query.method_responses[0].1["queryState"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let update = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "CalendarEvent/set".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "update": {
+                                    (event_id.clone()): {
+                                        "title": "Lifecycle Planning Updated",
+                                        "status": "confirmed",
+                                        "allDay": false,
+                                        "locations/main/name": "Room 501"
+                                    }
+                                }
+                            }),
+                            "event-update".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": after_create_state}),
+                            "event-changes".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        assert_eq!(update.method_responses[0].1["updated"][&event_id], json!({}));
+        assert!(update.method_responses[1].1["updated"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(event_id.clone())));
+
+        let destroy = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using,
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "CalendarEvent/set".to_string(),
+                            json!({"accountId": account_id, "destroy": [event_id.clone()]}),
+                            "event-destroy".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/get".to_string(),
+                            json!({"accountId": account_id, "ids": [event_id]}),
+                            "event-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/query".to_string(),
+                            json!({"accountId": account_id}),
+                            "event-query".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": update.method_responses[0].1["newState"]}),
+                            "event-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "CalendarEvent/queryChanges".to_string(),
+                            json!({"accountId": account_id, "sinceQueryState": after_create_query_state}),
+                            "event-query-changes".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Reminder/get".to_string(),
+                            json!({"accountId": account_id, "ids": [reminder_id]}),
+                            "reminder-get".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        assert_eq!(destroy.method_responses[0].1["destroyed"], json!([event_id]));
+        assert_eq!(destroy.method_responses[1].1["notFound"], json!([event_id]));
+        assert!(!destroy.method_responses[2].1["ids"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(event_id.clone())));
+        assert!(destroy.method_responses[3].1["destroyed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(event_id.clone())));
+        assert!(destroy.method_responses[4].1["removed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(event_id.clone())));
+        assert_eq!(destroy.method_responses[5].1["notFound"], json!([reminder_id]));
+
+        let tombstones = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT count(*)
+            FROM mail_change_log
+            WHERE account_id = $1
+              AND object_kind = 'calendar_event'
+              AND object_id = $2
+              AND change_kind = 'destroyed'
+            "#,
+        )
+        .bind(fixture.account_id)
+        .bind(Uuid::parse_str(&event_id)?)
+        .fetch_one(&fixture.pool)
+        .await?;
+        assert_eq!(tombstones, 1);
 
         Ok::<(), anyhow::Error>(())
     }
@@ -11117,6 +11545,143 @@ async fn calendar_methods_use_canonical_event_store() {
     assert!(created.attendees_json.contains("\"organizer\""));
     assert!(created.attendees_json.contains("\"partstat\":\"accepted\""));
     assert!(created.attendees_json.contains("\"rsvp\":true"));
+}
+
+#[tokio::test]
+async fn calendar_collection_write_methods_return_method_errors() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
+                method_calls: vec![
+                    JmapMethodCall("Calendar/set".to_string(), json!({}), "set".to_string()),
+                    JmapMethodCall(
+                        "Calendar/import".to_string(),
+                        json!({}),
+                        "import".to_string(),
+                    ),
+                    JmapMethodCall("Calendar/copy".to_string(), json!({}), "copy".to_string()),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response
+            .method_responses
+            .iter()
+            .map(|response| response.0.as_str())
+            .collect::<Vec<_>>(),
+        vec!["error", "error", "error"]
+    );
+}
+
+#[tokio::test]
+async fn calendar_event_round_trips_schema_backed_fields() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = JmapService::new(store.clone());
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "CalendarEvent/set".to_string(),
+                    json!({
+                        "create": {
+                            "ev": {
+                                "@type": "Event",
+                                "uid": "schema-backed",
+                                "title": "All hands",
+                                "start": "2026-06-01T00:00:00",
+                                "duration": "PT1440M",
+                                "allDay": true,
+                                "status": "cancelled",
+                                "sequence": 7,
+                                "recurrenceRule": "FREQ=WEEKLY;COUNT=2",
+                                "recurrence": {"frequency": "weekly"},
+                                "recurrenceOverrides": [{"recurrenceId": "2026-06-08"}],
+                                "organizer": {"email": "alice@example.test", "name": "Alice"},
+                                "participants": {
+                                    "owner": {
+                                        "email": "alice@example.test",
+                                        "name": "Alice",
+                                        "roles": {"owner": true}
+                                    },
+                                    "p1": {
+                                        "email": "bob@example.test",
+                                        "name": "Bob",
+                                        "roles": {"attendee": true},
+                                        "participationStatus": "accepted"
+                                    }
+                                },
+                                "description": "Plain body",
+                                "bodyHtml": "<p>HTML body</p>",
+                                "calendarIds": {"default": true}
+                            }
+                        }
+                    }),
+                    "set".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+    let event_id = response.method_responses[0].1["created"]["ev"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "CalendarEvent/get".to_string(),
+                    json!({"ids": [event_id]}),
+                    "get".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let event = &response.method_responses[0].1["list"][0];
+    assert_eq!(event["allDay"], Value::Bool(true));
+    assert_eq!(event["status"], Value::String("cancelled".to_string()));
+    assert_eq!(event["sequence"], Value::from(7));
+    assert_eq!(
+        event["recurrenceRule"],
+        Value::String("FREQ=WEEKLY;COUNT=2".to_string())
+    );
+    assert_eq!(
+        event["recurrence"]["frequency"],
+        Value::String("weekly".to_string())
+    );
+    assert_eq!(
+        event["recurrenceOverrides"][0]["recurrenceId"],
+        Value::String("2026-06-08".to_string())
+    );
+    assert_eq!(
+        event["organizer"]["email"],
+        Value::String("alice@example.test".to_string())
+    );
+    assert_eq!(
+        event["bodyHtml"],
+        Value::String("<p>HTML body</p>".to_string())
+    );
 }
 
 #[tokio::test]

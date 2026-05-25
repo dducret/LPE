@@ -2646,7 +2646,7 @@ fn parse_create_message_input(
     let body_text = if body_type.eq_ignore_ascii_case("HTML") {
         html_to_text(&body_value)
     } else {
-        body_value
+        body_value.clone()
     };
     let from = element_content(message, "From").and_then(parse_first_mailbox);
     let sender = element_content(message, "Sender").and_then(parse_first_mailbox);
@@ -2710,7 +2710,7 @@ fn parse_create_contact_input(
     let notes = if body_type.eq_ignore_ascii_case("HTML") {
         html_to_text(&body_value)
     } else {
-        body_value
+        body_value.clone()
     };
 
     Ok(UpsertClientContactInput {
@@ -2823,7 +2823,7 @@ fn parse_create_event_input(
     let notes = if body_type.eq_ignore_ascii_case("HTML") {
         html_to_text(&body_value)
     } else {
-        body_value
+        body_value.clone()
     };
     let (participants, _) = parse_event_participants(principal, event);
 
@@ -2835,12 +2835,30 @@ fn parse_create_event_input(
         time,
         time_zone: requested_time_zone(request).unwrap_or_else(|| "UTC".to_string()),
         duration_minutes,
+        all_day: element_text(event, "IsAllDayEvent")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
+        status: "confirmed".to_string(),
+        sequence: 0,
         recurrence_rule: parse_ews_recurrence(event)?,
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
         title: element_text(event, "Subject").unwrap_or_else(|| "Untitled event".to_string()),
         location: element_text(event, "Location").unwrap_or_default(),
+        organizer_json: participants
+            .organizer
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?
+            .unwrap_or_else(|| "{}".to_string()),
         attendees: calendar_attendee_labels(&participants),
         attendees_json: serialize_calendar_participants_metadata(&participants),
         notes,
+        body_html: if body_type.eq_ignore_ascii_case("HTML") {
+            body_value
+        } else {
+            String::new()
+        },
     })
 }
 
@@ -2889,6 +2907,11 @@ fn parse_update_event_input(
         time,
         time_zone: requested_time_zone(request).unwrap_or_else(|| existing.time_zone.clone()),
         duration_minutes,
+        all_day: element_text(event, "IsAllDayEvent")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(existing.all_day),
+        status: existing.status.clone(),
+        sequence: existing.sequence,
         recurrence_rule: if field_deleted(request, "calendar:Recurrence") {
             String::new()
         } else if element_content(event, "Recurrence").is_some() {
@@ -2896,6 +2919,8 @@ fn parse_update_event_input(
         } else {
             existing.recurrence_rule.clone()
         },
+        recurrence_json: existing.recurrence_json.clone(),
+        recurrence_exceptions_json: existing.recurrence_exceptions_json.clone(),
         title: deleted_or_updated_text(
             request,
             event,
@@ -2911,6 +2936,7 @@ fn parse_update_event_input(
             "Location",
             &existing.location,
         ),
+        organizer_json: existing.organizer_json.clone(),
         attendees: if has_attendee_updates {
             calendar_attendee_labels(&participants)
         } else {
@@ -2922,6 +2948,17 @@ fn parse_update_event_input(
             existing.attendees_json.clone()
         },
         notes,
+        body_html: if let Some(body_value) = element_text(event, "Body") {
+            let body_tag = open_tag_text(event, "Body").unwrap_or_default();
+            let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+            if body_type.eq_ignore_ascii_case("HTML") {
+                body_value
+            } else {
+                existing.body_html.clone()
+            }
+        } else {
+            existing.body_html.clone()
+        },
     })
 }
 

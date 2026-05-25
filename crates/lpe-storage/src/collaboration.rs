@@ -91,12 +91,19 @@ pub struct AccessibleEvent {
     pub time: String,
     pub time_zone: String,
     pub duration_minutes: i32,
+    pub all_day: bool,
+    pub status: String,
+    pub sequence: i32,
     pub recurrence_rule: String,
+    pub recurrence_json: String,
+    pub recurrence_exceptions_json: String,
     pub title: String,
     pub location: String,
+    pub organizer_json: String,
     pub attendees: String,
     pub attendees_json: String,
     pub notes: String,
+    pub body_html: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -909,12 +916,19 @@ impl Storage {
                 time: input.time,
                 time_zone: input.time_zone,
                 duration_minutes: input.duration_minutes,
+                all_day: input.all_day,
+                status: input.status,
+                sequence: input.sequence,
                 recurrence_rule: input.recurrence_rule,
+                recurrence_json: input.recurrence_json,
+                recurrence_exceptions_json: input.recurrence_exceptions_json,
                 title: input.title,
                 location: input.location,
+                organizer_json: input.organizer_json,
                 attendees: input.attendees,
                 attendees_json: input.attendees_json,
                 notes: input.notes,
+                body_html: input.body_html,
             })
             .await?;
 
@@ -953,12 +967,19 @@ impl Storage {
             time: input.time,
             time_zone: input.time_zone,
             duration_minutes: input.duration_minutes,
+            all_day: input.all_day,
+            status: input.status,
+            sequence: input.sequence,
             recurrence_rule: input.recurrence_rule,
+            recurrence_json: input.recurrence_json,
+            recurrence_exceptions_json: input.recurrence_exceptions_json,
             title: input.title,
             location: input.location,
+            organizer_json: input.organizer_json,
             attendees: input.attendees,
             attendees_json: input.attendees_json,
             notes: input.notes,
+            body_html: input.body_html,
         })
         .await?;
 
@@ -1399,12 +1420,19 @@ impl Storage {
                 to_char(e.starts_at AT TIME ZONE COALESCE(NULLIF(e.time_zone, ''), 'UTC'), 'HH24:MI') AS time,
                 e.time_zone,
                 GREATEST(0, EXTRACT(EPOCH FROM (e.ends_at - e.starts_at))::int / 60) AS duration_minutes,
+                e.all_day,
+                e.status,
+                e.sequence,
                 COALESCE(e.recurrence_rule, '') AS recurrence_rule,
+                e.recurrence_json::text AS recurrence_json,
+                e.recurrence_exceptions_json::text AS recurrence_exceptions_json,
                 e.title,
                 e.location,
+                e.organizer_json::text AS organizer_json,
                 COALESCE(e.source_payload_json->>'attendees', '') AS attendees,
                 e.attendees_json::text AS attendees_json,
-                e.body_text AS notes
+                e.body_text AS notes,
+                COALESCE(e.body_html, '') AS body_html
             FROM calendar_events e
             JOIN accounts owner ON owner.id = e.owner_account_id
             LEFT JOIN calendars c
@@ -1454,12 +1482,19 @@ impl Storage {
                 time: row.time,
                 time_zone: row.time_zone,
                 duration_minutes: row.duration_minutes,
+                all_day: row.all_day,
+                status: row.status,
+                sequence: row.sequence,
                 recurrence_rule: row.recurrence_rule,
+                recurrence_json: row.recurrence_json,
+                recurrence_exceptions_json: row.recurrence_exceptions_json,
                 title: row.title,
                 location: row.location,
+                organizer_json: row.organizer_json,
                 attendees: row.attendees,
                 attendees_json: row.attendees_json,
                 notes: row.notes,
+                body_html: row.body_html,
             })
             .collect())
     }

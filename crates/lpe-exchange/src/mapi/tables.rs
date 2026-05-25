@@ -3480,12 +3480,19 @@ pub(in crate::mapi) fn serialize_pending_event_row(
         time: event.time,
         time_zone: event.time_zone,
         duration_minutes: event.duration_minutes,
+        all_day: event.all_day,
+        status: event.status,
+        sequence: event.sequence,
         recurrence_rule: event.recurrence_rule,
+        recurrence_json: event.recurrence_json,
+        recurrence_exceptions_json: event.recurrence_exceptions_json,
         title: event.title,
         location: event.location,
+        organizer_json: event.organizer_json,
         attendees: event.attendees,
         attendees_json: event.attendees_json,
         notes: event.notes,
+        body_html: event.body_html,
     };
     serialize_event_row(&event, 0, CALENDAR_FOLDER_ID, columns)
 }

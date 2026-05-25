@@ -436,12 +436,19 @@ pub(crate) struct ClientEventRow {
     pub(crate) time: String,
     pub(crate) time_zone: String,
     pub(crate) duration_minutes: i32,
+    pub(crate) all_day: bool,
+    pub(crate) status: String,
+    pub(crate) sequence: i32,
     pub(crate) recurrence_rule: String,
+    pub(crate) recurrence_json: String,
+    pub(crate) recurrence_exceptions_json: String,
     pub(crate) title: String,
     pub(crate) location: String,
+    pub(crate) organizer_json: String,
     pub(crate) attendees: String,
     pub(crate) attendees_json: String,
     pub(crate) notes: String,
+    pub(crate) body_html: String,
 }
 
 #[derive(Debug, FromRow)]
@@ -519,12 +526,19 @@ pub(crate) struct AccessibleEventRow {
     pub(crate) time: String,
     pub(crate) time_zone: String,
     pub(crate) duration_minutes: i32,
+    pub(crate) all_day: bool,
+    pub(crate) status: String,
+    pub(crate) sequence: i32,
     pub(crate) recurrence_rule: String,
+    pub(crate) recurrence_json: String,
+    pub(crate) recurrence_exceptions_json: String,
     pub(crate) title: String,
     pub(crate) location: String,
+    pub(crate) organizer_json: String,
     pub(crate) attendees: String,
     pub(crate) attendees_json: String,
     pub(crate) notes: String,
+    pub(crate) body_html: String,
 }
 
 #[derive(Debug, FromRow)]

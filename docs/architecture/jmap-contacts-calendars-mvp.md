@@ -36,9 +36,6 @@
   - `Calendar/query`
   - `Calendar/changes`
   - `Calendar/queryChanges`
-  - `Calendar/set`
-  - `Calendar/import`
-  - `Calendar/copy`
   - `CalendarEvent/get`
   - `CalendarEvent/set`
   - `CalendarEvent/changes`
@@ -93,6 +90,7 @@
   - private `DurableChange` exposes canonical change cursor metadata and categories for clients that need durable sync diagnostics
 - Payloads:
   - `CalendarEvent` participant metadata is stored in `calendar_events.attendees_json` as an object containing organizer and attendee fields; older array-only attendee payloads are migrated into the object form.
+  - `CalendarEvent/get`, `CalendarEvent/set`, `CalendarEvent/query`, and `CalendarEvent/changes` are limited to canonical `calendar_events` fields already owned by LPE: `id`, `uid`, `@type`, `title`, `start`, `duration`, `timeZone`, `allDay`, `status`, `sequence`, `recurrenceRule`, opaque `recurrence`, opaque `recurrenceOverrides`, `locations` by name, `organizer`, `participants`, `description`, `descriptionContentType`, `bodyHtml`, and `calendarIds`. This is not a full JSCalendar implementation; unsupported fields are rejected rather than stored as protocol-local extensions.
   - `Share` returns a stable object-specific projection with `id`, `@type: "Share"`, `type`, `grantId`, owner and grantee account metadata, `rights`, and `created`/`updated` timestamps. Sender shares include `senderRight`; task-list shares include `taskListId` and `taskListName`.
   - `DurableChange` returns the singleton `canonical` object with `@type: "DurableChange"`, `scope: "account"`, `cursor`, `isAppendOnly: true`, `mayRead: true`, `mayWrite: false`, and category objects listing affected JMAP object families.
 - Push:
@@ -114,6 +112,7 @@
   - generic private canonical `query` responses use deterministic id ordering for stable client pagination
   - query/change behavior uses canonical timestamps and state
   - private Outlook compatibility methods must not overload JMAP Mail `Mailbox` or `Email`
+  - `Calendar/set`, `Calendar/import`, and `Calendar/copy` are intentionally not advertised or supported until canonical non-default calendar collection lifecycle semantics are implemented; they return `unknownMethod`, and event writes use `CalendarEvent/*` against the canonical calendar tables
 
 ## Reference Table/List
 

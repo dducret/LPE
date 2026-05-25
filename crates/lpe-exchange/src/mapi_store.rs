@@ -1811,12 +1811,19 @@ mod tests {
             time: "09:00".to_string(),
             time_zone: "UTC".to_string(),
             duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
             recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
             title: "Standup".to_string(),
             location: "Room 1".to_string(),
+            organizer_json: "{}".to_string(),
             attendees: String::new(),
             attendees_json: "[]".to_string(),
             notes: String::new(),
+            body_html: String::new(),
         };
         let task_list_id = Uuid::parse_str("12121212-3434-4565-8787-909090909090").unwrap();
         let task = ClientTask {

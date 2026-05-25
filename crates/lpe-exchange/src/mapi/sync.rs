@@ -711,6 +711,7 @@ fn calendar_sync_object(
     for property_tag in [
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
+        PID_LID_BUSY_STATUS_TAG,
         PID_LID_APPOINTMENT_START_WHOLE_TAG,
         PID_LID_APPOINTMENT_END_WHOLE_TAG,
         PID_LID_APPOINTMENT_SUB_TYPE_TAG,

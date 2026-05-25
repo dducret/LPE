@@ -397,17 +397,20 @@ represented by a zero-length `PidTagParentSourceKey`; this is expected for
 Calendar when Outlook syncs the IPM subtree root. Calendar content sync must
 load canonical calendar events for the Calendar folder and emit them as normal
 `IPM.Appointment` message changes with appointment timing/location properties,
-`PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day/state flags,
-and stable `PidLidGlobalObjectId` / `PidLidCleanGlobalObjectId` values; an
-advertised Calendar folder with state-only or generic-message-only content sync
-is not a valid Outlook interoperability result. Low-LID Calendar named
+`PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day, busy status,
+state flags, and stable `PidLidGlobalObjectId` / `PidLidCleanGlobalObjectId`
+values; an advertised Calendar folder with state-only or generic-message-only
+content sync is not a valid Outlook interoperability result. Low-LID Calendar named
 properties such as `PidLidGlobalObjectId` must be exposed through
 `RopGetPropertyIdsFromNames` with assigned named-property IDs in the
 named-property range; the LID itself is the property name, not the wire property
 ID. Outlook's MAPI Calendar property model also requires appointment start time
 to be strictly earlier than end time, so zero-duration canonical events are
 projected to MAPI with a minimum one-minute appointment window while leaving the
-canonical event unchanged.
+canonical event unchanged. Calendar attachments are intentionally not projected
+until a canonical calendar attachment table exists; `PidTagHasAttachments` for
+calendar appointment rows remains false rather than inventing a protocol-local
+attachment store.
 
 ### Publication Gate
 

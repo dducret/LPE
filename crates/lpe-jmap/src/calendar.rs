@@ -506,9 +506,18 @@ fn calendar_event_properties(properties: Option<Vec<String>>) -> HashSet<String>
                 "start".to_string(),
                 "duration".to_string(),
                 "timeZone".to_string(),
+                "allDay".to_string(),
+                "status".to_string(),
+                "sequence".to_string(),
+                "recurrenceRule".to_string(),
+                "recurrence".to_string(),
+                "recurrenceOverrides".to_string(),
                 "locations".to_string(),
+                "organizer".to_string(),
                 "participants".to_string(),
                 "description".to_string(),
+                "descriptionContentType".to_string(),
+                "bodyHtml".to_string(),
                 "calendarIds".to_string(),
             ]
         })
@@ -548,6 +557,27 @@ fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>
             );
         }
     }
+    insert_if(properties, &mut object, "allDay", event.all_day);
+    insert_if(properties, &mut object, "status", event.status.clone());
+    insert_if(properties, &mut object, "sequence", event.sequence);
+    insert_if(
+        properties,
+        &mut object,
+        "recurrenceRule",
+        event.recurrence_rule.clone(),
+    );
+    insert_json_if(
+        properties,
+        &mut object,
+        "recurrence",
+        &event.recurrence_json,
+    );
+    insert_json_if(
+        properties,
+        &mut object,
+        "recurrenceOverrides",
+        &event.recurrence_exceptions_json,
+    );
     if properties.contains("locations") && !event.location.trim().is_empty() {
         object.insert(
             "locations".to_string(),
@@ -569,7 +599,22 @@ fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>
             object.insert("participants".to_string(), participants);
         }
     }
+    insert_json_if(properties, &mut object, "organizer", &event.organizer_json);
     insert_if(properties, &mut object, "description", event.notes.clone());
+    insert_if(properties, &mut object, "bodyHtml", event.body_html.clone());
+    if properties.contains("descriptionContentType") {
+        object.insert(
+            "descriptionContentType".to_string(),
+            Value::String(
+                if event.body_html.trim().is_empty() {
+                    "text/plain"
+                } else {
+                    "text/html"
+                }
+                .to_string(),
+            ),
+        );
+    }
     if properties.contains("calendarIds") {
         object.insert(
             "calendarIds".to_string(),
@@ -577,6 +622,20 @@ fn calendar_event_to_value(event: &AccessibleEvent, properties: &HashSet<String>
         );
     }
     Value::Object(object)
+}
+
+fn insert_json_if(
+    properties: &HashSet<String>,
+    object: &mut Map<String, Value>,
+    key: &str,
+    raw: &str,
+) {
+    if properties.contains(key) {
+        object.insert(
+            key.to_string(),
+            serde_json::from_str(raw).unwrap_or(Value::Null),
+        );
+    }
 }
 
 fn participants_from_event(event: &AccessibleEvent) -> Value {
@@ -802,12 +861,37 @@ fn parse_calendar_event_input(
             time,
             time_zone: parse_optional_string(object.get("timeZone"))?.unwrap_or_default(),
             duration_minutes: parse_calendar_duration(object.get("duration"))?,
-            recurrence_rule: String::new(),
+            all_day: object
+                .get("allDay")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            status: parse_optional_string(object.get("status"))?
+                .unwrap_or_else(|| "confirmed".to_string()),
+            sequence: object
+                .get("sequence")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .clamp(0, i64::from(i32::MAX)) as i32,
+            recurrence_rule: parse_optional_string(object.get("recurrenceRule"))?
+                .unwrap_or_default(),
+            recurrence_json: object
+                .get("recurrence")
+                .map(Value::to_string)
+                .unwrap_or_else(|| "{}".to_string()),
+            recurrence_exceptions_json: object
+                .get("recurrenceOverrides")
+                .map(Value::to_string)
+                .unwrap_or_else(|| "[]".to_string()),
             title: parse_required_string(object.get("title"), "title")?,
             location: parse_calendar_location(object.get("locations"))?,
+            organizer_json: object
+                .get("organizer")
+                .map(Value::to_string)
+                .unwrap_or_else(|| "{}".to_string()),
             attendees: parse_calendar_participants(object.get("participants"))?,
             attendees_json: parse_calendar_participants_json(object.get("participants"))?,
             notes: parse_optional_string(object.get("description"))?.unwrap_or_default(),
+            body_html: parse_optional_string(object.get("bodyHtml"))?.unwrap_or_default(),
         },
     ))
 }
@@ -815,8 +899,26 @@ fn parse_calendar_event_input(
 fn reject_unknown_calendar_event_properties(object: &Map<String, Value>) -> Result<()> {
     for key in object.keys() {
         match key.as_str() {
-            "id" | "@type" | "uid" | "title" | "start" | "duration" | "timeZone" | "locations"
-            | "participants" | "description" | "calendarIds" => {}
+            "id"
+            | "@type"
+            | "uid"
+            | "title"
+            | "start"
+            | "duration"
+            | "timeZone"
+            | "locations"
+            | "allDay"
+            | "status"
+            | "sequence"
+            | "recurrenceRule"
+            | "recurrence"
+            | "recurrenceOverrides"
+            | "organizer"
+            | "participants"
+            | "description"
+            | "descriptionContentType"
+            | "bodyHtml"
+            | "calendarIds" => {}
             _ => bail!("unsupported calendar event property: {key}"),
         }
     }
