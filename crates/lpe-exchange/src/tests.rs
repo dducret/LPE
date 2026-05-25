@@ -16129,6 +16129,79 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_sync_projects_postgresql_custom_calendar_collection(
+) -> anyhow::Result<()> {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
+        return Ok(());
+    };
+    let storage = fixture.storage.clone();
+    let collection = storage
+        .create_accessible_calendar_collection(fixture.account_id, "Outlook Custom Calendar")
+        .await?;
+    let event = storage
+        .create_accessible_event(
+            fixture.account_id,
+            Some(&collection.id),
+            UpsertClientEventInput {
+                id: Some(Uuid::parse_str("73737373-7373-4373-9373-737373737373").unwrap()),
+                account_id: fixture.account_id,
+                uid: "mapi-calendar-custom-postgres".to_string(),
+                date: "2026-05-25".to_string(),
+                time: "11:00".to_string(),
+                time_zone: "UTC".to_string(),
+                duration_minutes: 30,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 1,
+                recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
+                title: "Custom calendar appointment".to_string(),
+                location: "Room 422".to_string(),
+                organizer_json: "{}".to_string(),
+                attendees: String::new(),
+                attendees_json: "{}".to_string(),
+                notes: "Custom calendar body".to_string(),
+                body_html: String::new(),
+            },
+        )
+        .await?;
+    assert_eq!(event.collection_id, collection.id);
+    let canonical_events = storage
+        .fetch_accessible_events_in_collection(fixture.account_id, &collection.id)
+        .await?;
+    assert_eq!(canonical_events.len(), 1);
+
+    let snapshot = storage
+        .load_mapi_mail_store(fixture.account_id, 500)
+        .await?;
+    let folder = snapshot
+        .collaboration_folders()
+        .iter()
+        .find(|folder| folder.collection.display_name == "Outlook Custom Calendar")
+        .expect("custom calendar folder projected");
+    assert_ne!(folder.id, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    assert_eq!(snapshot.events_for_folder(folder.id).len(), 1);
+
+    let response_rops = content_sync_response_rops_for_store(storage, folder.id, &[]).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].subject,
+        "Custom calendar appointment"
+    );
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 422")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Custom calendar body")
+    ));
+
+    fixture.cleanup().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn mapi_over_http_content_sync_first_folder_decodes_outlook_message_changes() {
     let inbox_id = Uuid::parse_str("51515151-5151-5151-5151-515151515152").unwrap();
     let first_id = Uuid::parse_str("61616161-6161-6161-6161-616161616162").unwrap();

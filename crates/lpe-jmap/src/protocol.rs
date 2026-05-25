@@ -385,6 +385,15 @@ pub struct CalendarQueryArguments {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CalendarSetArguments {
+    pub account_id: Option<String>,
+    pub create: Option<HashMap<String, Value>>,
+    pub update: Option<HashMap<String, Value>>,
+    pub destroy: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskListGetArguments {
     pub account_id: Option<String>,
     pub ids: Option<Vec<String>>,

@@ -1022,9 +1022,15 @@ fn mapi_collaboration_folder_id(
         }
         _ => collection
             .id
-            .rsplit('-')
-            .next()
-            .and_then(|value| Uuid::parse_str(value).ok())
+            .parse::<Uuid>()
+            .ok()
+            .or_else(|| {
+                collection
+                    .id
+                    .rsplit('-')
+                    .next()
+                    .and_then(|value| Uuid::parse_str(value).ok())
+            })
             .and_then(|id| crate::mapi::identity::mapped_mapi_object_id(&id))
             .unwrap_or_else(|| {
                 let seed = match kind {

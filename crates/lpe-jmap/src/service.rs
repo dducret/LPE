@@ -451,6 +451,18 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         "Calendar/changes" => {
                             self.handle_calendar_changes(account, arguments).await
                         }
+                        "Calendar/set" => {
+                            self.handle_calendar_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "Calendar/import" | "Calendar/copy" => {
+                            self.handle_calendar_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                            )
+                            .await
+                        }
                         "CalendarEvent/get" => {
                             self.handle_calendar_event_get(account, arguments).await
                         }
@@ -684,9 +696,6 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                                 &method_name,
                             )
                             .await
-                        }
-                        "Calendar/set" | "Calendar/import" | "Calendar/copy" => {
-                            Ok(method_error("unknownMethod", "method is not supported"))
                         }
                         "CalendarEvent/import" | "CalendarEvent/copy" => {
                             self.handle_canonical_import_or_copy(
@@ -2491,6 +2500,9 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Calendar/query"
         | "Calendar/queryChanges"
         | "Calendar/changes"
+        | "Calendar/set"
+        | "Calendar/import"
+        | "Calendar/copy"
         | "CalendarEvent/get"
         | "CalendarEvent/query"
         | "CalendarEvent/queryChanges"
@@ -2655,6 +2667,7 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "EmailSubmission/set"
         | "ContactCard/set"
         | "AddressBook/set"
+        | "Calendar/set"
         | "CalendarEvent/set"
         | "TaskList/set"
         | "Task/set"
@@ -2672,6 +2685,7 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Thread/copy"
         | "EmailSubmission/copy"
         | "AddressBook/copy"
+        | "Calendar/copy"
         | "ContactCard/copy"
         | "CalendarEvent/copy"
         | "TaskList/copy"
@@ -2687,6 +2701,7 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Thread/import"
         | "EmailSubmission/import"
         | "AddressBook/import"
+        | "Calendar/import"
         | "ContactCard/import"
         | "CalendarEvent/import"
         | "TaskList/import"

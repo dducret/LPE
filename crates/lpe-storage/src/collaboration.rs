@@ -514,7 +514,6 @@ impl Storage {
                   ON c.tenant_id = g.tenant_id
                  AND c.owner_account_id = g.owner_account_id
                  AND c.id = g.calendar_id
-                 AND c.role = 'calendar'
                 JOIN accounts owner ON owner.id = g.owner_account_id
                 JOIN accounts grantee ON grantee.id = g.grantee_account_id
                 WHERE g.tenant_id = $1
@@ -699,6 +698,223 @@ impl Storage {
     ) -> Result<Vec<CollaborationCollection>> {
         self.fetch_accessible_collections(principal_account_id, CollaborationResourceKind::Calendar)
             .await
+    }
+
+    pub async fn create_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        display_name: &str,
+    ) -> Result<CollaborationCollection> {
+        let display_name = display_name.trim();
+        if display_name.is_empty() {
+            bail!("calendar name is required");
+        }
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let calendar_id = Uuid::new_v4();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO calendars (id, tenant_id, owner_account_id, display_name, role)
+            VALUES ($1, $2, $3, $4, 'custom')
+            "#,
+        )
+        .bind(calendar_id)
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .bind(display_name)
+        .execute(&mut *tx)
+        .await?;
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                principal_account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(principal_account_id),
+            None,
+            "calendar",
+            calendar_id,
+            "created",
+            modseq,
+            &[principal_account_id],
+            serde_json::json!({}),
+        )
+        .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            principal_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        self.resolve_collection_access(
+            principal_account_id,
+            CollaborationResourceKind::Calendar,
+            &calendar_id.to_string(),
+        )
+        .await
+    }
+
+    pub async fn update_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: &str,
+        display_name: &str,
+    ) -> Result<CollaborationCollection> {
+        let calendar_id = Uuid::parse_str(collection_id.trim())
+            .map_err(|_| anyhow!("default calendar cannot be renamed through Calendar/set"))?;
+        let display_name = display_name.trim();
+        if display_name.is_empty() {
+            bail!("calendar name is required");
+        }
+        let access = self
+            .resolve_collection_access(
+                principal_account_id,
+                CollaborationResourceKind::Calendar,
+                collection_id,
+            )
+            .await?;
+        if !access.is_owned || !access.rights.may_write {
+            bail!("write access is not granted on this calendar");
+        }
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE calendars
+            SET display_name = $4, updated_at = NOW()
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+              AND role = 'custom'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .bind(calendar_id)
+        .bind(display_name)
+        .execute(&mut *tx)
+        .await?;
+        if updated.rows_affected() == 0 {
+            bail!("calendar not found");
+        }
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                principal_account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(principal_account_id),
+            None,
+            "calendar",
+            calendar_id,
+            "updated",
+            modseq,
+            &[principal_account_id],
+            serde_json::json!({}),
+        )
+        .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            principal_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        self.resolve_collection_access(
+            principal_account_id,
+            CollaborationResourceKind::Calendar,
+            &calendar_id.to_string(),
+        )
+        .await
+    }
+
+    pub async fn delete_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: &str,
+    ) -> Result<()> {
+        let calendar_id = Uuid::parse_str(collection_id.trim())
+            .map_err(|_| anyhow!("default calendar cannot be deleted through Calendar/set"))?;
+        let access = self
+            .resolve_collection_access(
+                principal_account_id,
+                CollaborationResourceKind::Calendar,
+                collection_id,
+            )
+            .await?;
+        if !access.is_owned || !access.rights.may_delete {
+            bail!("delete access is not granted on this calendar");
+        }
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let default_calendar_id =
+            Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, principal_account_id).await?;
+        sqlx::query(
+            r#"
+            UPDATE calendar_events
+            SET calendar_id = $4, updated_at = NOW()
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND calendar_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .bind(calendar_id)
+        .bind(default_calendar_id)
+        .execute(&mut *tx)
+        .await?;
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM calendars
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND id = $3
+              AND role = 'custom'
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .bind(calendar_id)
+        .execute(&mut *tx)
+        .await?;
+        if deleted.rows_affected() == 0 {
+            bail!("calendar not found");
+        }
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            principal_account_id,
+            None,
+            "calendar",
+            calendar_id,
+            None,
+            &[principal_account_id],
+        )
+        .await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            principal_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn fetch_accessible_task_collections(
@@ -907,29 +1123,33 @@ impl Storage {
             bail!("write access is not granted on this calendar");
         }
 
+        let calendar_id = Uuid::parse_str(&access.id).ok();
         let event = self
-            .upsert_client_event(UpsertClientEventInput {
-                id: input.id,
-                account_id: access.owner_account_id,
-                uid: input.uid,
-                date: input.date,
-                time: input.time,
-                time_zone: input.time_zone,
-                duration_minutes: input.duration_minutes,
-                all_day: input.all_day,
-                status: input.status,
-                sequence: input.sequence,
-                recurrence_rule: input.recurrence_rule,
-                recurrence_json: input.recurrence_json,
-                recurrence_exceptions_json: input.recurrence_exceptions_json,
-                title: input.title,
-                location: input.location,
-                organizer_json: input.organizer_json,
-                attendees: input.attendees,
-                attendees_json: input.attendees_json,
-                notes: input.notes,
-                body_html: input.body_html,
-            })
+            .upsert_client_event_in_calendar(
+                UpsertClientEventInput {
+                    id: input.id,
+                    account_id: access.owner_account_id,
+                    uid: input.uid,
+                    date: input.date,
+                    time: input.time,
+                    time_zone: input.time_zone,
+                    duration_minutes: input.duration_minutes,
+                    all_day: input.all_day,
+                    status: input.status,
+                    sequence: input.sequence,
+                    recurrence_rule: input.recurrence_rule,
+                    recurrence_json: input.recurrence_json,
+                    recurrence_exceptions_json: input.recurrence_exceptions_json,
+                    title: input.title,
+                    location: input.location,
+                    organizer_json: input.organizer_json,
+                    attendees: input.attendees,
+                    attendees_json: input.attendees_json,
+                    notes: input.notes,
+                    body_html: input.body_html,
+                },
+                calendar_id,
+            )
             .await?;
 
         self.fetch_accessible_events_by_ids(principal_account_id, &[event.id])
@@ -955,32 +1175,36 @@ impl Storage {
             bail!("write access is not granted on this calendar");
         }
 
-        self.upsert_client_event(UpsertClientEventInput {
-            id: Some(event_id),
-            account_id: existing.owner_account_id,
-            uid: if input.uid.trim().is_empty() {
-                existing.uid.clone()
-            } else {
-                input.uid
+        let calendar_id = Uuid::parse_str(&existing.collection_id).ok();
+        self.upsert_client_event_in_calendar(
+            UpsertClientEventInput {
+                id: Some(event_id),
+                account_id: existing.owner_account_id,
+                uid: if input.uid.trim().is_empty() {
+                    existing.uid.clone()
+                } else {
+                    input.uid
+                },
+                date: input.date,
+                time: input.time,
+                time_zone: input.time_zone,
+                duration_minutes: input.duration_minutes,
+                all_day: input.all_day,
+                status: input.status,
+                sequence: input.sequence,
+                recurrence_rule: input.recurrence_rule,
+                recurrence_json: input.recurrence_json,
+                recurrence_exceptions_json: input.recurrence_exceptions_json,
+                title: input.title,
+                location: input.location,
+                organizer_json: input.organizer_json,
+                attendees: input.attendees,
+                attendees_json: input.attendees_json,
+                notes: input.notes,
+                body_html: input.body_html,
             },
-            date: input.date,
-            time: input.time,
-            time_zone: input.time_zone,
-            duration_minutes: input.duration_minutes,
-            all_day: input.all_day,
-            status: input.status,
-            sequence: input.sequence,
-            recurrence_rule: input.recurrence_rule,
-            recurrence_json: input.recurrence_json,
-            recurrence_exceptions_json: input.recurrence_exceptions_json,
-            title: input.title,
-            location: input.location,
-            organizer_json: input.organizer_json,
-            attendees: input.attendees,
-            attendees_json: input.attendees_json,
-            notes: input.notes,
-            body_html: input.body_html,
-        })
+            calendar_id,
+        )
         .await?;
 
         self.fetch_accessible_events_by_ids(principal_account_id, &[event_id])
@@ -1149,15 +1373,51 @@ impl Storage {
                 });
             }
         }
+        if kind == CollaborationResourceKind::Calendar {
+            let rows = sqlx::query(
+                r#"
+                SELECT id, display_name
+                FROM calendars
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND role = 'custom'
+                ORDER BY lower(display_name), id
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(principal.id)
+            .fetch_all(&self.pool)
+            .await?;
+            for row in rows {
+                collections.push(CollaborationCollection {
+                    id: row.try_get::<Uuid, _>("id")?.to_string(),
+                    kind: kind.as_str().to_string(),
+                    owner_account_id: principal.id,
+                    owner_email: principal.email.clone(),
+                    owner_display_name: principal.display_name.clone(),
+                    display_name: row.try_get("display_name")?,
+                    is_owned: true,
+                    rights: CollaborationRights {
+                        may_read: true,
+                        may_write: true,
+                        may_delete: true,
+                        may_share: true,
+                    },
+                });
+            }
+        }
 
         let rows = match kind {
             CollaborationResourceKind::Contacts => {
                 sqlx::query_as::<_, CollaborationCollectionRow>(
                     r#"
                 SELECT
+                    b.id,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
+                    b.display_name,
+                    b.role,
                     g.may_read,
                     g.may_write,
                     g.may_delete,
@@ -1184,9 +1444,12 @@ impl Storage {
                 sqlx::query_as::<_, CollaborationCollectionRow>(
                     r#"
                 SELECT
+                    c.id,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
+                    c.display_name,
+                    c.role,
                     g.may_read,
                     g.may_write,
                     g.may_delete,
@@ -1213,9 +1476,12 @@ impl Storage {
                 sqlx::query_as::<_, CollaborationCollectionRow>(
                     r#"
                 SELECT
+                    l.id,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
+                    l.display_name,
+                    l.role,
                     g.may_read,
                     g.may_write,
                     g.may_delete,
@@ -1242,16 +1508,16 @@ impl Storage {
         };
 
         collections.extend(rows.into_iter().map(|row| CollaborationCollection {
-            id: shared_collection_id(kind, row.owner_account_id),
+            id: shared_collection_id_for_row(kind, &row),
             kind: kind.as_str().to_string(),
             owner_account_id: row.owner_account_id,
             owner_email: row.owner_email.clone(),
             owner_display_name: row.owner_display_name.clone(),
-            display_name: shared_collection_display_name(
-                kind,
-                &row.owner_display_name,
-                &row.owner_email,
-            ),
+            display_name: if kind == CollaborationResourceKind::Calendar && row.role == "custom" {
+                row.display_name.clone()
+            } else {
+                shared_collection_display_name(kind, &row.owner_display_name, &row.owner_email)
+            },
             is_owned: false,
             rights: CollaborationRights {
                 may_read: row.may_read,
@@ -1389,26 +1655,44 @@ impl Storage {
         ids: Option<&[Uuid]>,
     ) -> Result<Vec<AccessibleEvent>> {
         let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
-        let owner_account_id =
+        let collection_scope =
             if let Some(collection_id) = collection_id.filter(|value| !value.trim().is_empty()) {
-                Some(
-                    self.resolve_collection_access(
+                let access = self
+                    .resolve_collection_access(
                         principal_account_id,
                         CollaborationResourceKind::Calendar,
                         collection_id,
                     )
-                    .await?
-                    .owner_account_id,
-                )
+                    .await?;
+                Some((
+                    access.owner_account_id,
+                    Uuid::parse_str(collection_id).ok(),
+                    if Uuid::parse_str(collection_id).is_ok() {
+                        None
+                    } else {
+                        Some("calendar".to_string())
+                    },
+                ))
             } else {
                 None
             };
+        let owner_account_id = collection_scope
+            .as_ref()
+            .map(|(owner_account_id, _, _)| *owner_account_id);
+        let calendar_id = collection_scope
+            .as_ref()
+            .and_then(|(_, calendar_id, _)| *calendar_id);
+        let calendar_role = collection_scope
+            .as_ref()
+            .and_then(|(_, _, role)| role.as_deref());
 
         let rows = sqlx::query_as::<_, crate::AccessibleEventRow>(
             r#"
             SELECT
                 e.id,
                 e.uid,
+                e.calendar_id,
+                c.role AS calendar_role,
                 e.owner_account_id,
                 owner.primary_email AS owner_email,
                 owner.display_name AS owner_display_name,
@@ -1435,10 +1719,10 @@ impl Storage {
                 COALESCE(e.body_html, '') AS body_html
             FROM calendar_events e
             JOIN accounts owner ON owner.id = e.owner_account_id
-            LEFT JOIN calendars c
+            JOIN calendars c
               ON c.tenant_id = e.tenant_id
              AND c.owner_account_id = e.owner_account_id
-             AND c.role = 'calendar'
+             AND c.id = e.calendar_id
             LEFT JOIN calendar_grants g
               ON g.tenant_id = e.tenant_id
              AND g.calendar_id = c.id
@@ -1447,13 +1731,17 @@ impl Storage {
             WHERE e.tenant_id = $1
               AND (e.owner_account_id = $2 OR COALESCE(g.may_read, FALSE))
               AND ($3::uuid IS NULL OR e.owner_account_id = $3)
-              AND ($4::uuid[] IS NULL OR e.id = ANY($4))
+              AND ($4::uuid IS NULL OR e.calendar_id = $4)
+              AND ($5::text IS NULL OR c.role = $5)
+              AND ($6::uuid[] IS NULL OR e.id = ANY($6))
             ORDER BY e.starts_at ASC, e.id ASC
             "#,
         )
         .bind(&tenant_id)
         .bind(principal_account_id)
         .bind(owner_account_id)
+        .bind(calendar_id)
+        .bind(calendar_role)
         .bind(ids)
         .fetch_all(&self.pool)
         .await?;
@@ -1463,11 +1751,11 @@ impl Storage {
             .map(|row| AccessibleEvent {
                 id: row.id,
                 uid: row.uid,
-                collection_id: collection_id_for_owner(
-                    CollaborationResourceKind::Calendar,
+                collection_id: calendar_collection_id_for_event(
                     principal_account_id,
                     row.owner_account_id,
-                    "",
+                    row.calendar_id,
+                    &row.calendar_role,
                 ),
                 owner_account_id: row.owner_account_id,
                 owner_email: row.owner_email,
@@ -1603,6 +1891,24 @@ fn collection_id_for_owner(
     }
 }
 
+fn calendar_collection_id_for_event(
+    principal_account_id: Uuid,
+    owner_account_id: Uuid,
+    calendar_id: Uuid,
+    role: &str,
+) -> String {
+    if role == "custom" {
+        calendar_id.to_string()
+    } else {
+        collection_id_for_owner(
+            CollaborationResourceKind::Calendar,
+            principal_account_id,
+            owner_account_id,
+            role,
+        )
+    }
+}
+
 fn contact_book_role_for_collection_id(collection_id: Option<&str>) -> &'static str {
     match collection_id.map(str::trim) {
         Some(SUGGESTED_CONTACTS_COLLECTION_ID) => SUGGESTED_CONTACTS_ROLE,
@@ -1614,6 +1920,17 @@ fn contact_book_role_for_collection_id(collection_id: Option<&str>) -> &'static 
 
 fn shared_collection_id(kind: CollaborationResourceKind, owner_account_id: Uuid) -> String {
     format!("shared-{}-{}", kind.as_str(), owner_account_id)
+}
+
+fn shared_collection_id_for_row(
+    kind: CollaborationResourceKind,
+    row: &CollaborationCollectionRow,
+) -> String {
+    if kind == CollaborationResourceKind::Calendar && row.role == "custom" {
+        row.id.to_string()
+    } else {
+        shared_collection_id(kind, row.owner_account_id)
+    }
 }
 
 fn shared_collection_display_name(

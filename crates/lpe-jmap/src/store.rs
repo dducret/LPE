@@ -288,6 +288,22 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         &self,
         principal_account_id: Uuid,
     ) -> Result<Vec<CollaborationCollection>>;
+    async fn create_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        display_name: &str,
+    ) -> Result<CollaborationCollection>;
+    async fn update_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: &str,
+        display_name: &str,
+    ) -> Result<CollaborationCollection>;
+    async fn delete_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: &str,
+    ) -> Result<()>;
     async fn fetch_accessible_events(
         &self,
         principal_account_id: Uuid,
@@ -843,6 +859,38 @@ impl JmapStore for Storage {
         principal_account_id: Uuid,
     ) -> Result<Vec<CollaborationCollection>> {
         self.fetch_accessible_calendar_collections(principal_account_id)
+            .await
+    }
+
+    async fn create_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        display_name: &str,
+    ) -> Result<CollaborationCollection> {
+        self.create_accessible_calendar_collection(principal_account_id, display_name)
+            .await
+    }
+
+    async fn update_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: &str,
+        display_name: &str,
+    ) -> Result<CollaborationCollection> {
+        self.update_accessible_calendar_collection(
+            principal_account_id,
+            collection_id,
+            display_name,
+        )
+        .await
+    }
+
+    async fn delete_accessible_calendar_collection(
+        &self,
+        principal_account_id: Uuid,
+        collection_id: &str,
+    ) -> Result<()> {
+        self.delete_accessible_calendar_collection(principal_account_id, collection_id)
             .await
     }
 

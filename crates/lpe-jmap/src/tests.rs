@@ -1480,6 +1480,50 @@ impl JmapStore for FakeStore {
         }
     }
 
+    async fn create_accessible_calendar_collection(
+        &self,
+        _principal_account_id: Uuid,
+        display_name: &str,
+    ) -> Result<CollaborationCollection> {
+        let mut collection = Self::calendar_collection();
+        collection.id = Uuid::new_v4().to_string();
+        collection.display_name = display_name.to_string();
+        self.calendar_collections
+            .lock()
+            .unwrap()
+            .push(collection.clone());
+        Ok(collection)
+    }
+
+    async fn update_accessible_calendar_collection(
+        &self,
+        _principal_account_id: Uuid,
+        collection_id: &str,
+        display_name: &str,
+    ) -> Result<CollaborationCollection> {
+        let mut collections = self.calendar_collections.lock().unwrap();
+        let collection = collections
+            .iter_mut()
+            .find(|collection| collection.id == collection_id)
+            .ok_or_else(|| anyhow!("calendar not found"))?;
+        collection.display_name = display_name.to_string();
+        Ok(collection.clone())
+    }
+
+    async fn delete_accessible_calendar_collection(
+        &self,
+        _principal_account_id: Uuid,
+        collection_id: &str,
+    ) -> Result<()> {
+        let mut collections = self.calendar_collections.lock().unwrap();
+        let original_len = collections.len();
+        collections.retain(|collection| collection.id != collection_id);
+        if collections.len() == original_len {
+            bail!("calendar not found");
+        }
+        Ok(())
+    }
+
     async fn fetch_accessible_events(
         &self,
         _principal_account_id: Uuid,
@@ -7781,23 +7825,13 @@ async fn canonical_jmap_object_families_expose_full_method_matrix_without_mapi_s
             .iter()
             .map(|response| response.0.as_str())
             .collect::<Vec<_>>();
-        let expected_response_names = if family == "Calendar" {
-            vec![
-                "Calendar/get".to_string(),
-                "Calendar/query".to_string(),
-                "error".to_string(),
-                "error".to_string(),
-                "error".to_string(),
-            ]
-        } else {
-            vec![
-                format!("{family}/get"),
-                format!("{family}/query"),
-                format!("{family}/set"),
-                format!("{family}/import"),
-                format!("{family}/copy"),
-            ]
-        };
+        let expected_response_names = vec![
+            format!("{family}/get"),
+            format!("{family}/query"),
+            format!("{family}/set"),
+            format!("{family}/import"),
+            format!("{family}/copy"),
+        ];
         assert_eq!(response_names, expected_response_names);
         let state = match first.method_responses[0].1["state"].as_str() {
             Some(state) => state.to_string(),
@@ -8580,6 +8614,36 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
             .unwrap()
             .to_string();
 
+        let calendar = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Calendar/get".to_string(),
+                            json!({"accountId": account_id}),
+                            "calendar-get".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Calendar/set".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "create": {"calA": {"name": "Project Calendar"}}
+                            }),
+                            "calendar-set".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        let initial_calendar_state = calendar.method_responses[0].1["state"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let calendar_id = calendar.created_ids["calA"].clone();
+        assert_eq!(calendar.method_responses[1].1["notCreated"], json!({}));
+
         let create = service
             .handle_api_request(
                 Some(&authorization),
@@ -8620,7 +8684,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
                                     },
                                     "description": "Canonical lifecycle body",
                                     "bodyHtml": "<p>Canonical lifecycle body</p>",
-                                    "calendarIds": {"default": true}
+                                    "calendarIds": {calendar_id.clone(): true}
                                 }
                             }
                         }),
@@ -8666,7 +8730,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
                         ),
                         JmapMethodCall(
                             "CalendarEvent/query".to_string(),
-                            json!({"accountId": account_id, "filter": {"text": "lifecycle"}}),
+                            json!({"accountId": account_id, "filter": {"inCalendar": calendar_id, "text": "lifecycle"}}),
                             "event-query".to_string(),
                         ),
                         JmapMethodCall(
@@ -8693,6 +8757,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
         assert_eq!(created_event["locations"]["main"]["name"], "Room 500");
         assert_eq!(created_event["participants"]["p1"]["participationStatus"], "accepted");
         assert_eq!(created_event["bodyHtml"], "<p>Canonical lifecycle body</p>");
+        assert_eq!(created_event["calendarIds"][&calendar_id], true);
         assert!(created_view.method_responses[1].1["ids"]
             .as_array()
             .unwrap()
@@ -8732,6 +8797,39 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
             "<p>Canonical lifecycle body</p>"
         );
         assert_eq!(canonical_row.get::<i32, _>("duration_minutes"), 0);
+
+        let calendar_changes = service
+            .handle_api_request(
+                Some(&authorization),
+                JmapApiRequest {
+                    using_capabilities: using.clone(),
+                    method_calls: vec![
+                        JmapMethodCall(
+                            "Calendar/set".to_string(),
+                            json!({
+                                "accountId": account_id,
+                                "update": {(calendar_id.clone()): {"name": "Renamed Project Calendar"}}
+                            }),
+                            "calendar-update".to_string(),
+                        ),
+                        JmapMethodCall(
+                            "Calendar/changes".to_string(),
+                            json!({"accountId": account_id, "sinceState": initial_calendar_state}),
+                            "calendar-changes".to_string(),
+                        ),
+                    ],
+                },
+            )
+            .await?;
+        assert_eq!(
+            calendar_changes.method_responses[0].1["updated"][&calendar_id],
+            json!({})
+        );
+        assert!(calendar_changes.method_responses[1].1["created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|id| id == &Value::String(calendar_id.clone())));
 
         let reminder = service
             .handle_api_request(
@@ -8865,6 +8963,11 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
                             json!({"accountId": account_id, "ids": [reminder_id]}),
                             "reminder-get".to_string(),
                         ),
+                        JmapMethodCall(
+                            "Calendar/set".to_string(),
+                            json!({"accountId": account_id, "destroy": [calendar_id.clone()]}),
+                            "calendar-destroy".to_string(),
+                        ),
                     ],
                 },
             )
@@ -8887,6 +8990,7 @@ async fn storage_backed_calendar_event_lifecycle_updates_canonical_views() -> Re
             .iter()
             .any(|id| id == &Value::String(event_id.clone())));
         assert_eq!(destroy.method_responses[5].1["notFound"], json!([reminder_id]));
+        assert_eq!(destroy.method_responses[6].1["destroyed"], json!([calendar_id]));
 
         let tombstones = sqlx::query_scalar::<_, i64>(
             r#"
@@ -11548,7 +11652,7 @@ async fn calendar_methods_use_canonical_event_store() {
 }
 
 #[tokio::test]
-async fn calendar_collection_write_methods_return_method_errors() {
+async fn calendar_collection_write_methods_manage_custom_calendars() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -11560,27 +11664,33 @@ async fn calendar_collection_write_methods_return_method_errors() {
             JmapApiRequest {
                 using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
                 method_calls: vec![
-                    JmapMethodCall("Calendar/set".to_string(), json!({}), "set".to_string()),
+                    JmapMethodCall(
+                        "Calendar/set".to_string(),
+                        json!({"create": {"calA": {"name": "Projects"}}}),
+                        "set".to_string(),
+                    ),
                     JmapMethodCall(
                         "Calendar/import".to_string(),
-                        json!({}),
+                        json!({"create": {"calB": {"name": "Imported Calendar"}}}),
                         "import".to_string(),
                     ),
-                    JmapMethodCall("Calendar/copy".to_string(), json!({}), "copy".to_string()),
+                    JmapMethodCall(
+                        "Calendar/copy".to_string(),
+                        json!({"create": {"calC": {"name": "Copied Calendar"}}}),
+                        "copy".to_string(),
+                    ),
                 ],
             },
         )
         .await
         .unwrap();
 
-    assert_eq!(
-        response
-            .method_responses
-            .iter()
-            .map(|response| response.0.as_str())
-            .collect::<Vec<_>>(),
-        vec!["error", "error", "error"]
-    );
+    assert_eq!(response.method_responses[0].0, "Calendar/set");
+    assert_eq!(response.method_responses[1].0, "Calendar/import");
+    assert_eq!(response.method_responses[2].0, "Calendar/copy");
+    assert!(response.created_ids.contains_key("calA"));
+    assert!(response.created_ids.contains_key("calB"));
+    assert!(response.created_ids.contains_key("calC"));
 }
 
 #[tokio::test]

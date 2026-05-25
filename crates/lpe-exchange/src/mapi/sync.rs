@@ -419,6 +419,23 @@ pub(in crate::mapi) fn special_sync_objects_for(
     if sync_type == 0x02 {
         return Vec::new();
     }
+    if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| {
+            folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
+        })
+    {
+        return snapshot
+            .events_for_folder(folder_id)
+            .into_iter()
+            .map(|event| {
+                calendar_sync_object(
+                    event,
+                    snapshot.reminder_for_source("calendar", event.canonical_id),
+                )
+            })
+            .collect();
+    }
     match folder_id {
         NOTES_FOLDER_ID => snapshot
             .notes_for_folder(folder_id)
@@ -472,16 +489,6 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .journal_entries_for_folder(folder_id)
             .into_iter()
             .map(|entry| journal_sync_object(entry))
-            .collect(),
-        CALENDAR_FOLDER_ID => snapshot
-            .events_for_folder(folder_id)
-            .into_iter()
-            .map(|event| {
-                calendar_sync_object(
-                    event,
-                    snapshot.reminder_for_source("calendar", event.canonical_id),
-                )
-            })
             .collect(),
         COMMON_VIEWS_FOLDER_ID => snapshot
             .search_folder_definition_messages()

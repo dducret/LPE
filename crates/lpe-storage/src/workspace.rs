@@ -404,6 +404,14 @@ impl Storage {
     }
 
     pub async fn upsert_client_event(&self, input: UpsertClientEventInput) -> Result<ClientEvent> {
+        self.upsert_client_event_in_calendar(input, None).await
+    }
+
+    pub(crate) async fn upsert_client_event_in_calendar(
+        &self,
+        input: UpsertClientEventInput,
+        calendar_id: Option<Uuid>,
+    ) -> Result<ClientEvent> {
         if input.date.trim().is_empty()
             || input.time.trim().is_empty()
             || input.title.trim().is_empty()
@@ -414,8 +422,12 @@ impl Storage {
         let event_id = input.id.unwrap_or_else(Uuid::new_v4);
         let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let calendar_id =
-            Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        let calendar_id = match calendar_id {
+            Some(calendar_id) => calendar_id,
+            None => {
+                Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, input.account_id).await?
+            }
+        };
         let row = sqlx::query_as::<_, ClientEventRow>(
             r#"
             INSERT INTO calendar_events (

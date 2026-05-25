@@ -18,8 +18,8 @@ use crate::{
     },
     protocol::{
         CalendarEventGetArguments, CalendarEventQueryArguments, CalendarEventQueryFilter,
-        CalendarEventSetArguments, CalendarGetArguments, CalendarQueryArguments, ChangesArguments,
-        EntityQuerySort, QueryChangesArguments,
+        CalendarEventSetArguments, CalendarGetArguments, CalendarQueryArguments,
+        CalendarSetArguments, ChangesArguments, EntityQuerySort, QueryChangesArguments,
     },
     state::{query_changes_response, query_position, StateEntry},
     validation::{validate_calendar_event_filter, validate_entity_sort},
@@ -174,6 +174,152 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
             entries,
         )
         .await
+    }
+
+    pub(crate) async fn handle_calendar_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let arguments: CalendarSetArguments = serde_json::from_value(arguments)?;
+        let account_id = super::requested_account_id(arguments.account_id.as_deref(), account)?;
+        let old_state = self.object_state(account_id, "Calendar").await?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.create {
+            for (creation_id, value) in create {
+                match parse_calendar_collection_name(&value).and_then(|name| {
+                    if name.trim().eq_ignore_ascii_case("Calendar") {
+                        bail!("default calendar already exists")
+                    } else {
+                        Ok(name)
+                    }
+                }) {
+                    Ok(name) => match self
+                        .store
+                        .create_accessible_calendar_collection(account_id, &name)
+                        .await
+                    {
+                        Ok(collection) => {
+                            created_ids.insert(creation_id.clone(), collection.id.clone());
+                            created.insert(
+                                creation_id,
+                                json!({"id": collection.id, "name": collection.display_name}),
+                            );
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(update) = arguments.update {
+            for (id, value) in update {
+                match self.calendar_update_name(account_id, &id, value).await {
+                    Ok(name) => match self
+                        .store
+                        .update_accessible_calendar_collection(account_id, &id, &name)
+                        .await
+                    {
+                        Ok(_) => {
+                            updated.insert(id, Value::Object(Map::new()));
+                        }
+                        Err(error) => {
+                            not_updated.insert(id, set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_updated.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(ids) = arguments.destroy {
+            for id in ids {
+                match self
+                    .store
+                    .delete_accessible_calendar_collection(account_id, &id)
+                    .await
+                {
+                    Ok(()) => destroyed.push(Value::String(id)),
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        let new_state = self.object_state(account_id, "Calendar").await?;
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": new_state,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    pub(crate) async fn handle_calendar_import_or_copy(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let mut set_arguments = Map::new();
+        if let Some(account_id) = arguments.get("accountId").cloned() {
+            set_arguments.insert("accountId".to_string(), account_id);
+        }
+        set_arguments.insert(
+            "create".to_string(),
+            arguments
+                .get("create")
+                .cloned()
+                .unwrap_or_else(|| Value::Object(Map::new())),
+        );
+        self.handle_calendar_set(account, Value::Object(set_arguments), created_ids)
+            .await
+    }
+
+    async fn calendar_update_name(
+        &self,
+        account_id: Uuid,
+        calendar_id: &str,
+        value: Value,
+    ) -> Result<String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| anyhow!("calendar arguments must be an object"))?;
+        let name = if has_jmap_property_patch(object) {
+            let existing = self
+                .store
+                .fetch_accessible_calendar_collections(account_id)
+                .await?
+                .into_iter()
+                .find(|collection| collection.id == calendar_id)
+                .ok_or_else(|| anyhow!("calendar not found"))?;
+            let mut patched = calendar_to_value(&existing, &calendar_properties(None));
+            apply_jmap_property_patch(&mut patched, object)?;
+            parse_calendar_collection_name(&patched)?
+        } else {
+            parse_calendar_collection_name(&value)?
+        };
+        Ok(name)
     }
 
     pub(crate) async fn handle_calendar_event_get(
@@ -448,6 +594,19 @@ impl<S: crate::store::JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         apply_jmap_property_patch(&mut patched, object)?;
         parse_calendar_event_input(Some(event_id), account_id, patched).map(|(_, input)| input)
     }
+}
+
+fn parse_calendar_collection_name(value: &Value) -> Result<String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow!("calendar arguments must be an object"))?;
+    for key in object.keys() {
+        match key.as_str() {
+            "id" | "name" => {}
+            _ => bail!("unsupported calendar property: {key}"),
+        }
+    }
+    parse_required_string(object.get("name"), "name")
 }
 
 fn calendar_properties(properties: Option<Vec<String>>) -> HashSet<String> {

@@ -465,9 +465,12 @@ pub(crate) struct ClientContactRow {
 
 #[derive(Debug, FromRow)]
 pub(crate) struct CollaborationCollectionRow {
+    pub(crate) id: Uuid,
     pub(crate) owner_account_id: Uuid,
     pub(crate) owner_email: String,
     pub(crate) owner_display_name: String,
+    pub(crate) display_name: String,
+    pub(crate) role: String,
     pub(crate) may_read: bool,
     pub(crate) may_write: bool,
     pub(crate) may_delete: bool,
@@ -515,6 +518,8 @@ pub(crate) struct AccessibleContactRow {
 pub(crate) struct AccessibleEventRow {
     pub(crate) id: Uuid,
     pub(crate) uid: String,
+    pub(crate) calendar_id: Uuid,
+    pub(crate) calendar_role: String,
     pub(crate) owner_account_id: Uuid,
     pub(crate) owner_email: String,
     pub(crate) owner_display_name: String,
