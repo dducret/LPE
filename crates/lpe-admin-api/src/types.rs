@@ -427,13 +427,27 @@ pub struct UpsertClientEventRequest {
     #[serde(default)]
     pub duration_minutes: i32,
     #[serde(default)]
+    pub all_day: bool,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub sequence: i32,
+    #[serde(default)]
     pub recurrence_rule: String,
+    #[serde(default)]
+    pub recurrence_json: String,
+    #[serde(default)]
+    pub recurrence_exceptions_json: String,
     pub title: String,
     pub location: String,
+    #[serde(default)]
+    pub organizer_json: String,
     pub attendees: String,
     #[serde(default)]
     pub attendees_json: String,
     pub notes: String,
+    #[serde(default)]
+    pub body_html: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -460,12 +460,35 @@ pub(crate) async fn upsert_client_event(
         time: request.time,
         time_zone: request.time_zone,
         duration_minutes: request.duration_minutes,
+        all_day: request.all_day,
+        status: if request.status.trim().is_empty() {
+            "confirmed".to_string()
+        } else {
+            request.status
+        },
+        sequence: request.sequence,
         recurrence_rule: request.recurrence_rule,
+        recurrence_json: if request.recurrence_json.trim().is_empty() {
+            "{}".to_string()
+        } else {
+            request.recurrence_json
+        },
+        recurrence_exceptions_json: if request.recurrence_exceptions_json.trim().is_empty() {
+            "[]".to_string()
+        } else {
+            request.recurrence_exceptions_json
+        },
         title: request.title,
         location: request.location,
+        organizer_json: if request.organizer_json.trim().is_empty() {
+            "{}".to_string()
+        } else {
+            request.organizer_json
+        },
         attendees: request.attendees,
         attendees_json: request.attendees_json,
         notes: request.notes,
+        body_html: request.body_html,
     };
     let event = if let Some(event_id) = request.id {
         storage
@@ -485,12 +508,19 @@ pub(crate) async fn upsert_client_event(
         time: event.time,
         time_zone: event.time_zone,
         duration_minutes: event.duration_minutes,
+        all_day: event.all_day,
+        status: event.status,
+        sequence: event.sequence,
         recurrence_rule: event.recurrence_rule,
+        recurrence_json: event.recurrence_json,
+        recurrence_exceptions_json: event.recurrence_exceptions_json,
         title: event.title,
         location: event.location,
+        organizer_json: event.organizer_json,
         attendees: event.attendees,
         attendees_json: event.attendees_json,
         notes: event.notes,
+        body_html: event.body_html,
     }))
 }
 
