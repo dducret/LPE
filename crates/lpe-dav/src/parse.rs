@@ -121,12 +121,24 @@ pub(crate) fn parse_ical(
         time,
         time_zone,
         duration_minutes,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
         recurrence_rule,
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
         title,
         location,
+        organizer_json: metadata
+            .organizer
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?
+            .unwrap_or_else(|| "{}".to_string()),
         attendees,
         attendees_json: serialize_calendar_participants_metadata(&metadata),
         notes,
+        body_html: String::new(),
     })
 }
 

@@ -3618,6 +3618,14 @@ fn parse_event_input(
             .or_else(|| existing.map(|event| event.time_zone.clone()))
             .unwrap_or_default(),
         duration_minutes,
+        all_day: field_text(application_data, "AllDayEvent")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .or_else(|| existing.map(|event| event.all_day))
+            .unwrap_or(false),
+        status: existing
+            .map(|event| event.status.clone())
+            .unwrap_or_else(|| "confirmed".to_string()),
+        sequence: existing.map(|event| event.sequence).unwrap_or(0),
         recurrence_rule: if let Some(recurrence) = application_data.child("Recurrence") {
             if recurrence.children.is_empty() {
                 String::new()
@@ -3629,12 +3637,21 @@ fn parse_event_input(
                 .map(|event| event.recurrence_rule.clone())
                 .unwrap_or_default()
         },
+        recurrence_json: existing
+            .map(|event| event.recurrence_json.clone())
+            .unwrap_or_else(|| "{}".to_string()),
+        recurrence_exceptions_json: existing
+            .map(|event| event.recurrence_exceptions_json.clone())
+            .unwrap_or_else(|| "[]".to_string()),
         title: field_text(application_data, "Subject")
             .or_else(|| existing.map(|event| event.title.clone()))
             .unwrap_or_default(),
         location: field_text(application_data, "Location")
             .or_else(|| existing.map(|event| event.location.clone()))
             .unwrap_or_default(),
+        organizer_json: existing
+            .map(|event| event.organizer_json.clone())
+            .unwrap_or_else(|| "{}".to_string()),
         attendees,
         attendees_json: attendees_metadata
             .as_ref()
@@ -3642,6 +3659,9 @@ fn parse_event_input(
             .or_else(|| existing.map(|event| event.attendees_json.clone()))
             .unwrap_or_default(),
         notes,
+        body_html: existing
+            .map(|event| event.body_html.clone())
+            .unwrap_or_default(),
     })
 }
 
