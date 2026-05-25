@@ -206,16 +206,74 @@ pub(crate) fn object_id_from_folder_entry_id(entry_id: &[u8]) -> Option<u64> {
     if entry_id.len() != 46
         || entry_id[0..4] != [0, 0, 0, 0]
         || entry_id[20..22] != 1u16.to_le_bytes()
-        || entry_id[22..38] != STORE_REPLICA_GUID
         || entry_id[44..46] != [0, 0]
     {
         return None;
     }
-    global_counter_from_globcnt(&entry_id[38..44]).map(mapi_store_id)
+    let global_counter = global_counter_from_globcnt(&entry_id[38..44])?;
+    let object_id = mapi_store_id(global_counter);
+    if entry_id[22..38] == STORE_REPLICA_GUID || is_advertised_special_folder_id(object_id) {
+        Some(object_id)
+    } else {
+        None
+    }
 }
 
 pub(crate) fn object_id_from_folder_identifier_bytes(bytes: &[u8]) -> Option<u64> {
-    object_id_from_folder_entry_id(bytes).or_else(|| object_id_from_long_term_id(bytes))
+    object_id_from_folder_entry_id(bytes)
+        .or_else(|| object_id_from_long_term_id(bytes))
+        .or_else(|| stale_special_folder_object_id_from_long_term_id(bytes))
+}
+
+fn stale_special_folder_object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
+    if long_term_id.len() != 24 || long_term_id[22..24] != [0, 0] {
+        return None;
+    }
+    let global_counter = global_counter_from_globcnt(&long_term_id[16..22])?;
+    let object_id = mapi_store_id(global_counter);
+    is_advertised_special_folder_id(object_id).then_some(object_id)
+}
+
+fn is_advertised_special_folder_id(object_id: u64) -> bool {
+    matches!(
+        object_id,
+        ROOT_FOLDER_ID
+            | IPM_SUBTREE_FOLDER_ID
+            | DEFERRED_ACTION_FOLDER_ID
+            | SPOOLER_QUEUE_FOLDER_ID
+            | COMMON_VIEWS_FOLDER_ID
+            | SCHEDULE_FOLDER_ID
+            | SEARCH_FOLDER_ID
+            | VIEWS_FOLDER_ID
+            | SHORTCUTS_FOLDER_ID
+            | INBOX_FOLDER_ID
+            | DRAFTS_FOLDER_ID
+            | SENT_FOLDER_ID
+            | TRASH_FOLDER_ID
+            | OUTBOX_FOLDER_ID
+            | CONTACTS_FOLDER_ID
+            | CALENDAR_FOLDER_ID
+            | TASKS_FOLDER_ID
+            | NOTES_FOLDER_ID
+            | JOURNAL_FOLDER_ID
+            | REMINDERS_FOLDER_ID
+            | JUNK_FOLDER_ID
+            | ARCHIVE_FOLDER_ID
+            | RSS_FEEDS_FOLDER_ID
+            | TRACKED_MAIL_PROCESSING_FOLDER_ID
+            | TODO_SEARCH_FOLDER_ID
+            | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+            | SUGGESTED_CONTACTS_FOLDER_ID
+            | CONTACTS_SEARCH_FOLDER_ID
+            | DOCUMENT_LIBRARIES_FOLDER_ID
+            | IM_CONTACT_LIST_FOLDER_ID
+            | QUICK_CONTACTS_FOLDER_ID
+            | SYNC_ISSUES_FOLDER_ID
+            | CONFLICTS_FOLDER_ID
+            | LOCAL_FAILURES_FOLDER_ID
+            | SERVER_FAILURES_FOLDER_ID
+            | CONVERSATION_HISTORY_FOLDER_ID
+    )
 }
 
 pub(crate) fn message_entry_id_from_object_ids(
@@ -316,6 +374,61 @@ mod tests {
             object_id_from_folder_identifier_bytes(&entry_id),
             Some(object_id)
         );
+    }
+
+    #[test]
+    fn message_entry_id_uses_private_mailbox_shape_with_source_key_counters() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let message_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER + 7);
+        let entry_id =
+            message_entry_id_from_object_ids(mailbox_guid, CALENDAR_FOLDER_ID, message_id)
+                .expect("message EntryID");
+
+        assert_eq!(entry_id.len(), 70);
+        assert_eq!(&entry_id[..4], &0u32.to_le_bytes());
+        assert_eq!(&entry_id[4..20], &mailbox_guid.to_bytes_le());
+        assert_eq!(&entry_id[20..22], &0x0007u16.to_le_bytes());
+        assert_eq!(&entry_id[22..38], &STORE_REPLICA_GUID);
+        assert_eq!(&entry_id[38..44], &globcnt_bytes(CALENDAR_FOLDER_COUNTER));
+        assert_eq!(&entry_id[44..46], &0u16.to_le_bytes());
+        assert_eq!(&entry_id[46..62], &STORE_REPLICA_GUID);
+        assert_eq!(
+            &entry_id[62..68],
+            &source_key_for_object_id(message_id)[16..22]
+        );
+        assert_eq!(&entry_id[68..70], &0u16.to_le_bytes());
+    }
+
+    #[test]
+    fn stale_cached_special_folder_identifiers_normalize_to_canonical_ids() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let mut entry_id =
+            folder_entry_id_from_object_id(mailbox_guid, CALENDAR_FOLDER_ID).unwrap();
+        entry_id[22..38].copy_from_slice(&[0xA5; 16]);
+        assert_eq!(
+            object_id_from_folder_identifier_bytes(&entry_id),
+            Some(CALENDAR_FOLDER_ID)
+        );
+
+        let mut long_term_id = long_term_id_from_object_id(CALENDAR_FOLDER_ID).unwrap();
+        long_term_id[..16].copy_from_slice(&[0xA5; 16]);
+        assert_eq!(
+            object_id_from_folder_identifier_bytes(&long_term_id),
+            Some(CALENDAR_FOLDER_ID)
+        );
+    }
+
+    #[test]
+    fn stale_cached_normal_item_identifiers_are_not_accepted_as_special_folders() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let object_id = mapi_store_id(FIRST_DYNAMIC_GLOBAL_COUNTER);
+        let mut entry_id = folder_entry_id_from_object_id(mailbox_guid, object_id).unwrap();
+        entry_id[22..38].copy_from_slice(&[0xA5; 16]);
+        assert_eq!(object_id_from_folder_identifier_bytes(&entry_id), None);
+
+        let mut long_term_id = long_term_id_from_object_id(object_id).unwrap();
+        long_term_id[..16].copy_from_slice(&[0xA5; 16]);
+        assert_eq!(object_id_from_folder_identifier_bytes(&long_term_id), None);
     }
 
     #[test]

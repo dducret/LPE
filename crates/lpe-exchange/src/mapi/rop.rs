@@ -1199,7 +1199,7 @@ fn outlook_logon_bootstrap_row_shape(
 }
 
 fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u32]) -> bool {
-    const OUTLOOK_BOOTSTRAP_LOGON_PROPS: [u32; 8] = [
+    const OUTLOOK_BOOTSTRAP_LOGON_PROPS: [u32; 9] = [
         PID_TAG_MAILBOX_OWNER_NAME_W,
         PID_TAG_MAILBOX_OWNER_ENTRY_ID,
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
@@ -1208,6 +1208,7 @@ fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u
         PID_TAG_PRIVATE,
         PID_TAG_OUTLOOK_STORE_STATE,
         PID_TAG_USER_GUID,
+        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE,
     ];
 
     matches!(object, Some(MapiObject::Logon))
@@ -1244,6 +1245,9 @@ fn format_outlook_logon_bootstrap_property_details(
                     format!("outlook_store_state={value:#010x}")
                 }
                 (PID_TAG_PRIVATE, MapiValue::Bool(value)) => format!("private={value}"),
+                (PID_TAG_MAX_SUBMIT_MESSAGE_SIZE, MapiValue::U32(value)) => {
+                    format!("max_submit_message_size_kb={value}")
+                }
                 (
                     PID_TAG_MAILBOX_OWNER_NAME_W | PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
                     MapiValue::String(value),
@@ -5071,6 +5075,7 @@ mod tests {
             PID_TAG_PRIVATE,
             PID_TAG_OUTLOOK_STORE_STATE,
             PID_TAG_USER_GUID,
+            PID_TAG_MAX_SUBMIT_MESSAGE_SIZE,
         ];
 
         assert!(is_outlook_logon_bootstrap_getprops(
@@ -5084,12 +5089,13 @@ mod tests {
         assert!(details.contains("r4=0x00000001"));
         assert!(details.contains("dn_null_terminated=true"));
         assert!(details.contains("private=true"));
+        assert!(details.contains("max_submit_message_size_kb=35840"));
         assert!(details.contains("bit_count=32"));
         assert!(details.contains("length_matches_directory=true"));
-        assert_eq!(row_shape.estimated_rop_payload_bytes, 2453);
-        assert_eq!(row_shape.property_row_bytes, 2446);
+        assert_eq!(row_shape.estimated_rop_payload_bytes, 2457);
+        assert_eq!(row_shape.property_row_bytes, 2450);
         assert_eq!(row_shape.icon_row_bytes, 2304);
-        assert_eq!(row_shape.non_icon_row_bytes, 142);
+        assert_eq!(row_shape.non_icon_row_bytes, 146);
     }
 
     #[test]
