@@ -201,6 +201,11 @@ not by itself authorize broad client publication.
   state, mailbox owner, user GUID, server icons, and max submit message size.
 - `RopGetReceiveFolder` maps Outlook `IPM.Appointment` probes to the canonical
   Calendar folder so cached-mode bootstrap does not fall back to Inbox.
+- Calendar RCA diagnostics log the `PR_IPM_APPOINTMENT_ENTRYID` folder EntryID,
+  decoded Calendar FID, `IPF.Appointment` folder contract, default calendar
+  collection presence, projected event count, and effective access state when
+  Outlook opens the Calendar folder. The log must distinguish a truly wired
+  canonical Calendar projection from an advertised special-folder shell.
 - Unsupported or malformed ROPs use parseable error responses and terminate the
   current buffer as required by the wire contract.
 

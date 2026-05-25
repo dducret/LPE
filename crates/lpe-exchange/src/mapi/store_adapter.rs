@@ -290,6 +290,22 @@ where
         .fetch_accessible_calendar_collections(account_id)
         .await
         .context("fetch MAPI calendar collections")?;
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        calendar_collection_count = calendar_collections.len(),
+        calendar_collection_ids = %calendar_collections
+            .iter()
+            .map(|collection| collection.id.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        default_calendar_collection_loaded = calendar_collections
+            .iter()
+            .any(|collection| matches!(collection.id.as_str(), "default" | "calendar")),
+        message = "rca debug mapi calendar collections loaded"
+    );
     log_mapi_store_load_step(account_id, plan, "fetch task collections", 0);
     let task_collections = store
         .fetch_accessible_task_collections(account_id)
@@ -396,6 +412,20 @@ where
             .await
             .with_context(|| format!("fetch {} MAPI events by id", event_ids.len()))?
     };
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        snapshot_backed_contents = snapshot_backed_contents,
+        requested_calendar_event_identity_count = event_ids.len(),
+        loaded_calendar_event_count = events.len(),
+        loaded_default_calendar_event_count = events
+            .iter()
+            .filter(|event| matches!(event.collection_id.as_str(), "default" | "calendar"))
+            .count(),
+        message = "rca debug mapi calendar events loaded"
+    );
     let tasks = if snapshot_backed_contents {
         log_mapi_store_load_step(
             account_id,

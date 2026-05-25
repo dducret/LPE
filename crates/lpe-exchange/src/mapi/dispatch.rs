@@ -2099,6 +2099,73 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         .join("")
 }
 
+fn log_calendar_folder_contract(
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    mailbox_folder_found: bool,
+    collaboration_folder_found: bool,
+    advertised_special_folder: bool,
+    snapshot: &MapiMailStoreSnapshot,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+) {
+    if folder_id != CALENDAR_FOLDER_ID {
+        return;
+    }
+    let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        principal.account_id,
+        CALENDAR_FOLDER_ID,
+    )
+    .unwrap_or_default();
+    let source_key = mapi_mailstore::source_key_for_store_id(CALENDAR_FOLDER_ID);
+    let parent_source_key = mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID);
+    let calendar_folder = snapshot.collaboration_folder_for_id(CALENDAR_FOLDER_ID);
+    let calendar_collection_count = snapshot
+        .collaboration_folders()
+        .iter()
+        .filter(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+        .count();
+    let calendar_access = snapshot.folder_access_for_principal(folder_id, principal.account_id);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x02",
+        folder_id = "0x0000000000100001",
+        expected_parent_folder_id = "0x0000000000040001",
+        expected_container_class = "IPF.Appointment",
+        expected_item_message_class = "IPM.Appointment",
+        default_entry_id_bytes = entry_id.len(),
+        default_entry_id_preview = %hex_preview(&entry_id, 24),
+        default_entry_id_decodes_to_calendar =
+            crate::mapi::identity::object_id_from_folder_entry_id(&entry_id)
+                == Some(CALENDAR_FOLDER_ID),
+        source_key = %bytes_to_hex(&source_key),
+        parent_source_key = %bytes_to_hex(&parent_source_key),
+        mailbox_folder_found = mailbox_folder_found,
+        collaboration_folder_found = collaboration_folder_found,
+        advertised_special_folder = advertised_special_folder,
+        canonical_calendar_collection_count = calendar_collection_count,
+        canonical_calendar_collection_id =
+            calendar_folder.map(|folder| folder.collection.id.as_str()).unwrap_or(""),
+        canonical_calendar_collection_name =
+            calendar_folder.map(|folder| folder.collection.display_name.as_str()).unwrap_or(""),
+        canonical_calendar_item_count =
+            calendar_folder.map(|folder| folder.item_count).unwrap_or(0),
+        projected_calendar_event_count = snapshot.events_for_folder(CALENDAR_FOLDER_ID).len(),
+        projected_folder_content_count =
+            folder_message_count(folder_id, mailboxes, emails, snapshot),
+        mapi_folder_access_mask = %format!("0x{MAPI_FOLDER_ACCESS:08x}"),
+        acl_access_row_present = calendar_access.is_some(),
+        acl_may_read = calendar_access.map(|access| access.may_read).unwrap_or(true),
+        acl_may_write = calendar_access.map(|access| access.may_write).unwrap_or(true),
+        acl_may_delete = calendar_access.map(|access| access.may_delete).unwrap_or(true),
+        message = "rca debug mapi calendar folder contract"
+    );
+}
+
 fn summarize_handle_table(handle_table: &[u8], parse_error: &mut String) -> (usize, String) {
     match read_handle_table(handle_table) {
         Ok(handles) => {
@@ -2269,6 +2336,16 @@ where
                     advertised_special_folder = advertised_special_folder,
                     result = open_folder_result,
                     message = "rca debug mapi open folder"
+                );
+                log_calendar_folder_contract(
+                    principal,
+                    folder_id,
+                    mailbox_folder_found,
+                    collaboration_folder_found,
+                    advertised_special_folder,
+                    snapshot,
+                    mailboxes,
+                    emails,
                 );
                 if open_folder_result == "not_found" {
                     responses.extend_from_slice(&rop_error_response(

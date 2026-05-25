@@ -3067,11 +3067,7 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn message_ids(&self) -> Vec<u64> {
-        let (count_offset, ids_offset) = if self.rop_id == 0x59 {
-            (0, 2)
-        } else {
-            (2, 4)
-        };
+        let (count_offset, ids_offset) = if self.rop_id == 0x59 { (0, 2) } else { (2, 4) };
         let Some(count_bytes) = self.payload.get(count_offset..count_offset + 2) else {
             return Vec::new();
         };

@@ -2898,11 +2898,8 @@ fn assert_content_final_state_includes_counters(
     let idset_given = mapi_binary_property_value(bytes, META_TAG_IDSET_GIVEN);
     for message_counter in message_counters {
         assert!(
-            strict_replguid_globset_contains_counter(
-                idset_given,
-                &globcnt_bytes(*message_counter)
-            )
-            .unwrap(),
+            strict_replguid_globset_contains_counter(idset_given, &globcnt_bytes(*message_counter))
+                .unwrap(),
             "final MetaTagIdsetGiven missing message counter {message_counter}"
         );
     }
@@ -3599,9 +3596,7 @@ fn mapi_binary_property(tag: u32, value: &[u8]) -> Vec<u8> {
 }
 
 fn mapi_message_global_counter(id: &Uuid) -> u64 {
-    crate::mapi::identity::mapped_mapi_object_id(id)
-        .unwrap_or_else(|| test_mapi_uuid_id(id))
-        >> 16
+    crate::mapi::identity::mapped_mapi_object_id(id).unwrap_or_else(|| test_mapi_uuid_id(id)) >> 16
 }
 
 fn mapi_message_cnset_property(tag: u32, changes: &[u64]) -> Vec<u8> {
