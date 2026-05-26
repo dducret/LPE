@@ -294,6 +294,8 @@ pub(in crate::mapi) const PID_LID_TASK_DUE_DATE: u32 = 0x0000_8105;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE: u32 = 0x0000_820D;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE: u32 = 0x0000_820E;
 pub(in crate::mapi) const PID_LID_BUSY_STATUS: u32 = 0x0000_8205;
+pub(in crate::mapi) const PID_LID_LOCATION: u32 = 0x0000_8208;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_DURATION: u32 = 0x0000_8213;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE: u32 = 0x0000_8215;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS: u32 = 0x0000_8217;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
@@ -331,6 +333,8 @@ pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG: u32 = 0x8002_0102;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_START_WHOLE_TAG: u32 = 0x820D_0040;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_END_WHOLE_TAG: u32 = 0x820E_0040;
 pub(in crate::mapi) const PID_LID_BUSY_STATUS_TAG: u32 = 0x8205_0003;
+pub(in crate::mapi) const PID_LID_LOCATION_W_TAG: u32 = 0x8208_001F;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_DURATION_TAG: u32 = 0x8213_0003;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS_TAG: u32 = 0x8217_0003;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
@@ -422,8 +426,10 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_TASK_START_DATE, PSETID_TASK_GUID),
             (PID_LID_TASK_DUE_DATE, PSETID_TASK_GUID),
             (PID_LID_BUSY_STATUS, PSETID_APPOINTMENT_GUID),
+            (PID_LID_LOCATION, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_START_WHOLE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_END_WHOLE, PSETID_APPOINTMENT_GUID),
+            (PID_LID_APPOINTMENT_DURATION, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_STATE_FLAGS, PSETID_APPOINTMENT_GUID),
             (PID_LID_COMPANIES, PSETID_COMMON_GUID),
@@ -1531,13 +1537,16 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_END_DATE | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
             Some(MapiValue::I64(event_end_filetime(event) as i64))
         }
-        PID_TAG_LOCATION_W => Some(MapiValue::String(event.location.clone())),
+        PID_TAG_LOCATION_W | PID_LID_LOCATION_W_TAG => {
+            Some(MapiValue::String(event.location.clone()))
+        }
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.Appointment".to_string())),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(event_size(event))),
         PID_LID_BUSY_STATUS_TAG => Some(MapiValue::I32(appointment_busy_status(event))),
+        PID_LID_APPOINTMENT_DURATION_TAG => Some(MapiValue::I32(appointment_duration(event))),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
@@ -1583,6 +1592,15 @@ fn appointment_state_flags(event: &AccessibleEvent) -> i32 {
         flags |= 0x0000_0004;
     }
     flags
+}
+
+fn appointment_duration(event: &AccessibleEvent) -> i32 {
+    let start = event_start_filetime(event);
+    let end = event_end_filetime(event);
+    if end <= start {
+        return 0;
+    }
+    ((end - start) / 600_000_000).min(i32::MAX as u64) as i32
 }
 
 fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
@@ -2936,23 +2954,24 @@ pub(in crate::mapi) fn event_input_from_mapi(
 ) -> Result<UpsertClientEventInput> {
     reject_unsupported_mapi_event_properties(properties)?;
     let participants = event_participants_from_mapi(existing, properties);
-    let start = properties
+    let start_filetime = properties
         .get(&PID_TAG_START_DATE)
-        .and_then(MapiValue::as_i64)
-        .and_then(filetime_to_date_time)
-        .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
-    let end = properties
+        .and_then(MapiValue::as_i64);
+    let end_filetime = properties
         .get(&PID_TAG_END_DATE)
         .and_then(MapiValue::as_i64)
-        .and_then(filetime_to_date_time);
-    let duration_minutes = match (
-        properties
-            .get(&PID_TAG_START_DATE)
-            .and_then(MapiValue::as_i64),
-        properties
-            .get(&PID_TAG_END_DATE)
-            .and_then(MapiValue::as_i64),
-    ) {
+        .or_else(|| {
+            let start = start_filetime?;
+            let duration = properties
+                .get(&PID_LID_APPOINTMENT_DURATION_TAG)
+                .and_then(MapiValue::as_i64)?;
+            Some(start.saturating_add(duration.max(0).saturating_mul(600_000_000)))
+        });
+    let start = start_filetime
+        .and_then(filetime_to_date_time)
+        .unwrap_or_else(|| (existing.date.clone(), existing.time.clone()));
+    let end = end_filetime.and_then(filetime_to_date_time);
+    let duration_minutes = match (start_filetime, end_filetime) {
         (Some(start), Some(end)) if end >= start => {
             ((end - start) / 10_000_000 / 60).clamp(0, i64::from(i32::MAX)) as i32
         }
@@ -2991,8 +3010,11 @@ pub(in crate::mapi) fn event_input_from_mapi(
             ],
         )
         .unwrap_or_else(|| existing.title.clone()),
-        location: optional_pending_text_property(properties, &[PID_TAG_LOCATION_W])
-            .unwrap_or_else(|| existing.location.clone()),
+        location: optional_pending_text_property(
+            properties,
+            &[PID_TAG_LOCATION_W, PID_LID_LOCATION_W_TAG],
+        )
+        .unwrap_or_else(|| existing.location.clone()),
         organizer_json: participants.organizer_json,
         attendees: participants.attendees,
         attendees_json: participants.attendees_json,
@@ -3099,8 +3121,10 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
                 | PID_TAG_START_DATE
                 | PID_TAG_END_DATE
                 | PID_TAG_LOCATION_W
+                | PID_LID_LOCATION_W_TAG
                 | PID_TAG_BODY_HTML_W
                 | PID_LID_BUSY_STATUS_TAG
+                | PID_LID_APPOINTMENT_DURATION_TAG
                 | PID_LID_APPOINTMENT_SUB_TYPE_TAG
                 | PID_TAG_MESSAGE_CLASS_W
         );
@@ -5302,6 +5326,19 @@ mod tests {
             Some(MapiValue::String("Room A".to_string()))
         );
         assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_LOCATION_W_TAG),
+            Some(MapiValue::String("Room A".to_string()))
+        );
+        assert_eq!(
+            event_property_value(
+                &event,
+                1,
+                CALENDAR_FOLDER_ID,
+                PID_LID_APPOINTMENT_DURATION_TAG
+            ),
+            Some(MapiValue::I32(60))
+        );
+        assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_HAS_ATTACHMENTS),
             Some(MapiValue::Bool(false))
         );
@@ -5330,6 +5367,15 @@ mod tests {
             PID_TAG_BODY_HTML_W,
             MapiValue::String("<p>Updated</p>".to_string()),
         );
+        properties.insert(
+            PID_LID_LOCATION_W_TAG,
+            MapiValue::String("Room B".to_string()),
+        );
+        properties.insert(
+            PID_TAG_START_DATE,
+            MapiValue::I64(date_time_to_filetime("2026-05-22", "10:00") as i64),
+        );
+        properties.insert(PID_LID_APPOINTMENT_DURATION_TAG, MapiValue::I32(45));
 
         let input = event_input_from_mapi(
             Uuid::nil(),
@@ -5342,6 +5388,10 @@ mod tests {
         assert_eq!(input.title, "Updated");
         assert!(input.all_day);
         assert_eq!(input.body_html, "<p>Updated</p>");
+        assert_eq!(input.date, "2026-05-22");
+        assert_eq!(input.time, "10:00");
+        assert_eq!(input.duration_minutes, 45);
+        assert_eq!(input.location, "Room B");
         assert_eq!(input.status, "tentative");
         assert_eq!(input.recurrence_rule, existing.recurrence_rule);
         assert_eq!(input.attendees, "Bob One, Cara Two");
