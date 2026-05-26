@@ -1104,14 +1104,10 @@ fn log_set_properties_specific_debug(
     object: Option<&MapiObject>,
     probe: &SetPropertiesProbeRequest,
 ) {
-    let root_default_folder_values_stripped = matches!(
-        object,
-        Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            ..
-        })
-    ) && !probe.default_folder_entry_id_values.is_empty();
-    let default_folder_entry_id_storage_mode = if root_default_folder_values_stripped {
+    let default_folder_identification_values_stripped =
+        strips_default_folder_identification_values(object)
+            && !probe.default_folder_entry_id_values.is_empty();
+    let default_folder_entry_id_storage_mode = if default_folder_identification_values_stripped {
         "accepted_canonical_projection_not_persisted"
     } else if probe.default_folder_entry_id_values.is_empty() {
         "not_default_folder_entry_ids"
@@ -1133,7 +1129,7 @@ fn log_set_properties_specific_debug(
         property_tags = %format_debug_property_tags(&probe.property_tags),
         property_value_shapes = %probe.property_value_shapes,
         default_folder_entry_id_values = %probe.default_folder_entry_id_values,
-        root_default_folder_values_stripped = root_default_folder_values_stripped,
+        default_folder_identification_values_stripped = default_folder_identification_values_stripped,
         default_folder_entry_id_storage_mode = default_folder_entry_id_storage_mode,
         parse_error = %probe.parse_error,
         "rca debug mapi set properties specific"
@@ -1145,6 +1141,28 @@ fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> Stri
         .iter()
         .filter_map(|(tag, value)| {
             let storage_tag = canonical_property_storage_tag(*tag);
+            if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
+                return Some(indexed_special_folder_entry_ids_for_debug(
+                    storage_tag,
+                    "PidTagAdditionalRenEntryIds",
+                    value,
+                    &[
+                        CONFLICTS_FOLDER_ID,
+                        SYNC_ISSUES_FOLDER_ID,
+                        LOCAL_FAILURES_FOLDER_ID,
+                        SERVER_FAILURES_FOLDER_ID,
+                        JUNK_FOLDER_ID,
+                    ],
+                ));
+            }
+            if storage_tag == PID_TAG_FREE_BUSY_ENTRY_IDS {
+                return Some(indexed_special_folder_entry_ids_for_debug(
+                    storage_tag,
+                    "PidTagFreeBusyEntryIds",
+                    value,
+                    &[0, 0, 0, FREEBUSY_DATA_FOLDER_ID],
+                ));
+            }
             let expected_folder_id = default_folder_entry_id_expected_folder_id(storage_tag)?;
             let property_name = default_folder_entry_id_property_name(storage_tag);
             let MapiValue::Binary(bytes) = value else {
@@ -1168,6 +1186,78 @@ fn default_folder_entry_id_values_for_debug(values: &[(u32, MapiValue)]) -> Stri
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn indexed_special_folder_entry_ids_for_debug(
+    storage_tag: u32,
+    property_name: &'static str,
+    value: &MapiValue,
+    expected_folder_ids: &[u64],
+) -> String {
+    let MapiValue::MultiBinary(values) = value else {
+        return format!(
+            "{storage_tag:#010x}:{property_name}:value_type={}",
+            mapi_value_debug_shape(value)
+        );
+    };
+    let mut summaries = Vec::new();
+    for (index, bytes) in values.iter().enumerate() {
+        let expected_folder_id = expected_folder_ids.get(index).copied().unwrap_or(0);
+        summaries.push(format_indexed_special_folder_entry_id(
+            index,
+            bytes,
+            expected_folder_id,
+        ));
+    }
+    if values.len() < expected_folder_ids.len() {
+        summaries.push(format!(
+            "missing_expected_indexes={}",
+            (values.len()..expected_folder_ids.len())
+                .map(|index| index.to_string())
+                .collect::<Vec<_>>()
+                .join("+")
+        ));
+    }
+    format!(
+        "{storage_tag:#010x}:{property_name}:count={}:{}",
+        values.len(),
+        summaries.join(";")
+    )
+}
+
+fn format_indexed_special_folder_entry_id(
+    index: usize,
+    bytes: &[u8],
+    expected_folder_id: u64,
+) -> String {
+    if bytes.is_empty() {
+        return format!(
+            "index={index}:bytes=0:expected_folder_id={}:matches_expected={}",
+            format_expected_folder_id_for_debug(expected_folder_id),
+            expected_folder_id == 0
+        );
+    }
+    let decoded_folder_id =
+        crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes).unwrap_or(0);
+    let decoded_name = if decoded_folder_id == 0 {
+        "invalid"
+    } else {
+        post_hierarchy_probe_folder_name(decoded_folder_id)
+    };
+    format!(
+        "index={index}:bytes={}:decoded_folder_id=0x{decoded_folder_id:016x}:decoded_name={decoded_name}:expected_folder_id={}:matches_expected={}",
+        bytes.len(),
+        format_expected_folder_id_for_debug(expected_folder_id),
+        decoded_folder_id == expected_folder_id
+    )
+}
+
+fn format_expected_folder_id_for_debug(folder_id: u64) -> String {
+    if folder_id == 0 {
+        "empty".to_string()
+    } else {
+        format!("0x{folder_id:016x}")
+    }
 }
 
 fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
@@ -1227,23 +1317,27 @@ fn folder_set_property_problems(
         .collect()
 }
 
-fn root_default_folder_safe_property_values(
+fn default_folder_identification_safe_property_values(
     object: Option<&MapiObject>,
     values: Vec<(u32, MapiValue)>,
 ) -> Vec<(u32, MapiValue)> {
-    if !matches!(
-        object,
-        Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
-            ..
-        })
-    ) {
+    if !strips_default_folder_identification_values(object) {
         return values;
     }
     values
         .into_iter()
         .filter(|(tag, _)| !is_default_folder_identification_property_tag(*tag))
         .collect()
+}
+
+fn strips_default_folder_identification_values(object: Option<&MapiObject>) -> bool {
+    matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
+            ..
+        })
+    )
 }
 
 fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
@@ -3725,8 +3819,10 @@ where
                             ));
                             continue;
                         }
-                        let values =
-                            root_default_folder_safe_property_values(object.as_ref(), values);
+                        let values = default_folder_identification_safe_property_values(
+                            object.as_ref(),
+                            values,
+                        );
                         apply_mapi_property_values(
                             input_object_mut(session, &handle_slots, &request),
                             values,
@@ -8725,6 +8821,92 @@ mod tests {
                 &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
             ),
             vec![(0, PID_TAG_OST_OSTID, 0x8004_0102)]
+        );
+    }
+
+    #[test]
+    fn default_folder_entry_id_values_debug_decodes_indexed_special_folder_ids() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let values = vec![
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                CONFLICTS_FOLDER_ID,
+            )
+            .unwrap(),
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                SYNC_ISSUES_FOLDER_ID,
+            )
+            .unwrap(),
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                LOCAL_FAILURES_FOLDER_ID,
+            )
+            .unwrap(),
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                mailbox_guid,
+                SERVER_FAILURES_FOLDER_ID,
+            )
+            .unwrap(),
+        ];
+
+        let debug = default_folder_entry_id_values_for_debug(&[(
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+            MapiValue::MultiBinary(values),
+        )]);
+
+        assert!(debug.contains("PidTagAdditionalRenEntryIds:count=4"));
+        assert!(debug.contains("index=0"));
+        assert!(debug.contains("decoded_name=conflicts"));
+        assert!(debug.contains("missing_expected_indexes=4"));
+    }
+
+    #[test]
+    fn default_folder_entry_id_values_debug_decodes_freebusy_data_index() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let freebusy_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            mailbox_guid,
+            FREEBUSY_DATA_FOLDER_ID,
+        )
+        .unwrap();
+
+        let debug = default_folder_entry_id_values_for_debug(&[(
+            PID_TAG_FREE_BUSY_ENTRY_IDS,
+            MapiValue::MultiBinary(vec![Vec::new(), Vec::new(), Vec::new(), freebusy_entry_id]),
+        )]);
+
+        assert!(debug.contains("PidTagFreeBusyEntryIds:count=4"));
+        assert!(debug.contains("index=3"));
+        assert!(debug.contains("decoded_name=freebusy_data"));
+        assert!(debug.contains("matches_expected=true"));
+    }
+
+    #[test]
+    fn default_folder_identification_values_do_not_shadow_canonical_inbox_projection() {
+        let inbox = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let retained = default_folder_identification_safe_property_values(
+            Some(&inbox),
+            vec![
+                (
+                    PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                    MapiValue::MultiBinary(vec![Vec::new()]),
+                ),
+                (
+                    PID_TAG_DISPLAY_NAME_W,
+                    MapiValue::String("Inbox".to_string()),
+                ),
+            ],
+        );
+
+        assert_eq!(
+            retained,
+            vec![(
+                PID_TAG_DISPLAY_NAME_W,
+                MapiValue::String("Inbox".to_string())
+            )]
         );
     }
 
