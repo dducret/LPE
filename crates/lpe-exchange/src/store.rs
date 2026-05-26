@@ -150,10 +150,16 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) current_modseq: u64,
     pub(crate) changed_mailbox_ids: Vec<Uuid>,
     pub(crate) changed_message_ids: Vec<Uuid>,
+    pub(crate) changed_contact_ids: Vec<Uuid>,
+    pub(crate) changed_calendar_event_ids: Vec<Uuid>,
+    pub(crate) changed_task_ids: Vec<Uuid>,
     pub(crate) changed_note_ids: Vec<Uuid>,
     pub(crate) changed_journal_entry_ids: Vec<Uuid>,
     pub(crate) changed_conversation_action_ids: Vec<Uuid>,
     pub(crate) deleted_message_ids: Vec<Uuid>,
+    pub(crate) deleted_contact_ids: Vec<Uuid>,
+    pub(crate) deleted_calendar_event_ids: Vec<Uuid>,
+    pub(crate) deleted_task_ids: Vec<Uuid>,
     pub(crate) deleted_note_ids: Vec<Uuid>,
     pub(crate) deleted_journal_entry_ids: Vec<Uuid>,
     pub(crate) deleted_conversation_action_ids: Vec<Uuid>,
@@ -166,10 +172,16 @@ impl Default for MapiSyncChangeSet {
             current_modseq: 1,
             changed_mailbox_ids: Vec::new(),
             changed_message_ids: Vec::new(),
+            changed_contact_ids: Vec::new(),
+            changed_calendar_event_ids: Vec::new(),
+            changed_task_ids: Vec::new(),
             changed_note_ids: Vec::new(),
             changed_journal_entry_ids: Vec::new(),
             changed_conversation_action_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
+            deleted_contact_ids: Vec::new(),
+            deleted_calendar_event_ids: Vec::new(),
+            deleted_task_ids: Vec::new(),
             deleted_note_ids: Vec::new(),
             deleted_journal_entry_ids: Vec::new(),
             deleted_conversation_action_ids: Vec::new(),
@@ -841,6 +853,7 @@ impl ExchangeStore for Storage {
             repair_reserved_mapi_identity_counter_collisions(&mut tx, tenant_id, account_id)
                 .await?;
             repair_invalid_mapi_identity_change_keys(&mut tx, tenant_id, account_id).await?;
+            repair_stale_mapi_collaboration_identities(&mut tx, tenant_id, account_id).await?;
 
             let mut records = Vec::with_capacity(requests.len());
             for request in requests {
@@ -1409,6 +1422,8 @@ impl ExchangeStore for Storage {
                 current_modseq: cursor.get::<i64, _>("current_modseq") as u64,
                 ..Default::default()
             };
+            let special_object_kind =
+                mapi_special_object_kind_for_checkpoint_mailbox(checkpoint_kind, mailbox_id);
 
             let rows = sqlx::query(
                 r#"
@@ -1428,10 +1443,14 @@ impl ExchangeStore for Storage {
                                 AND ($5::uuid IS NULL OR mailbox_id = $5 OR mailbox_id IS NULL)
                             )
                             OR ($5::uuid IS NULL AND object_kind IN (
+                                'contact',
+                                'calendar_event',
+                                'task',
                                 'note',
                                 'journal_entry',
                                 'conversation_action'
                             ))
+                            OR ($6::text IS NOT NULL AND object_kind = $6)
                         )
                     )
                   )
@@ -1444,6 +1463,7 @@ impl ExchangeStore for Storage {
             .bind(account_id)
             .bind(checkpoint_kind.as_str())
             .bind(mailbox_id)
+            .bind(special_object_kind)
             .fetch_all(self.pool())
             .await?;
 
@@ -1471,6 +1491,30 @@ impl ExchangeStore for Storage {
                             push_unique_uuid(&mut changes.deleted_message_ids, message_id);
                         } else {
                             push_unique_uuid(&mut changes.changed_message_ids, message_id);
+                        }
+                    }
+                    "contact" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(&mut changes.deleted_contact_ids, object_id);
+                        } else {
+                            push_unique_uuid(&mut changes.changed_contact_ids, object_id);
+                        }
+                    }
+                    "calendar_event" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(&mut changes.deleted_calendar_event_ids, object_id);
+                        } else {
+                            push_unique_uuid(&mut changes.changed_calendar_event_ids, object_id);
+                        }
+                    }
+                    "task" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_uuid(&mut changes.deleted_task_ids, object_id);
+                        } else {
+                            push_unique_uuid(&mut changes.changed_task_ids, object_id);
                         }
                     }
                     "note" => {
@@ -1538,9 +1582,16 @@ impl ExchangeStore for Storage {
                     FROM tombstones
                     WHERE tenant_id = $1
                       AND account_id = $2
-                      AND object_kind IN ('note', 'journal_entry', 'conversation_action')
+                      AND object_kind IN (
+                          'contact',
+                          'calendar_event',
+                          'task',
+                          'note',
+                          'journal_entry',
+                          'conversation_action'
+                      )
                       AND change_cursor > $3
-                      AND $4::uuid IS NULL
+                      AND ($4::uuid IS NULL OR object_kind = $5)
                       AND (retained_until IS NULL OR retained_until > NOW())
                     ORDER BY change_cursor ASC
                     LIMIT 1000
@@ -1550,10 +1601,21 @@ impl ExchangeStore for Storage {
                 .bind(account_id)
                 .bind(after_change_sequence as i64)
                 .bind(mailbox_id)
+                .bind(special_object_kind)
                 .fetch_all(self.pool())
                 .await?;
                 for row in collaboration_tombstones {
                     match row.get::<String, _>("object_kind").as_str() {
+                        "contact" => {
+                            push_unique_uuid(&mut changes.deleted_contact_ids, row.get("object_id"))
+                        }
+                        "calendar_event" => push_unique_uuid(
+                            &mut changes.deleted_calendar_event_ids,
+                            row.get("object_id"),
+                        ),
+                        "task" => {
+                            push_unique_uuid(&mut changes.deleted_task_ids, row.get("object_id"))
+                        }
                         "note" => {
                             push_unique_uuid(&mut changes.deleted_note_ids, row.get("object_id"))
                         }
@@ -2552,6 +2614,56 @@ impl ExchangeStore for Storage {
     }
 }
 
+fn mapi_special_object_kind_for_checkpoint_mailbox(
+    checkpoint_kind: MapiCheckpointKind,
+    mailbox_id: Option<Uuid>,
+) -> Option<&'static str> {
+    if checkpoint_kind == MapiCheckpointKind::Hierarchy {
+        return None;
+    }
+    let mailbox_id = mailbox_id?;
+    let matches_virtual_folder = |folder_id| {
+        crate::mapi_mailstore::virtual_special_mailbox(folder_id)
+            .map(|mailbox| mailbox.id == mailbox_id)
+            .unwrap_or(false)
+    };
+    if [
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID,
+        crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
+        crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
+        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+    ]
+    .into_iter()
+    .any(matches_virtual_folder)
+    {
+        return Some("contact");
+    }
+    if matches_virtual_folder(crate::mapi::identity::CALENDAR_FOLDER_ID) {
+        return Some("calendar_event");
+    }
+    if [
+        crate::mapi::identity::TASKS_FOLDER_ID,
+        crate::mapi::identity::TODO_SEARCH_FOLDER_ID,
+        crate::mapi::identity::REMINDERS_FOLDER_ID,
+    ]
+    .into_iter()
+    .any(matches_virtual_folder)
+    {
+        return Some("task");
+    }
+    if matches_virtual_folder(crate::mapi::identity::NOTES_FOLDER_ID) {
+        return Some("note");
+    }
+    if matches_virtual_folder(crate::mapi::identity::JOURNAL_FOLDER_ID) {
+        return Some("journal_entry");
+    }
+    if matches_virtual_folder(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID) {
+        return Some("conversation_action");
+    }
+    None
+}
+
 async fn advance_mapi_replica_counter_past_allocated(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
@@ -2883,6 +2995,98 @@ async fn repair_invalid_mapi_identity_change_keys(
         .bind(change_key)
         .execute(&mut **tx)
         .await?;
+    }
+
+    Ok(())
+}
+
+async fn repair_stale_mapi_collaboration_identities(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<()> {
+    let contact_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'contact'
+          AND identity.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM contacts contact
+              WHERE contact.tenant_id = identity.tenant_id
+                AND contact.owner_account_id = identity.account_id
+                AND contact.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let calendar_event_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'calendar_event'
+          AND identity.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM calendar_events event
+              WHERE event.tenant_id = identity.tenant_id
+                AND event.owner_account_id = identity.account_id
+                AND event.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let task_count = sqlx::query(
+        r#"
+        UPDATE mapi_object_identities identity
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE identity.tenant_id = $1
+          AND identity.account_id = $2
+          AND identity.object_kind = 'task'
+          AND identity.deleted_at IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM tasks task
+              WHERE task.tenant_id = identity.tenant_id
+                AND task.owner_account_id = identity.account_id
+                AND task.id = identity.canonical_id
+          )
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+
+    let total_count = contact_count + calendar_event_count + task_count;
+    if total_count > 0 {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            account_id = %account_id,
+            repaired_stale_contact_identity_count = contact_count,
+            repaired_stale_calendar_event_identity_count = calendar_event_count,
+            repaired_stale_task_identity_count = task_count,
+            repaired_stale_collaboration_identity_count = total_count,
+            message = "rca debug mapi repaired stale collaboration identities",
+        );
     }
 
     Ok(())

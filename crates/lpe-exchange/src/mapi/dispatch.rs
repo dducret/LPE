@@ -9,7 +9,9 @@ use super::tables::*;
 use super::transport::*;
 use super::wire::{FastTransferMarker, MapiPropertyType, MapiSyncType, RopId};
 use super::*;
-use crate::store::{MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncCheckpoint};
+use crate::store::{
+    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncChangeSet, MapiSyncCheckpoint,
+};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -6025,14 +6027,8 @@ where
                 let available_special_sync_object_count = all_special_sync_objects.len();
                 let (delta_sync_mailboxes, delta_sync_emails, delta_special_sync_objects) =
                     if checkpoint.is_some() {
-                        let changed_special_ids: &[Uuid] = match folder_id {
-                            NOTES_FOLDER_ID => &changes.changed_note_ids,
-                            JOURNAL_FOLDER_ID => &changes.changed_journal_entry_ids,
-                            CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
-                                &changes.changed_conversation_action_ids
-                            }
-                            _ => &[],
-                        };
+                        let changed_special_ids =
+                            changed_special_ids_for_folder(folder_id, snapshot, &changes);
                         (
                             changed_sync_mailboxes(
                                 all_sync_mailboxes.clone(),
@@ -6100,6 +6096,14 @@ where
                         )
                         .await
                         .unwrap_or_default(),
+                    );
+                }
+                if checkpoint.is_some() {
+                    deleted_message_ids.extend(
+                        deleted_special_object_ids_for_folder(
+                            store, principal, folder_id, snapshot, &changes,
+                        )
+                        .await,
                     );
                 }
                 if checkpoint.is_some() && folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
@@ -6228,6 +6232,14 @@ where
                     checkpoint_delta_mailbox_count,
                     checkpoint_delta_email_count,
                     checkpoint_delta_special_object_count = delta_special_sync_objects.len(),
+                    checkpoint_changed_contact_count = changes.changed_contact_ids.len(),
+                    checkpoint_changed_calendar_event_count =
+                        changes.changed_calendar_event_ids.len(),
+                    checkpoint_changed_task_count = changes.changed_task_ids.len(),
+                    checkpoint_deleted_contact_count = changes.deleted_contact_ids.len(),
+                    checkpoint_deleted_calendar_event_count =
+                        changes.deleted_calendar_event_ids.len(),
+                    checkpoint_deleted_task_count = changes.deleted_task_ids.len(),
                     checkpoint_deleted_message_count,
                     current_change_sequence = changes.current_change_sequence,
                     generated_sync_state_summary =
@@ -7994,6 +8006,97 @@ where
         .into_iter()
         .map(|identity| identity.object_id)
         .collect())
+}
+
+fn changed_special_ids_for_folder<'a>(
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    changes: &'a MapiSyncChangeSet,
+) -> &'a [Uuid] {
+    if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
+        || matches!(
+            folder_id,
+            CONTACTS_SEARCH_FOLDER_ID
+                | SUGGESTED_CONTACTS_FOLDER_ID
+                | QUICK_CONTACTS_FOLDER_ID
+                | IM_CONTACT_LIST_FOLDER_ID
+        )
+    {
+        return &changes.changed_contact_ids;
+    }
+    if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+    {
+        return &changes.changed_calendar_event_ids;
+    }
+    if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Task)
+        || matches!(folder_id, TODO_SEARCH_FOLDER_ID | REMINDERS_FOLDER_ID)
+    {
+        return &changes.changed_task_ids;
+    }
+    match folder_id {
+        NOTES_FOLDER_ID => &changes.changed_note_ids,
+        JOURNAL_FOLDER_ID => &changes.changed_journal_entry_ids,
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => &changes.changed_conversation_action_ids,
+        _ => &[],
+    }
+}
+
+async fn deleted_special_object_ids_for_folder<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+    changes: &MapiSyncChangeSet,
+) -> Vec<u64>
+where
+    S: ExchangeStore,
+{
+    let kind_and_ids = if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
+        || matches!(
+            folder_id,
+            CONTACTS_SEARCH_FOLDER_ID
+                | SUGGESTED_CONTACTS_FOLDER_ID
+                | QUICK_CONTACTS_FOLDER_ID
+                | IM_CONTACT_LIST_FOLDER_ID
+        ) {
+        Some((
+            MapiIdentityObjectKind::Contact,
+            changes.deleted_contact_ids.as_slice(),
+        ))
+    } else if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+    {
+        Some((
+            MapiIdentityObjectKind::CalendarEvent,
+            changes.deleted_calendar_event_ids.as_slice(),
+        ))
+    } else if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Task)
+        || matches!(folder_id, TODO_SEARCH_FOLDER_ID | REMINDERS_FOLDER_ID)
+    {
+        Some((
+            MapiIdentityObjectKind::Task,
+            changes.deleted_task_ids.as_slice(),
+        ))
+    } else {
+        None
+    };
+    let Some((object_kind, object_ids)) = kind_and_ids else {
+        return Vec::new();
+    };
+    mapi_object_ids_for_deleted_changes(store, principal, object_kind, object_ids)
+        .await
+        .unwrap_or_default()
 }
 
 async fn remember_created_mapi_identity<S>(

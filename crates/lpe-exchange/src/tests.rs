@@ -15880,6 +15880,11 @@ async fn mapi_over_http_conversation_action_content_sync_exports_fai_rows() {
 #[tokio::test]
 async fn mapi_over_http_conversation_action_content_sync_exports_deletes() {
     let action_id = Uuid::parse_str("abababab-abab-4bab-8bab-abababababac").unwrap();
+    let conversation_action_checkpoint_id = mapi_mailstore::virtual_special_mailbox(
+        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    )
+    .unwrap()
+    .id;
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -15887,7 +15892,7 @@ async fn mapi_over_http_conversation_action_content_sync_exports_deletes() {
     store
         .store_mapi_sync_checkpoint(
             FakeStore::account().account_id,
-            None,
+            Some(conversation_action_checkpoint_id),
             MapiCheckpointKind::Content,
             50,
             50,
@@ -15913,6 +15918,55 @@ async fn mapi_over_http_conversation_action_content_sync_exports_deletes() {
     assert!(contains_bytes(
         &response_rops,
         &mapi_deleted_message_idset_property(&[action_id])
+    ));
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(stream.deleted_idset.is_some());
+}
+
+#[tokio::test]
+async fn mapi_over_http_contact_content_sync_exports_deletes() {
+    let contact_id = Uuid::parse_str("fb129372-d6b6-4d69-99f7-977ab2a8093f").unwrap();
+    let contacts_checkpoint_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            .unwrap()
+            .id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(contacts_checkpoint_id),
+            MapiCheckpointKind::Content,
+            50,
+            50,
+            serde_json::json!({"source": "previous-run"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 51,
+        current_modseq: 51,
+        deleted_contact_ids: vec![contact_id],
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops_for_store(
+        store,
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        b"client-content-state",
+    )
+    .await;
+
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), None);
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_deleted_message_idset_property(&[contact_id])
     ));
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert!(stream.message_changes.is_empty());
