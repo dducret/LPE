@@ -4673,11 +4673,25 @@ fn append_rop_set_properties(
 }
 
 fn append_rop_modify_recipients(rops: &mut Vec<u8>, input: u8, rows: &[(u32, u8, &[u8])]) {
+    append_rop_modify_recipients_with_columns(
+        rops,
+        input,
+        &[0x3001_001F, 0x3003_001F, 0x0C15_0003],
+        rows,
+    );
+}
+
+fn append_rop_modify_recipients_with_columns(
+    rops: &mut Vec<u8>,
+    input: u8,
+    columns: &[u32],
+    rows: &[(u32, u8, &[u8])],
+) {
     rops.extend_from_slice(&[0x0E, 0x00, input]);
-    rops.extend_from_slice(&3u16.to_le_bytes());
-    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
-    rops.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
-    rops.extend_from_slice(&0x0C15_0003u32.to_le_bytes());
+    rops.extend_from_slice(&(columns.len() as u16).to_le_bytes());
+    for column in columns {
+        rops.extend_from_slice(&column.to_le_bytes());
+    }
     rops.extend_from_slice(&(rows.len() as u16).to_le_bytes());
     for (row_id, recipient_type, row) in rows {
         rops.extend_from_slice(&row_id.to_le_bytes());
@@ -4952,6 +4966,23 @@ fn mapi_wrapped_recipient_row(display_name: &str, address: &str, recipient_type:
     row.extend_from_slice(&utf16z(display_name));
     row.extend_from_slice(&utf16z(address));
     row.extend_from_slice(&(recipient_type as i32).to_le_bytes());
+    row
+}
+
+fn mapi_wrapped_x500_recipient_row(display_name: &str, legacy_dn: &str) -> Vec<u8> {
+    let mut row = Vec::new();
+    row.extend_from_slice(&0x0651u16.to_le_bytes());
+    row.push(1);
+    row.push(0);
+    row.extend_from_slice(legacy_dn.as_bytes());
+    row.push(0);
+    row.extend_from_slice(&utf16z(display_name));
+    row.extend_from_slice(&utf16z(display_name));
+    row.extend_from_slice(&3u16.to_le_bytes());
+    row.push(0);
+    row.extend_from_slice(&6i32.to_le_bytes());
+    row.extend_from_slice(&0i32.to_le_bytes());
+    row.extend_from_slice(&utf16z(display_name));
     row
 }
 
@@ -11280,6 +11311,71 @@ async fn mapi_over_http_modify_recipients_wrapped_recipient_rows_save_canonicall
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].to.len(), 1);
     assert_eq!(recorded[0].to[0].address, "bob@example.test");
+    assert_eq!(recorded[0].to[0].display_name.as_deref(), Some("Bob"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_modify_recipients_x500_rows_save_canonically() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "X500 recipients");
+    let legacy_dn = "O=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=bob";
+    let to_row = mapi_wrapped_x500_recipient_row("Bob", legacy_dn);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_create_message(&mut rops, 1, 2, test_mapi_folder_id(5));
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+    append_rop_modify_recipients_with_columns(
+        &mut rops,
+        2,
+        &[0x0FFE_0003, 0x3900_0003, 0x39FF_001F],
+        &[(1, 0x01, to_row.as_slice())],
+    );
+    append_rop_save_changes_message(&mut rops, 2, 2);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0E, 0x02, 0, 0, 0, 0]));
+
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].to.len(), 1);
+    assert_eq!(recorded[0].to[0].address, legacy_dn);
     assert_eq!(recorded[0].to[0].display_name.as_deref(), Some("Bob"));
 }
 

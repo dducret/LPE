@@ -3443,7 +3443,12 @@ fn parse_simple_pending_recipient_row(
         .unwrap_or(fallback_recipient_type);
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
-            .ok_or_else(|| anyhow!("recipient address is required"))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "recipient address is required;row_format=simple;columns={}",
+                    format_property_tags_for_debug(columns)
+                )
+            })?;
     let display_name = optional_mapi_value_text(&values, &[PID_TAG_DISPLAY_NAME_W])
         .filter(|value| !value.eq_ignore_ascii_case(&address));
 
@@ -3466,16 +3471,19 @@ fn parse_wrapped_pending_recipient_row(
     let address_type = recipient_flags & 0x0007;
     let unicode_strings = recipient_flags & 0x0200 != 0;
 
-    if address_type == 0x01 {
+    let x500_dn = if address_type == 0x01 {
         let _address_prefix_used = cursor.read_u8()?;
         let _display_type = cursor.read_u8()?;
-        let _x500_dn = cursor.read_ascii_z()?;
+        Some(cursor.read_ascii_z()?).filter(|value| !value.is_empty())
     } else if matches!(address_type, 0x06 | 0x07) {
         let entry_id_size = cursor.read_u16()? as usize;
         let _entry_id = cursor.read_bytes(entry_id_size)?;
         let search_key_size = cursor.read_u16()? as usize;
         let _search_key = cursor.read_bytes(search_key_size)?;
-    }
+        None
+    } else {
+        None
+    };
 
     if address_type == 0x00 && recipient_flags & 0x8000 != 0 {
         let _address_type = cursor.read_ascii_z()?;
@@ -3525,7 +3533,13 @@ fn parse_wrapped_pending_recipient_row(
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .or(email_address)
-            .ok_or_else(|| anyhow!("recipient address is required"))?;
+            .or(x500_dn)
+            .ok_or_else(|| {
+                anyhow!(
+                    "recipient address is required;row_format=wrapped;recipient_flags={recipient_flags:#06x};address_type={address_type:#04x};recipient_column_count={recipient_column_count};columns={}",
+                    format_property_tags_for_debug(columns)
+                )
+            })?;
     let display_name = optional_mapi_value_text(&values, &[PID_TAG_DISPLAY_NAME_W])
         .or(display_name)
         .filter(|value| !value.eq_ignore_ascii_case(&address));
