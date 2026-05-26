@@ -667,11 +667,21 @@ fn log_mapi_requested_identity_resolution(
         .iter()
         .map(|identity| identity.object_id)
         .collect::<Vec<_>>();
-    let unresolved_object_ids = plan
+    let missing_object_ids = plan
         .object_ids
         .iter()
         .copied()
         .filter(|object_id| !resolved_object_ids.contains(object_id))
+        .collect::<Vec<_>>();
+    let expected_unbacked_object_ids = missing_object_ids
+        .iter()
+        .copied()
+        .filter(|object_id| is_expected_unbacked_mapi_object(*object_id))
+        .collect::<Vec<_>>();
+    let unresolved_object_ids = missing_object_ids
+        .iter()
+        .copied()
+        .filter(|object_id| !is_expected_unbacked_mapi_object(*object_id))
         .collect::<Vec<_>>();
     tracing::info!(
         rca_debug = true,
@@ -685,6 +695,8 @@ fn log_mapi_requested_identity_resolution(
         resolved_identity_count = identities.len(),
         resolved_identity_object_ids = %format_mapi_object_ids(&resolved_object_ids),
         resolved_identity_kinds = %format_mapi_identity_kinds(identities),
+        expected_unbacked_object_id_count = expected_unbacked_object_ids.len(),
+        expected_unbacked_object_ids = %format_mapi_object_ids(&expected_unbacked_object_ids),
         unresolved_object_id_count = unresolved_object_ids.len(),
         unresolved_object_ids = %format_mapi_object_ids(&unresolved_object_ids),
         unresolved_object_scopes = %format_unresolved_mapi_object_scopes(&unresolved_object_ids),
@@ -803,7 +815,7 @@ fn format_unresolved_mapi_object_scopes(object_ids: &[u64]) -> String {
 }
 
 fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
-    if is_advertised_special_folder(object_id) {
+    if is_expected_unbacked_mapi_object(object_id) {
         return "advertised_special_folder";
     }
     if crate::mapi::identity::global_counter_from_store_id(object_id).is_some() {
@@ -811,6 +823,10 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
     } else {
         "foreign_or_invalid_replid"
     }
+}
+
+fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
+    is_advertised_special_folder(object_id)
 }
 
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {
@@ -1392,6 +1408,23 @@ mod tests {
     }
 
     #[test]
+    fn access_plan_does_not_decode_set_properties_payload_as_import_source_key() {
+        let mut rop = vec![0x0A, 0x00, 0x00];
+        rop.extend_from_slice(&[0x01, 0x00]);
+        rop.extend_from_slice(&PID_TAG_SOURCE_KEY.to_le_bytes());
+        rop.extend_from_slice(&22u16.to_le_bytes());
+        rop.extend_from_slice(&crate::mapi::identity::source_key_for_object_id(
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 12,
+            ),
+        ));
+
+        let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
+
+        assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+    }
+
+    #[test]
     fn missing_mapi_identity_summary_names_object_and_canonical_ids() {
         let missing_id = Uuid::parse_str("fb129372-d6b6-4d69-99f7-977ab2a8093f").unwrap();
         let loaded_id = Uuid::parse_str("17b18079-e962-4d53-9d2f-d68cfb37dcad").unwrap();
@@ -1437,5 +1470,15 @@ mod tests {
                 "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )
         );
+    }
+
+    #[test]
+    fn expected_unbacked_mapi_objects_are_only_advertised_special_folders() {
+        let dynamic_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
+        );
+
+        assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
+        assert!(!is_expected_unbacked_mapi_object(dynamic_id));
     }
 }

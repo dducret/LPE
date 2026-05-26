@@ -2971,6 +2971,12 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn import_message_id(&self) -> Option<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::SynchronizationImportMessageChange)
+        ) {
+            return None;
+        }
         self.import_property_values()
             .ok()?
             .into_iter()
