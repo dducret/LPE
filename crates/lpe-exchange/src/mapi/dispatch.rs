@@ -13,6 +13,59 @@ use crate::store::{MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSy
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
+async fn hard_delete_folder_contents<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<bool, u32> {
+    let mailbox = role_for_folder_id(folder_id)
+        .and_then(|role| mailboxes.iter().find(|mailbox| mailbox.role == role))
+        .or_else(|| {
+            mailboxes.iter().find(|mailbox| {
+                crate::mapi::identity::mapped_mapi_object_id(&mailbox.id) == Some(folder_id)
+            })
+        })
+        .ok_or(0x8004_010Fu32)?;
+
+    if !snapshot
+        .folder_access_for_principal(folder_id, principal.account_id)
+        .map(|access| access.may_delete)
+        .unwrap_or(true)
+    {
+        return Err(0x8007_0005);
+    }
+
+    let mut partial_completion = false;
+    let message_ids = emails
+        .iter()
+        .filter(|email| email_matches_folder(email, folder_id, mailboxes))
+        .map(|email| email.id)
+        .collect::<Vec<_>>();
+
+    for message_id in message_ids {
+        if store
+            .delete_jmap_email_from_mailbox(
+                principal.account_id,
+                mailbox.id,
+                message_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "mapi-hard-delete-folder-contents".to_string(),
+                    subject: format!("folder:{} message:{}", mailbox.id, message_id),
+                },
+            )
+            .await
+            .is_err()
+        {
+            partial_completion = true;
+        }
+    }
+    Ok(partial_completion)
+}
+
 pub(in crate::mapi) async fn execute_response<S, V>(
     store: &S,
     validator: &Validator<V>,
@@ -2635,7 +2688,9 @@ fn sync_mailboxes_with_collaboration_counts(
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<JmapMailbox> {
     for mailbox in &mut mailboxes {
-        let folder_id = mapi_folder_id(mailbox);
+        let Some(folder_id) = try_mapi_folder_id(mailbox) else {
+            continue;
+        };
         if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
             mailbox.total_emails = folder.item_count;
             mailbox.unread_emails = 0;
@@ -7267,9 +7322,43 @@ where
                     first_global_counter,
                 ));
             }
-            Some(RopId::HardDeleteMessagesAndSubfolders) => responses.extend_from_slice(
-                &rop_error_response(request.rop_id, request.response_handle_index(), 0x8004_0102),
-            ),
+            Some(RopId::EmptyFolder | RopId::HardDeleteMessagesAndSubfolders) => {
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+
+                match hard_delete_folder_contents(
+                    store, principal, folder_id, mailboxes, emails, snapshot,
+                )
+                .await
+                {
+                    Ok(partial_completion) => {
+                        if !partial_completion {
+                            session.record_notification(MapiNotificationEvent {
+                                folder_id,
+                                kind: MapiNotificationKind::Content,
+                            });
+                        }
+                        responses.extend_from_slice(&rop_partial_completion_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            partial_completion,
+                        ));
+                    }
+                    Err(error) => responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        error,
+                    )),
+                }
+            }
             Some(RopId::GetTransportFolder) => {
                 responses.extend_from_slice(&rop_get_transport_folder_response(&request))
             }

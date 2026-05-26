@@ -193,8 +193,9 @@ not by itself authorize broad client publication.
   permission table projection.
 - The current ROP surface includes bounded support for property reads/writes,
   table query, hierarchy sync, content sync, FastTransfer source buffering,
-  message import/save, draft/send flows, read-state changes, deletes, moves,
-  copies, and attachment reads/writes where backed by canonical state.
+  message import/save, draft/send flows, read-state changes, deletes, whole-folder
+  canonical mailbox content purges, moves, copies, and attachment reads/writes
+  where backed by canonical state.
 - Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
   accepted as session-local folder metadata during cached-mode bootstrap.
 - Outlook store bootstrap metadata includes the private-store marker, store
@@ -256,7 +257,7 @@ not by itself authorize broad client publication.
 | Protocol-local Sent/Outbox | Forbidden. Sent and submission state must be canonical. |
 | NSPI mutation | Deferred. Address-book writes and link-table mutation remain disabled. |
 | Raw FastTransfer destination upload streams | Deferred except for bounded import behavior that mutates canonical mailbox state through supported ROPs. |
-| Folder move/copy and whole-folder purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. |
+| Folder move/copy and non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
 | Full search-folder parity | Partially implemented. Full Microsoft template BLOB parity and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Deferred until canonical rules/deferred-action state is designed. |
 | Folder permission mutation | Deferred. Read-only permission table projection is supported. |

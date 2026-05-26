@@ -688,12 +688,14 @@ fn rop_requires_full_snapshot(rop_id: u8) -> bool {
             | 0x4D
             | 0x4E
             | 0x4F
+            | 0x58
             | 0x70
             | 0x72
             | 0x73
             | 0x74
             | 0x78
             | 0x80
+            | 0x92
     )
 }
 
