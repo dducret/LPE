@@ -383,6 +383,9 @@ pub(in crate::mapi) fn sync_checkpoint_mailbox_id(
         .iter()
         .find(|mailbox| mapi_folder_id(mailbox) == folder_id)
         .map(|mailbox| mailbox.id)
+        .or_else(|| {
+            crate::mapi_mailstore::virtual_special_mailbox(folder_id).map(|mailbox| mailbox.id)
+        })
 }
 
 pub(in crate::mapi) fn changed_sync_mailboxes(

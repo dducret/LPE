@@ -1985,9 +1985,15 @@ fn upload_state_property_name(tag: u32) -> &'static str {
 }
 
 fn sync_checkpoint_scope(
+    folder_id: u64,
     checkpoint_mailbox_id: Option<Uuid>,
     special_objects: &[mapi_mailstore::SpecialMessageSyncFact],
 ) -> &'static str {
+    let virtual_scope_id =
+        mapi_mailstore::virtual_special_mailbox(folder_id).map(|mailbox| mailbox.id);
+    if checkpoint_mailbox_id.is_some() && checkpoint_mailbox_id == virtual_scope_id {
+        return "virtual_special_folder";
+    }
     if checkpoint_mailbox_id.is_some() {
         "canonical_mailbox"
     } else if !special_objects.is_empty() {
@@ -1995,6 +2001,82 @@ fn sync_checkpoint_scope(
     } else {
         "virtual_or_system_folder"
     }
+}
+
+fn debug_object_scope_for_id(
+    object_id: Option<u64>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> &'static str {
+    let Some(object_id) = object_id else {
+        return "unparsed";
+    };
+    if is_advertised_special_folder(object_id) {
+        return "advertised_special_folder";
+    }
+    if mailboxes
+        .iter()
+        .any(|mailbox| crate::mapi::identity::mapped_mapi_object_id(&mailbox.id) == Some(object_id))
+    {
+        return "mailbox";
+    }
+    if emails
+        .iter()
+        .any(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id) == Some(object_id))
+    {
+        return "message";
+    }
+    if snapshot
+        .event_for_id(CALENDAR_FOLDER_ID, object_id)
+        .is_some()
+        || snapshot
+            .event_for_id(REMINDERS_FOLDER_ID, object_id)
+            .is_some()
+    {
+        return "calendar_event";
+    }
+    if snapshot
+        .contact_for_id(CONTACTS_FOLDER_ID, object_id)
+        .is_some()
+        || snapshot
+            .contact_for_id(CONTACTS_SEARCH_FOLDER_ID, object_id)
+            .is_some()
+    {
+        return "contact";
+    }
+    if snapshot.task_for_id(TASKS_FOLDER_ID, object_id).is_some()
+        || snapshot
+            .task_for_id(TODO_SEARCH_FOLDER_ID, object_id)
+            .is_some()
+        || snapshot
+            .task_for_id(REMINDERS_FOLDER_ID, object_id)
+            .is_some()
+    {
+        return "task";
+    }
+    if snapshot.note_for_id(NOTES_FOLDER_ID, object_id).is_some() {
+        return "note";
+    }
+    if snapshot
+        .journal_entry_for_id(JOURNAL_FOLDER_ID, object_id)
+        .is_some()
+    {
+        return "journal_entry";
+    }
+    if snapshot
+        .search_folder_definition_message_for_id(object_id)
+        .is_some()
+    {
+        return "search_folder_definition";
+    }
+    if snapshot
+        .conversation_action_message_for_id(object_id)
+        .is_some()
+    {
+        return "conversation_action";
+    }
+    "not_loaded"
 }
 
 fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
@@ -6107,6 +6189,7 @@ where
                         .map(|id| id.to_string())
                         .unwrap_or_default(),
                     checkpoint_scope = sync_checkpoint_scope(
+                        folder_id,
                         checkpoint_mailbox_id,
                         &all_special_sync_objects
                     ),
@@ -6701,9 +6784,14 @@ where
                         ..
                     }) => {
                         let uploaded_bytes = state_upload_buffer.len();
-                        let upload_state_stream_summary =
-                            mapi_mailstore::replguid_globset_debug_summary(state_upload_buffer);
+                        let upload_state_stream_summary = if uploaded_bytes == 0 {
+                            "bytes=0;empty=true".to_string()
+                        } else {
+                            mapi_mailstore::replguid_globset_debug_summary(state_upload_buffer)
+                        };
                         let may_use_incremental = *client_state_uploaded_bytes == 0;
+                        let upload_state_empty_stream_after_client_state =
+                            uploaded_bytes == 0 && *client_state_uploaded_bytes > 0;
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
                             (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
@@ -6734,8 +6822,8 @@ where
                             upload_state_total_bytes = state.len(),
                             upload_state_stream_bytes = uploaded_bytes,
                             upload_state_empty_stream = uploaded_bytes == 0,
-                            upload_state_empty_stream_expected =
-                                uploaded_bytes == 0 && *client_state_uploaded_bytes == 0,
+                            upload_state_empty_stream_expected = uploaded_bytes == 0,
+                            upload_state_empty_stream_after_client_state,
                             upload_state_stream_summary = %upload_state_stream_summary,
                             upload_state_client_bytes = *client_state_uploaded_bytes,
                             upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
@@ -7467,6 +7555,8 @@ where
                     .map(bytes_to_hex)
                     .unwrap_or_default();
                 let decoded_object_id = request.long_term_source_object_id();
+                let decoded_object_scope =
+                    debug_object_scope_for_id(decoded_object_id, mailboxes, emails, snapshot);
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -7481,6 +7571,7 @@ where
                     decoded_advertised_special_folder = decoded_object_id
                         .map(is_advertised_special_folder)
                         .unwrap_or(false),
+                    decoded_object_scope,
                     message = "rca debug mapi long term id from id",
                 );
                 responses.extend_from_slice(&rop_long_term_id_from_id_response(&request))

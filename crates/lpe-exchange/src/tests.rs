@@ -16343,7 +16343,7 @@ async fn mapi_over_http_content_sync_first_baseline_exports_all_current_messages
 }
 
 #[tokio::test]
-async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_checkpoint() {
+async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint() {
     let account = FakeStore::account();
     let calendar = FakeStore::collection("default", "calendar", "Calendar");
     let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171717171").unwrap();
@@ -16422,12 +16422,25 @@ async fn mapi_over_http_virtual_calendar_content_sync_does_not_store_mailbox_che
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
-            None,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                    .unwrap()
+                    .id,
+            ),
             MapiCheckpointKind::Content,
         )
         .await
         .unwrap();
-    assert!(checkpoint.is_none());
+    let checkpoint = checkpoint.unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 55);
+    assert_eq!(checkpoint.last_modseq, 41);
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("syncRootFolderId")
+            .and_then(|id| id.as_u64()),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
 }
 
 #[tokio::test]

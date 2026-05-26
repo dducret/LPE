@@ -1510,6 +1510,24 @@ async fn exercise_change_log_cursor_constraints(
     .await
     .context("insert valid mailbox-scoped MAPI content checkpoint")?;
 
+    sqlx::query(
+        r#"
+        INSERT INTO mapi_sync_checkpoints (
+            id, tenant_id, account_id, mailbox_id, checkpoint_kind,
+            mapi_replica_guid, cursor_json, expires_at
+        )
+        VALUES ($1, $2, $3, $4, 'content', $5, '{}'::jsonb, NOW() + INTERVAL '1 hour')
+        "#,
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(Uuid::parse_str("4c50455f-4d41-5049-0000-000000100001")?)
+    .bind(Uuid::new_v4())
+    .execute(pool)
+    .await
+    .context("insert valid virtual-special-folder MAPI content checkpoint")?;
+
     let expired_cursor = sqlx::query_scalar::<_, i64>(
         r#"
         INSERT INTO mail_change_log (

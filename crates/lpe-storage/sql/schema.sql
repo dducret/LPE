@@ -1705,10 +1705,7 @@ CREATE TABLE mapi_sync_checkpoints (
         OR (checkpoint_kind IN ('content', 'read_state') AND mailbox_id IS NOT NULL)
     ),
     UNIQUE (tenant_id, account_id, mailbox_id, checkpoint_kind, mapi_replica_guid),
-    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
-    FOREIGN KEY (tenant_id, account_id, mailbox_id)
-        REFERENCES mailboxes (tenant_id, account_id, id)
-        ON DELETE CASCADE
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX mapi_sync_checkpoints_account_idx

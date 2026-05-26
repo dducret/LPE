@@ -126,6 +126,27 @@ BEGIN;
 
 DROP TABLE IF EXISTS public.mapi_folder_properties;
 
+DO $$
+DECLARE
+  constraint_name TEXT;
+BEGIN
+  FOR constraint_name IN
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    WHERE n.nspname = 'public'
+      AND r.relname = 'mapi_sync_checkpoints'
+      AND c.contype = 'f'
+      AND (
+        pg_get_constraintdef(c.oid) LIKE '%REFERENCES public.mailboxes%'
+        OR pg_get_constraintdef(c.oid) LIKE '%REFERENCES mailboxes%'
+      )
+  LOOP
+    EXECUTE format('ALTER TABLE public.mapi_sync_checkpoints DROP CONSTRAINT %I', constraint_name);
+  END LOOP;
+END $$;
+
 CREATE TABLE IF NOT EXISTS public.search_folders (
   id UUID PRIMARY KEY,
   tenant_id UUID NOT NULL,

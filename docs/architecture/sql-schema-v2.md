@@ -236,9 +236,10 @@ Protocol adapters store only cursor rows:
   outbox, search, rights, or quarantine store.
 - `mapi_sync_checkpoints` stores EMSMDB/ICS folder or hierarchy cursor state.
   Hierarchy checkpoints are account-wide and must have `mailbox_id IS NULL`.
-  Content and read-state checkpoints are mailbox-scoped and must have a real
-  mailbox id. MAPI checkpoints store positions over canonical change rows, not
-  mailbox or message replicas.
+  Content and read-state checkpoints are folder/scope-scoped and must have a
+  non-null `mailbox_id`: canonical folders use the real mailbox id, and virtual
+  special folders use their stable projected folder UUID. MAPI checkpoints store
+  positions over canonical change rows, not mailbox or message replicas.
 - `mapi_mailbox_replicas` and `mapi_object_identities` store the durable MAPI
   identity projection for a canonical account: replica GUID, allocated
   48-bit global counters, FIDs, MIDs, source keys, change keys, and instance

@@ -462,8 +462,9 @@ fn replay_logs_tombstones_and_cursors_have_structural_constraints() {
         mapi.contains("CHECK (jsonb_typeof(cursor_json) = 'object')")
             && mapi.contains("(checkpoint_kind = 'hierarchy' AND mailbox_id IS NULL)")
             && mapi
-                .contains("(checkpoint_kind IN ('content', 'read_state') AND mailbox_id IS NOT NULL)"),
-        "MAPI checkpoints must encode hierarchy as account-wide and content/read-state as mailbox-scoped"
+                .contains("(checkpoint_kind IN ('content', 'read_state') AND mailbox_id IS NOT NULL)")
+            && !mapi.contains("FOREIGN KEY (tenant_id, account_id, mailbox_id)"),
+        "MAPI checkpoints must encode hierarchy as account-wide and content/read-state as folder/scope-scoped"
     );
 
     assert!(
