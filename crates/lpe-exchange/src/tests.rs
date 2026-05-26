@@ -331,6 +331,7 @@ struct FakeStore {
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
+    navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
@@ -1772,6 +1773,41 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(conversation_actions) })
     }
 
+    fn fetch_mapi_navigation_shortcuts<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<crate::store::MapiNavigationShortcutRecord>> {
+        let shortcuts = self.navigation_shortcuts.lock().unwrap().clone();
+        Box::pin(async move { Ok(shortcuts) })
+    }
+
+    fn upsert_mapi_navigation_shortcut<'a>(
+        &'a self,
+        input: crate::store::UpsertMapiNavigationShortcutInput,
+    ) -> StoreFuture<'a, crate::store::MapiNavigationShortcutRecord> {
+        let shortcuts = self.navigation_shortcuts.clone();
+        Box::pin(async move {
+            let mut shortcuts = shortcuts.lock().unwrap();
+            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let record = crate::store::MapiNavigationShortcutRecord {
+                id,
+                account_id: input.account_id,
+                subject: input.subject,
+                target_folder_id: input.target_folder_id,
+                shortcut_type: input.shortcut_type,
+                flags: input.flags,
+                section: input.section,
+                ordinal: input.ordinal,
+            };
+            if let Some(existing) = shortcuts.iter_mut().find(|shortcut| shortcut.id == id) {
+                *existing = record.clone();
+            } else {
+                shortcuts.push(record.clone());
+            }
+            Ok(record)
+        })
+    }
+
     fn upsert_conversation_action<'a>(
         &'a self,
         input: UpsertConversationActionInput,
@@ -3184,13 +3220,16 @@ const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6842_0003;
 const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
+const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
+const PID_TAG_WLINK_STORE_ENTRY_ID: u32 = 0x684E_0102;
+const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0102;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
 const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
-const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 13;
+const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 12;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
 const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
 const META_TAG_IDSET_DELETED: u32 = 0x4018_0102;
@@ -15751,8 +15790,12 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
-    let message = &stream.message_changes[0];
+    assert_eq!(stream.message_changes.len(), 3);
+    let message = stream
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Reminders")
+        .expect("Reminders Common Views FAI row");
     assert!(message.associated);
     assert_eq!(message.subject, "Reminders");
     assert_eq!(
@@ -15781,6 +15824,90 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
     ));
     assert!(contains_bytes(&response_rops, b"exchange_reminders"));
     assert!(contains_bytes(&response_rops, b"occurrenceDismissals"));
+    let shortcut = stream
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Inbox")
+        .expect("Inbox navigation shortcut FAI row");
+    assert!(shortcut.associated);
+    assert_eq!(
+        shortcut.parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+    );
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_ENTRY_ID));
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_STORE_ENTRY_ID));
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_FOLDER_TYPE));
+    assert!(!stream.cnset_seen_fai.is_empty());
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.WunderBar.Link")
+    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("Shortcuts")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persists() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let shortcuts = store.navigation_shortcuts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, PID_TAG_SUBJECT_W, "Persisted Inbox");
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_WLINK_ENTRY_ID,
+        &inbox_entry_id,
+    );
+    append_mapi_i32_property(&mut property_values, 0x6849_0003, 2);
+    append_mapi_i32_property(&mut property_values, 0x684B_0003, 9);
+
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 4, &property_values);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x01, 0x00]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = shortcuts.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].subject, "Persisted Inbox");
+    assert_eq!(
+        stored[0].target_folder_id,
+        crate::mapi::identity::INBOX_FOLDER_ID
+    );
+    assert_eq!(stored[0].shortcut_type, 2);
+    assert_eq!(stored[0].ordinal, 9);
 }
 
 #[tokio::test]
@@ -18759,8 +18886,7 @@ async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
         "Common Views",
         "Schedule",
         "Search",
-        "Views",
-        "Shortcuts",
+        "Personal Views",
     ] {
         let folder = decoded
             .folder_changes
@@ -18769,6 +18895,10 @@ async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
             .unwrap_or_else(|| panic!("{name} folderChange"));
         assert!(folder.parent_source_key.is_empty());
     }
+    assert!(!decoded
+        .folder_changes
+        .iter()
+        .any(|folder| folder.display_name == "Shortcuts"));
     let ipm_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
     for name in ["Inbox", "Outbox", "Sent Items", "Deleted Items"] {
         let folder = decoded
@@ -20807,6 +20937,18 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
     rops.extend_from_slice(&stale_calendar_long_term_id);
     rops.extend_from_slice(&[0x44, 0x00, 0x00]);
     rops.extend_from_slice(&invalid_long_term_id);
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]);
+    rops.extend_from_slice(
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        )
+        .unwrap(),
+    );
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]);
+    rops.extend_from_slice(
+        &crate::mapi::identity::long_term_id_from_object_id(crate::mapi::identity::VIEWS_FOLDER_ID)
+            .unwrap(),
+    );
 
     let response = service
         .handle_mapi(
@@ -20865,6 +21007,18 @@ async fn mapi_over_http_long_term_id_round_trips_canonical_replica_ids() {
         &response_rops,
         &[0x44, 0x00, 0x0F, 0x01, 0x04, 0x80]
     ));
+    let mut common_views_response = vec![0x44, 0x00, 0, 0, 0, 0];
+    append_mapi_wire_id(
+        &mut common_views_response,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    assert!(contains_bytes(&response_rops, &common_views_response));
+    let mut personal_views_response = vec![0x44, 0x00, 0, 0, 0, 0];
+    append_mapi_wire_id(
+        &mut personal_views_response,
+        crate::mapi::identity::VIEWS_FOLDER_ID,
+    );
+    assert!(contains_bytes(&response_rops, &personal_views_response));
 }
 
 #[tokio::test]

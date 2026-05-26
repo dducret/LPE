@@ -1733,7 +1733,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
@@ -1795,6 +1795,25 @@ CREATE TABLE mapi_custom_property_values (
 
 CREATE INDEX mapi_custom_property_values_object_idx
     ON mapi_custom_property_values (tenant_id, account_id, object_kind, canonical_id);
+
+CREATE TABLE mapi_navigation_shortcuts (
+    tenant_id UUID NOT NULL,
+    id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+    target_folder_id BIGINT NOT NULL CHECK (target_folder_id > 0),
+    shortcut_type BIGINT NOT NULL CHECK (shortcut_type >= 0 AND shortcut_type <= 4294967295),
+    flags BIGINT NOT NULL DEFAULT 0 CHECK (flags >= 0 AND flags <= 4294967295),
+    section BIGINT NOT NULL DEFAULT 0 CHECK (section >= 0 AND section <= 4294967295),
+    ordinal BIGINT NOT NULL DEFAULT 0 CHECK (ordinal >= 0 AND ordinal <= 4294967295),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_navigation_shortcuts_account_idx
+    ON mapi_navigation_shortcuts (tenant_id, account_id, section, ordinal, subject, id);
 
 CREATE TABLE submission_queue (
     id UUID PRIMARY KEY,

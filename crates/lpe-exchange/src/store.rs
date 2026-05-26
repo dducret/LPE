@@ -30,6 +30,7 @@ pub(crate) enum MapiIdentityObjectKind {
     JournalEntry,
     SearchFolderDefinition,
     ConversationAction,
+    NavigationShortcut,
 }
 
 impl MapiIdentityObjectKind {
@@ -45,8 +46,33 @@ impl MapiIdentityObjectKind {
             Self::JournalEntry => "journal_entry",
             Self::SearchFolderDefinition => "search_folder_definition",
             Self::ConversationAction => "conversation_action",
+            Self::NavigationShortcut => "navigation_shortcut",
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiNavigationShortcutRecord {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) subject: String,
+    pub(crate) target_folder_id: u64,
+    pub(crate) shortcut_type: u32,
+    pub(crate) flags: u32,
+    pub(crate) section: u32,
+    pub(crate) ordinal: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpsertMapiNavigationShortcutInput {
+    pub(crate) id: Option<Uuid>,
+    pub(crate) account_id: Uuid,
+    pub(crate) subject: String,
+    pub(crate) target_folder_id: u64,
+    pub(crate) shortcut_type: u32,
+    pub(crate) flags: u32,
+    pub(crate) section: u32,
+    pub(crate) ordinal: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -624,6 +650,16 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<ConversationAction>>;
+
+    fn fetch_mapi_navigation_shortcuts<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiNavigationShortcutRecord>>;
+
+    fn upsert_mapi_navigation_shortcut<'a>(
+        &'a self,
+        input: UpsertMapiNavigationShortcutInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutRecord>;
 
     fn upsert_conversation_action<'a>(
         &'a self,
@@ -2238,6 +2274,75 @@ impl ExchangeStore for Storage {
         Box::pin(async move { self.fetch_conversation_actions(account_id).await })
     }
 
+    fn fetch_mapi_navigation_shortcuts<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiNavigationShortcutRecord>> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT id, account_id, subject, target_folder_id, shortcut_type,
+                       flags, section, ordinal
+                FROM mapi_navigation_shortcuts
+                WHERE tenant_id = $1 AND account_id = $2
+                ORDER BY section, ordinal, subject, id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_navigation_shortcut_from_row)
+                .collect()
+        })
+    }
+
+    fn upsert_mapi_navigation_shortcut<'a>(
+        &'a self,
+        input: UpsertMapiNavigationShortcutInput,
+    ) -> StoreFuture<'a, MapiNavigationShortcutRecord> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
+            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let row = sqlx::query(
+                r#"
+                INSERT INTO mapi_navigation_shortcuts (
+                    tenant_id, id, account_id, subject, target_folder_id,
+                    shortcut_type, flags, section, ordinal
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (tenant_id, id)
+                DO UPDATE SET
+                    subject = EXCLUDED.subject,
+                    target_folder_id = EXCLUDED.target_folder_id,
+                    shortcut_type = EXCLUDED.shortcut_type,
+                    flags = EXCLUDED.flags,
+                    section = EXCLUDED.section,
+                    ordinal = EXCLUDED.ordinal,
+                    updated_at = NOW()
+                RETURNING id, account_id, subject, target_folder_id, shortcut_type,
+                          flags, section, ordinal
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(id)
+            .bind(input.account_id)
+            .bind(input.subject)
+            .bind(input.target_folder_id as i64)
+            .bind(input.shortcut_type as i64)
+            .bind(input.flags as i64)
+            .bind(input.section as i64)
+            .bind(input.ordinal as i64)
+            .fetch_one(self.pool())
+            .await?;
+
+            mapi_navigation_shortcut_from_row(row)
+        })
+    }
+
     fn upsert_conversation_action<'a>(
         &'a self,
         input: UpsertConversationActionInput,
@@ -2951,6 +3056,21 @@ fn mapi_custom_property_value_from_row(
         property_tag: row.get::<i64, _>("property_tag") as u32,
         property_type: row.get::<i32, _>("property_type") as u16,
         property_value: row.get("property_value"),
+    })
+}
+
+fn mapi_navigation_shortcut_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<MapiNavigationShortcutRecord> {
+    Ok(MapiNavigationShortcutRecord {
+        id: row.try_get("id")?,
+        account_id: row.try_get("account_id")?,
+        subject: row.try_get("subject")?,
+        target_folder_id: row.try_get::<i64, _>("target_folder_id")? as u64,
+        shortcut_type: row.try_get::<i64, _>("shortcut_type")? as u32,
+        flags: row.try_get::<i64, _>("flags")? as u32,
+        section: row.try_get::<i64, _>("section")? as u32,
+        ordinal: row.try_get::<i64, _>("ordinal")? as u32,
     })
 }
 

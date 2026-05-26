@@ -11,6 +11,7 @@ use super::wire::{FastTransferMarker, MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncChangeSet, MapiSyncCheckpoint,
+    UpsertMapiNavigationShortcutInput,
 };
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
@@ -970,6 +971,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::JournalEntry { .. }) => "journal_entry",
         Some(MapiObject::SearchFolderDefinition { .. }) => "search_folder_definition",
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
+        Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
         Some(MapiObject::PendingMessage { .. }) => "pending_message",
         Some(MapiObject::PendingContact { .. }) => "pending_contact",
         Some(MapiObject::PendingEvent { .. }) => "pending_event",
@@ -977,6 +979,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::PendingNote { .. }) => "pending_note",
         Some(MapiObject::PendingJournalEntry { .. }) => "pending_journal_entry",
         Some(MapiObject::PendingConversationAction { .. }) => "pending_conversation_action",
+        Some(MapiObject::PendingNavigationShortcut { .. }) => "pending_navigation_shortcut",
         Some(MapiObject::HierarchyTable { .. }) => "hierarchy_table",
         Some(MapiObject::ContentsTable { .. }) => "contents_table",
         Some(MapiObject::AttachmentTable { .. }) => "attachment_table",
@@ -1468,6 +1471,49 @@ where
                 )
                 .await?;
             }
+            MapiObject::NavigationShortcut {
+                folder_id: _,
+                shortcut_id,
+            } => {
+                let Some(existing) = snapshot.navigation_shortcut_message_for_id(*shortcut_id)
+                else {
+                    return Err(anyhow!("canonical MAPI navigation shortcut was not found"));
+                };
+                let mut properties = HashMap::new();
+                for tag in [
+                    PID_TAG_SUBJECT_W,
+                    PID_TAG_NORMALIZED_SUBJECT_W,
+                    PID_TAG_WLINK_ENTRY_ID,
+                    PID_TAG_WLINK_TYPE,
+                    PID_TAG_WLINK_FLAGS,
+                    PID_TAG_WLINK_SECTION,
+                    PID_TAG_WLINK_ORDINAL,
+                ] {
+                    if let Some(value) =
+                        navigation_shortcut_property_value(&existing, principal.account_id, tag)
+                    {
+                        properties.insert(tag, value);
+                    }
+                }
+                apply_mapi_property_values_to_map(&mut properties, canonical_values);
+                let shortcut = navigation_shortcut_from_mapi_properties(
+                    principal.account_id,
+                    Some(existing.canonical_id),
+                    &properties,
+                );
+                store
+                    .upsert_mapi_navigation_shortcut(UpsertMapiNavigationShortcutInput {
+                        id: Some(shortcut.canonical_id),
+                        account_id: principal.account_id,
+                        subject: shortcut.subject,
+                        target_folder_id: shortcut.target_folder_id,
+                        shortcut_type: shortcut.shortcut_type,
+                        flags: shortcut.flags,
+                        section: shortcut.section,
+                        ordinal: shortcut.ordinal,
+                    })
+                    .await?;
+            }
             _ => return Err(anyhow!("MAPI object does not support property mutation")),
         }
     }
@@ -1917,8 +1963,7 @@ pub(in crate::mapi) fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'sta
         COMMON_VIEWS_FOLDER_ID => "common_views",
         SCHEDULE_FOLDER_ID => "schedule",
         SEARCH_FOLDER_ID => "search",
-        VIEWS_FOLDER_ID => "views",
-        SHORTCUTS_FOLDER_ID => "shortcuts",
+        VIEWS_FOLDER_ID => "personal_views",
         CALENDAR_FOLDER_ID => "calendar",
         CONTACTS_FOLDER_ID => "contacts",
         JOURNAL_FOLDER_ID => "journal",
@@ -1956,8 +2001,7 @@ pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
         | VIEWS_FOLDER_ID
-        | SHORTCUTS_FOLDER_ID
-        | FREEBUSY_DATA_FOLDER_ID => "IPF.Root",
+        | FREEBUSY_DATA_FOLDER_ID => "",
         CONTACTS_SEARCH_FOLDER_ID => "IPF.Contact",
         TODO_SEARCH_FOLDER_ID => "IPF.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
@@ -3298,6 +3342,23 @@ where
                             0,
                         ));
                         output_handles.push(handle);
+                    } else if let Some(message) =
+                        snapshot.navigation_shortcut_message_for_id(message_id)
+                    {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::NavigationShortcut {
+                                folder_id,
+                                shortcut_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &message.subject,
+                            0,
+                        ));
+                        output_handles.push(handle);
                     } else {
                         responses.extend_from_slice(&rop_error_response(
                             0x03,
@@ -3444,6 +3505,7 @@ where
                             | OUTBOX_FOLDER_ID
                             | NOTES_FOLDER_ID
                             | JOURNAL_FOLDER_ID
+                            | COMMON_VIEWS_FOLDER_ID
                             | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
                     )
                 {
@@ -3481,6 +3543,12 @@ where
                     },
                     _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
                         MapiObject::PendingConversationAction {
+                            folder_id,
+                            properties: HashMap::new(),
+                        }
+                    }
+                    _ if folder_id == COMMON_VIEWS_FOLDER_ID => {
+                        MapiObject::PendingNavigationShortcut {
                             folder_id,
                             properties: HashMap::new(),
                         }
@@ -3590,7 +3658,8 @@ where
                         | MapiObject::Task { .. }
                         | MapiObject::Note { .. }
                         | MapiObject::JournalEntry { .. }
-                        | MapiObject::ConversationAction { .. }),
+                        | MapiObject::ConversationAction { .. }
+                        | MapiObject::NavigationShortcut { .. }),
                     ) => {
                         apply_supported_object_property_values(
                             store, principal, &object, values, mailboxes, emails, snapshot,
@@ -4094,6 +4163,70 @@ where
                         }
                         continue;
                     }
+                    Some(MapiObject::PendingNavigationShortcut {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let shortcut = navigation_shortcut_from_mapi_properties(
+                            principal.account_id,
+                            None,
+                            &properties,
+                        );
+                        let input = UpsertMapiNavigationShortcutInput {
+                            id: None,
+                            account_id: principal.account_id,
+                            subject: shortcut.subject,
+                            target_folder_id: shortcut.target_folder_id,
+                            shortcut_type: shortcut.shortcut_type,
+                            flags: shortcut.flags,
+                            section: shortcut.section,
+                            ordinal: shortcut.ordinal,
+                        };
+                        match store.upsert_mapi_navigation_shortcut(input).await {
+                            Ok(saved) => {
+                                let shortcut_id = match remember_created_mapi_identity(
+                                    store,
+                                    principal,
+                                    MapiIdentityObjectKind::NavigationShortcut,
+                                    saved.id,
+                                    None,
+                                )
+                                .await
+                                {
+                                    Ok(shortcut_id) => shortcut_id,
+                                    Err(_) => {
+                                        responses.extend_from_slice(&rop_error_response(
+                                            0x0C,
+                                            request.response_handle_index(),
+                                            0x8004_010F,
+                                        ));
+                                        continue;
+                                    }
+                                };
+                                session.handles.insert(
+                                    handle,
+                                    MapiObject::NavigationShortcut {
+                                        folder_id,
+                                        shortcut_id,
+                                    },
+                                );
+                                session.record_notification(MapiNotificationEvent {
+                                    folder_id,
+                                    kind: MapiNotificationKind::Content,
+                                });
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request,
+                                    shortcut_id,
+                                ));
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
+                        continue;
+                    }
                     Some(MapiObject::Contact { contact_id, .. })
                     | Some(MapiObject::Event {
                         event_id: contact_id,
@@ -4113,6 +4246,10 @@ where
                     })
                     | Some(MapiObject::ConversationAction {
                         conversation_action_id: contact_id,
+                        ..
+                    })
+                    | Some(MapiObject::NavigationShortcut {
+                        shortcut_id: contact_id,
                         ..
                     }) => {
                         responses.extend_from_slice(&rop_save_changes_message_response(
@@ -7035,6 +7172,70 @@ where
                     parsed_message_id = format_args!("0x{message_id:016x}"),
                     "rca debug mapi sync import message change"
                 );
+                if import_flag & 0x10 != 0 && folder_id == COMMON_VIEWS_FOLDER_ID {
+                    let properties = property_values.into_iter().collect::<HashMap<_, _>>();
+                    let shortcut = navigation_shortcut_from_mapi_properties(
+                        principal.account_id,
+                        None,
+                        &properties,
+                    );
+                    match store
+                        .upsert_mapi_navigation_shortcut(UpsertMapiNavigationShortcutInput {
+                            id: None,
+                            account_id: principal.account_id,
+                            subject: shortcut.subject,
+                            target_folder_id: shortcut.target_folder_id,
+                            shortcut_type: shortcut.shortcut_type,
+                            flags: shortcut.flags,
+                            section: shortcut.section,
+                            ordinal: shortcut.ordinal,
+                        })
+                        .await
+                    {
+                        Ok(saved) => {
+                            let shortcut_id = match remember_created_mapi_identity(
+                                store,
+                                principal,
+                                MapiIdentityObjectKind::NavigationShortcut,
+                                saved.id,
+                                None,
+                            )
+                            .await
+                            {
+                                Ok(shortcut_id) => shortcut_id,
+                                Err(_) => {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x72,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
+                            };
+                            let handle = session.allocate_output_handle(
+                                request.output_handle_index,
+                                MapiObject::NavigationShortcut {
+                                    folder_id,
+                                    shortcut_id,
+                                },
+                            );
+                            set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                            responses.extend_from_slice(
+                                &rop_synchronization_import_message_change_response(
+                                    &request,
+                                    shortcut_id,
+                                ),
+                            );
+                            output_handles.push(handle);
+                        }
+                        Err(_) => responses.extend_from_slice(&rop_error_response(
+                            0x72,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        )),
+                    }
+                    continue;
+                }
                 if message_id != 0
                     && message_for_id(folder_id, message_id, mailboxes, emails).is_some()
                 {

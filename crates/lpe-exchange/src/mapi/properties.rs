@@ -5,7 +5,8 @@ use super::tables::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
-    MapiConversationActionMessage, MapiMessage, MapiSearchFolderDefinitionMessage,
+    MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage,
+    MapiSearchFolderDefinitionMessage,
 };
 use lpe_storage::{
     calendar_attendee_labels, normalize_calendar_email, parse_calendar_participants_metadata,
@@ -211,6 +212,14 @@ pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6842_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_EFP_FLAGS: u32 = 0x6844_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_TAG: u32 = 0x6847_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_FLAGS: u32 = 0x684A_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_STORE_ENTRY_ID: u32 = 0x684E_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_SECTION: u32 = 0x6852_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -1180,6 +1189,60 @@ pub(in crate::mapi) fn search_folder_definition_property_value(
         PID_TAG_SEARCH_FOLDER_DEFINITION => {
             Some(MapiValue::Binary(search_folder_definition_blob(definition)))
         }
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn navigation_shortcut_property_value(
+    message: &MapiNavigationShortcutMessage,
+    account_id: Uuid,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    match property_tag {
+        PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
+            Some(MapiValue::String(message.subject.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            "IPM.Microsoft.WunderBar.Link".to_string(),
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(MSGFLAG_READ)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I32(128)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST => Some(
+            MapiValue::Binary(mapi_mailstore::source_key_for_store_id(message.id)),
+        ),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
+        PID_TAG_WLINK_TYPE => Some(MapiValue::U32(message.shortcut_type)),
+        PID_TAG_WLINK_FLAGS => Some(MapiValue::U32(message.flags)),
+        PID_TAG_WLINK_SECTION => Some(MapiValue::U32(message.section)),
+        PID_TAG_WLINK_ORDINAL => Some(MapiValue::U32(message.ordinal)),
+        PID_TAG_WLINK_GROUP_HEADER_ID => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.id),
+        )),
+        PID_TAG_WLINK_ENTRY_ID => Some(MapiValue::Binary(
+            crate::mapi::identity::folder_entry_id_from_object_id(
+                account_id,
+                message.target_folder_id,
+            )
+            .unwrap_or_default(),
+        )),
+        PID_TAG_WLINK_STORE_ENTRY_ID => Some(MapiValue::Binary(
+            mapi_mailstore::private_store_entry_id(account_id),
+        )),
+        PID_TAG_WLINK_FOLDER_TYPE => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.target_folder_id),
+        )),
         _ => None,
     }
 }
@@ -3822,7 +3885,8 @@ pub(in crate::mapi) fn apply_mapi_property_values(
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })
         | Some(MapiObject::PendingJournalEntry { properties, .. })
-        | Some(MapiObject::PendingConversationAction { properties, .. }) => {
+        | Some(MapiObject::PendingConversationAction { properties, .. })
+        | Some(MapiObject::PendingNavigationShortcut { properties, .. }) => {
             properties.extend(values);
             Ok(())
         }
@@ -3874,7 +3938,8 @@ pub(in crate::mapi) fn delete_mapi_properties(
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })
         | Some(MapiObject::PendingJournalEntry { properties, .. })
-        | Some(MapiObject::PendingConversationAction { properties, .. }) => {
+        | Some(MapiObject::PendingConversationAction { properties, .. })
+        | Some(MapiObject::PendingNavigationShortcut { properties, .. }) => {
             for tag in &property_tags {
                 properties.remove(tag);
             }

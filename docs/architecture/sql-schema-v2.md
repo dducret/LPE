@@ -215,6 +215,11 @@ Conversation Action Settings FAI messages are projections of
 `conversation_actions` rows with `object_kind = 'conversation_action'` change
 rows. These rows are canonical LPE state, not Exchange-only FAI message stores
 or protocol-owned rule tables.
+Common Views navigation shortcut FAI messages are persisted as
+`mapi_navigation_shortcuts` rows with durable MAPI identity rows using
+`object_kind = 'navigation_shortcut'`. The table stores only the bounded
+Outlook shortcut facts LPE currently supports: subject, target folder id,
+shortcut type, flags, section, and ordinal.
 
 Protocol adapters store only cursor rows:
 

@@ -6,8 +6,8 @@ use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
-    MapiConversationActionMessage, MapiEvent, MapiMessage, MapiSearchFolderDefinitionMessage,
-    MapiTask,
+    MapiCommonViewsMessage, MapiConversationActionMessage, MapiEvent, MapiMessage,
+    MapiNavigationShortcutMessage, MapiSearchFolderDefinitionMessage, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -50,8 +50,8 @@ pub(in crate::mapi) fn associated_folder_message_count(
 ) -> u32 {
     if folder_id == COMMON_VIEWS_FOLDER_ID {
         snapshot
-            .search_folder_definition_messages()
-            .len()
+            .common_views_messages()
+            .count()
             .min(u32::MAX as usize) as u32
     } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
         snapshot
@@ -131,6 +131,14 @@ pub(in crate::mapi) fn default_search_folder_definition_property_tags() -> Vec<u
         PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
         PID_TAG_SEARCH_FOLDER_TAG,
         PID_TAG_SEARCH_FOLDER_DEFINITION,
+        PID_TAG_WLINK_TYPE,
+        PID_TAG_WLINK_FLAGS,
+        PID_TAG_WLINK_ENTRY_ID,
+        PID_TAG_WLINK_STORE_ENTRY_ID,
+        PID_TAG_WLINK_FOLDER_TYPE,
+        PID_TAG_WLINK_GROUP_HEADER_ID,
+        PID_TAG_WLINK_SECTION,
+        PID_TAG_WLINK_ORDINAL,
     ]
 }
 
@@ -370,8 +378,11 @@ fn special_folder_property_value(folder_id: u64, property_tag: u32) -> Option<Ma
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(special_folder_type(folder_id))),
-        PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
+        PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
+            Some(MapiValue::U32(0))
+        }
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
+        PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W if message_class.is_empty() => None,
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(message_class.to_string()))
         }
@@ -677,9 +688,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
             if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     snapshot
-                        .search_folder_definition_messages()
-                        .iter()
-                        .map(|message| serialize_search_folder_definition_row(message, &columns))
+                        .common_views_messages()
+                        .map(|message| serialize_common_views_row(message, None, &columns))
                         .collect::<Vec<_>>()
                 } else if *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     snapshot
@@ -1802,18 +1812,15 @@ pub(in crate::mapi) fn rop_find_row_response(
                 columns.clone()
             };
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
-                let rows = snapshot
-                    .search_folder_definition_messages()
-                    .iter()
-                    .collect::<Vec<_>>();
-                if let Some((index, message)) =
-                    find_row(rows.as_slice(), *position, request, |_message| true)
-                {
+                let rows = snapshot.common_views_messages().collect::<Vec<_>>();
+                if *position < rows.len() {
+                    let index = *position;
+                    let message = rows.into_iter().nth(index).expect("row exists");
                     *position = index;
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_search_folder_definition_row(message, &columns),
+                        &serialize_common_views_row(message, None, &columns),
                     );
                 } else {
                     response.push(0);
@@ -2261,7 +2268,6 @@ pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
             | SCHEDULE_FOLDER_ID
             | SEARCH_FOLDER_ID
             | VIEWS_FOLDER_ID
-            | SHORTCUTS_FOLDER_ID
     ) || role_for_folder_id(folder_id).is_some()
 }
 
@@ -2327,8 +2333,13 @@ fn serialize_advertised_special_folder_row(
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, parent_folder_id),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, special_folder_type(folder_id)),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
-            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
+                write_u32(&mut row, 0)
+            }
             PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
+            PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W if message_class.is_empty() => {
+                write_property_default(&mut row, *column)
+            }
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, message_class),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, message_class),
             PID_TAG_LAST_MODIFICATION_TIME
@@ -2386,11 +2397,10 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         OUTBOX_FOLDER_ID => ("Outbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         SENT_FOLDER_ID => ("Sent", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         TRASH_FOLDER_ID => ("Deleted Items", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
-        COMMON_VIEWS_FOLDER_ID => ("Common Views", ROOT_FOLDER_ID, "IPF.Root", false),
-        SCHEDULE_FOLDER_ID => ("Schedule", ROOT_FOLDER_ID, "IPF.Root", false),
-        SEARCH_FOLDER_ID => ("Search", ROOT_FOLDER_ID, "IPF.Root", false),
-        VIEWS_FOLDER_ID => ("Views", ROOT_FOLDER_ID, "IPF.Root", false),
-        SHORTCUTS_FOLDER_ID => ("Shortcuts", ROOT_FOLDER_ID, "IPF.Root", false),
+        COMMON_VIEWS_FOLDER_ID => ("Common Views", ROOT_FOLDER_ID, "", false),
+        SCHEDULE_FOLDER_ID => ("Schedule", ROOT_FOLDER_ID, "", false),
+        SEARCH_FOLDER_ID => ("Search", ROOT_FOLDER_ID, "", false),
+        VIEWS_FOLDER_ID => ("Personal Views", ROOT_FOLDER_ID, "", false),
         DRAFTS_FOLDER_ID => ("Drafts", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         CONTACTS_FOLDER_ID => ("Contacts", IPM_SUBTREE_FOLDER_ID, "IPF.Contact", false),
         CALENDAR_FOLDER_ID => ("Calendar", IPM_SUBTREE_FOLDER_ID, "IPF.Appointment", false),
@@ -2495,7 +2505,9 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, 0),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
-            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
+                write_u32(&mut row, 0)
+            }
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
@@ -2554,7 +2566,9 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, ROOT_FOLDER_ID),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
-            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
+                write_u32(&mut row, 0)
+            }
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
@@ -2683,6 +2697,26 @@ mod tests {
     }
 
     #[test]
+    fn special_folder_rows_project_deleted_count_total() {
+        let row = serialize_special_folder_row(
+            COMMON_VIEWS_FOLDER_ID,
+            &[],
+            &[
+                PID_TAG_LOCAL_COMMIT_TIME_MAX,
+                PID_TAG_DELETED_COUNT_TOTAL,
+                PID_TAG_CONTENT_UNREAD_COUNT,
+                PID_TAG_CONTENT_COUNT,
+            ],
+            None,
+        );
+
+        assert_eq!(row.len(), 20);
+        assert_eq!(u32::from_le_bytes(row[8..12].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(row[12..16].try_into().unwrap()), 0);
+        assert_eq!(u32::from_le_bytes(row[16..20].try_into().unwrap()), 0);
+    }
+
+    #[test]
     fn ipm_subtree_row_projects_principal_ost_identity_when_available() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
@@ -2753,7 +2787,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_associated_contents_project_search_folder_definitions() {
+    fn common_views_associated_contents_project_search_folder_definitions_and_shortcuts() {
         let definition_id = Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             definition_id,
@@ -2807,7 +2841,7 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            1
+            3
         );
         let response = rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
 
@@ -2820,6 +2854,18 @@ mod tests {
         assert!(response
             .windows(message_class.len())
             .any(|window| window == message_class.as_slice()));
+        if let MapiObject::ContentsTable { position, .. } = &mut table {
+            *position = 1;
+        }
+        let shortcut_response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
+        let mut shortcut_class = Vec::new();
+        for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
+            shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
+        }
+        assert!(shortcut_response
+            .windows(shortcut_class.len())
+            .any(|window| window == shortcut_class.as_slice()));
     }
 
     #[test]
@@ -3120,6 +3166,39 @@ pub(in crate::mapi) fn serialize_search_folder_definition_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_navigation_shortcut_row(
+    message: &MapiNavigationShortcutMessage,
+    principal: Option<&AccountPrincipal>,
+    columns: &[u32],
+) -> Vec<u8> {
+    let account_id = principal
+        .map(|principal| principal.account_id)
+        .unwrap_or_default();
+    let mut row = Vec::new();
+    for column in columns {
+        match navigation_shortcut_property_value(message, account_id, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn serialize_common_views_row(
+    message: MapiCommonViewsMessage<'_>,
+    principal: Option<&AccountPrincipal>,
+    columns: &[u32],
+) -> Vec<u8> {
+    match message {
+        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            serialize_search_folder_definition_row(message, columns)
+        }
+        MapiCommonViewsMessage::NavigationShortcut(message) => {
+            serialize_navigation_shortcut_row(&message, principal, columns)
+        }
+    }
+}
+
 pub(in crate::mapi) fn serialize_conversation_action_row(
     message: &MapiConversationActionMessage,
     columns: &[u32],
@@ -3132,6 +3211,68 @@ pub(in crate::mapi) fn serialize_conversation_action_row(
         }
     }
     row
+}
+
+pub(in crate::mapi) fn serialize_pending_navigation_shortcut_row(
+    properties: &HashMap<u32, MapiValue>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+) -> Vec<u8> {
+    let shortcut = navigation_shortcut_from_mapi_properties(principal.account_id, None, properties);
+    serialize_navigation_shortcut_row(&shortcut, Some(principal), columns)
+}
+
+pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
+    _account_id: Uuid,
+    id: Option<Uuid>,
+    properties: &HashMap<u32, MapiValue>,
+) -> MapiNavigationShortcutMessage {
+    let entry_target = properties
+        .get(&PID_TAG_WLINK_ENTRY_ID)
+        .and_then(|value| match value {
+            MapiValue::Binary(bytes) => {
+                crate::mapi::identity::object_id_from_folder_entry_id(bytes)
+            }
+            _ => None,
+        });
+    let subject = properties
+        .get(&PID_TAG_SUBJECT_W)
+        .or_else(|| properties.get(&PID_TAG_NORMALIZED_SUBJECT_W))
+        .and_then(|value| match value {
+            MapiValue::String(value) => Some(value.clone()),
+            _ => None,
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Shortcut".to_string());
+    let shortcut_id = id.unwrap_or_else(Uuid::new_v4);
+    MapiNavigationShortcutMessage {
+        id: crate::mapi::identity::mapped_mapi_object_id(&shortcut_id)
+            .unwrap_or_else(|| crate::mapi::identity::mapi_store_id(0x7fff)),
+        folder_id: COMMON_VIEWS_FOLDER_ID,
+        canonical_id: shortcut_id,
+        subject,
+        target_folder_id: entry_target.unwrap_or(INBOX_FOLDER_ID),
+        shortcut_type: properties
+            .get(&PID_TAG_WLINK_TYPE)
+            .and_then(MapiValue::as_i64)
+            .map(|value| value as u32)
+            .unwrap_or(2),
+        flags: properties
+            .get(&PID_TAG_WLINK_FLAGS)
+            .and_then(MapiValue::as_i64)
+            .map(|value| value as u32)
+            .unwrap_or(0),
+        section: properties
+            .get(&PID_TAG_WLINK_SECTION)
+            .and_then(MapiValue::as_i64)
+            .map(|value| value as u32)
+            .unwrap_or(0),
+        ordinal: properties
+            .get(&PID_TAG_WLINK_ORDINAL)
+            .and_then(MapiValue::as_i64)
+            .map(|value| value as u32)
+            .unwrap_or(0),
+    }
 }
 
 pub(in crate::mapi) fn serialize_contact_row(

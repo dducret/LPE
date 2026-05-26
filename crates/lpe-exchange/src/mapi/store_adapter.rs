@@ -844,6 +844,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::Task => "task",
         MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",
         MapiIdentityObjectKind::ConversationAction => "conversation_action",
+        MapiIdentityObjectKind::NavigationShortcut => "navigation_shortcut",
         MapiIdentityObjectKind::Note => "note",
         MapiIdentityObjectKind::JournalEntry => "journal_entry",
     }
@@ -1230,6 +1231,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingNote { folder_id, .. }
         | MapiObject::PendingJournalEntry { folder_id, .. }
         | MapiObject::PendingConversationAction { folder_id, .. }
+        | MapiObject::PendingNavigationShortcut { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
         | MapiObject::SynchronizationCollector { folder_id, .. }
         | MapiObject::PermissionTable { folder_id, .. } => {
@@ -1304,6 +1306,13 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *conversation_action_id);
+        }
+        MapiObject::NavigationShortcut {
+            folder_id,
+            shortcut_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *shortcut_id);
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }

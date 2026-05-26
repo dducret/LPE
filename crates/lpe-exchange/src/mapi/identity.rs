@@ -19,6 +19,7 @@ pub(crate) const COMMON_VIEWS_FOLDER_COUNTER: u64 = 9;
 pub(crate) const SCHEDULE_FOLDER_COUNTER: u64 = 10;
 pub(crate) const SEARCH_FOLDER_COUNTER: u64 = 11;
 pub(crate) const VIEWS_FOLDER_COUNTER: u64 = 12;
+#[allow(dead_code)]
 pub(crate) const SHORTCUTS_FOLDER_COUNTER: u64 = 13;
 pub(crate) const DRAFTS_FOLDER_COUNTER: u64 = 14;
 pub(crate) const CONTACTS_FOLDER_COUNTER: u64 = 15;
@@ -58,6 +59,7 @@ pub(crate) const COMMON_VIEWS_FOLDER_ID: u64 = mapi_store_id(COMMON_VIEWS_FOLDER
 pub(crate) const SCHEDULE_FOLDER_ID: u64 = mapi_store_id(SCHEDULE_FOLDER_COUNTER);
 pub(crate) const SEARCH_FOLDER_ID: u64 = mapi_store_id(SEARCH_FOLDER_COUNTER);
 pub(crate) const VIEWS_FOLDER_ID: u64 = mapi_store_id(VIEWS_FOLDER_COUNTER);
+#[allow(dead_code)]
 pub(crate) const SHORTCUTS_FOLDER_ID: u64 = mapi_store_id(SHORTCUTS_FOLDER_COUNTER);
 pub(crate) const DRAFTS_FOLDER_ID: u64 = mapi_store_id(DRAFTS_FOLDER_COUNTER);
 pub(crate) const CONTACTS_FOLDER_ID: u64 = mapi_store_id(CONTACTS_FOLDER_COUNTER);
@@ -245,7 +247,6 @@ fn is_advertised_special_folder_id(object_id: u64) -> bool {
             | SCHEDULE_FOLDER_ID
             | SEARCH_FOLDER_ID
             | VIEWS_FOLDER_ID
-            | SHORTCUTS_FOLDER_ID
             | INBOX_FOLDER_ID
             | DRAFTS_FOLDER_ID
             | SENT_FOLDER_ID

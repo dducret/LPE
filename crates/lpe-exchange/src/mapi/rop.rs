@@ -855,6 +855,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::PendingConversationAction { properties, .. }) => {
             serialize_pending_conversation_action_row(properties, &columns)
         }
+        Some(MapiObject::PendingNavigationShortcut { properties, .. }) => {
+            serialize_pending_navigation_shortcut_row(properties, principal, &columns)
+        }
         Some(MapiObject::Task { folder_id, task_id }) => {
             let Some(_task) = snapshot.task_for_id(*folder_id, *task_id) else {
                 return rop_error_response(
@@ -922,6 +925,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 );
             };
             serialize_search_folder_definition_row(message, &columns)
+        }
+        Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => {
+            let Some(message) = snapshot.navigation_shortcut_message_for_id(*shortcut_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_navigation_shortcut_row(&message, Some(principal), &columns)
         }
         Some(MapiObject::ConversationAction {
             conversation_action_id,
@@ -1594,6 +1607,14 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{conversation_action_id:#018x}"),
         ),
+        Some(MapiObject::NavigationShortcut {
+            folder_id,
+            shortcut_id,
+        }) => (
+            "navigation_shortcut",
+            format!("{folder_id:#018x}"),
+            format!("{shortcut_id:#018x}"),
+        ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
             format!("{folder_id:#018x}"),
@@ -1620,6 +1641,11 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
         ),
         Some(MapiObject::PendingConversationAction { folder_id, .. }) => (
             "pending_conversation_action",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::PendingNavigationShortcut { folder_id, .. }) => (
+            "pending_navigation_shortcut",
             format!("{folder_id:#018x}"),
             String::new(),
         ),
@@ -1985,6 +2011,9 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::PendingConversationAction { properties, .. }) => {
             serialize_pending_conversation_action_row(properties, &[tag])
         }
+        Some(MapiObject::PendingNavigationShortcut { properties, .. }) => {
+            serialize_pending_navigation_shortcut_row(properties, principal, &[tag])
+        }
         Some(MapiObject::Task { folder_id, task_id }) => snapshot
             .task_for_id(*folder_id, *task_id)
             .map(|task| serialize_task_row(&task.task, task.id, task.folder_id, &[tag]))
@@ -2017,6 +2046,14 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::SearchFolderDefinition { definition_id, .. }) => snapshot
             .search_folder_definition_message_for_id(*definition_id)
             .map(|message| serialize_search_folder_definition_row(message, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => snapshot
+            .navigation_shortcut_message_for_id(*shortcut_id)
+            .map(|message| serialize_navigation_shortcut_row(&message, Some(principal), &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

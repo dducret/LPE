@@ -10,7 +10,7 @@ use crate::mapi::permissions::{
     access_from_rights, reserved_permission_rows, MapiFolderAccess, MapiFolderPermission,
 };
 use crate::store::ExchangeStore;
-use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest};
+use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest, MapiNavigationShortcutRecord};
 
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
@@ -23,6 +23,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     notes: Vec<MapiNote>,
     journal_entries: Vec<MapiJournalEntry>,
     search_folder_definitions: Vec<MapiSearchFolderDefinitionMessage>,
+    navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     reminders: Vec<ClientReminder>,
     folder_permissions: Vec<MapiFolderPermission>,
@@ -114,6 +115,25 @@ pub(crate) struct MapiSearchFolderDefinitionMessage {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) definition: SearchFolderDefinition,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiNavigationShortcutMessage {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) subject: String,
+    pub(crate) target_folder_id: u64,
+    pub(crate) shortcut_type: u32,
+    pub(crate) flags: u32,
+    pub(crate) section: u32,
+    pub(crate) ordinal: u32,
+}
+
+pub(crate) enum MapiCommonViewsMessage<'a> {
+    SearchFolderDefinition(&'a MapiSearchFolderDefinitionMessage),
+    NavigationShortcut(MapiNavigationShortcutMessage),
 }
 
 #[derive(Debug, Clone)]
@@ -320,6 +340,7 @@ impl MapiMailStoreSnapshot {
             notes: Vec::new(),
             journal_entries: Vec::new(),
             search_folder_definitions: Vec::new(),
+            navigation_shortcuts: Vec::new(),
             conversation_actions: Vec::new(),
             reminders: Vec::new(),
             folder_permissions,
@@ -354,6 +375,27 @@ impl MapiMailStoreSnapshot {
                 folder_id: crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
                 canonical_id: action.id,
                 action,
+            })
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_navigation_shortcuts(
+        mut self,
+        navigation_shortcuts: Vec<MapiNavigationShortcutRecord>,
+    ) -> Self {
+        self.navigation_shortcuts = navigation_shortcuts
+            .into_iter()
+            .map(|shortcut| MapiNavigationShortcutMessage {
+                id: mapi_item_id(&shortcut.id),
+                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                canonical_id: shortcut.id,
+                subject: shortcut.subject,
+                target_folder_id: shortcut.target_folder_id,
+                shortcut_type: shortcut.shortcut_type,
+                flags: shortcut.flags,
+                section: shortcut.section,
+                ordinal: shortcut.ordinal,
             })
             .collect();
         self
@@ -765,12 +807,65 @@ impl MapiMailStoreSnapshot {
         &self.search_folder_definitions
     }
 
+    pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
+        let mut messages = vec![
+            MapiNavigationShortcutMessage {
+                id: crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 100,
+                ),
+                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
+                subject: "Mail".to_string(),
+                target_folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                shortcut_type: 1,
+                flags: 0,
+                section: 0,
+                ordinal: 0,
+            },
+            MapiNavigationShortcutMessage {
+                id: crate::mapi::identity::mapi_store_id(
+                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 101,
+                ),
+                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002),
+                subject: "Inbox".to_string(),
+                target_folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                shortcut_type: 2,
+                flags: 0,
+                section: 0,
+                ordinal: 1,
+            },
+        ];
+        messages.extend(self.navigation_shortcuts.iter().cloned());
+        messages
+    }
+
+    pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage<'_>> {
+        self.search_folder_definition_messages()
+            .iter()
+            .map(MapiCommonViewsMessage::SearchFolderDefinition)
+            .chain(
+                self.navigation_shortcut_messages()
+                    .into_iter()
+                    .map(MapiCommonViewsMessage::NavigationShortcut),
+            )
+    }
+
     pub(crate) fn search_folder_definition_message_for_id(
         &self,
         item_id: u64,
     ) -> Option<&MapiSearchFolderDefinitionMessage> {
         self.search_folder_definitions
             .iter()
+            .find(|message| message.id == item_id)
+    }
+
+    pub(crate) fn navigation_shortcut_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<MapiNavigationShortcutMessage> {
+        self.navigation_shortcut_messages()
+            .into_iter()
             .find(|message| message.id == item_id)
     }
 
@@ -881,6 +976,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let notes = self.fetch_mapi_notes(account_id).await?;
             let journal_entries = self.fetch_mapi_journal_entries(account_id).await?;
             let search_folder_definitions = self.fetch_search_folders(account_id).await?;
+            let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let reminders = self
                 .query_client_reminders(
@@ -899,6 +995,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &notes,
                 &journal_entries,
                 &search_folder_definitions,
+                &navigation_shortcuts,
                 &conversation_actions,
             );
             for identity in self
@@ -931,6 +1028,7 @@ impl<T: ExchangeStore> MapiStore for T {
             ))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
+            .map(|snapshot| snapshot.with_navigation_shortcuts(navigation_shortcuts))
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_reminders(reminders))
         })
@@ -946,6 +1044,7 @@ fn mapi_identity_requests(
     notes: &[ClientNote],
     journal_entries: &[JournalEntry],
     search_folder_definitions: &[SearchFolderDefinition],
+    navigation_shortcuts: &[MapiNavigationShortcutRecord],
     conversation_actions: &[ConversationAction],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
@@ -999,6 +1098,15 @@ fn mapi_identity_requests(
             .map(|action| MapiIdentityRequest {
                 object_kind: MapiIdentityObjectKind::ConversationAction,
                 canonical_id: action.id,
+                reserved_global_counter: None,
+            }),
+    );
+    requests.extend(
+        navigation_shortcuts
+            .iter()
+            .map(|shortcut| MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                canonical_id: shortcut.id,
                 reserved_global_counter: None,
             }),
     );

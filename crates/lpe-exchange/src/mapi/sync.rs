@@ -14,12 +14,12 @@ pub(in crate::mapi) use super::identity::{
     JOURNAL_FOLDER_ID, JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
     QUICK_CONTACTS_FOLDER_ID, REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID,
     SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID, SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID,
-    SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID, STORE_REPLICA_ID, SUGGESTED_CONTACTS_FOLDER_ID,
-    SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
-    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    SPOOLER_QUEUE_FOLDER_ID, STORE_REPLICA_ID, SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID,
+    TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID, TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID,
+    VIEWS_FOLDER_ID,
 };
 
-pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
+pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 12] = [
     ROOT_FOLDER_ID,
     DEFERRED_ACTION_FOLDER_ID,
     SPOOLER_QUEUE_FOLDER_ID,
@@ -32,7 +32,6 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SCHEDULE_FOLDER_ID,
     SEARCH_FOLDER_ID,
     VIEWS_FOLDER_ID,
-    SHORTCUTS_FOLDER_ID,
 ];
 
 const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 20] = [
@@ -254,8 +253,7 @@ fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) ->
         | "__mapi_common_views"
         | "__mapi_schedule"
         | "__mapi_search"
-        | "__mapi_views"
-        | "__mapi_shortcuts" => ROOT_FOLDER_ID,
+        | "__mapi_views" => ROOT_FOLDER_ID,
         "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
         _ => mailbox
             .parent_id
@@ -273,8 +271,7 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | COMMON_VIEWS_FOLDER_ID
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
-        | VIEWS_FOLDER_ID
-        | SHORTCUTS_FOLDER_ID => Some(ROOT_FOLDER_ID),
+        | VIEWS_FOLDER_ID => Some(ROOT_FOLDER_ID),
         INBOX_FOLDER_ID
         | DRAFTS_FOLDER_ID
         | OUTBOX_FOLDER_ID
@@ -546,9 +543,8 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .map(|entry| journal_sync_object(entry))
             .collect(),
         COMMON_VIEWS_FOLDER_ID => snapshot
-            .search_folder_definition_messages()
-            .iter()
-            .map(search_folder_definition_sync_object)
+            .common_views_messages()
+            .map(common_views_sync_object)
             .collect(),
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
             .conversation_action_messages()
@@ -786,6 +782,55 @@ fn search_folder_definition_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
         named_properties,
+    }
+}
+
+fn navigation_shortcut_sync_object(
+    message: &crate::mapi_store::MapiNavigationShortcutMessage,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut named_properties = Vec::new();
+    for property_tag in [
+        PID_TAG_WLINK_TYPE,
+        PID_TAG_WLINK_FLAGS,
+        PID_TAG_WLINK_ENTRY_ID,
+        PID_TAG_WLINK_STORE_ENTRY_ID,
+        PID_TAG_WLINK_FOLDER_TYPE,
+        PID_TAG_WLINK_GROUP_HEADER_ID,
+        PID_TAG_WLINK_SECTION,
+        PID_TAG_WLINK_ORDINAL,
+    ] {
+        if let Some(value) = navigation_shortcut_property_value(message, Uuid::nil(), property_tag)
+            .and_then(special_message_property_value)
+        {
+            named_properties.push((property_tag, value));
+        }
+    }
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: message.subject.clone(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size: 128,
+        named_properties,
+    }
+}
+
+fn common_views_sync_object(
+    message: crate::mapi_store::MapiCommonViewsMessage<'_>,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    match message {
+        crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            search_folder_definition_sync_object(message)
+        }
+        crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
+            navigation_shortcut_sync_object(&message)
+        }
     }
 }
 

@@ -158,10 +158,21 @@ non-canonical LPE state.
   folder/message global counters used by `PidTagSourceKey`. Outlook relies on
   this identity material when deriving local item-friendly identifiers during
   cached-mode sync.
-- Private-mailbox `RopLogon` responses expose exactly the documented 13
-  special-folder IDs before `ResponseFlags` and `MailboxGuid`; adding extra
-  folder IDs shifts `MailboxGuid` and causes Outlook to construct malformed
-  private-store EntryIDs.
+- Private-mailbox `RopLogon` responses expose only implemented Microsoft
+  special-folder IDs before `ResponseFlags` and `MailboxGuid`; adding
+  compatibility-only virtual folders, such as navigation shortcuts, shifts
+  `MailboxGuid` and causes Outlook to construct malformed private-store
+  EntryIDs.
+- Common Views and Personal Views are Root children outside the IPM subtree.
+  Navigation shortcuts are projected as folder-associated information messages
+  in Common Views, not as a separate Shortcuts folder.
+- Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
+  Outlook-created or imported Common Views shortcut messages. The bounded
+  supported property surface is the visible shortcut subject, target folder
+  EntryID, type, flags, section, and ordinal. LPE also seeds minimal Mail and
+  Inbox shortcut rows for cached-mode bootstrap. Full Outlook shortcut group
+  header parity remains unproven until real Outlook traces require additional
+  `WunderBar` group/header rows.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed

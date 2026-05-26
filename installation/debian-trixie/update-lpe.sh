@@ -355,21 +355,43 @@ BEGIN
      AND (
        constraint_def NOT LIKE '%search_folder_definition%'
        OR constraint_def NOT LIKE '%conversation_action%'
+       OR constraint_def NOT LIKE '%navigation_shortcut%'
      ) THEN
     EXECUTE format('ALTER TABLE public.mapi_object_identities DROP CONSTRAINT %I', constraint_name);
     ALTER TABLE public.mapi_object_identities
       ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
         'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
-        'note', 'journal_entry', 'search_folder_definition', 'conversation_action'
+        'note', 'journal_entry', 'search_folder_definition', 'conversation_action',
+        'navigation_shortcut'
       ));
   ELSIF constraint_name IS NULL THEN
     ALTER TABLE public.mapi_object_identities
       ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
         'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
-        'note', 'journal_entry', 'search_folder_definition', 'conversation_action'
+        'note', 'journal_entry', 'search_folder_definition', 'conversation_action',
+        'navigation_shortcut'
       ));
   END IF;
 END $$;
+
+CREATE TABLE IF NOT EXISTS public.mapi_navigation_shortcuts (
+  tenant_id UUID NOT NULL,
+  id UUID NOT NULL,
+  account_id UUID NOT NULL,
+  subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+  target_folder_id BIGINT NOT NULL CHECK (target_folder_id > 0),
+  shortcut_type BIGINT NOT NULL CHECK (shortcut_type >= 0 AND shortcut_type <= 4294967295),
+  flags BIGINT NOT NULL DEFAULT 0 CHECK (flags >= 0 AND flags <= 4294967295),
+  section BIGINT NOT NULL DEFAULT 0 CHECK (section >= 0 AND section <= 4294967295),
+  ordinal BIGINT NOT NULL DEFAULT 0 CHECK (ordinal >= 0 AND ordinal <= 4294967295),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, id),
+  FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mapi_navigation_shortcuts_account_idx
+  ON public.mapi_navigation_shortcuts (tenant_id, account_id, section, ordinal, subject, id);
 
 COMMIT;
 SQL
