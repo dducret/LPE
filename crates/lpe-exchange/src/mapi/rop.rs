@@ -2959,22 +2959,33 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn import_message_id(&self) -> Option<u64> {
-        let bytes = self.payload.get(..8)?;
-        crate::mapi::identity::object_id_from_wire_id(bytes)
+        self.import_property_values()
+            .ok()?
+            .into_iter()
+            .find_map(|(tag, value)| match (tag, value) {
+                (PID_TAG_SOURCE_KEY, MapiValue::Binary(bytes)) => {
+                    crate::mapi::identity::object_id_from_source_key(&bytes)
+                }
+                _ => None,
+            })
+    }
+
+    pub(in crate::mapi) fn import_flag(&self) -> Option<u8> {
+        self.payload.first().copied()
     }
 
     pub(in crate::mapi) fn import_property_values(&self) -> Result<Vec<(u32, MapiValue)>> {
         let property_payload = self
             .payload
-            .get(8..)
+            .get(1..)
             .ok_or_else(|| anyhow!("missing import property payload"))?;
-        RopRequest {
-            rop_id: 0x0A,
-            input_handle_index: self.input_handle_index,
-            output_handle_index: self.output_handle_index,
-            payload: property_payload.to_vec(),
+        let mut cursor = Cursor::new(property_payload);
+        let property_value_count = cursor.read_u16()? as usize;
+        let mut values = Vec::with_capacity(property_value_count);
+        for _ in 0..property_value_count {
+            values.push(parse_tagged_property(&mut cursor)?);
         }
-        .property_values()
+        Ok(values)
     }
 
     pub(in crate::mapi) fn import_hierarchy_values(
@@ -4228,21 +4239,18 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         Some(RopId::SynchronizationImportMessageChange) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
-            let mut payload = Vec::new();
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            let property_value_size = cursor.read_u16()? as usize;
-            let property_value_count = cursor.read_u16()?;
-            payload.extend_from_slice(&(property_value_size as u16).to_le_bytes());
-            payload.extend_from_slice(&property_value_count.to_le_bytes());
-            let values_size = property_value_size
-                .checked_sub(2)
-                .ok_or_else(|| anyhow!("invalid import property value size"))?;
-            payload.extend_from_slice(cursor.read_bytes(values_size)?);
+            let start = cursor.position;
+            cursor.read_u8()?;
+            let property_value_count = cursor.read_u16()? as usize;
+            for _ in 0..property_value_count {
+                parse_tagged_property(cursor)?;
+            }
+            let end = cursor.position;
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
                 output_handle_index: Some(output_handle_index),
-                payload,
+                payload: cursor.bytes[start..end].to_vec(),
             })
         }
         Some(RopId::SynchronizationImportHierarchyChange) => {

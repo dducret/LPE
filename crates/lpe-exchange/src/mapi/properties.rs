@@ -3439,6 +3439,7 @@ where
             PID_NAME_KEYWORDS_TAG => {
                 update.categories = Some(categories_from_mapi_value(value)?);
             }
+            PID_TAG_SOURCE_KEY => {}
             _ => return Err(anyhow!("canonical MAPI message property is not mutable")),
         }
     }

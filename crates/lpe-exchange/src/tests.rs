@@ -20628,7 +20628,6 @@ async fn mapi_over_http_sync_upload_state_round_trips_as_transfer_state() {
 #[tokio::test]
 async fn mapi_over_http_upload_import_collector_handles_never_advance_download_checkpoints() {
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555502").unwrap();
-    let imported_id = Uuid::parse_str("45454545-4545-4545-8545-454545454502").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -20681,8 +20680,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
         0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(&imported_id.to_string()));
-    rops.extend_from_slice(&((values.len() + 2) as u16).to_le_bytes());
+    rops.push(0);
     rops.extend_from_slice(&2u16.to_le_bytes());
     rops.extend_from_slice(&values);
     rops.extend_from_slice(&[
@@ -20911,6 +20909,11 @@ async fn mapi_over_http_sync_import_message_change_updates_canonical_flags() {
         .to_string();
 
     let mut property_values = Vec::new();
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_SOURCE_KEY,
+        &mapi_mailstore::source_key_for_store_id(test_mapi_message_id(message_id)),
+    );
     append_mapi_i32_property(&mut property_values, 0x0E07_0003, 1);
     append_mapi_i32_property(&mut property_values, 0x1090_0003, 2);
 
@@ -20923,9 +20926,8 @@ async fn mapi_over_http_sync_import_message_change_updates_canonical_flags() {
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
-    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
-    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&3u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
 
     let mut execute_headers = mapi_headers("Execute");
@@ -20991,8 +20993,7 @@ async fn mapi_over_http_sync_import_new_message_saves_canonical_email() {
         0x7E, 0x00, 0x01, 0x02, // RopSynchronizationOpenCollector
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
-    rops.extend_from_slice(&0u64.to_le_bytes());
-    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.push(0);
     rops.extend_from_slice(&3u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
     rops.extend_from_slice(&[

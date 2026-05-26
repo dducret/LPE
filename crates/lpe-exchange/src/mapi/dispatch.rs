@@ -1918,6 +1918,32 @@ fn format_debug_property_tags(tags: &[u32]) -> String {
         .join(",")
 }
 
+fn upload_state_property_name(tag: u32) -> &'static str {
+    match tag {
+        0x4017_0003 | 0x4017_0102 => "MetaTagIdsetGiven",
+        0x4018_0102 => "MetaTagIdsetDeleted",
+        0x402D_0102 => "MetaTagIdsetRead",
+        0x402E_0102 => "MetaTagIdsetUnread",
+        0x6796_0102 => "MetaTagCnsetSeen",
+        0x67DA_0102 => "MetaTagCnsetSeenFAI",
+        0x67D2_0102 => "MetaTagCnsetRead",
+        _ => "unknown",
+    }
+}
+
+fn sync_checkpoint_scope(
+    checkpoint_mailbox_id: Option<Uuid>,
+    special_objects: &[mapi_mailstore::SpecialMessageSyncFact],
+) -> &'static str {
+    if checkpoint_mailbox_id.is_some() {
+        "canonical_mailbox"
+    } else if !special_objects.is_empty() {
+        "virtual_special_folder"
+    } else {
+        "virtual_or_system_folder"
+    }
+}
+
 fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
     let mut summary = RopRequestDebugSummary {
         extended: is_rpc_header_ext_rop_buffer(rop_buffer),
@@ -2642,6 +2668,7 @@ fn expected_special_folder_container_class(folder_id: u64) -> &'static str {
         | QUICK_CONTACTS_FOLDER_ID
         | IM_CONTACT_LIST_FOLDER_ID
         | CONTACTS_SEARCH_FOLDER_ID => "IPF.Contact",
+        CALENDAR_FOLDER_ID => "IPF.Appointment",
         JOURNAL_FOLDER_ID => "IPF.Journal",
         NOTES_FOLDER_ID => "IPF.StickyNote",
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPF.Task",
@@ -5622,6 +5649,8 @@ where
                 let checkpoint_kind = sync_checkpoint_kind(sync_type);
                 let checkpoint_mailbox_id =
                     sync_checkpoint_mailbox_id(folder_id, sync_type, mailboxes);
+                let folder_role = debug_role_for_folder_id(folder_id);
+                let folder_container_class = debug_container_class_for_folder_id(folder_id);
                 let checkpoint = match store
                     .fetch_mapi_sync_checkpoint(
                         principal.account_id,
@@ -5889,6 +5918,8 @@ where
                     request_type = "Execute",
                     request_rop_id = "0x70",
                     folder_id = format_args!("0x{folder_id:016x}"),
+                    folder_role,
+                    folder_container_class,
                     sync_type = format_args!("0x{sync_type:02x}"),
                     sync_flags = format_args!("0x{sync_flags:04x}"),
                     sync_extra_flags = format_args!("0x{sync_extra_flags:08x}"),
@@ -5897,6 +5928,14 @@ where
                     sync_property_filter_mode =
                         sync_property_filter_mode(sync_flags, &sync_property_tags),
                     checkpoint_loaded = checkpoint.is_some(),
+                    checkpoint_kind = checkpoint_kind.as_str(),
+                    checkpoint_mailbox_id = checkpoint_mailbox_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default(),
+                    checkpoint_scope = sync_checkpoint_scope(
+                        checkpoint_mailbox_id,
+                        &all_special_sync_objects
+                    ),
                     checkpoint_status,
                     checkpoint_cursor_source,
                     checkpoint_cursor_sync_root_folder_id = %checkpoint_cursor_sync_root_folder_id,
@@ -6324,14 +6363,15 @@ where
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::SynchronizationSource {
                         folder_id,
-                        state_upload_buffer,
-                        ..
-                    })
-                    | Some(MapiObject::SynchronizationCollector {
-                        folder_id,
+                        mailbox_id,
+                        checkpoint_kind,
+                        sync_type,
                         state_upload_buffer,
                         ..
                     }) => {
+                        let property_tag = request.upload_state_property_tag().unwrap_or_default();
+                        let declared_bytes =
+                            request.upload_state_transfer_size().unwrap_or_default();
                         state_upload_buffer.clear();
                         tracing::info!(
                             rca_debug = true,
@@ -6340,13 +6380,53 @@ where
                             mailbox = %principal.email,
                             request_type = "Execute",
                             request_rop_id = "0x75",
+                            sync_context_kind = "source",
                             folder_id = format_args!("0x{:016x}", *folder_id),
-                            upload_state_property_tag = format_args!(
-                                "0x{:08x}",
-                                request.upload_state_property_tag().unwrap_or_default()
-                            ),
-                            upload_state_declared_bytes =
-                                request.upload_state_transfer_size().unwrap_or_default(),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
+                            checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_mailbox_id = (*mailbox_id)
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
+                            upload_state_property_tag = format_args!("0x{property_tag:08x}"),
+                            upload_state_property_name = upload_state_property_name(property_tag),
+                            upload_state_declared_bytes = declared_bytes,
+                            upload_state_empty_declared = declared_bytes == 0,
+                            "rca debug mapi sync upload state begin"
+                        );
+                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
+                    }
+                    Some(MapiObject::SynchronizationCollector {
+                        folder_id,
+                        mailbox_id,
+                        checkpoint_kind,
+                        state_upload_buffer,
+                        ..
+                    }) => {
+                        let property_tag = request.upload_state_property_tag().unwrap_or_default();
+                        let declared_bytes =
+                            request.upload_state_transfer_size().unwrap_or_default();
+                        state_upload_buffer.clear();
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x75",
+                            sync_context_kind = "collector",
+                            folder_id = format_args!("0x{:016x}", *folder_id),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_mailbox_id = (*mailbox_id)
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
+                            upload_state_property_tag = format_args!("0x{property_tag:08x}"),
+                            upload_state_property_name = upload_state_property_name(property_tag),
+                            upload_state_declared_bytes = declared_bytes,
+                            upload_state_empty_declared = declared_bytes == 0,
                             "rca debug mapi sync upload state begin"
                         );
                         responses.extend_from_slice(&rop_upload_state_success_response(&request));
@@ -6362,11 +6442,9 @@ where
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::SynchronizationSource {
                         folder_id,
-                        state_upload_buffer,
-                        ..
-                    })
-                    | Some(MapiObject::SynchronizationCollector {
-                        folder_id,
+                        mailbox_id,
+                        checkpoint_kind,
+                        sync_type,
                         state_upload_buffer,
                         ..
                     }) => {
@@ -6379,8 +6457,48 @@ where
                             mailbox = %principal.email,
                             request_type = "Execute",
                             request_rop_id = "0x76",
+                            sync_context_kind = "source",
                             folder_id = format_args!("0x{:016x}", *folder_id),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
+                            checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_mailbox_id = (*mailbox_id)
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
                             upload_state_chunk_bytes = stream_data.len(),
+                            upload_state_chunk_preview = %hex_preview(stream_data, 16),
+                            upload_state_buffer_bytes = state_upload_buffer.len(),
+                            "rca debug mapi sync upload state continue"
+                        );
+                        responses.extend_from_slice(&rop_upload_state_success_response(&request));
+                    }
+                    Some(MapiObject::SynchronizationCollector {
+                        folder_id,
+                        mailbox_id,
+                        checkpoint_kind,
+                        state_upload_buffer,
+                        ..
+                    }) => {
+                        let stream_data = request.stream_data();
+                        state_upload_buffer.extend_from_slice(stream_data);
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x76",
+                            sync_context_kind = "collector",
+                            folder_id = format_args!("0x{:016x}", *folder_id),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_mailbox_id = (*mailbox_id)
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
+                            upload_state_chunk_bytes = stream_data.len(),
+                            upload_state_chunk_preview = %hex_preview(stream_data, 16),
                             upload_state_buffer_bytes = state_upload_buffer.len(),
                             "rca debug mapi sync upload state continue"
                         );
@@ -6397,6 +6515,9 @@ where
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::SynchronizationSource {
                         folder_id,
+                        mailbox_id,
+                        checkpoint_kind,
+                        sync_type,
                         state,
                         state_upload_buffer,
                         client_state_uploaded_bytes,
@@ -6427,9 +6548,20 @@ where
                             mailbox = %principal.email,
                             request_type = "Execute",
                             request_rop_id = "0x77",
+                            sync_context_kind = "source",
                             folder_id = format_args!("0x{:016x}", *folder_id),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
+                            checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_mailbox_id = (*mailbox_id)
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
                             upload_state_total_bytes = state.len(),
                             upload_state_stream_bytes = uploaded_bytes,
+                            upload_state_empty_stream = uploaded_bytes == 0,
+                            upload_state_empty_stream_expected =
+                                uploaded_bytes == 0 && *client_state_uploaded_bytes == 0,
                             upload_state_stream_summary = %upload_state_stream_summary,
                             upload_state_client_bytes = *client_state_uploaded_bytes,
                             upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
@@ -6441,10 +6573,13 @@ where
                     }
                     Some(MapiObject::SynchronizationCollector {
                         folder_id,
+                        mailbox_id,
+                        checkpoint_kind,
                         state,
                         state_upload_buffer,
                         ..
                     }) => {
+                        let uploaded_bytes = state_upload_buffer.len();
                         commit_uploaded_sync_state(state, state_upload_buffer);
                         tracing::info!(
                             rca_debug = true,
@@ -6453,8 +6588,17 @@ where
                             mailbox = %principal.email,
                             request_type = "Execute",
                             request_rop_id = "0x77",
+                            sync_context_kind = "collector",
                             folder_id = format_args!("0x{:016x}", *folder_id),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            checkpoint_kind = checkpoint_kind.as_str(),
+                            checkpoint_mailbox_id = (*mailbox_id)
+                                .map(|id| id.to_string())
+                                .unwrap_or_default(),
                             upload_state_total_bytes = state.len(),
+                            upload_state_stream_bytes = uploaded_bytes,
+                            upload_state_empty_stream = uploaded_bytes == 0,
                             "rca debug mapi sync upload state end"
                         );
                         responses.extend_from_slice(&rop_upload_state_success_response(&request));
@@ -6568,7 +6712,39 @@ where
                         continue;
                     }
                 };
+                let import_flag = request.import_flag().unwrap_or_default();
+                let import_property_tags = property_values
+                    .iter()
+                    .map(|(tag, _)| format!("0x{tag:08x}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let import_source_key = property_values
+                    .iter()
+                    .find_map(|(tag, value)| match (*tag, value) {
+                        (PID_TAG_SOURCE_KEY, MapiValue::Binary(bytes)) => Some(bytes_to_hex(bytes)),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
                 let message_id = request.import_message_id().unwrap_or(0);
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x72",
+                    folder_id = format_args!("0x{:016x}", folder_id),
+                    folder_role = debug_role_for_folder_id(folder_id),
+                    folder_container_class = debug_container_class_for_folder_id(folder_id),
+                    import_flag = format_args!("0x{import_flag:02x}"),
+                    import_associated = import_flag & 0x10 != 0,
+                    import_fail_on_conflict = import_flag & 0x40 != 0,
+                    import_property_tag_count = property_values.len(),
+                    import_property_tags = %import_property_tags,
+                    import_source_key = %import_source_key,
+                    parsed_message_id = format_args!("0x{message_id:016x}"),
+                    "rca debug mapi sync import message change"
+                );
                 if message_id != 0
                     && message_for_id(folder_id, message_id, mailboxes, emails).is_some()
                 {
