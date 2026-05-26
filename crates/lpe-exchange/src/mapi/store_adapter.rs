@@ -687,6 +687,7 @@ fn log_mapi_requested_identity_resolution(
         resolved_identity_kinds = %format_mapi_identity_kinds(identities),
         unresolved_object_id_count = unresolved_object_ids.len(),
         unresolved_object_ids = %format_mapi_object_ids(&unresolved_object_ids),
+        unresolved_object_scopes = %format_unresolved_mapi_object_scopes(&unresolved_object_ids),
         message = "rca debug mapi requested identity resolution",
     );
 }
@@ -786,6 +787,30 @@ fn format_mapi_object_ids(object_ids: &[u64]) -> String {
         .map(|object_id| format!("{object_id:#018x}"))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn format_unresolved_mapi_object_scopes(object_ids: &[u64]) -> String {
+    object_ids
+        .iter()
+        .map(|object_id| {
+            format!(
+                "{object_id:#018x}:{}",
+                unresolved_mapi_object_scope(*object_id)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
+    if is_advertised_special_folder(object_id) {
+        return "advertised_special_folder";
+    }
+    if crate::mapi::identity::global_counter_from_store_id(object_id).is_some() {
+        "unallocated_store_object"
+    } else {
+        "foreign_or_invalid_replid"
+    }
 }
 
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {
@@ -1392,6 +1417,25 @@ mod tests {
                 &[loaded_id],
             ),
             "object_id=0x00000000003b0001;canonical_id=fb129372-d6b6-4d69-99f7-977ab2a8093f;kind=contact"
+        );
+    }
+
+    #[test]
+    fn unresolved_mapi_identity_summary_classifies_expected_special_and_invalid_ids() {
+        let invalid_replid_id = 0x0201_047c_2800_0002;
+        let dynamic_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
+        );
+
+        assert_eq!(
+            format_unresolved_mapi_object_scopes(&[
+                ROOT_FOLDER_ID,
+                dynamic_id,
+                invalid_replid_id
+            ]),
+            format!(
+                "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
+            )
         );
     }
 }

@@ -2082,7 +2082,7 @@ fn debug_object_scope_for_id(
 }
 
 fn long_term_id_from_id_scope_is_loaded(scope: &str) -> bool {
-    !matches!(scope, "unparsed" | "not_loaded")
+    scope != "unparsed"
 }
 
 fn rop_long_term_id_from_id_response_for_scope(request: &RopRequest, scope: &str) -> Vec<u8> {
@@ -7587,6 +7587,11 @@ where
                     debug_object_scope_for_id(decoded_object_id, mailboxes, emails, snapshot);
                 let response =
                     rop_long_term_id_from_id_response_for_scope(&request, decoded_object_scope);
+                let response_status = if response.len() > 6 {
+                    "ok"
+                } else {
+                    "ecNotFound"
+                };
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -7602,11 +7607,7 @@ where
                         .map(is_advertised_special_folder)
                         .unwrap_or(false),
                     decoded_object_scope,
-                    response_status = if long_term_id_from_id_scope_is_loaded(decoded_object_scope) {
-                        "ok"
-                    } else {
-                        "ecNotFound"
-                    },
+                    response_status,
                     message = "rca debug mapi long term id from id",
                 );
                 responses.extend_from_slice(&response)
@@ -8405,7 +8406,7 @@ mod tests {
     }
 
     #[test]
-    fn long_term_id_from_id_rejects_not_loaded_scope() {
+    fn long_term_id_from_id_allows_not_loaded_scope() {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 1,
         );
@@ -8419,12 +8420,16 @@ mod tests {
         };
 
         assert_eq!(
-            rop_long_term_id_from_id_response_for_scope(&request, "not_loaded"),
-            vec![RopId::LongTermIdFromId as u8, 0x00, 0x0F, 0x01, 0x04, 0x80]
+            &rop_long_term_id_from_id_response_for_scope(&request, "not_loaded")[..6],
+            &[RopId::LongTermIdFromId as u8, 0x00, 0, 0, 0, 0]
         );
         assert_eq!(
             &rop_long_term_id_from_id_response_for_scope(&request, "message")[..6],
             &[RopId::LongTermIdFromId as u8, 0x00, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            rop_long_term_id_from_id_response_for_scope(&request, "unparsed"),
+            vec![RopId::LongTermIdFromId as u8, 0x00, 0x0F, 0x01, 0x04, 0x80]
         );
     }
 
