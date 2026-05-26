@@ -439,7 +439,59 @@ pub(in crate::mapi) fn special_sync_objects_for(
             })
             .collect();
     }
+    if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| {
+            folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Contacts
+        })
+    {
+        return snapshot
+            .contacts_for_folder(folder_id)
+            .into_iter()
+            .map(contact_sync_object)
+            .collect();
+    }
+    if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Task)
+    {
+        return snapshot
+            .tasks_for_folder(folder_id)
+            .into_iter()
+            .map(|task| {
+                task_sync_object(
+                    task,
+                    snapshot.reminder_for_source("task", task.canonical_id),
+                )
+            })
+            .collect();
+    }
     match folder_id {
+        CONTACTS_SEARCH_FOLDER_ID => snapshot
+            .contacts_search_results()
+            .into_iter()
+            .map(contact_sync_object)
+            .collect(),
+        TODO_SEARCH_FOLDER_ID => snapshot
+            .todo_search_results()
+            .into_iter()
+            .map(|task| {
+                task_sync_object(
+                    task,
+                    snapshot.reminder_for_source("task", task.canonical_id),
+                )
+            })
+            .collect(),
+        REMINDERS_FOLDER_ID => snapshot
+            .reminder_tasks()
+            .into_iter()
+            .map(|task| {
+                task_sync_object(
+                    task,
+                    snapshot.reminder_for_source("task", task.canonical_id),
+                )
+            })
+            .collect(),
         NOTES_FOLDER_ID => snapshot
             .notes_for_folder(folder_id)
             .into_iter()
@@ -504,6 +556,94 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .map(conversation_action_sync_object)
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+fn contact_sync_object(
+    contact: &crate::mapi_store::MapiContact,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut properties = Vec::new();
+    for property_tag in [
+        PID_TAG_EMAIL_ADDRESS_W,
+        PID_TAG_SMTP_ADDRESS_W,
+        PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
+        PID_TAG_BUSINESS_TELEPHONE_NUMBER_W,
+        PID_TAG_HOME_TELEPHONE_NUMBER_W,
+        PID_TAG_COMPANY_NAME_W,
+        PID_TAG_TITLE_W,
+        PID_TAG_ACCESS,
+        PID_TAG_HAS_ATTACHMENTS,
+    ] {
+        if let Some(value) = contact_property_value(
+            &contact.contact,
+            contact.id,
+            contact.folder_id,
+            property_tag,
+        )
+        .and_then(special_message_property_value)
+        {
+            properties.push((property_tag, value));
+        }
+    }
+    let change_number = mapi_mailstore::change_number_for_store_id(contact.id);
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: contact.folder_id,
+        item_id: contact.id,
+        canonical_id: contact.canonical_id,
+        associated: false,
+        subject: contact.contact.name.clone(),
+        body_text: contact.contact.notes.clone(),
+        message_class: "IPM.Contact".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size: contact_size(&contact.contact),
+        named_properties: properties,
+    }
+}
+
+fn task_sync_object(
+    task: &crate::mapi_store::MapiTask,
+    reminder: Option<&lpe_storage::ClientReminder>,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut properties = Vec::new();
+    for property_tag in [
+        PID_TAG_FLAG_STATUS,
+        PID_TAG_ACCESS,
+        PID_TAG_HAS_ATTACHMENTS,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
+        PID_LID_REMINDER_SET_TAG,
+        PID_LID_REMINDER_DELTA_TAG,
+        PID_LID_REMINDER_TIME_TAG,
+        PID_LID_REMINDER_SIGNAL_TIME_TAG,
+        PID_LID_REMINDER_OVERRIDE_TAG,
+        PID_LID_REMINDER_PLAY_SOUND_TAG,
+        PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
+    ] {
+        if let Some(value) = task_property_value_with_reminder(
+            &task.task,
+            task.id,
+            task.folder_id,
+            property_tag,
+            reminder,
+        )
+        .and_then(special_message_property_value)
+        {
+            properties.push((property_tag, value));
+        }
+    }
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: task.folder_id,
+        item_id: task.id,
+        canonical_id: task.canonical_id,
+        associated: false,
+        subject: task.task.title.clone(),
+        body_text: task.task.description.clone(),
+        message_class: "IPM.Task".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&task.task.updated_at),
+        message_size: task_size(&task.task),
+        named_properties: properties,
     }
 }
 

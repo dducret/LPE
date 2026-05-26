@@ -16444,6 +16444,71 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
 }
 
 #[tokio::test]
+async fn mapi_over_http_virtual_contacts_content_sync_stores_virtual_checkpoint() {
+    let account = FakeStore::account();
+    let contacts = FakeStore::collection("default", "contacts", "Contacts");
+    let first = FakeStore::contact(
+        "71717171-7171-7171-7171-717171717171",
+        "Contact Sync One",
+        "one@example.test",
+    );
+    let second = FakeStore::contact(
+        "72727272-7272-7272-7272-727272727272",
+        "Contact Sync Two",
+        "two@example.test",
+    );
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![contacts])),
+        contacts: Arc::new(Mutex::new(vec![first, second])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 56,
+        current_modseq: 42,
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        &[],
+    )
+    .await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Contact")));
+    assert!(contains_bytes(&response_rops, &utf16z("Contact Sync One")));
+    assert!(contains_bytes(&response_rops, &utf16z("one@example.test")));
+    assert!(contains_bytes(&response_rops, &utf16z("Contact Sync Two")));
+    assert!(contains_bytes(&response_rops, &utf16z("two@example.test")));
+
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CONTACTS_FOLDER_ID)
+                    .unwrap()
+                    .id,
+            ),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap();
+    let checkpoint = checkpoint.unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 56);
+    assert_eq!(checkpoint.last_modseq, 42);
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("syncRootFolderId")
+            .and_then(|id| id.as_u64()),
+        Some(crate::mapi::identity::CONTACTS_FOLDER_ID)
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_properties(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {

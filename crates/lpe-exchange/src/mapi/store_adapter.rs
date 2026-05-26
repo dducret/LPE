@@ -5,7 +5,10 @@ use super::sync::{CALENDAR_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
 use super::tables::*;
 use super::*;
 use crate::mapi_store;
-use crate::store::{MapiContentTableQuery, MapiContentTableSort, MapiContentTableSortField};
+use crate::store::{
+    MapiContentTableQuery, MapiContentTableSort, MapiContentTableSortField,
+    MapiIdentityLookupRecord,
+};
 use anyhow::Context;
 use lpe_storage::ReminderQuery;
 
@@ -189,6 +192,7 @@ where
         .fetch_mapi_identities_by_object_ids(account_id, &plan.object_ids)
         .await
         .context("fetch MAPI requested object identities")?;
+    log_mapi_requested_identity_resolution(account_id, plan, &identities);
     for identity in &identities {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
     }
@@ -464,6 +468,21 @@ where
                 )
             })?
     };
+    log_mapi_requested_collaboration_resolution(
+        account_id,
+        plan,
+        snapshot_backed_contents,
+        contact_ids.len(),
+        contacts.len(),
+        event_ids.len(),
+        events.len(),
+        task_ids.len(),
+        tasks.len(),
+        note_ids.len(),
+        notes.len(),
+        journal_entry_ids.len(),
+        journal_entries.len(),
+    );
     let identity_requests = contacts
         .iter()
         .map(|contact| MapiIdentityRequest {
@@ -618,6 +637,125 @@ fn log_mapi_store_full_snapshot(account_id: Uuid, plan: &MapiAccessPlan) {
         content_query_count = plan.content_queries.len(),
         message = "rca debug mapi execute store load summary",
     );
+}
+
+fn log_mapi_requested_identity_resolution(
+    account_id: Uuid,
+    plan: &MapiAccessPlan,
+    identities: &[MapiIdentityLookupRecord],
+) {
+    if plan.object_ids.is_empty() {
+        return;
+    }
+
+    let resolved_object_ids = identities
+        .iter()
+        .map(|identity| identity.object_id)
+        .collect::<Vec<_>>();
+    let unresolved_object_ids = plan
+        .object_ids
+        .iter()
+        .copied()
+        .filter(|object_id| !resolved_object_ids.contains(object_id))
+        .collect::<Vec<_>>();
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        full_snapshot = false,
+        object_id_count = plan.object_ids.len(),
+        content_query_count = plan.content_queries.len(),
+        requested_object_ids = %format_mapi_object_ids(&plan.object_ids),
+        resolved_identity_count = identities.len(),
+        resolved_identity_object_ids = %format_mapi_object_ids(&resolved_object_ids),
+        resolved_identity_kinds = %format_mapi_identity_kinds(identities),
+        unresolved_object_id_count = unresolved_object_ids.len(),
+        unresolved_object_ids = %format_mapi_object_ids(&unresolved_object_ids),
+        message = "rca debug mapi requested identity resolution",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn log_mapi_requested_collaboration_resolution(
+    account_id: Uuid,
+    plan: &MapiAccessPlan,
+    snapshot_backed_contents: bool,
+    requested_contact_identity_count: usize,
+    loaded_contact_count: usize,
+    requested_calendar_event_identity_count: usize,
+    loaded_calendar_event_count: usize,
+    requested_task_identity_count: usize,
+    loaded_task_count: usize,
+    requested_note_identity_count: usize,
+    loaded_note_count: usize,
+    requested_journal_entry_identity_count: usize,
+    loaded_journal_entry_count: usize,
+) {
+    if plan.object_ids.is_empty()
+        || requested_contact_identity_count
+            + requested_calendar_event_identity_count
+            + requested_task_identity_count
+            + requested_note_identity_count
+            + requested_journal_entry_identity_count
+            == 0
+    {
+        return;
+    }
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        request_type = "Execute",
+        account_id = %account_id,
+        full_snapshot = false,
+        object_id_count = plan.object_ids.len(),
+        content_query_count = plan.content_queries.len(),
+        snapshot_backed_contents,
+        requested_contact_identity_count,
+        loaded_contact_count,
+        missing_contact_count = requested_contact_identity_count.saturating_sub(loaded_contact_count),
+        requested_calendar_event_identity_count,
+        loaded_calendar_event_count,
+        missing_calendar_event_count = requested_calendar_event_identity_count.saturating_sub(loaded_calendar_event_count),
+        requested_task_identity_count,
+        loaded_task_count,
+        missing_task_count = requested_task_identity_count.saturating_sub(loaded_task_count),
+        requested_note_identity_count,
+        loaded_note_count,
+        missing_note_count = requested_note_identity_count.saturating_sub(loaded_note_count),
+        requested_journal_entry_identity_count,
+        loaded_journal_entry_count,
+        missing_journal_entry_count = requested_journal_entry_identity_count.saturating_sub(loaded_journal_entry_count),
+        message = "rca debug mapi requested collaboration resolution",
+    );
+}
+
+fn format_mapi_object_ids(object_ids: &[u64]) -> String {
+    object_ids
+        .iter()
+        .map(|object_id| format!("{object_id:#018x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {
+    identities
+        .iter()
+        .map(|identity| match identity.object_kind {
+            MapiIdentityObjectKind::Account => "account",
+            MapiIdentityObjectKind::Mailbox => "mailbox",
+            MapiIdentityObjectKind::Message => "message",
+            MapiIdentityObjectKind::Contact => "contact",
+            MapiIdentityObjectKind::CalendarEvent => "calendar_event",
+            MapiIdentityObjectKind::Task => "task",
+            MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",
+            MapiIdentityObjectKind::ConversationAction => "conversation_action",
+            MapiIdentityObjectKind::Note => "note",
+            MapiIdentityObjectKind::JournalEntry => "journal_entry",
+        })
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 #[allow(clippy::too_many_arguments)]
