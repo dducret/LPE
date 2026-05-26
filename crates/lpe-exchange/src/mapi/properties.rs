@@ -192,6 +192,7 @@ pub(in crate::mapi) const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 pub(in crate::mapi) const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME: u32 = 0x6709_0040;
 pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
+pub(in crate::mapi) const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 pub(in crate::mapi) const PID_TAG_SERIALIZED_REPLID_GUID_MAP: u32 = 0x6638_0102;
 pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_ENTRY_ID: u32 = 0x661B_0102;
 pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_NAME_W: u32 = 0x661C_001F;
@@ -939,6 +940,7 @@ pub(in crate::mapi) fn mailbox_property_value_with_context(
         | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
             mapi_mailstore::canonical_folder_change_number(mailbox),
         ))),
+        PID_TAG_DELETED_COUNT_TOTAL => Some(MapiValue::U32(0)),
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
         PID_TAG_HIERARCHY_CHANGE_NUMBER => Some(MapiValue::U32(
             mapi_mailstore::canonical_folder_change_number(mailbox).min(u64::from(u32::MAX)) as u32,
@@ -1007,6 +1009,7 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
             change_number,
         ))),
+        PID_TAG_DELETED_COUNT_TOTAL => Some(MapiValue::U32(0)),
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
         PID_TAG_HIERARCHY_CHANGE_NUMBER => {
             Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
@@ -4167,6 +4170,8 @@ pub(in crate::mapi) fn write_named_property(row: &mut Vec<u8>, property: &MapiNa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapi_store::{MapiCollaborationFolder, MapiCollaborationFolderKind};
+    use lpe_storage::{CollaborationCollection, CollaborationRights};
 
     fn mailbox(id: &str, parent_id: Option<Uuid>, role: &str, name: &str) -> JmapMailbox {
         JmapMailbox {
@@ -4246,6 +4251,49 @@ mod tests {
         assert_eq!(
             mailbox_property_value_with_context(&child, &mailboxes, PID_TAG_SUBFOLDERS),
             Some(MapiValue::Bool(false))
+        );
+    }
+
+    #[test]
+    fn folder_properties_report_deleted_count_total() {
+        let mailbox = mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            None,
+            "inbox",
+            "Inbox",
+        );
+        let collection = MapiCollaborationFolder {
+            id: CALENDAR_FOLDER_ID,
+            kind: MapiCollaborationFolderKind::Calendar,
+            collection: CollaborationCollection {
+                id: "calendar-default".to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: Uuid::nil(),
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                display_name: "Calendar".to_string(),
+                is_owned: true,
+                rights: CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: true,
+                    may_share: true,
+                },
+            },
+            item_count: 0,
+        };
+
+        assert_eq!(
+            mailbox_property_value_with_context(
+                &mailbox,
+                std::slice::from_ref(&mailbox),
+                PID_TAG_DELETED_COUNT_TOTAL
+            ),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            collaboration_folder_property_value(&collection, PID_TAG_DELETED_COUNT_TOTAL),
+            Some(MapiValue::U32(0))
         );
     }
 

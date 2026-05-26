@@ -1730,6 +1730,8 @@ fn format_property_names_for_debug(tags: &[u32]) -> String {
 fn property_tag_debug_name(tag: u32) -> &'static str {
     match tag {
         PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
+        PID_TAG_CONTENT_COUNT => "PidTagContentCount",
+        PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
         PID_TAG_IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
         PID_TAG_IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
@@ -1748,6 +1750,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PRIVATE => "PidTagPrivate",
         PID_TAG_USER_GUID => "PidTagUserGuid",
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => "PidTagMaxSubmitMessageSize",
+        PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
+        PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
+        PID_TAG_CHANGE_KEY => "PidTagChangeKey",
         PID_TAG_OST_OSTID => "PR_OST_OSTID",
         _ => "unknown",
     }
@@ -5359,6 +5364,30 @@ mod tests {
             1_778_046_495
         );
         assert_eq!(gwart_time_marker(SystemTime::UNIX_EPOCH), 1);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn property_debug_names_cover_recent_outlook_folder_probes() {
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_LOCAL_COMMIT_TIME_MAX),
+            "PidTagLocalCommitTimeMax"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_DELETED_COUNT_TOTAL),
+            "PidTagDeletedCountTotal"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_CONTENT_UNREAD_COUNT),
+            "PidTagContentUnreadCount"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_CONTENT_COUNT),
+            "PidTagContentCount"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_CHANGE_KEY),
+            "PidTagChangeKey"
+        );
     }
 
     #[test]
