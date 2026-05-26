@@ -556,6 +556,11 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .iter()
             .map(conversation_action_sync_object)
             .collect(),
+        FREEBUSY_DATA_FOLDER_ID => snapshot
+            .delegate_freebusy_messages()
+            .iter()
+            .map(delegate_freebusy_sync_object)
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -878,6 +883,36 @@ fn conversation_action_sync_object(
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
         named_properties,
+    }
+}
+
+fn delegate_freebusy_sync_object(
+    message: &crate::mapi_store::MapiDelegateFreeBusyMessage,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let message_size = message
+        .message
+        .subject
+        .len()
+        .saturating_add(message.message.body_text.len())
+        .saturating_add(message.message.payload_json.len())
+        .min(i64::MAX as usize) as i64;
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: message.message.subject.clone(),
+        body_text: message.message.body_text.clone(),
+        message_class: if message.message.message_kind == "delegate" {
+            "IPM.Microsoft.Delegate".to_string()
+        } else {
+            "IPM.Microsoft.ScheduleData.FreeBusy".to_string()
+        },
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size,
+        named_properties: Vec::new(),
     }
 }
 

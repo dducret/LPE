@@ -6,8 +6,8 @@ use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
-    MapiCommonViewsMessage, MapiConversationActionMessage, MapiEvent, MapiMessage,
-    MapiNavigationShortcutMessage, MapiSearchFolderDefinitionMessage, MapiTask,
+    MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
+    MapiMessage, MapiNavigationShortcutMessage, MapiSearchFolderDefinitionMessage, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -56,6 +56,11 @@ pub(in crate::mapi) fn associated_folder_message_count(
     } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
         snapshot
             .conversation_action_messages()
+            .len()
+            .min(u32::MAX as usize) as u32
+    } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
+        snapshot
+            .delegate_freebusy_messages()
             .len()
             .min(u32::MAX as usize) as u32
     } else {
@@ -679,6 +684,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     default_search_folder_definition_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
+                } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                    default_message_property_tags()
                 } else {
                     default_contents_columns()
                 }
@@ -696,6 +703,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .conversation_action_messages()
                         .iter()
                         .map(|message| serialize_conversation_action_row(message, &columns))
+                        .collect::<Vec<_>>()
+                } else if *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                    snapshot
+                        .delegate_freebusy_messages()
+                        .iter()
+                        .map(|message| serialize_delegate_freebusy_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else {
                     Vec::new()
@@ -942,6 +955,8 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
         }) => {
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                 default_search_folder_definition_property_tags()
+            } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                default_message_property_tags()
             } else {
                 match snapshot
                     .collaboration_folder_for_id(*folder_id)
@@ -3214,6 +3229,74 @@ pub(in crate::mapi) fn serialize_conversation_action_row(
         }
     }
     row
+}
+
+pub(in crate::mapi) fn serialize_delegate_freebusy_row(
+    message: &MapiDelegateFreeBusyMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match delegate_freebusy_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn delegate_freebusy_property_value(
+    message: &MapiDelegateFreeBusyMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(message.message.subject.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(message.message.body_text.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            if message.message.message_kind == "delegate" {
+                "IPM.Microsoft.Delegate".to_string()
+            } else {
+                "IPM.Microsoft.ScheduleData.FreeBusy".to_string()
+            },
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
+            message
+                .message
+                .subject
+                .len()
+                .saturating_add(message.message.body_text.len())
+                .saturating_add(message.message.payload_json.len())
+                .min(i64::MAX as usize) as i64,
+        )),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+            mapi_mailstore::filetime_from_rfc3339_utc(&message.message.updated_at) as i64,
+        )),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn serialize_pending_navigation_shortcut_row(

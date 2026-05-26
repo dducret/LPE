@@ -748,6 +748,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::SearchFolderDefinition { .. } => "search_folder_definition",
         MapiObject::ConversationAction { .. } => "conversation_action",
         MapiObject::NavigationShortcut { .. } => "navigation_shortcut",
+        MapiObject::DelegateFreeBusyMessage { .. } => "delegate_freebusy_message",
         MapiObject::PendingMessage { .. } => "pending_message",
         MapiObject::PendingContact { .. } => "pending_contact",
         MapiObject::PendingEvent { .. } => "pending_event",

@@ -1733,7 +1733,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'delegate_freebusy_message')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
@@ -1814,6 +1814,35 @@ CREATE TABLE mapi_navigation_shortcuts (
 
 CREATE INDEX mapi_navigation_shortcuts_account_idx
     ON mapi_navigation_shortcuts (tenant_id, account_id, section, ordinal, subject, id);
+
+CREATE TABLE mapi_delegate_freebusy_messages (
+    tenant_id UUID NOT NULL,
+    id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    message_kind TEXT NOT NULL CHECK (message_kind IN ('delegate', 'freebusy')),
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+    body_text TEXT NOT NULL DEFAULT '',
+    starts_at TIMESTAMPTZ,
+    ends_at TIMESTAMPTZ,
+    busy_status TEXT CHECK (busy_status IS NULL OR busy_status IN ('busy', 'tentative')),
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, id),
+    UNIQUE (tenant_id, account_id, owner_account_id, message_kind, starts_at, ends_at, busy_status),
+    CHECK (
+        (message_kind = 'delegate' AND starts_at IS NULL AND ends_at IS NULL AND busy_status IS NULL)
+        OR
+        (message_kind = 'freebusy' AND starts_at IS NOT NULL AND ends_at IS NOT NULL AND busy_status IS NOT NULL AND ends_at > starts_at)
+    ),
+    CHECK (jsonb_typeof(payload_json) = 'object'),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_delegate_freebusy_messages_account_idx
+    ON mapi_delegate_freebusy_messages (tenant_id, account_id, owner_account_id, message_kind, starts_at, id);
 
 CREATE TABLE submission_queue (
     id UUID PRIMARY KEY,

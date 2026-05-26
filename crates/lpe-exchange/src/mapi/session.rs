@@ -131,6 +131,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         shortcut_id: u64,
     },
+    DelegateFreeBusyMessage {
+        folder_id: u64,
+        message_id: u64,
+    },
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -782,6 +786,7 @@ impl MapiObject {
             | MapiObject::SearchFolderDefinition { folder_id, .. }
             | MapiObject::ConversationAction { folder_id, .. }
             | MapiObject::NavigationShortcut { folder_id, .. }
+            | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
             | MapiObject::PendingContact { folder_id, .. }
             | MapiObject::PendingEvent { folder_id, .. }

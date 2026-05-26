@@ -271,6 +271,35 @@ CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values (
 CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx
   ON public.mapi_custom_property_values (tenant_id, account_id, object_kind, canonical_id);
 
+CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages (
+  tenant_id UUID NOT NULL,
+  id UUID NOT NULL,
+  account_id UUID NOT NULL,
+  owner_account_id UUID NOT NULL,
+  message_kind TEXT NOT NULL CHECK (message_kind IN ('delegate', 'freebusy')),
+  subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+  body_text TEXT NOT NULL DEFAULT '',
+  starts_at TIMESTAMPTZ,
+  ends_at TIMESTAMPTZ,
+  busy_status TEXT CHECK (busy_status IS NULL OR busy_status IN ('busy', 'tentative')),
+  payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, id),
+  UNIQUE (tenant_id, account_id, owner_account_id, message_kind, starts_at, ends_at, busy_status),
+  CHECK (
+    (message_kind = 'delegate' AND starts_at IS NULL AND ends_at IS NULL AND busy_status IS NULL)
+    OR
+    (message_kind = 'freebusy' AND starts_at IS NOT NULL AND ends_at IS NOT NULL AND busy_status IS NOT NULL AND ends_at > starts_at)
+  ),
+  CHECK (jsonb_typeof(payload_json) = 'object'),
+  FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (tenant_id, owner_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mapi_delegate_freebusy_messages_account_idx
+  ON public.mapi_delegate_freebusy_messages (tenant_id, account_id, owner_account_id, message_kind, starts_at, id);
+
 CREATE TABLE IF NOT EXISTS public.calendar_event_attachments (
   id UUID PRIMARY KEY,
   tenant_id UUID NOT NULL,
@@ -356,20 +385,21 @@ BEGIN
        constraint_def NOT LIKE '%search_folder_definition%'
        OR constraint_def NOT LIKE '%conversation_action%'
        OR constraint_def NOT LIKE '%navigation_shortcut%'
+       OR constraint_def NOT LIKE '%delegate_freebusy_message%'
      ) THEN
     EXECUTE format('ALTER TABLE public.mapi_object_identities DROP CONSTRAINT %I', constraint_name);
     ALTER TABLE public.mapi_object_identities
       ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
         'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
         'note', 'journal_entry', 'search_folder_definition', 'conversation_action',
-        'navigation_shortcut'
+        'navigation_shortcut', 'delegate_freebusy_message'
       ));
   ELSIF constraint_name IS NULL THEN
     ALTER TABLE public.mapi_object_identities
       ADD CONSTRAINT mapi_object_identities_object_kind_check CHECK (object_kind IN (
         'account', 'mailbox', 'message', 'contact', 'calendar_event', 'task',
         'note', 'journal_entry', 'search_folder_definition', 'conversation_action',
-        'navigation_shortcut'
+        'navigation_shortcut', 'delegate_freebusy_message'
       ));
   END IF;
 END $$;

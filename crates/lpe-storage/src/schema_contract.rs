@@ -502,7 +502,7 @@ fn mapi_identity_mapping_is_store_backed() {
 
     let identities = table_definition("mapi_object_identities");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'delegate_freebusy_message'))",
         "canonical_id UUID NOT NULL",
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
@@ -523,6 +523,36 @@ fn mapi_identity_mapping_is_store_backed() {
         "CREATE INDEX mapi_object_identities_lookup_idx",
         "CREATE INDEX mapi_object_identities_source_key_idx",
     ]);
+}
+
+#[test]
+fn mapi_delegate_freebusy_messages_are_materialized_canonical_state() {
+    let messages = table_definition("mapi_delegate_freebusy_messages");
+    for required in [
+        "message_kind TEXT NOT NULL CHECK (message_kind IN ('delegate', 'freebusy'))",
+        "owner_account_id UUID NOT NULL",
+        "payload_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "PRIMARY KEY (tenant_id, id)",
+        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+        "FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            messages.contains(required),
+            "mapi_delegate_freebusy_messages must persist canonical delegate/free-busy message objects: {required}"
+        );
+    }
+
+    assert_schema_contains_all(&["CREATE INDEX mapi_delegate_freebusy_messages_account_idx"]);
+    assert_source_contains_all(
+        "collaboration storage",
+        COLLABORATION_STORAGE,
+        &[
+            "materialize_delegate_freebusy_messages",
+            "INSERT INTO mapi_delegate_freebusy_messages",
+            "fetch_delegate_freebusy_messages",
+            "DELETE FROM mapi_delegate_freebusy_messages",
+        ],
+    );
 }
 
 #[test]
@@ -597,7 +627,12 @@ fn update_script_repairs_mapi_property_store_tables() {
             && UPDATE_LPE_SCRIPT
                 .contains("CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values")
             && UPDATE_LPE_SCRIPT
-                .contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx"),
+                .contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx")
+            && UPDATE_LPE_SCRIPT.contains("delegate_freebusy_message")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages")
+            && UPDATE_LPE_SCRIPT
+                .contains("CREATE INDEX IF NOT EXISTS mapi_delegate_freebusy_messages_account_idx"),
         "update-lpe.sh must add durable MAPI named/custom property tables for existing databases"
     );
 }

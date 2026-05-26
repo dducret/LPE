@@ -1,5 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use sqlx::{Postgres, Row};
@@ -145,6 +146,23 @@ pub struct DelegateAccessObject {
     pub can_delete_calendar_items: bool,
     pub can_receive_meeting_objects: bool,
     pub can_send_on_behalf: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegateFreeBusyMessageObject {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub message_kind: String,
+    pub subject: String,
+    pub body_text: String,
+    pub starts_at: Option<String>,
+    pub ends_at: Option<String>,
+    pub busy_status: Option<String>,
+    pub payload_json: String,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -850,6 +868,190 @@ impl Storage {
             owner.email,
             can_read_details,
         ))
+    }
+
+    pub async fn materialize_delegate_freebusy_messages(
+        &self,
+        principal_account_id: Uuid,
+        owner_account_id: Uuid,
+        starts_before: &str,
+        ends_after: &str,
+    ) -> Result<Vec<DelegateFreeBusyMessageObject>> {
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let delegate_objects = self
+            .fetch_delegate_access_objects(principal_account_id)
+            .await?;
+        let delegate = delegate_objects
+            .iter()
+            .find(|object| object.owner_account_id == owner_account_id);
+        let free_busy = self
+            .fetch_free_busy_blocks(
+                principal_account_id,
+                owner_account_id,
+                starts_before,
+                ends_after,
+            )
+            .await?;
+        let owner_email = free_busy
+            .first()
+            .map(|block| block.owner_email.clone())
+            .or_else(|| delegate.map(|object| object.owner_email.clone()))
+            .unwrap_or_else(|| owner_account_id.to_string());
+
+        let mut materialized = Vec::new();
+        if let Some(delegate) = delegate {
+            materialized.push(DelegateFreeBusyMaterialization {
+                id: stable_delegate_freebusy_id(&[
+                    "delegate",
+                    &principal_account_id.to_string(),
+                    &owner_account_id.to_string(),
+                ]),
+                message_kind: "delegate".to_string(),
+                subject: format!("Delegate access for {}", delegate.owner_email),
+                body_text: format!(
+                    "calendarRead={}; calendarWrite={}; meetingObjects={}; sendOnBehalf={}",
+                    delegate.can_open_calendar,
+                    delegate.can_create_or_update_calendar_items,
+                    delegate.can_receive_meeting_objects,
+                    delegate.can_send_on_behalf
+                ),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: serde_json::to_value(delegate)?,
+            });
+        }
+        for block in free_busy {
+            materialized.push(DelegateFreeBusyMaterialization {
+                id: stable_delegate_freebusy_id(&[
+                    "freebusy",
+                    &principal_account_id.to_string(),
+                    &owner_account_id.to_string(),
+                    &block.start,
+                    &block.end,
+                    &block.status,
+                ]),
+                message_kind: "freebusy".to_string(),
+                subject: format!("{}: {}", block.owner_email, block.status),
+                body_text: format!("{} from {} to {}", block.status, block.start, block.end),
+                starts_at: Some(block.start),
+                ends_at: Some(block.end),
+                busy_status: Some(block.status),
+                payload_json: serde_json::json!({
+                    "ownerAccountId": owner_account_id,
+                    "ownerEmail": block.owner_email,
+                }),
+            });
+        }
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            DELETE FROM mapi_delegate_freebusy_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND owner_account_id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .bind(owner_account_id)
+        .execute(&mut *tx)
+        .await?;
+        for message in &materialized {
+            sqlx::query(
+                r#"
+                INSERT INTO mapi_delegate_freebusy_messages (
+                    tenant_id, id, account_id, owner_account_id, message_kind, subject, body_text,
+                    starts_at, ends_at, busy_status, payload_json
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz, $10, $11::jsonb)
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(message.id)
+            .bind(principal_account_id)
+            .bind(owner_account_id)
+            .bind(&message.message_kind)
+            .bind(&message.subject)
+            .bind(&message.body_text)
+            .bind(message.starts_at.as_deref())
+            .bind(message.ends_at.as_deref())
+            .bind(message.busy_status.as_deref())
+            .bind(message.payload_json.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+
+        self.fetch_delegate_freebusy_messages(principal_account_id, Some(owner_account_id))
+            .await
+            .map(|mut messages| {
+                if messages.is_empty() && materialized.is_empty() {
+                    messages.push(DelegateFreeBusyMessageObject {
+                        id: stable_delegate_freebusy_id(&[
+                            "empty",
+                            &principal_account_id.to_string(),
+                            &owner_account_id.to_string(),
+                        ]),
+                        account_id: principal_account_id,
+                        owner_account_id,
+                        owner_email,
+                        message_kind: "delegate".to_string(),
+                        subject: "No delegate or free/busy objects".to_string(),
+                        body_text: String::new(),
+                        starts_at: None,
+                        ends_at: None,
+                        busy_status: None,
+                        payload_json: "{}".to_string(),
+                        updated_at: "1970-01-01T00:00:00Z".to_string(),
+                    });
+                }
+                messages
+            })
+    }
+
+    pub async fn fetch_delegate_freebusy_messages(
+        &self,
+        principal_account_id: Uuid,
+        owner_account_id: Option<Uuid>,
+    ) -> Result<Vec<DelegateFreeBusyMessageObject>> {
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let rows = sqlx::query_as::<_, crate::DelegateFreeBusyMessageRow>(
+            r#"
+            SELECT
+                m.id,
+                m.account_id,
+                m.owner_account_id,
+                owner.primary_email AS owner_email,
+                m.message_kind,
+                m.subject,
+                m.body_text,
+                to_char(m.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS starts_at,
+                to_char(m.ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ends_at,
+                m.busy_status,
+                m.payload_json::text AS payload_json,
+                to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM mapi_delegate_freebusy_messages m
+            JOIN accounts owner
+              ON owner.tenant_id = m.tenant_id
+             AND owner.id = m.owner_account_id
+            WHERE m.tenant_id = $1
+              AND m.account_id = $2
+              AND ($3::uuid IS NULL OR m.owner_account_id = $3)
+            ORDER BY m.owner_account_id ASC, m.message_kind ASC, m.starts_at ASC NULLS FIRST, m.id ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .bind(owner_account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(map_delegate_freebusy_message)
+            .collect())
     }
 
     pub async fn create_accessible_calendar_collection(
@@ -2158,6 +2360,50 @@ fn free_busy_status(status: &str, can_read_details: bool) -> String {
         "tentative" => "tentative".to_string(),
         "cancelled" => "free".to_string(),
         _ => "busy".to_string(),
+    }
+}
+
+struct DelegateFreeBusyMaterialization {
+    id: Uuid,
+    message_kind: String,
+    subject: String,
+    body_text: String,
+    starts_at: Option<String>,
+    ends_at: Option<String>,
+    busy_status: Option<String>,
+    payload_json: serde_json::Value,
+}
+
+fn stable_delegate_freebusy_id(parts: &[&str]) -> Uuid {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+fn map_delegate_freebusy_message(
+    row: crate::DelegateFreeBusyMessageRow,
+) -> DelegateFreeBusyMessageObject {
+    DelegateFreeBusyMessageObject {
+        id: row.id,
+        account_id: row.account_id,
+        owner_account_id: row.owner_account_id,
+        owner_email: row.owner_email,
+        message_kind: row.message_kind,
+        subject: row.subject,
+        body_text: row.body_text,
+        starts_at: row.starts_at,
+        ends_at: row.ends_at,
+        busy_status: row.busy_status,
+        payload_json: row.payload_json,
+        updated_at: row.updated_at,
     }
 }
 

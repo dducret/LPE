@@ -554,6 +554,22 @@ pub(crate) struct FreeBusyEventRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct DelegateFreeBusyMessageRow {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) owner_account_id: Uuid,
+    pub(crate) owner_email: String,
+    pub(crate) message_kind: String,
+    pub(crate) subject: String,
+    pub(crate) body_text: String,
+    pub(crate) starts_at: Option<String>,
+    pub(crate) ends_at: Option<String>,
+    pub(crate) busy_status: Option<String>,
+    pub(crate) payload_json: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct ClientTaskListRow {
     pub(crate) id: Uuid,
     pub(crate) owner_account_id: Uuid,

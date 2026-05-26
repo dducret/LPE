@@ -995,6 +995,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::SearchFolderDefinition { .. }) => "search_folder_definition",
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
+        Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
         Some(MapiObject::PendingMessage { .. }) => "pending_message",
         Some(MapiObject::PendingContact { .. }) => "pending_contact",
         Some(MapiObject::PendingEvent { .. }) => "pending_event",
@@ -1537,6 +1538,7 @@ where
                     })
                     .await?;
             }
+            MapiObject::DelegateFreeBusyMessage { .. } => {}
             _ => return Err(anyhow!("MAPI object does not support property mutation")),
         }
     }
@@ -3414,6 +3416,29 @@ where
                             0x8004_010F,
                         ));
                     }
+                } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
+                    if let Some(message) = snapshot.delegate_freebusy_message_for_id(message_id) {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::DelegateFreeBusyMessage {
+                                folder_id,
+                                message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &message.message.subject,
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
                 } else {
                     responses.extend_from_slice(&rop_error_response(
                         0x03,
@@ -3684,7 +3709,8 @@ where
                         | MapiObject::Note { .. }
                         | MapiObject::JournalEntry { .. }
                         | MapiObject::ConversationAction { .. }
-                        | MapiObject::NavigationShortcut { .. }),
+                        | MapiObject::NavigationShortcut { .. }
+                        | MapiObject::DelegateFreeBusyMessage { .. }),
                     ) => {
                         apply_supported_object_property_values(
                             store, principal, &object, values, mailboxes, emails, snapshot,
@@ -4275,6 +4301,10 @@ where
                     })
                     | Some(MapiObject::NavigationShortcut {
                         shortcut_id: contact_id,
+                        ..
+                    })
+                    | Some(MapiObject::DelegateFreeBusyMessage {
+                        message_id: contact_id,
                         ..
                     }) => {
                         responses.extend_from_slice(&rop_save_changes_message_response(

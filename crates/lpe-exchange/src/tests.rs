@@ -7,12 +7,12 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
     CalendarEventAttachment, ClientReminder, ClientTask, CollaborationCollection,
-    CollaborationRights, ConversationAction, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
-    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
-    UpsertConversationActionInput,
+    CollaborationRights, ConversationAction, DelegateFreeBusyMessageObject, JmapEmail,
+    JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput, UpsertConversationActionInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -1204,6 +1204,13 @@ impl ExchangeStore for FakeStore {
     ) -> StoreFuture<'a, Vec<CollaborationCollection>> {
         let collections = self.task_collections.lock().unwrap().clone();
         Box::pin(async move { Ok(collections) })
+    }
+
+    fn fetch_delegate_freebusy_messages<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<DelegateFreeBusyMessageObject>> {
+        Box::pin(async move { Ok(Vec::new()) })
     }
 
     fn fetch_accessible_contacts_in_collection<'a>(

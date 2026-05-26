@@ -2,8 +2,8 @@ use axum::{http::StatusCode, Json};
 use lpe_storage::{
     AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
     AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, DelegateAccessObject,
-    FreeBusyBlock, MailFlowEntry, MailboxDelegationOverview, SieveScriptDocument,
-    SieveScriptSummary, TaskListGrant,
+    DelegateFreeBusyMessageObject, FreeBusyBlock, MailFlowEntry, MailboxDelegationOverview,
+    SieveScriptDocument, SieveScriptSummary, TaskListGrant,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -546,6 +546,7 @@ pub struct FreeBusyQuery {
 pub struct FreeBusyResponse {
     pub delegate_objects: Vec<DelegateAccessObject>,
     pub blocks: Vec<FreeBusyBlock>,
+    pub message_objects: Vec<DelegateFreeBusyMessageObject>,
 }
 
 #[derive(Debug, Deserialize)]

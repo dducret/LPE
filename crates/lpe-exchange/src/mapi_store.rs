@@ -1,8 +1,9 @@
 use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
-    ClientReminder, ClientTask, CollaborationCollection, ConversationAction, JmapEmail,
-    JmapMailbox, JournalEntry, ReminderQuery, SearchFolderDefinition,
+    ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, ReminderQuery,
+    SearchFolderDefinition,
 };
 use uuid::Uuid;
 
@@ -25,6 +26,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     search_folder_definitions: Vec<MapiSearchFolderDefinitionMessage>,
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     conversation_actions: Vec<MapiConversationActionMessage>,
+    delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
     reminders: Vec<ClientReminder>,
     folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
@@ -143,6 +145,15 @@ pub(crate) struct MapiConversationActionMessage {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) action: ConversationAction,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiDelegateFreeBusyMessage {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) message: DelegateFreeBusyMessageObject,
 }
 
 #[derive(Debug, Clone)]
@@ -342,6 +353,7 @@ impl MapiMailStoreSnapshot {
             search_folder_definitions: Vec::new(),
             navigation_shortcuts: Vec::new(),
             conversation_actions: Vec::new(),
+            delegate_freebusy_messages: Vec::new(),
             reminders: Vec::new(),
             folder_permissions,
             content_windows: Vec::new(),
@@ -375,6 +387,22 @@ impl MapiMailStoreSnapshot {
                 folder_id: crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
                 canonical_id: action.id,
                 action,
+            })
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_delegate_freebusy_messages(
+        mut self,
+        messages: Vec<DelegateFreeBusyMessageObject>,
+    ) -> Self {
+        self.delegate_freebusy_messages = messages
+            .into_iter()
+            .map(|message| MapiDelegateFreeBusyMessage {
+                id: mapi_item_id(&message.id),
+                folder_id: crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+                canonical_id: message.id,
+                message,
             })
             .collect();
         self
@@ -882,6 +910,19 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
     }
 
+    pub(crate) fn delegate_freebusy_messages(&self) -> &[MapiDelegateFreeBusyMessage] {
+        &self.delegate_freebusy_messages
+    }
+
+    pub(crate) fn delegate_freebusy_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<&MapiDelegateFreeBusyMessage> {
+        self.delegate_freebusy_messages
+            .iter()
+            .find(|message| message.id == item_id)
+    }
+
     pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
         let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) else {
             return Vec::new();
@@ -978,6 +1019,8 @@ impl<T: ExchangeStore> MapiStore for T {
             let search_folder_definitions = self.fetch_search_folders(account_id).await?;
             let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
+            let delegate_freebusy_messages =
+                self.fetch_delegate_freebusy_messages(account_id).await?;
             let reminders = self
                 .query_client_reminders(
                     account_id,
@@ -997,6 +1040,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &search_folder_definitions,
                 &navigation_shortcuts,
                 &conversation_actions,
+                &delegate_freebusy_messages,
             );
             for identity in self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
@@ -1030,6 +1074,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
             .map(|snapshot| snapshot.with_navigation_shortcuts(navigation_shortcuts))
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
+            .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
             .map(|snapshot| snapshot.with_reminders(reminders))
         })
     }
@@ -1046,6 +1091,7 @@ fn mapi_identity_requests(
     search_folder_definitions: &[SearchFolderDefinition],
     navigation_shortcuts: &[MapiNavigationShortcutRecord],
     conversation_actions: &[ConversationAction],
+    delegate_freebusy_messages: &[DelegateFreeBusyMessageObject],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
     requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
@@ -1107,6 +1153,15 @@ fn mapi_identity_requests(
             .map(|shortcut| MapiIdentityRequest {
                 object_kind: MapiIdentityObjectKind::NavigationShortcut,
                 canonical_id: shortcut.id,
+                reserved_global_counter: None,
+            }),
+    );
+    requests.extend(
+        delegate_freebusy_messages
+            .iter()
+            .map(|message| MapiIdentityRequest {
+                object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
+                canonical_id: message.id,
                 reserved_global_counter: None,
             }),
     );
@@ -2161,6 +2216,36 @@ mod tests {
                 crate::mapi::identity::REMINDERS_FOLDER_ID,
                 crate::mapi::identity::mapi_store_id(99)
             )
+            .is_some());
+    }
+
+    #[test]
+    fn snapshot_projects_materialized_delegate_freebusy_messages() {
+        let message_id = Uuid::parse_str("55555555-5555-4555-8555-555555555555").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            message_id,
+            crate::mapi::identity::mapi_store_id(110),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_delegate_freebusy_messages(vec![
+            DelegateFreeBusyMessageObject {
+                id: message_id,
+                account_id: Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap(),
+                owner_account_id: Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb").unwrap(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "freebusy".to_string(),
+                subject: "owner@example.test: busy".to_string(),
+                body_text: "busy from 2026-05-26T08:00:00Z to 2026-05-26T09:00:00Z".to_string(),
+                starts_at: Some("2026-05-26T08:00:00Z".to_string()),
+                ends_at: Some("2026-05-26T09:00:00Z".to_string()),
+                busy_status: Some("busy".to_string()),
+                payload_json: "{}".to_string(),
+                updated_at: "2026-05-26T08:00:00Z".to_string(),
+            },
+        ]);
+
+        assert_eq!(snapshot.delegate_freebusy_messages().len(), 1);
+        assert!(snapshot
+            .delegate_freebusy_message_for_id(crate::mapi::identity::mapi_store_id(110))
             .is_some());
     }
 }

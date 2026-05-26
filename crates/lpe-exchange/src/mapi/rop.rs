@@ -951,6 +951,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             };
             serialize_conversation_action_row(message, &columns)
         }
+        Some(MapiObject::DelegateFreeBusyMessage { message_id, .. }) => {
+            let Some(message) = snapshot.delegate_freebusy_message_for_id(*message_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_delegate_freebusy_row(message, &columns)
+        }
         Some(MapiObject::Folder {
             folder_id,
             properties,
@@ -1615,6 +1625,14 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{shortcut_id:#018x}"),
         ),
+        Some(MapiObject::DelegateFreeBusyMessage {
+            folder_id,
+            message_id,
+        }) => (
+            "delegate_freebusy_message",
+            format!("{folder_id:#018x}"),
+            format!("{message_id:#018x}"),
+        ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
             format!("{folder_id:#018x}"),
@@ -2065,6 +2083,14 @@ pub(in crate::mapi) fn serialize_object_property(
         }) => snapshot
             .conversation_action_message_for_id(*conversation_action_id)
             .map(|message| serialize_conversation_action_row(message, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::DelegateFreeBusyMessage { message_id, .. }) => snapshot
+            .delegate_freebusy_message_for_id(*message_id)
+            .map(|message| serialize_delegate_freebusy_row(message, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

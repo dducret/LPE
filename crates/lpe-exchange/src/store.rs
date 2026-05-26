@@ -3,12 +3,12 @@ use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CanonicalChangeCategory,
-    ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction, JmapEmail,
-    JmapEmailFollowupUpdate, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JournalEntry, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput,
+    ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
+    UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -31,6 +31,7 @@ pub(crate) enum MapiIdentityObjectKind {
     SearchFolderDefinition,
     ConversationAction,
     NavigationShortcut,
+    DelegateFreeBusyMessage,
 }
 
 impl MapiIdentityObjectKind {
@@ -47,6 +48,7 @@ impl MapiIdentityObjectKind {
             Self::SearchFolderDefinition => "search_folder_definition",
             Self::ConversationAction => "conversation_action",
             Self::NavigationShortcut => "navigation_shortcut",
+            Self::DelegateFreeBusyMessage => "delegate_freebusy_message",
         }
     }
 }
@@ -398,6 +400,11 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<CollaborationCollection>>;
+
+    fn fetch_delegate_freebusy_messages<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<DelegateFreeBusyMessageObject>>;
 
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
@@ -1885,6 +1892,16 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_delegate_freebusy_messages<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<DelegateFreeBusyMessageObject>> {
+        Box::pin(async move {
+            self.fetch_delegate_freebusy_messages(principal_account_id, None)
+                .await
+        })
+    }
+
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -3317,6 +3334,8 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         "journal_entry" => MapiIdentityObjectKind::JournalEntry,
         "search_folder_definition" => MapiIdentityObjectKind::SearchFolderDefinition,
         "conversation_action" => MapiIdentityObjectKind::ConversationAction,
+        "navigation_shortcut" => MapiIdentityObjectKind::NavigationShortcut,
+        "delegate_freebusy_message" => MapiIdentityObjectKind::DelegateFreeBusyMessage,
         value => anyhow::bail!("unsupported MAPI object kind: {value}"),
     };
     Ok(MapiIdentityLookupRecord {

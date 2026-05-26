@@ -312,6 +312,11 @@ where
         .fetch_conversation_actions(account_id)
         .await
         .context("fetch MAPI conversation actions")?;
+    log_mapi_store_load_step(account_id, plan, "fetch delegate freebusy messages", 0);
+    let delegate_freebusy_messages = store
+        .fetch_delegate_freebusy_messages(account_id)
+        .await
+        .context("fetch MAPI delegate freebusy messages")?;
     log_mapi_store_load_step(account_id, plan, "fetch reminders", 0);
     let reminders = store
         .query_client_reminders(
@@ -543,6 +548,15 @@ where
                     reserved_global_counter: None,
                 }),
         )
+        .chain(
+            delegate_freebusy_messages
+                .iter()
+                .map(|message| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
+                    canonical_id: message.id,
+                    reserved_global_counter: None,
+                }),
+        )
         .collect::<Vec<_>>();
     log_mapi_store_load_step(
         account_id,
@@ -616,6 +630,7 @@ where
     .with_notes_and_journal(notes, journal_entries)
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
+    .with_delegate_freebusy_messages(delegate_freebusy_messages)
     .with_reminders(reminders)
     .with_content_windows(content_windows)
     .with_calendar_attachments(calendar_attachments))
@@ -850,6 +865,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::NavigationShortcut => "navigation_shortcut",
         MapiIdentityObjectKind::Note => "note",
         MapiIdentityObjectKind::JournalEntry => "journal_entry",
+        MapiIdentityObjectKind::DelegateFreeBusyMessage => "delegate_freebusy_message",
     }
 }
 
@@ -1316,6 +1332,13 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *shortcut_id);
+        }
+        MapiObject::DelegateFreeBusyMessage {
+            folder_id,
+            message_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *message_id);
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }
