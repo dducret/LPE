@@ -475,6 +475,18 @@ where
         account_id,
         plan,
         snapshot_backed_contents,
+        &identities,
+        &contacts
+            .iter()
+            .map(|contact| contact.id)
+            .collect::<Vec<_>>(),
+        &events.iter().map(|event| event.id).collect::<Vec<_>>(),
+        &tasks.iter().map(|task| task.id).collect::<Vec<_>>(),
+        &notes.iter().map(|note| note.id).collect::<Vec<_>>(),
+        &journal_entries
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
         contact_ids.len(),
         contacts.len(),
         event_ids.len(),
@@ -684,6 +696,12 @@ fn log_mapi_requested_collaboration_resolution(
     account_id: Uuid,
     plan: &MapiAccessPlan,
     snapshot_backed_contents: bool,
+    identities: &[MapiIdentityLookupRecord],
+    loaded_contact_ids: &[Uuid],
+    loaded_event_ids: &[Uuid],
+    loaded_task_ids: &[Uuid],
+    loaded_note_ids: &[Uuid],
+    loaded_journal_entry_ids: &[Uuid],
     requested_contact_identity_count: usize,
     loaded_contact_count: usize,
     requested_calendar_event_identity_count: usize,
@@ -730,8 +748,36 @@ fn log_mapi_requested_collaboration_resolution(
         requested_journal_entry_identity_count,
         loaded_journal_entry_count,
         missing_journal_entry_count = requested_journal_entry_identity_count.saturating_sub(loaded_journal_entry_count),
+        missing_contact_identities = %format_missing_mapi_identities(identities, MapiIdentityObjectKind::Contact, loaded_contact_ids),
+        missing_calendar_event_identities = %format_missing_mapi_identities(identities, MapiIdentityObjectKind::CalendarEvent, loaded_event_ids),
+        missing_task_identities = %format_missing_mapi_identities(identities, MapiIdentityObjectKind::Task, loaded_task_ids),
+        missing_note_identities = %format_missing_mapi_identities(identities, MapiIdentityObjectKind::Note, loaded_note_ids),
+        missing_journal_entry_identities = %format_missing_mapi_identities(identities, MapiIdentityObjectKind::JournalEntry, loaded_journal_entry_ids),
         message = "rca debug mapi requested collaboration resolution",
     );
+}
+
+fn format_missing_mapi_identities(
+    identities: &[MapiIdentityLookupRecord],
+    object_kind: MapiIdentityObjectKind,
+    loaded_canonical_ids: &[Uuid],
+) -> String {
+    identities
+        .iter()
+        .filter(|identity| {
+            identity.object_kind == object_kind
+                && !loaded_canonical_ids.contains(&identity.canonical_id)
+        })
+        .map(|identity| {
+            format!(
+                "object_id={:#018x};canonical_id={};kind={}",
+                identity.object_id,
+                identity.canonical_id,
+                mapi_identity_kind_name(identity.object_kind)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn format_mapi_object_ids(object_ids: &[u64]) -> String {
@@ -745,20 +791,24 @@ fn format_mapi_object_ids(object_ids: &[u64]) -> String {
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {
     identities
         .iter()
-        .map(|identity| match identity.object_kind {
-            MapiIdentityObjectKind::Account => "account",
-            MapiIdentityObjectKind::Mailbox => "mailbox",
-            MapiIdentityObjectKind::Message => "message",
-            MapiIdentityObjectKind::Contact => "contact",
-            MapiIdentityObjectKind::CalendarEvent => "calendar_event",
-            MapiIdentityObjectKind::Task => "task",
-            MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",
-            MapiIdentityObjectKind::ConversationAction => "conversation_action",
-            MapiIdentityObjectKind::Note => "note",
-            MapiIdentityObjectKind::JournalEntry => "journal_entry",
-        })
+        .map(|identity| mapi_identity_kind_name(identity.object_kind))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str {
+    match object_kind {
+        MapiIdentityObjectKind::Account => "account",
+        MapiIdentityObjectKind::Mailbox => "mailbox",
+        MapiIdentityObjectKind::Message => "message",
+        MapiIdentityObjectKind::Contact => "contact",
+        MapiIdentityObjectKind::CalendarEvent => "calendar_event",
+        MapiIdentityObjectKind::Task => "task",
+        MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",
+        MapiIdentityObjectKind::ConversationAction => "conversation_action",
+        MapiIdentityObjectKind::Note => "note",
+        MapiIdentityObjectKind::JournalEntry => "journal_entry",
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1314,5 +1364,34 @@ mod tests {
         let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
 
         assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+    }
+
+    #[test]
+    fn missing_mapi_identity_summary_names_object_and_canonical_ids() {
+        let missing_id = Uuid::parse_str("fb129372-d6b6-4d69-99f7-977ab2a8093f").unwrap();
+        let loaded_id = Uuid::parse_str("17b18079-e962-4d53-9d2f-d68cfb37dcad").unwrap();
+        let identities = vec![
+            MapiIdentityLookupRecord {
+                object_kind: MapiIdentityObjectKind::Contact,
+                canonical_id: missing_id,
+                object_id: 0x0000_0000_003b_0001,
+                source_key: Vec::new(),
+            },
+            MapiIdentityLookupRecord {
+                object_kind: MapiIdentityObjectKind::Contact,
+                canonical_id: loaded_id,
+                object_id: 0x0000_0000_0037_0001,
+                source_key: Vec::new(),
+            },
+        ];
+
+        assert_eq!(
+            format_missing_mapi_identities(
+                &identities,
+                MapiIdentityObjectKind::Contact,
+                &[loaded_id],
+            ),
+            "object_id=0x00000000003b0001;canonical_id=fb129372-d6b6-4d69-99f7-977ab2a8093f;kind=contact"
+        );
     }
 }
