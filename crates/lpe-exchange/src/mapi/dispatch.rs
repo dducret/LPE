@@ -2263,6 +2263,20 @@ fn log_calendar_special_sync_objects(
     );
 }
 
+fn sync_mailboxes_with_collaboration_counts(
+    mut mailboxes: Vec<JmapMailbox>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<JmapMailbox> {
+    for mailbox in &mut mailboxes {
+        let folder_id = mapi_folder_id(mailbox);
+        if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
+            mailbox.total_emails = folder.item_count;
+            mailbox.unread_emails = 0;
+        }
+    }
+    mailboxes
+}
+
 fn special_property_shape(value: &mapi_mailstore::SpecialMessagePropertyValue) -> String {
     match value {
         mapi_mailstore::SpecialMessagePropertyValue::Binary(value) => {
@@ -5242,9 +5256,14 @@ where
                         continue;
                     }
                 };
-                let all_sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
-                let state_sync_mailboxes =
-                    sync_state_mailboxes_for(folder_id, sync_type, mailboxes);
+                let all_sync_mailboxes = sync_mailboxes_with_collaboration_counts(
+                    sync_mailboxes_for(folder_id, sync_type, mailboxes),
+                    snapshot,
+                );
+                let state_sync_mailboxes = sync_mailboxes_with_collaboration_counts(
+                    sync_state_mailboxes_for(folder_id, sync_type, mailboxes),
+                    snapshot,
+                );
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                 let all_special_sync_objects =
                     special_sync_objects_for(folder_id, sync_type, snapshot);
