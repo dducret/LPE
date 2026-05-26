@@ -2458,6 +2458,19 @@ fn folder_content_counts(
         );
     }
 
+    if mailbox.total_emails > 0
+        && matches!(
+            mailbox.role.as_str(),
+            "contacts" | "calendar" | "tasks" | "journal" | "notes" | "suggested_contacts"
+        )
+    {
+        return (
+            mailbox.total_emails.min(i32::MAX as u32) as i32,
+            mailbox.unread_emails.min(i32::MAX as u32) as i32,
+            "collaboration",
+        );
+    }
+
     let mut total = 0u32;
     let mut unread = 0u32;
     for unread_in_folder in aggregate_emails
