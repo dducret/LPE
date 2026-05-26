@@ -926,7 +926,6 @@ fn rop_requires_full_snapshot(rop_id: u8) -> bool {
             | 0x73
             | 0x74
             | 0x78
-            | 0x80
             | 0x92
     )
 }
@@ -1422,6 +1421,56 @@ mod tests {
         let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
 
         assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+    }
+
+    #[test]
+    fn access_plan_does_not_decode_set_properties_payload_as_read_state_change() {
+        let mut rop = vec![0x0A, 0x00, 0x00];
+        rop.extend_from_slice(&[0x01, 0x00]);
+        rop.extend_from_slice(&PID_TAG_OST_OSTID.to_le_bytes());
+        rop.extend_from_slice(&20u16.to_le_bytes());
+        rop.extend_from_slice(&[
+            0xea, 0x33, 0x94, 0x46, 0x27, 0xb9, 0x4a, 0x9c, 0xb0, 0xde, 0x87, 0x3f, 0x03, 0xa3,
+            0x53, 0x76, 0x00, 0x00, 0x00, 0x00,
+        ]);
+
+        let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
+
+        assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+    }
+
+    #[test]
+    fn access_plan_decodes_synchronization_import_read_state_changes() {
+        let message_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 42,
+        );
+        let message_id_bytes = crate::mapi::identity::wire_id_bytes_from_object_id(message_id)
+            .expect("MAPI store id is encodable");
+        let mut rop = vec![0x80, 0x00, 0x00];
+        rop.extend_from_slice(&11u16.to_le_bytes());
+        rop.extend_from_slice(&8u16.to_le_bytes());
+        rop.extend_from_slice(&message_id_bytes);
+        rop.push(1);
+
+        let buffer = single_rop_buffer(&rop);
+        let (requests, _) = split_rop_buffer(&buffer).expect("ROP buffer should split");
+        let mut cursor = Cursor::new(requests);
+        let request = read_rop_request(&mut cursor).expect("ROP request should parse");
+        assert_eq!(
+            request.import_read_state_changes(),
+            vec![(message_id, false)]
+        );
+        assert_eq!(cursor.remaining(), 0);
+        assert!(!rop_requires_full_snapshot(0x80));
+
+        let plan = plan_mapi_store_access(&empty_session(), &buffer);
+
+        assert_eq!(
+            plan.object_ids,
+            vec![message_id],
+            "requires_full_snapshot={}",
+            plan.requires_full_snapshot
+        );
     }
 
     #[test]

@@ -3086,22 +3086,38 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn import_read_state_changes(&self) -> Vec<(u64, bool)> {
-        let count = self
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::SynchronizationImportReadStateChanges)
+        ) {
+            return Vec::new();
+        }
+        let size = self
             .payload
             .get(..2)
             .and_then(|bytes| bytes.try_into().ok())
             .map(u16::from_le_bytes)
             .unwrap_or(0) as usize;
-        self.payload
-            .get(2..)
-            .unwrap_or_default()
-            .chunks_exact(9)
-            .take(count)
-            .filter_map(|bytes| {
-                let message_id = crate::mapi::identity::object_id_from_wire_id(&bytes[0..8])?;
-                Some((message_id, bytes[8] == 0))
-            })
-            .collect()
+        let mut cursor = Cursor::new(self.payload.get(2..2 + size).unwrap_or_default());
+        let mut changes = Vec::new();
+        while cursor.remaining() >= 3 {
+            let Ok(message_id_size) = cursor.read_u16().map(usize::from) else {
+                break;
+            };
+            let Ok(message_id_bytes) = cursor.read_bytes(message_id_size) else {
+                break;
+            };
+            let Ok(mark_as_read) = cursor.read_u8() else {
+                break;
+            };
+            if let Some(message_id) =
+                crate::mapi::identity::object_id_from_wire_id(message_id_bytes)
+                    .or_else(|| crate::mapi::identity::object_id_from_source_key(message_id_bytes))
+            {
+                changes.push((message_id, mark_as_read == 0));
+            }
+        }
+        changes
     }
 
     pub(in crate::mapi) fn local_replica_midset_deleted(&self) -> &[u8] {
@@ -4528,13 +4544,10 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         }
         Some(RopId::SynchronizationImportReadStateChanges) => {
             let input_handle_index = cursor.read_u8()?;
-            let change_count = cursor.read_u16()? as usize;
+            let states_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
-            payload.extend_from_slice(&(change_count as u16).to_le_bytes());
-            for _ in 0..change_count {
-                payload.extend_from_slice(cursor.read_bytes(8)?);
-                payload.push(cursor.read_u8()?);
-            }
+            payload.extend_from_slice(&(states_size as u16).to_le_bytes());
+            payload.extend_from_slice(cursor.read_bytes(states_size)?);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
