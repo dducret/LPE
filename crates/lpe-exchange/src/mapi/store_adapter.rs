@@ -67,9 +67,6 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         if rop_requires_full_snapshot(request.rop_id) {
             return MapiAccessPlan::full();
         }
-        if let Some(object_id) = request.long_term_source_object_id() {
-            push_unique(&mut plan.object_ids, object_id);
-        }
         if let Some(folder_id) = request.folder_id() {
             push_unique(&mut plan.object_ids, folder_id);
         }
@@ -1471,6 +1468,22 @@ mod tests {
             "requires_full_snapshot={}",
             plan.requires_full_snapshot
         );
+    }
+
+    #[test]
+    fn access_plan_does_not_preload_long_term_id_from_id_source() {
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 59,
+        );
+        let mut rop = vec![0x43, 0x00, 0x00];
+        rop.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(object_id)
+                .expect("MAPI store id is encodable"),
+        );
+
+        let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
+
+        assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
     }
 
     #[test]
