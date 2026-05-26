@@ -3615,6 +3615,18 @@ fn strict_decode_object_id_property(property: &StrictFastTransferProperty) -> Re
         .ok_or_else(|| format!("property 0x{:08x} had an invalid object id", property.tag))
 }
 
+fn strict_decode_change_number_property(
+    property: &StrictFastTransferProperty,
+) -> Result<u64, String> {
+    let value = strict_decode_object_id_property(property)?;
+    crate::mapi::identity::global_counter_from_store_id(value).ok_or_else(|| {
+        format!(
+            "property 0x{:08x} had an invalid change number",
+            property.tag
+        )
+    })
+}
+
 fn strict_finish_folder_change(
     folder: StrictHierarchyFolderBuilder,
     seen_source_keys: &mut Vec<Vec<u8>>,
@@ -4174,7 +4186,7 @@ fn strict_record_content_header_property(
         PID_TAG_PREDECESSOR_CHANGE_LIST => message.predecessor_change_list = Some(property.value),
         PID_TAG_MID => message.mid = Some(strict_decode_u64_property(&property)?),
         PID_TAG_CHANGE_NUMBER => {
-            message.change_number = Some(strict_decode_u64_property(&property)?)
+            message.change_number = Some(strict_decode_change_number_property(&property)?)
         }
         PID_TAG_ASSOCIATED => {
             if property.value.len() != 2 {

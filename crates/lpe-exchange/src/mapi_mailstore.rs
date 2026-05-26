@@ -618,7 +618,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         }
         if sync_extra_flags & 0x0000_0004 != 0 {
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
-            write_i64(&mut buffer, change_number as i64);
+            write_change_number(&mut buffer, change_number);
         }
         write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(
@@ -736,7 +736,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         }
         if sync_extra_flags & 0x0000_0004 != 0 {
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
-            write_i64(&mut buffer, change_number as i64);
+            write_change_number(&mut buffer, change_number);
         }
         write_u32(&mut buffer, INCR_SYNC_MESSAGE);
         write_binary_property(
@@ -1759,7 +1759,9 @@ fn decode_hierarchy_transfer_debug_summary(
                 PID_TAG_LAST_MODIFICATION_TIME => {
                     folder.last_modification_time = decode_debug_u64(&property.value)
                 }
-                PID_TAG_CHANGE_NUMBER => folder.change_number = decode_debug_u64(&property.value),
+                PID_TAG_CHANGE_NUMBER => {
+                    folder.change_number = decode_debug_change_number(&property.value)
+                }
                 PID_TAG_CONTENT_COUNT => folder.content_count = decode_debug_i32(&property.value),
                 PID_TAG_CONTENT_UNREAD_COUNT => {
                     folder.content_unread_count = decode_debug_i32(&property.value)
@@ -2028,6 +2030,12 @@ fn decode_debug_u64(bytes: &[u8]) -> Option<u64> {
 
 fn decode_debug_object_id(bytes: &[u8]) -> Option<u64> {
     crate::mapi::identity::object_id_from_wire_id(bytes).or_else(|| decode_debug_u64(bytes))
+}
+
+fn decode_debug_change_number(bytes: &[u8]) -> Option<u64> {
+    crate::mapi::identity::object_id_from_wire_id(bytes)
+        .and_then(crate::mapi::identity::global_counter_from_store_id)
+        .or_else(|| decode_debug_u64(bytes))
 }
 
 fn decode_debug_bool(bytes: &[u8]) -> Option<bool> {
@@ -3221,6 +3229,10 @@ fn write_object_id(buffer: &mut Vec<u8>, value: u64) {
     }
 }
 
+fn write_change_number(buffer: &mut Vec<u8>, change_number: u64) {
+    write_object_id(buffer, crate::mapi::identity::mapi_store_id(change_number));
+}
+
 fn write_i32_property(buffer: &mut Vec<u8>, property_tag: u32, value: i32) {
     write_u32(buffer, property_tag);
     write_i32(buffer, value);
@@ -3727,6 +3739,11 @@ mod tests {
             ],
         );
         assert_bool_property(&buffer, PID_TAG_ASSOCIATED, false);
+        assert_change_number_property(
+            &buffer,
+            PID_TAG_CHANGE_NUMBER,
+            canonical_message_change_number(&test_email()),
+        );
     }
 
     #[test]
@@ -4551,6 +4568,18 @@ mod tests {
             .expect("property tag is present");
         let expected = if value { [1, 0] } else { [0, 0] };
         assert_eq!(&buffer[offset + 4..offset + 6], &expected);
+    }
+
+    fn assert_change_number_property(buffer: &[u8], property_tag: u32, change_number: u64) {
+        let tag = property_tag.to_le_bytes();
+        let offset = buffer
+            .windows(tag.len())
+            .position(|window| window == tag)
+            .expect("property tag is present");
+        let value = crate::mapi::identity::object_id_from_wire_id(&buffer[offset + 4..offset + 12])
+            .and_then(crate::mapi::identity::global_counter_from_store_id)
+            .expect("change number is encoded as an internal CN structure");
+        assert_eq!(value, change_number);
     }
 
     fn assert_tag_order(buffer: &[u8], tags: &[u32]) {

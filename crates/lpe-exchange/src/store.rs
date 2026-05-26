@@ -902,6 +902,7 @@ impl ExchangeStore for Storage {
                       AND account_id = $2
                       AND object_kind = $3
                       AND canonical_id = $4
+                      AND deleted_at IS NULL
                     LIMIT 1
                     "#,
                 )
@@ -937,7 +938,13 @@ impl ExchangeStore for Storage {
                         )
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                         ON CONFLICT (tenant_id, account_id, object_kind, canonical_id)
-                        DO UPDATE SET updated_at = mapi_object_identities.updated_at
+                        DO UPDATE SET
+                            deleted_at = NULL,
+                            updated_at = CASE
+                                WHEN mapi_object_identities.deleted_at IS NULL
+                                THEN mapi_object_identities.updated_at
+                                ELSE NOW()
+                            END
                         RETURNING mapi_object_id
                         "#,
                     )
