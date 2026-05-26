@@ -2855,6 +2855,7 @@ where
     let mut responses = Vec::new();
     let mut output_handles = Vec::new();
     let mut post_hierarchy_release_events = Vec::new();
+    let mut created_emails: Vec<JmapEmail> = Vec::new();
     let mut echo_input_handle_table = false;
     while cursor.remaining() > 0 {
         let request = match read_rop_request(&mut cursor) {
@@ -3308,12 +3309,36 @@ where
             Some(RopId::GetPropertiesSpecific) => {
                 echo_input_handle_table = true;
                 let object = input_object(session, &handle_slots, &request);
+                let visible_emails;
+                let emails_for_request = if created_emails.is_empty() {
+                    emails
+                } else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x07",
+                        object_kind = mapi_object_debug_kind(object),
+                        folder_id = %mapi_object_debug_folder_id(object),
+                        same_execute_created_email_count = created_emails.len(),
+                        base_snapshot_email_count = emails.len(),
+                        "rca debug mapi same execute created message visibility"
+                    );
+                    visible_emails = emails
+                        .iter()
+                        .chain(created_emails.iter())
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    &visible_emails
+                };
                 let custom_values = fetch_custom_property_values_for_request(
                     store,
                     principal,
                     object,
                     mailboxes,
-                    emails,
+                    emails_for_request,
                     snapshot,
                     &request.property_tags(),
                 )
@@ -3324,7 +3349,7 @@ where
                     object,
                     principal,
                     mailboxes,
-                    emails,
+                    emails_for_request,
                     snapshot,
                     &custom_values,
                 ));
@@ -3980,6 +4005,7 @@ where
                                 message_id,
                             },
                         );
+                        created_emails.push(email);
                         session.record_notification(MapiNotificationEvent {
                             folder_id,
                             kind: MapiNotificationKind::Content,
