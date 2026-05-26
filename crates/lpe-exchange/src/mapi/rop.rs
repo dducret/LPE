@@ -3413,6 +3413,21 @@ pub(in crate::mapi) fn parse_pending_recipient_row(
     columns: &[u32],
     row: &[u8],
 ) -> Result<PendingRecipient> {
+    if let Ok(recipient) =
+        parse_wrapped_pending_recipient_row(row_id, fallback_recipient_type, columns, row)
+    {
+        return Ok(recipient);
+    }
+
+    parse_simple_pending_recipient_row(row_id, fallback_recipient_type, columns, row)
+}
+
+fn parse_simple_pending_recipient_row(
+    row_id: u32,
+    fallback_recipient_type: u8,
+    columns: &[u32],
+    row: &[u8],
+) -> Result<PendingRecipient> {
     let mut cursor = Cursor::new(row);
     let mut values = HashMap::new();
     for column in columns {
@@ -3438,6 +3453,97 @@ pub(in crate::mapi) fn parse_pending_recipient_row(
         address,
         display_name,
     })
+}
+
+fn parse_wrapped_pending_recipient_row(
+    row_id: u32,
+    fallback_recipient_type: u8,
+    columns: &[u32],
+    row: &[u8],
+) -> Result<PendingRecipient> {
+    let mut cursor = Cursor::new(row);
+    let recipient_flags = cursor.read_u16()?;
+    let address_type = recipient_flags & 0x0007;
+    let unicode_strings = recipient_flags & 0x0200 != 0;
+
+    if address_type == 0x01 {
+        let _address_prefix_used = cursor.read_u8()?;
+        let _display_type = cursor.read_u8()?;
+        let _x500_dn = cursor.read_ascii_z()?;
+    } else if matches!(address_type, 0x06 | 0x07) {
+        let entry_id_size = cursor.read_u16()? as usize;
+        let _entry_id = cursor.read_bytes(entry_id_size)?;
+        let search_key_size = cursor.read_u16()? as usize;
+        let _search_key = cursor.read_bytes(search_key_size)?;
+    }
+
+    if address_type == 0x00 && recipient_flags & 0x8000 != 0 {
+        let _address_type = cursor.read_ascii_z()?;
+    }
+
+    let email_address = if recipient_flags & 0x0008 != 0 {
+        Some(read_recipient_string(&mut cursor, unicode_strings)?)
+    } else {
+        None
+    };
+    let display_name = if recipient_flags & 0x0010 != 0 {
+        Some(read_recipient_string(&mut cursor, unicode_strings)?)
+    } else {
+        None
+    };
+    if recipient_flags & 0x0400 != 0 {
+        let _simple_display_name = read_recipient_string(&mut cursor, unicode_strings)?;
+    }
+    if recipient_flags & 0x0020 != 0 {
+        let _transmittable_display_name = read_recipient_string(&mut cursor, unicode_strings)?;
+    }
+
+    let recipient_column_count = cursor.read_u16()? as usize;
+    if recipient_column_count > columns.len() {
+        return Err(anyhow!(
+            "recipient column count exceeds request column count"
+        ));
+    }
+    let row_kind = cursor.read_u8()?;
+    if row_kind != 0 {
+        return Err(anyhow!("unsupported flagged recipient property row"));
+    }
+
+    let mut values = HashMap::new();
+    for column in columns.iter().take(recipient_column_count) {
+        values.insert(
+            canonical_property_storage_tag(*column),
+            parse_property_value_for_tag(&mut cursor, *column)?,
+        );
+    }
+
+    let recipient_type = values
+        .get(&PID_TAG_RECIPIENT_TYPE)
+        .and_then(MapiValue::as_i64)
+        .and_then(|value| u8::try_from(value).ok())
+        .unwrap_or(fallback_recipient_type);
+    let address =
+        optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
+            .or(email_address)
+            .ok_or_else(|| anyhow!("recipient address is required"))?;
+    let display_name = optional_mapi_value_text(&values, &[PID_TAG_DISPLAY_NAME_W])
+        .or(display_name)
+        .filter(|value| !value.eq_ignore_ascii_case(&address));
+
+    Ok(PendingRecipient {
+        row_id,
+        recipient_type,
+        address,
+        display_name,
+    })
+}
+
+fn read_recipient_string(cursor: &mut Cursor<'_>, unicode: bool) -> Result<String> {
+    if unicode {
+        cursor.read_utf16z()
+    } else {
+        cursor.read_ascii_z()
+    }
 }
 
 pub(in crate::mapi) fn optional_mapi_value_text(
@@ -4226,7 +4332,18 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload: Vec::new(),
             })
         }
-        Some(RopId::SynchronizationOpenCollector | RopId::SynchronizationGetTransferState) => {
+        Some(RopId::SynchronizationOpenCollector) => {
+            let input_handle_index = cursor.read_u8()?;
+            let output_handle_index = cursor.read_u8()?;
+            let payload = vec![cursor.read_u8()?];
+            Ok(RopRequest {
+                rop_id,
+                input_handle_index: Some(input_handle_index),
+                output_handle_index: Some(output_handle_index),
+                payload,
+            })
+        }
+        Some(RopId::SynchronizationGetTransferState) => {
             let input_handle_index = cursor.read_u8()?;
             let output_handle_index = cursor.read_u8()?;
             Ok(RopRequest {

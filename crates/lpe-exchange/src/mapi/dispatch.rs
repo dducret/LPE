@@ -2864,6 +2864,42 @@ fn rop_id_hex(rop_id: u8) -> String {
     format!("0x{rop_id:02x}")
 }
 
+fn pending_recipient_upsert_count(changes: &[PendingRecipientChange]) -> usize {
+    changes
+        .iter()
+        .filter(|change| matches!(change, PendingRecipientChange::Upsert(_)))
+        .count()
+}
+
+fn pending_recipient_delete_count(changes: &[PendingRecipientChange]) -> usize {
+    changes
+        .iter()
+        .filter(|change| matches!(change, PendingRecipientChange::Delete(_)))
+        .count()
+}
+
+fn pending_recipient_types_summary(changes: &[PendingRecipientChange]) -> String {
+    changes
+        .iter()
+        .filter_map(|change| match change {
+            PendingRecipientChange::Upsert(recipient) => Some(recipient.recipient_type.to_string()),
+            PendingRecipientChange::Delete(_) => None,
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn pending_recipient_row_ids_summary(changes: &[PendingRecipientChange]) -> String {
+    changes
+        .iter()
+        .map(|change| match change {
+            PendingRecipientChange::Upsert(recipient) => recipient.row_id.to_string(),
+            PendingRecipientChange::Delete(row_id) => format!("delete:{row_id}"),
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 pub(in crate::mapi) async fn execute_rops<S, V>(
     store: &S,
     principal: &AccountPrincipal,
@@ -4094,14 +4130,49 @@ where
                     Some(MapiObject::PendingMessage { recipients, .. }) => {
                         match request.modify_recipients() {
                             Ok(changes) => {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x0e",
+                                    input_handle_index = request.input_handle_index.unwrap_or(0),
+                                    response_handle_index = request.response_handle_index(),
+                                    existing_recipient_count = recipients.len(),
+                                    recipient_change_count = changes.len(),
+                                    recipient_upsert_count = pending_recipient_upsert_count(&changes),
+                                    recipient_delete_count = pending_recipient_delete_count(&changes),
+                                    recipient_types = %pending_recipient_types_summary(&changes),
+                                    recipient_row_ids = %pending_recipient_row_ids_summary(&changes),
+                                    parse_error = "",
+                                    "rca debug mapi modify recipients"
+                                );
                                 apply_pending_recipient_changes(recipients, changes);
                                 responses.extend_from_slice(&rop_simple_success_response(&request));
                             }
-                            Err(_) => responses.extend_from_slice(&rop_error_response(
-                                0x0E,
-                                request.response_handle_index(),
-                                0x8004_0102,
-                            )),
+                            Err(error) => {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x0e",
+                                    input_handle_index = request.input_handle_index.unwrap_or(0),
+                                    response_handle_index = request.response_handle_index(),
+                                    existing_recipient_count = recipients.len(),
+                                    recipient_payload_bytes = request.payload.len(),
+                                    recipient_payload_preview = %hex_preview(&request.payload, 48),
+                                    parse_error = %error,
+                                    "rca debug mapi modify recipients"
+                                );
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x0E,
+                                    request.response_handle_index(),
+                                    0x8004_0102,
+                                ));
+                            }
                         }
                     }
                     _ => responses.extend_from_slice(&rop_error_response(
