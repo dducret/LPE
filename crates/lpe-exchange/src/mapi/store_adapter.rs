@@ -67,6 +67,9 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         if rop_requires_full_snapshot(request.rop_id) {
             return MapiAccessPlan::full();
         }
+        if let Some(object_id) = request.long_term_source_object_id() {
+            push_unique(&mut plan.object_ids, object_id);
+        }
         if let Some(folder_id) = request.folder_id() {
             push_unique(&mut plan.object_ids, folder_id);
         }
@@ -1243,4 +1246,73 @@ fn mailbox_id_for_mapi_folder_id(mailboxes: &[JmapMailbox], folder_id: u64) -> O
         .iter()
         .find(|mailbox| mapi_folder_id(mailbox) == folder_id)
         .map(|mailbox| mailbox.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{HashMap, VecDeque};
+    use std::time::SystemTime;
+
+    fn empty_session() -> MapiSession {
+        MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::nil(),
+            email: "test@example.test".to_string(),
+            last_seen_at: SystemTime::UNIX_EPOCH,
+            next_handle: 1,
+            handles: HashMap::new(),
+            message_statuses: HashMap::new(),
+            named_properties: HashMap::new(),
+            named_property_ids: HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: VecDeque::new(),
+            completed_execute_requests: HashMap::new(),
+            completed_execute_request_order: VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+        }
+    }
+
+    fn single_rop_buffer(rop: &[u8]) -> Vec<u8> {
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&(rop.len() as u16).to_le_bytes());
+        buffer.extend_from_slice(rop);
+        buffer.extend_from_slice(&1u32.to_le_bytes());
+        buffer
+    }
+
+    #[test]
+    fn access_plan_includes_long_term_id_source_in_trailing_replid_form() {
+        let object_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 9,
+        );
+        let global_counter = crate::mapi::identity::global_counter_from_store_id(object_id)
+            .expect("dynamic object id has a global counter");
+        let mut rop = vec![0x43, 0x00, 0x00];
+        rop.extend_from_slice(&crate::mapi::identity::globcnt_bytes(global_counter));
+        rop.extend_from_slice(&1u16.to_le_bytes());
+
+        let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
+
+        assert!(
+            plan.object_ids.contains(&object_id),
+            "object_id={object_id:#018x} plan={:?}",
+            plan.object_ids
+        );
+    }
+
+    #[test]
+    fn access_plan_does_not_decode_get_properties_payload_as_object_id() {
+        let mut rop = vec![0x07, 0x00, 0x00];
+        rop.extend_from_slice(&[0x01, 0x00]);
+        rop.extend_from_slice(&1u16.to_le_bytes());
+        rop.extend_from_slice(&[0x00, 0x00, 0x2f, 0x00]);
+
+        let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
+
+        assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+    }
 }

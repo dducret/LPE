@@ -2731,11 +2731,20 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn folder_id(&self) -> Option<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::OpenFolder | RopId::OpenMessage | RopId::CreateMessage)
+        ) {
+            return None;
+        }
         let bytes = self.payload.get(..8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn long_term_source_object_id(&self) -> Option<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::LongTermIdFromId)) {
+            return None;
+        }
         let bytes = self.payload.get(..8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
             .or_else(|| crate::mapi::identity::object_id_from_trailing_replid_wire_id(bytes))
@@ -2796,6 +2805,9 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn message_id(&self) -> Option<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::OpenMessage)) {
+            return None;
+        }
         let bytes = self.payload.get(9..17)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
     }
@@ -3006,6 +3018,12 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn import_delete_message_ids(&self) -> Vec<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::SynchronizationImportDeletes)
+        ) {
+            return Vec::new();
+        }
         let count = self
             .payload
             .get(1..3)
@@ -3026,6 +3044,12 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn fast_transfer_message_ids(&self) -> Vec<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::FastTransferSourceCopyMessages)
+        ) {
+            return Vec::new();
+        }
         let count = self
             .payload
             .get(..2)
@@ -3043,6 +3067,12 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn import_move(&self) -> Option<(u64, u64)> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::SynchronizationImportMessageMove)
+        ) {
+            return None;
+        }
         let message_id = crate::mapi::identity::object_id_from_wire_id(self.payload.get(..8)?)?;
         let target_folder_id =
             crate::mapi::identity::object_id_from_wire_id(self.payload.get(8..16)?)?;
@@ -3090,6 +3120,17 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn message_ids(&self) -> Vec<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(
+                RopId::DeleteMessages
+                    | RopId::HardDeleteMessages
+                    | RopId::ExpandRow
+                    | RopId::SetReadFlags
+            )
+        ) {
+            return Vec::new();
+        }
         let (count_offset, ids_offset) = if self.rop_id == 0x59 { (0, 2) } else { (2, 4) };
         let Some(count_bytes) = self.payload.get(count_offset..count_offset + 2) else {
             return Vec::new();
@@ -3138,11 +3179,17 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn delete_folder_id(&self) -> Option<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::DeleteFolder)) {
+            return None;
+        }
         let bytes = self.payload.get(1..9)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
     pub(in crate::mapi) fn move_copy_message_ids(&self) -> Vec<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::MoveCopyMessages)) {
+            return Vec::new();
+        }
         let Some(count_bytes) = self.payload.get(..2) else {
             return Vec::new();
         };
