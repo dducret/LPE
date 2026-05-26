@@ -4105,11 +4105,29 @@ where
                             &request, message_id,
                         ));
                     }
-                    Err(_) => responses.extend_from_slice(&rop_error_response(
-                        0x0C,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
+                    Err(error) => {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x0c",
+                            input_handle_index = request.input_handle_index.unwrap_or(0),
+                            response_handle_index = request.response_handle_index(),
+                            object_kind = "pending_message",
+                            folder_id = %format!("{folder_id:#018x}"),
+                            folder_role = role_for_folder_id(folder_id).unwrap_or(""),
+                            recipient_count = recipients.len(),
+                            save_error = %error,
+                            "rca debug mapi save changes message"
+                        );
+                        responses.extend_from_slice(&rop_error_response(
+                            0x0C,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ))
+                    }
                 }
             }
             Some(RopId::RemoveAllRecipients) => {
@@ -4128,7 +4146,11 @@ where
             Some(RopId::ModifyRecipients) => {
                 match input_object_mut(session, &handle_slots, &request) {
                     Some(MapiObject::PendingMessage { recipients, .. }) => {
-                        match request.modify_recipients() {
+                        let address_book_entries = store
+                            .fetch_address_book_entries(principal)
+                            .await
+                            .unwrap_or_default();
+                        match request.modify_recipients(principal, &address_book_entries) {
                             Ok(changes) => {
                                 tracing::info!(
                                     rca_debug = true,

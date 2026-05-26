@@ -69,6 +69,8 @@ const SYNC_TYPE_HIERARCHY: u8 = MapiSyncType::Hierarchy.as_u8();
 const SYNC_FLAG_NO_FOREIGN_IDENTIFIERS: u16 = 0x0100;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
+const GLOBSET_BITMASK_COMMAND: u8 = 0x42;
+const GLOBSET_POP_COMMAND: u8 = 0x50;
 const GLOBSET_END_COMMAND: u8 = 0x00;
 const WINDOWS_UNIX_EPOCH_OFFSET_SECONDS: i64 = 11_644_473_600;
 const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
@@ -2214,46 +2216,10 @@ fn format_replguid_globset_debug(value: &[u8]) -> String {
         );
     };
 
-    let mut offset = 16;
-    let mut ranges: Vec<(u64, u64)> = Vec::new();
-    let mut parse_error = "";
-    let mut saw_end = false;
-    while offset < value.len() {
-        let command = value[offset];
-        offset += 1;
-        match command {
-            GLOBSET_END_COMMAND => {
-                saw_end = true;
-                if offset != value.len() {
-                    parse_error = "trailing_bytes_after_end";
-                }
-                break;
-            }
-            GLOBSET_RANGE_COMMAND => {
-                let Some(low) = value.get(offset..offset + 6) else {
-                    parse_error = "truncated_range_low";
-                    break;
-                };
-                let Some(high) = value.get(offset + 6..offset + 12) else {
-                    parse_error = "truncated_range_high";
-                    break;
-                };
-                let low =
-                    crate::mapi::identity::global_counter_from_globcnt(low).unwrap_or_default();
-                let high =
-                    crate::mapi::identity::global_counter_from_globcnt(high).unwrap_or_default();
-                ranges.push((low, high));
-                offset += 12;
-            }
-            _ => {
-                parse_error = "unsupported_command";
-                break;
-            }
-        }
-    }
-    if !saw_end && parse_error.is_empty() {
-        parse_error = "missing_end_command";
-    }
+    let (ranges, parse_error) = match decode_globset_ranges(value, 16) {
+        Ok(ranges) => (ranges, String::new()),
+        Err(error) => (Vec::new(), error),
+    };
 
     let range_summary = ranges
         .iter()
@@ -2284,36 +2250,144 @@ fn replguid_globset_counters(value: &[u8]) -> Result<Vec<u64>, String> {
         return Err("unexpected_replica_guid".to_string());
     }
 
-    let mut offset = 16;
+    let ranges = decode_globset_ranges(value, 16)?;
     let mut counters = BTreeSet::new();
+    for (low, high) in ranges {
+        for counter in low..=high {
+            counters.insert(counter);
+        }
+    }
+    Ok(counters.into_iter().collect())
+}
+
+fn decode_globset_ranges(value: &[u8], mut offset: usize) -> Result<Vec<(u64, u64)>, String> {
+    let mut stack = Vec::new();
+    let mut push_lengths = Vec::new();
+    let mut ranges = Vec::new();
     while offset < value.len() {
         let command = value[offset];
         offset += 1;
         match command {
             GLOBSET_END_COMMAND => {
-                if offset == value.len() {
-                    return Ok(counters.into_iter().collect());
+                if offset != value.len() {
+                    return Err("trailing_bytes_after_end".to_string());
                 }
-                return Err("trailing_bytes_after_end".to_string());
+                if !stack.is_empty() {
+                    return Err("non_empty_stack_at_end".to_string());
+                }
+                return Ok(ranges);
+            }
+            1..=6 => {
+                let push_len = command as usize;
+                let end = offset.saturating_add(push_len);
+                let Some(bytes) = value.get(offset..end) else {
+                    return Err("truncated_push".to_string());
+                };
+                offset = end;
+                if stack.len().saturating_add(push_len) > 6 {
+                    return Err("push_overflows_globcnt".to_string());
+                }
+                stack.extend_from_slice(bytes);
+                if stack.len() == 6 {
+                    let counter = globcnt_slice_to_u64(&stack)
+                        .ok_or_else(|| "invalid_push_globcnt".to_string())?;
+                    ranges.push((counter, counter));
+                    stack.truncate(stack.len().saturating_sub(push_len));
+                } else {
+                    push_lengths.push(push_len);
+                }
+            }
+            GLOBSET_POP_COMMAND => {
+                let Some(pop_len) = push_lengths.pop() else {
+                    return Err("pop_without_push".to_string());
+                };
+                if pop_len > stack.len() {
+                    return Err("pop_underflows_stack".to_string());
+                }
+                stack.truncate(stack.len() - pop_len);
+            }
+            GLOBSET_BITMASK_COMMAND => {
+                if stack.len() != 5 {
+                    return Err("bitmask_requires_five_byte_stack".to_string());
+                }
+                let Some(starting_value) = value.get(offset).copied() else {
+                    return Err("truncated_bitmask_start".to_string());
+                };
+                let Some(bitmask) = value.get(offset + 1).copied() else {
+                    return Err("truncated_bitmask".to_string());
+                };
+                offset += 2;
+                let mut values = vec![starting_value];
+                for bit in 0..8 {
+                    if bitmask & (1 << bit) != 0 {
+                        let value = u16::from(starting_value) + 1 + bit;
+                        if value > u16::from(u8::MAX) {
+                            return Err("bitmask_value_overflow".to_string());
+                        }
+                        values.push(value as u8);
+                    }
+                }
+                for (low, high) in coalesced_u8_ranges(values) {
+                    let mut low_bytes = stack.clone();
+                    low_bytes.push(low);
+                    let mut high_bytes = stack.clone();
+                    high_bytes.push(high);
+                    let low = globcnt_slice_to_u64(&low_bytes)
+                        .ok_or_else(|| "invalid_bitmask_low".to_string())?;
+                    let high = globcnt_slice_to_u64(&high_bytes)
+                        .ok_or_else(|| "invalid_bitmask_high".to_string())?;
+                    ranges.push((low, high));
+                }
             }
             GLOBSET_RANGE_COMMAND => {
+                let suffix_len = 6usize.saturating_sub(stack.len());
                 let low = value
-                    .get(offset..offset + 6)
-                    .and_then(crate::mapi::identity::global_counter_from_globcnt)
-                    .ok_or_else(|| "truncated_or_invalid_range_low".to_string())?;
+                    .get(offset..offset.saturating_add(suffix_len))
+                    .ok_or_else(|| "truncated_range_low".to_string())?;
                 let high: u64 = value
-                    .get(offset + 6..offset + 12)
-                    .and_then(crate::mapi::identity::global_counter_from_globcnt)
+                    .get(offset.saturating_add(suffix_len)..offset.saturating_add(suffix_len * 2))
+                    .and_then(|high| {
+                        let mut bytes = stack.clone();
+                        bytes.extend_from_slice(high);
+                        globcnt_slice_to_u64(&bytes)
+                    })
                     .ok_or_else(|| "truncated_or_invalid_range_high".to_string())?;
-                for counter in low..=high.max(low) {
-                    counters.insert(counter);
+                let mut low_bytes = stack.clone();
+                low_bytes.extend_from_slice(low);
+                let low = globcnt_slice_to_u64(&low_bytes)
+                    .ok_or_else(|| "truncated_or_invalid_range_low".to_string())?;
+                if high < low {
+                    return Err("invalid_range".to_string());
                 }
-                offset += 12;
+                ranges.push((low, high));
+                offset += suffix_len * 2;
             }
-            _ => return Err("unsupported_command".to_string()),
+            _ => {
+                return Err(format!(
+                    "unsupported_command_0x{command:02x}_at_{}",
+                    offset - 1
+                ))
+            }
         }
     }
     Err("missing_end_command".to_string())
+}
+
+fn globcnt_slice_to_u64(bytes: &[u8]) -> Option<u64> {
+    crate::mapi::identity::global_counter_from_globcnt(bytes)
+}
+
+fn coalesced_u8_ranges(mut values: Vec<u8>) -> Vec<(u8, u8)> {
+    values.sort_unstable();
+    values.dedup();
+    let mut ranges: Vec<(u8, u8)> = Vec::new();
+    for value in values {
+        match ranges.last_mut() {
+            Some((_, high)) if value == high.saturating_add(1) => *high = value,
+            _ => ranges.push((value, value)),
+        }
+    }
+    ranges
 }
 
 fn counter_from_xid(value: &[u8]) -> Option<u64> {
@@ -4349,6 +4423,53 @@ mod tests {
 
         assert_variable_property(&token, META_TAG_IDSET_GIVEN, &expected_idset);
         assert_variable_property(&token, META_TAG_CNSET_SEEN, &expected_cnset);
+    }
+
+    #[test]
+    fn replguid_globset_parser_decodes_push_singleton_client_state() {
+        let mut globset = STORE_REPLICA_GUID.to_vec();
+        globset.push(6);
+        globset.extend_from_slice(&globcnt_bytes(0xbad397870262));
+        globset.push(GLOBSET_END_COMMAND);
+
+        assert_eq!(
+            replguid_globset_counters(&globset).unwrap(),
+            vec![0xbad397870262]
+        );
+        let summary = replguid_globset_debug_summary(&globset);
+        assert!(summary.contains("range_count=1"));
+        assert!(summary.contains("ranges=205417943073378"));
+        assert!(summary.contains("parse_error="));
+        assert!(!summary.contains("unsupported_command"));
+    }
+
+    #[test]
+    fn replguid_globset_parser_decodes_common_stack_range_and_bitmask() {
+        let mut range_globset = STORE_REPLICA_GUID.to_vec();
+        range_globset.push(5);
+        range_globset.extend_from_slice(&[0, 0, 0, 0, 0]);
+        range_globset.push(GLOBSET_RANGE_COMMAND);
+        range_globset.push(7);
+        range_globset.push(9);
+        range_globset.push(GLOBSET_POP_COMMAND);
+        range_globset.push(GLOBSET_END_COMMAND);
+        assert_eq!(
+            replguid_globset_counters(&range_globset).unwrap(),
+            vec![7, 8, 9]
+        );
+
+        let mut bitmask_globset = STORE_REPLICA_GUID.to_vec();
+        bitmask_globset.push(5);
+        bitmask_globset.extend_from_slice(&[0, 0, 0, 0, 0]);
+        bitmask_globset.push(GLOBSET_BITMASK_COMMAND);
+        bitmask_globset.push(1);
+        bitmask_globset.push(0b0000_1011);
+        bitmask_globset.push(GLOBSET_POP_COMMAND);
+        bitmask_globset.push(GLOBSET_END_COMMAND);
+        assert_eq!(
+            replguid_globset_counters(&bitmask_globset).unwrap(),
+            vec![1, 2, 3, 5]
+        );
     }
 
     #[test]

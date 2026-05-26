@@ -3363,7 +3363,11 @@ impl RopRequest {
         Ok(values)
     }
 
-    pub(in crate::mapi) fn modify_recipients(&self) -> Result<Vec<PendingRecipientChange>> {
+    pub(in crate::mapi) fn modify_recipients(
+        &self,
+        principal: &AccountPrincipal,
+        address_book_entries: &[ExchangeAddressBookEntry],
+    ) -> Result<Vec<PendingRecipientChange>> {
         let Some(count_bytes) = self.payload.get(..2) else {
             return Ok(Vec::new());
         };
@@ -3401,6 +3405,8 @@ impl RopRequest {
                 recipient_type,
                 &columns,
                 row,
+                principal,
+                address_book_entries,
             )?));
         }
         Ok(changes)
@@ -3412,10 +3418,17 @@ pub(in crate::mapi) fn parse_pending_recipient_row(
     fallback_recipient_type: u8,
     columns: &[u32],
     row: &[u8],
+    principal: &AccountPrincipal,
+    address_book_entries: &[ExchangeAddressBookEntry],
 ) -> Result<PendingRecipient> {
-    if let Ok(recipient) =
-        parse_wrapped_pending_recipient_row(row_id, fallback_recipient_type, columns, row)
-    {
+    if let Ok(recipient) = parse_wrapped_pending_recipient_row(
+        row_id,
+        fallback_recipient_type,
+        columns,
+        row,
+        principal,
+        address_book_entries,
+    ) {
         return Ok(recipient);
     }
 
@@ -3465,6 +3478,8 @@ fn parse_wrapped_pending_recipient_row(
     fallback_recipient_type: u8,
     columns: &[u32],
     row: &[u8],
+    principal: &AccountPrincipal,
+    address_book_entries: &[ExchangeAddressBookEntry],
 ) -> Result<PendingRecipient> {
     let mut cursor = Cursor::new(row);
     let recipient_flags = cursor.read_u16()?;
@@ -3533,7 +3548,11 @@ fn parse_wrapped_pending_recipient_row(
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .or(email_address)
-            .or(x500_dn)
+            .or_else(|| {
+                x500_dn
+                    .as_deref()
+                    .and_then(|dn| legacy_dn_recipient_address(dn, principal, address_book_entries))
+            })
             .ok_or_else(|| {
                 anyhow!(
                     "recipient address is required;row_format=wrapped;recipient_flags={recipient_flags:#06x};address_type={address_type:#04x};recipient_column_count={recipient_column_count};columns={}",
@@ -3550,6 +3569,31 @@ fn parse_wrapped_pending_recipient_row(
         address,
         display_name,
     })
+}
+
+fn legacy_dn_recipient_address(
+    legacy_dn: &str,
+    principal: &AccountPrincipal,
+    address_book_entries: &[ExchangeAddressBookEntry],
+) -> Option<String> {
+    let legacy_dn = super::nspi::normalize_nspi_lookup_value(legacy_dn);
+    let principal_entry = super::nspi::principal_address_book_entry(principal);
+    std::iter::once(&principal_entry)
+        .chain(address_book_entries.iter())
+        .find(|entry| {
+            legacy_dn_matches_entry(&legacy_dn, &super::nspi::nspi_entry_legacy_dn(entry))
+                || legacy_dn_matches_entry(
+                    &legacy_dn,
+                    &super::nspi::nspi_entry_unprefixed_legacy_dn(entry),
+                )
+        })
+        .map(|entry| lpe_storage::normalize_mailbox_email(&entry.email))
+        .filter(|address| !address.is_empty())
+}
+
+fn legacy_dn_matches_entry(actual: &str, expected: &str) -> bool {
+    let expected = expected.to_ascii_lowercase();
+    actual == expected || actual == expected.trim_start_matches('/')
 }
 
 fn read_recipient_string(cursor: &mut Cursor<'_>, unicode: bool) -> Result<String> {

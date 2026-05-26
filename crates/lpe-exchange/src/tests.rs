@@ -11345,7 +11345,7 @@ async fn mapi_over_http_modify_recipients_x500_rows_save_canonically() {
 
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "X500 recipients");
-    let legacy_dn = "O=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=bob";
+    let legacy_dn = "O=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice-example-test";
     let to_row = mapi_wrapped_x500_recipient_row("Bob", legacy_dn);
 
     let mut rops = Vec::new();
@@ -11375,7 +11375,7 @@ async fn mapi_over_http_modify_recipients_x500_rows_save_canonically() {
     let recorded = imported_emails.lock().unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].to.len(), 1);
-    assert_eq!(recorded[0].to[0].address, legacy_dn);
+    assert_eq!(recorded[0].to[0].address, "alice@example.test");
     assert_eq!(recorded[0].to[0].display_name.as_deref(), Some("Bob"));
 }
 
