@@ -1,8 +1,9 @@
 use axum::{http::StatusCode, Json};
 use lpe_storage::{
     AccountAppPassword, AccountAuthFactor, AdminAuthFactor, AuthenticatedAccount,
-    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, MailFlowEntry,
-    MailboxDelegationOverview, SieveScriptDocument, SieveScriptSummary, TaskListGrant,
+    AuthenticatedAdmin, CollaborationCollection, CollaborationGrant, DelegateAccessObject,
+    FreeBusyBlock, MailFlowEntry, MailboxDelegationOverview, SieveScriptDocument,
+    SieveScriptSummary, TaskListGrant,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -530,6 +531,21 @@ pub struct SetActiveSieveScriptRequest {
 #[serde(rename_all = "camelCase")]
 pub struct MailboxDelegationResponse {
     pub overview: MailboxDelegationOverview,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeBusyQuery {
+    pub owner_account_id: Uuid,
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeBusyResponse {
+    pub delegate_objects: Vec<DelegateAccessObject>,
+    pub blocks: Vec<FreeBusyBlock>,
 }
 
 #[derive(Debug, Deserialize)]

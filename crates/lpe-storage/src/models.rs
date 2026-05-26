@@ -547,6 +547,13 @@ pub(crate) struct AccessibleEventRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct FreeBusyEventRow {
+    pub(crate) starts_at: String,
+    pub(crate) ends_at: String,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct ClientTaskListRow {
     pub(crate) id: Uuid,
     pub(crate) owner_account_id: Uuid,

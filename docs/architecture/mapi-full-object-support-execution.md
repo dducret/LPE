@@ -24,6 +24,15 @@ Access date for all entries: 2026-05-21.
 | MAPI address book provider objects | https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/mapi-address-book-provider-objects | Address book providers implement containers, distribution lists, messaging users, tables, status objects, and controls. | Controls/dialog behavior is client/provider UI behavior; LPE should support NSPI data semantics first. |
 | Accessing Objects by Using the Session | https://learn.microsoft.com/en-us/office/client-developer/outlook/mapi/accessing-objects-by-using-the-session | A MAPI session opens message stores, address books, and entries by entry identifier. | LPE sessions are HTTP server sessions; client profile administration objects are not stored as canonical mailbox data. |
 
+Access date for delegate/free-busy entries: 2026-05-26.
+
+| Page title | URL | Topic or claim supported | Ambiguity |
+| --- | --- | --- | --- |
+| [MS-OXCMAPIHTTP]: Overview | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxcmapihttp/beb85e42-8ecf-47f3-802a-d0e13914c6fd | MAPI over HTTP establishes server-side session context for mailbox and directory operations. | It defines transport/session flow, not how LPE should persist delegate or free/busy state. |
+| [MS-OXODLGT]: Additional Constraints for Calendar Folder | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxodlgt/22f09162-0382-4fe5-b767-c5417060fb8b | Calendar delegates need calendar Author/Editor-style permissions; delegates that receive meeting-related objects also need send-on-behalf and delegate-rule behavior. | LPE maps this to canonical calendar write plus `send-on-behalf`; full OP_DELEGATE rule parity remains deferred until canonical rule state exists. |
+| [MS-OXWSDLGM]: Delegate Access Management Web Service Protocol | https://learn.microsoft.com/en-us/openspecs/exchange_server_protocols/ms-oxwsdlgm/365cb220-56ba-4e2c-a244-b143a1f2eeac | Delegate access is server-managed mailbox information. | The protocol is EWS-oriented; LPE keeps one canonical delegate object layer for EWS and MAPI projections. |
+| About the Free/Busy API | https://learn.microsoft.com/en-us/office/client-developer/outlook/auxiliary/about-the-free-busy-api | Outlook free/busy data is exposed as availability blocks and the Free/Busy API does not provide write access or delegate-account access. | LPE computes read-only blocks from canonical events; delegate management remains separate canonical ACL state. |
+
 ## Assumptions
 
 - `LPE` remains the canonical system of record for mailboxes, contacts,

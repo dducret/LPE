@@ -73,6 +73,7 @@ The detailed Microsoft specification-to-`LPE` implementation matrix for MAPI ove
 | `/rpc/rpcproxy.dll` | later legacy authenticated RPC/HTTP mailbox transport shim for `EXPR` publication |
 | MAPI identity | store-backed projection from canonical UUIDs to replica GUID, FID, MID, LongTermID, source key, change key, and instance key values |
 | Folder permissions | `RopGetPermissionsTable` projects canonical mailbox delegation grants into a bounded folder permission table with `PidTagMemberId`, `PidTagMemberName`, and `PidTagMemberRights`; mailbox owners map to full owner rights, delegates map from canonical `may_read`, `may_write`, `may_delete`, and `may_share`, while `Default` and `Anonymous` rows are exposed with no rights |
+| Delegate / free-busy objects | `/api/mail/delegation/free-busy` exposes canonical delegate access objects and computed free/busy blocks for the MAPI/EWS layers. It maps calendar write plus `send-on-behalf` to meeting-object delegate capability, projects calendar grants without creating Exchange-only delegate data folders, and computes availability from `calendar_events` with only availability-level detail for same-tenant users without calendar read grants. |
 | Notifications | `RopRegisterNotification` registers session-scoped content or hierarchy watches for the supported notification bitmask, and `NotificationWait` returns protocol-shaped no-event or event-pending responses from registered session events and the canonical mail change cursor |
 
 | MAPI ROP parser / dispatch boundary | Current support |

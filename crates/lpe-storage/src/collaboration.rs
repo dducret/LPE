@@ -122,6 +122,31 @@ pub struct CollaborationGrant {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeBusyBlock {
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub start: String,
+    pub end: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DelegateAccessObject {
+    pub owner_account_id: Uuid,
+    pub owner_email: String,
+    pub grantee_account_id: Uuid,
+    pub grantee_email: String,
+    pub can_view_free_busy: bool,
+    pub can_open_calendar: bool,
+    pub can_create_or_update_calendar_items: bool,
+    pub can_delete_calendar_items: bool,
+    pub can_receive_meeting_objects: bool,
+    pub can_send_on_behalf: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct CollaborationGrantInput {
     pub kind: CollaborationResourceKind,
@@ -698,6 +723,133 @@ impl Storage {
     ) -> Result<Vec<CollaborationCollection>> {
         self.fetch_accessible_collections(principal_account_id, CollaborationResourceKind::Calendar)
             .await
+    }
+
+    pub async fn fetch_delegate_access_objects(
+        &self,
+        principal_account_id: Uuid,
+    ) -> Result<Vec<DelegateAccessObject>> {
+        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                owner.id AS owner_account_id,
+                owner.primary_email AS owner_email,
+                grantee.id AS grantee_account_id,
+                grantee.primary_email AS grantee_email,
+                COALESCE(g.may_read, FALSE) AS may_read,
+                COALESCE(g.may_write, FALSE) AS may_write,
+                COALESCE(g.may_delete, FALSE) AS may_delete,
+                EXISTS(
+                    SELECT 1
+                    FROM sender_rights sender
+                    WHERE sender.tenant_id = c.tenant_id
+                      AND sender.owner_account_id = c.owner_account_id
+                      AND sender.grantee_account_id = $2
+                      AND sender.sender_right = 'send_on_behalf'
+                      AND sender.identity_id IS NULL
+                ) AS may_send_on_behalf
+            FROM calendar_grants g
+            JOIN calendars c
+              ON c.tenant_id = g.tenant_id
+             AND c.owner_account_id = g.owner_account_id
+             AND c.id = g.calendar_id
+             AND c.role = 'calendar'
+            JOIN accounts owner
+              ON owner.tenant_id = g.tenant_id
+             AND owner.id = g.owner_account_id
+            JOIN accounts grantee
+              ON grantee.tenant_id = g.tenant_id
+             AND grantee.id = g.grantee_account_id
+            WHERE g.tenant_id = $1
+              AND g.grantee_account_id = $2
+            ORDER BY lower(owner.primary_email) ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(principal_account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| {
+                let may_write = row.get::<bool, _>("may_write");
+                let may_delete = row.get::<bool, _>("may_delete");
+                let may_send_on_behalf = row.get::<bool, _>("may_send_on_behalf");
+                DelegateAccessObject {
+                    owner_account_id: row.get("owner_account_id"),
+                    owner_email: row.get("owner_email"),
+                    grantee_account_id: row.get("grantee_account_id"),
+                    grantee_email: row.get("grantee_email"),
+                    can_view_free_busy: true,
+                    can_open_calendar: row.get("may_read"),
+                    can_create_or_update_calendar_items: may_write,
+                    can_delete_calendar_items: may_delete,
+                    can_receive_meeting_objects: may_write && may_send_on_behalf,
+                    can_send_on_behalf: may_send_on_behalf,
+                }
+            })
+            .collect())
+    }
+
+    pub async fn fetch_free_busy_blocks(
+        &self,
+        principal_account_id: Uuid,
+        owner_account_id: Uuid,
+        starts_before: &str,
+        ends_after: &str,
+    ) -> Result<Vec<FreeBusyBlock>> {
+        let principal_tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
+        let owner = self
+            .account_identity_for_id(owner_account_id)
+            .await
+            .map_err(|_| anyhow!("calendar owner not found"))?;
+        let owner_tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        if principal_tenant_id != owner_tenant_id {
+            bail!("free/busy is available only inside one tenant");
+        }
+
+        let can_read_details = principal_account_id == owner_account_id
+            || self
+                .fetch_accessible_calendar_collections(principal_account_id)
+                .await?
+                .into_iter()
+                .any(|collection| collection.owner_account_id == owner_account_id);
+
+        let rows = sqlx::query_as::<_, crate::FreeBusyEventRow>(
+            r#"
+            SELECT
+                to_char(GREATEST(e.starts_at, $4::timestamptz) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS starts_at,
+                to_char(LEAST(e.ends_at, $3::timestamptz) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ends_at,
+                e.status
+            FROM calendar_events e
+            JOIN calendars c
+              ON c.tenant_id = e.tenant_id
+             AND c.owner_account_id = e.owner_account_id
+             AND c.id = e.calendar_id
+             AND c.role = 'calendar'
+            WHERE e.tenant_id = $1
+              AND e.owner_account_id = $2
+              AND e.status <> 'cancelled'
+              AND e.starts_at < $3::timestamptz
+              AND e.ends_at > $4::timestamptz
+            ORDER BY e.starts_at ASC, e.ends_at ASC, e.id ASC
+            "#,
+        )
+        .bind(&principal_tenant_id)
+        .bind(owner_account_id)
+        .bind(starts_before)
+        .bind(ends_after)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(merge_free_busy_rows(
+            rows,
+            owner_account_id,
+            owner.email,
+            can_read_details,
+        ))
     }
 
     pub async fn create_accessible_calendar_collection(
@@ -1964,5 +2116,102 @@ fn map_collaboration_grant(row: CollaborationGrantRow) -> CollaborationGrant {
         },
         created_at: row.created_at,
         updated_at: row.updated_at,
+    }
+}
+
+fn merge_free_busy_rows(
+    rows: Vec<crate::FreeBusyEventRow>,
+    owner_account_id: Uuid,
+    owner_email: String,
+    can_read_details: bool,
+) -> Vec<FreeBusyBlock> {
+    let mut blocks: Vec<FreeBusyBlock> = Vec::new();
+    for row in rows {
+        let status = free_busy_status(&row.status, can_read_details);
+        if status == "free" || row.starts_at >= row.ends_at {
+            continue;
+        }
+        if let Some(last) = blocks.last_mut() {
+            if last.status == status && last.end >= row.starts_at {
+                if last.end < row.ends_at {
+                    last.end = row.ends_at;
+                }
+                continue;
+            }
+        }
+        blocks.push(FreeBusyBlock {
+            owner_account_id,
+            owner_email: owner_email.clone(),
+            start: row.starts_at,
+            end: row.ends_at,
+            status,
+        });
+    }
+    blocks
+}
+
+fn free_busy_status(status: &str, can_read_details: bool) -> String {
+    if !can_read_details {
+        return "busy".to_string();
+    }
+    match status.trim().to_ascii_lowercase().as_str() {
+        "tentative" => "tentative".to_string(),
+        "cancelled" => "free".to_string(),
+        _ => "busy".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod free_busy_tests {
+    use super::*;
+
+    #[test]
+    fn free_busy_rows_merge_adjacent_matching_states() {
+        let owner_account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let blocks = merge_free_busy_rows(
+            vec![
+                crate::FreeBusyEventRow {
+                    starts_at: "2026-05-26T08:00:00Z".to_string(),
+                    ends_at: "2026-05-26T09:00:00Z".to_string(),
+                    status: "confirmed".to_string(),
+                },
+                crate::FreeBusyEventRow {
+                    starts_at: "2026-05-26T09:00:00Z".to_string(),
+                    ends_at: "2026-05-26T10:00:00Z".to_string(),
+                    status: "confirmed".to_string(),
+                },
+                crate::FreeBusyEventRow {
+                    starts_at: "2026-05-26T10:30:00Z".to_string(),
+                    ends_at: "2026-05-26T11:00:00Z".to_string(),
+                    status: "tentative".to_string(),
+                },
+            ],
+            owner_account_id,
+            "owner@example.test".to_string(),
+            true,
+        );
+
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].start, "2026-05-26T08:00:00Z");
+        assert_eq!(blocks[0].end, "2026-05-26T10:00:00Z");
+        assert_eq!(blocks[0].status, "busy");
+        assert_eq!(blocks[1].status, "tentative");
+    }
+
+    #[test]
+    fn free_busy_without_calendar_access_hides_tentative_detail() {
+        let owner_account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let blocks = merge_free_busy_rows(
+            vec![crate::FreeBusyEventRow {
+                starts_at: "2026-05-26T08:00:00Z".to_string(),
+                ends_at: "2026-05-26T09:00:00Z".to_string(),
+                status: "tentative".to_string(),
+            }],
+            owner_account_id,
+            "owner@example.test".to_string(),
+            false,
+        );
+
+        assert_eq!(blocks[0].status, "busy");
     }
 }

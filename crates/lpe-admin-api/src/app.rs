@@ -33,9 +33,9 @@ use crate::{
     },
     delegation::{
         delete_collaboration_grant, delete_mailbox_delegation_grant,
-        delete_sender_delegation_grant, delete_task_list_grant, get_mailbox_delegation,
-        list_collaboration_overview, upsert_collaboration_grant, upsert_mailbox_delegation_grant,
-        upsert_sender_delegation_grant, upsert_task_list_grant,
+        delete_sender_delegation_grant, delete_task_list_grant, get_free_busy,
+        get_mailbox_delegation, list_collaboration_overview, upsert_collaboration_grant,
+        upsert_mailbox_delegation_grant, upsert_sender_delegation_grant, upsert_task_list_grant,
     },
     health::{health, health_live, health_ready},
     integration::{
@@ -203,6 +203,7 @@ pub fn router(storage: Storage) -> Router {
             delete(delete_task_list_grant),
         )
         .route("/mail/delegation", get(get_mailbox_delegation))
+        .route("/mail/delegation/free-busy", get(get_free_busy))
         .route(
             "/mail/delegation/mailboxes",
             put(upsert_mailbox_delegation_grant),

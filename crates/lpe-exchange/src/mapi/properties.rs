@@ -598,6 +598,9 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
             mailbox_guid,
             REMINDERS_FOLDER_ID,
         )),
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => Some(MapiValue::MultiBinary(additional_ren_entry_ids(
+            mailbox_guid,
+        ))),
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => {
             Some(MapiValue::Binary(additional_ren_entry_ids_ex(mailbox_guid)))
         }
@@ -614,6 +617,7 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
             | PID_TAG_REM_ONLINE_ENTRY_ID
+            | PID_TAG_ADDITIONAL_REN_ENTRY_IDS
             | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
     )
 }
@@ -637,6 +641,19 @@ fn valid_folder_mask() -> u32 {
 
 fn special_folder_entry_id_value(mailbox_guid: Uuid, folder_id: u64) -> MapiValue {
     MapiValue::Binary(special_folder_entry_id(mailbox_guid, folder_id))
+}
+
+fn additional_ren_entry_ids(mailbox_guid: Uuid) -> Vec<Vec<u8>> {
+    [
+        CONFLICTS_FOLDER_ID,
+        SYNC_ISSUES_FOLDER_ID,
+        LOCAL_FAILURES_FOLDER_ID,
+        SERVER_FAILURES_FOLDER_ID,
+        JUNK_FOLDER_ID,
+    ]
+    .into_iter()
+    .map(|folder_id| special_folder_entry_id(mailbox_guid, folder_id))
+    .collect()
 }
 
 fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
@@ -4521,6 +4538,36 @@ mod tests {
                 (0x800B, Some(QUICK_CONTACTS_FOLDER_ID)),
             ]
         );
+    }
+
+    #[test]
+    fn additional_ren_entry_ids_advertises_documented_indexed_special_folders() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let Some(MapiValue::MultiBinary(values)) = special_folder_identification_property_value(
+            mailbox_guid,
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        ) else {
+            panic!("expected AdditionalRenEntryIds multi-binary value");
+        };
+
+        assert_eq!(
+            values
+                .iter()
+                .map(
+                    |entry_id| crate::mapi::identity::object_id_from_folder_identifier_bytes(
+                        entry_id
+                    )
+                )
+                .collect::<Vec<_>>(),
+            vec![
+                Some(CONFLICTS_FOLDER_ID),
+                Some(SYNC_ISSUES_FOLDER_ID),
+                Some(LOCAL_FAILURES_FOLDER_ID),
+                Some(SERVER_FAILURES_FOLDER_ID),
+                Some(JUNK_FOLDER_ID),
+            ]
+        );
+        assert!(values.iter().all(|entry_id| entry_id.len() == 46));
     }
 
     #[test]

@@ -22,6 +22,17 @@
   - supports delegated mailbox read/write where granted
   - supports `send-as` and `send-on-behalf` checks during canonical submission
   - does not create protocol-specific submitted-message logic
+- Delegate / free-busy object layer:
+  - `/api/mail/delegation/free-busy` returns canonical delegate access objects
+    and computed free/busy blocks for Outlook, EWS, and MAPI consumers
+  - free/busy is computed from canonical `calendar_events`, not stored as an
+    Exchange-specific public-folder free/busy store
+  - same-tenant users can retrieve availability blocks; users with canonical
+    calendar read grants can distinguish tentative from busy, while users
+    without calendar read grants receive availability-only `busy` blocks
+  - cancelled events are omitted from free/busy output
+  - delegate meeting-object handling is considered enabled only when the
+    grantee has calendar write access and canonical `send-on-behalf`
 - JMAP:
   - exposes shared objects through canonical account and collection visibility
   - uses canonical state/change channels
@@ -49,6 +60,7 @@
 | `share` | manage grants where owner policy permits |
 | `send-as` | submit with delegated mailbox in `From` |
 | `send-on-behalf` | submit with delegated mailbox represented by `Sender` |
+| `free-busy` | view computed availability without exposing event details |
 
 | Resource | Canonical source |
 | --- | --- |
@@ -56,3 +68,4 @@
 | Calendars | `calendar_events` |
 | Tasks | `tasks`, `task_lists`, `task_list_grants` |
 | Mailboxes | canonical mailbox tables and mailbox delegation grants |
+| Delegate/free-busy objects | `calendar_grants`, `sender_rights`, `calendar_events` |

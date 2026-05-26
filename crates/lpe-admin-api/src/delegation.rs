@@ -3,13 +3,14 @@ use crate::{
     http::internal_error,
     parse_collaboration_kind, parse_sender_delegation_right, require_account,
     types::{
-        ApiResult, CollaborationOverviewResponse, MailboxDelegationResponse,
-        UpsertCollaborationGrantRequest, UpsertMailboxDelegationGrantRequest,
-        UpsertSenderDelegationGrantRequest, UpsertTaskListGrantRequest,
+        ApiResult, CollaborationOverviewResponse, FreeBusyQuery, FreeBusyResponse,
+        MailboxDelegationResponse, UpsertCollaborationGrantRequest,
+        UpsertMailboxDelegationGrantRequest, UpsertSenderDelegationGrantRequest,
+        UpsertTaskListGrantRequest,
     },
 };
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -206,6 +207,35 @@ pub(crate) async fn get_mailbox_delegation(
             .map_err(internal_error)?,
     };
     Ok(Json(MailboxDelegationResponse { overview }))
+}
+
+pub(crate) async fn get_free_busy(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Query(query): Query<FreeBusyQuery>,
+) -> ApiResult<FreeBusyResponse> {
+    let account = require_account(&storage, &headers).await?;
+    if query.start.trim().is_empty() || query.end.trim().is_empty() {
+        return Err(bad_request_error("start and end are required"));
+    }
+    let delegate_objects = storage
+        .fetch_delegate_access_objects(account.account_id)
+        .await
+        .map_err(internal_error)?;
+    let blocks = storage
+        .fetch_free_busy_blocks(
+            account.account_id,
+            query.owner_account_id,
+            query.end.trim(),
+            query.start.trim(),
+        )
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(FreeBusyResponse {
+        delegate_objects,
+        blocks,
+    }))
 }
 
 pub(crate) async fn upsert_mailbox_delegation_grant(

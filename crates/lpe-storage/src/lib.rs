@@ -48,7 +48,8 @@ pub use crate::change::{
 };
 pub use crate::collaboration::{
     AccessibleContact, AccessibleEvent, CollaborationCollection, CollaborationGrant,
-    CollaborationGrantInput, CollaborationResourceKind, CollaborationRights,
+    CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, DelegateAccessObject,
+    FreeBusyBlock,
 };
 pub use crate::conversation_actions::{
     ConversationAction, UpsertConversationActionInput, CONVERSATION_ACTION_VERSION,

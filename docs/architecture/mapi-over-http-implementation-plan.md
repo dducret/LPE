@@ -175,6 +175,14 @@ non-canonical LPE state.
   `WunderBar` group/header rows.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store.
+- Delegate and free/busy objects are canonical projections over
+  `calendar_grants`, `sender_rights`, and `calendar_events`. LPE does not create
+  Exchange public-folder free/busy state or protocol-local delegate data-folder
+  truth for this layer. The MAPI and EWS adapters consume the canonical
+  delegate/free-busy API: same-tenant availability is exposed as computed
+  free/busy blocks, calendar read grants preserve tentative/busy distinctions,
+  and calendar write plus `send-on-behalf` is the supported canonical signal for
+  receiving or processing meeting-related objects on behalf of a delegator.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed
   blobs fail validation instead of being accepted into canonical task state.
 - Journal and Notes data are canonical account-owned items. MAPI coverage must
@@ -431,6 +439,15 @@ attachments are projected only through canonical `calendar_event_attachments`:
 that table, while bounded `RopCreateAttachment`/`RopSaveChangesAttachment`
 writes validated attachment blobs into the same canonical event attachment
 state. Outlook-only attachment state is not stored.
+
+Delegate/free-busy readiness additionally requires the canonical
+`/api/mail/delegation/free-busy` layer to return delegate access objects and
+merged non-overlapping availability blocks for the target mailbox calendar.
+This follows the Microsoft MAPI over HTTP session model, the delegate calendar
+constraints in MS-OXODLGT, the delegate-management contract in MS-OXWSDLGM, and
+the Outlook free/busy block behavior described by Microsoft's Free/Busy API
+documentation. Public MAPI publication still waits for the existing local, RCA,
+and real-Outlook evidence gates.
 
 ### Publication Gate
 
