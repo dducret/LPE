@@ -1987,6 +1987,7 @@ pub(in crate::mapi) fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'sta
         SCHEDULE_FOLDER_ID => "schedule",
         SEARCH_FOLDER_ID => "search",
         VIEWS_FOLDER_ID => "personal_views",
+        SHORTCUTS_FOLDER_ID => "shortcuts",
         CALENDAR_FOLDER_ID => "calendar",
         CONTACTS_FOLDER_ID => "contacts",
         JOURNAL_FOLDER_ID => "journal",
@@ -2024,6 +2025,7 @@ pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
         | VIEWS_FOLDER_ID
+        | SHORTCUTS_FOLDER_ID
         | FREEBUSY_DATA_FOLDER_ID => "",
         CONTACTS_SEARCH_FOLDER_ID => "IPF.Contact",
         TODO_SEARCH_FOLDER_ID => "IPF.Task",

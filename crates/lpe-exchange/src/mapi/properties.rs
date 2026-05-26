@@ -131,6 +131,7 @@ pub(in crate::mapi) const PID_TAG_IPM_TASK_ENTRY_ID: u32 = 0x36D4_0102;
 pub(in crate::mapi) const PID_TAG_REM_ONLINE_ENTRY_ID: u32 = 0x36D5_0102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS: u32 = 0x36D8_1102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
+pub(in crate::mapi) const PID_TAG_FREE_BUSY_ENTRY_IDS: u32 = 0x36E4_1102;
 pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
@@ -604,6 +605,9 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX => {
             Some(MapiValue::Binary(additional_ren_entry_ids_ex(mailbox_guid)))
         }
+        PID_TAG_FREE_BUSY_ENTRY_IDS => {
+            Some(MapiValue::MultiBinary(free_busy_entry_ids(mailbox_guid)))
+        }
         _ => None,
     }
 }
@@ -619,6 +623,7 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
             | PID_TAG_REM_ONLINE_ENTRY_ID
             | PID_TAG_ADDITIONAL_REN_ENTRY_IDS
             | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
+            | PID_TAG_FREE_BUSY_ENTRY_IDS
     )
 }
 
@@ -685,6 +690,15 @@ fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
     value.extend_from_slice(&0u16.to_le_bytes());
     value.extend_from_slice(&0u16.to_le_bytes());
     value
+}
+
+fn free_busy_entry_ids(mailbox_guid: Uuid) -> Vec<Vec<u8>> {
+    vec![
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        special_folder_entry_id(mailbox_guid, FREEBUSY_DATA_FOLDER_ID),
+    ]
 }
 
 fn special_folder_entry_id(mailbox_guid: Uuid, folder_id: u64) -> Vec<u8> {
@@ -4444,6 +4458,7 @@ mod tests {
         assert_eq!(PID_TAG_IPM_NOTE_ENTRY_ID, 0x36D3_0102);
         assert_eq!(PID_TAG_IPM_TASK_ENTRY_ID, 0x36D4_0102);
         assert_eq!(PID_TAG_REM_ONLINE_ENTRY_ID, 0x36D5_0102);
+        assert_eq!(PID_TAG_FREE_BUSY_ENTRY_IDS, 0x36E4_1102);
 
         assert_eq!(
             special_folder_identification_property_value(Uuid::nil(), PID_TAG_VALID_FOLDER_MASK),
@@ -4568,6 +4583,24 @@ mod tests {
             ]
         );
         assert!(values.iter().all(|entry_id| entry_id.len() == 46));
+    }
+
+    #[test]
+    fn free_busy_entry_ids_advertises_freebusy_data_at_documented_index() {
+        let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let Some(MapiValue::MultiBinary(values)) =
+            special_folder_identification_property_value(mailbox_guid, PID_TAG_FREE_BUSY_ENTRY_IDS)
+        else {
+            panic!("expected FreeBusyEntryIds multi-binary value");
+        };
+
+        assert_eq!(values.len(), 4);
+        assert!(values[..3].iter().all(Vec::is_empty));
+        assert_eq!(
+            crate::mapi::identity::object_id_from_folder_identifier_bytes(&values[3]),
+            Some(FREEBUSY_DATA_FOLDER_ID)
+        );
+        assert_eq!(values[3].len(), 46);
     }
 
     #[test]
