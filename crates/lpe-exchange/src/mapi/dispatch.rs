@@ -502,6 +502,29 @@ fn log_execute_rop_debug(
         message = message,
     );
 
+    if logon.present {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            output_handle_index = %logon.output_handle_index,
+            logon_error_code = %logon.error_code,
+            logon_flags = %logon.logon_flags,
+            response_flags = %logon.response_flags,
+            special_folder_ids = %logon.special_folder_ids,
+            mailbox_guid = %logon.mailbox_guid,
+            replid = %logon.replid,
+            replica_guid = %logon.replica_guid,
+            parse_error = %logon.parse_error,
+            message = "rca debug mapi logon response",
+        );
+    }
+
     if endpoint == "emsmdb" && !request.parse_error.is_empty() {
         tracing::info!(
             rca_debug = true,
