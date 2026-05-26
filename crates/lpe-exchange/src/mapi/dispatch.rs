@@ -352,6 +352,10 @@ struct RopRequestDebugSummary {
     ids_csv: String,
     handle_count: usize,
     handle_table_summary: String,
+    request_payload_bytes: usize,
+    handle_table_bytes: usize,
+    raw_frame_count: usize,
+    raw_frames: String,
     extended: bool,
     parse_error: String,
 }
@@ -441,6 +445,28 @@ fn log_execute_rop_debug(
         response_rop_buffer_bytes = response_rop_buffer.len(),
         message = message,
     );
+
+    if endpoint == "emsmdb" && !request.parse_error.is_empty() {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            request_rop_ids = %request.ids_csv,
+            request_rop_parse_error = %request.parse_error,
+            request_rop_payload_bytes = request.request_payload_bytes,
+            request_handle_table_bytes = request.handle_table_bytes,
+            request_handle_count = request.handle_count,
+            input_handle_table_summary = %request.handle_table_summary,
+            request_rop_raw_frame_count = request.raw_frame_count,
+            request_rop_raw_frames = %request.raw_frames,
+            "rca debug mapi execute request framing"
+        );
+    }
 
     if let Some(response_framing_context) =
         execute_response_framing_context(&request.ids).filter(|_| endpoint == "emsmdb")
@@ -1822,22 +1848,66 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
     )
 }
 
-fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'static str {
+pub(in crate::mapi) fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'static str {
     match folder_id {
         ROOT_FOLDER_ID => "root",
         IPM_SUBTREE_FOLDER_ID => "ipm_subtree",
+        DEFERRED_ACTION_FOLDER_ID => "deferred_action",
+        SPOOLER_QUEUE_FOLDER_ID => "spooler_queue",
         INBOX_FOLDER_ID => "inbox",
         DRAFTS_FOLDER_ID => "drafts",
         SENT_FOLDER_ID => "sent",
         TRASH_FOLDER_ID => "trash",
         OUTBOX_FOLDER_ID => "outbox",
+        COMMON_VIEWS_FOLDER_ID => "common_views",
+        SCHEDULE_FOLDER_ID => "schedule",
+        SEARCH_FOLDER_ID => "search",
+        VIEWS_FOLDER_ID => "views",
+        SHORTCUTS_FOLDER_ID => "shortcuts",
         CALENDAR_FOLDER_ID => "calendar",
         CONTACTS_FOLDER_ID => "contacts",
         JOURNAL_FOLDER_ID => "journal",
         NOTES_FOLDER_ID => "notes",
         TASKS_FOLDER_ID => "tasks",
         REMINDERS_FOLDER_ID => "reminders",
+        SUGGESTED_CONTACTS_FOLDER_ID => "suggested_contacts",
+        QUICK_CONTACTS_FOLDER_ID => "quick_contacts",
+        IM_CONTACT_LIST_FOLDER_ID => "im_contact_list",
+        CONTACTS_SEARCH_FOLDER_ID => "contacts_search",
+        DOCUMENT_LIBRARIES_FOLDER_ID => "document_libraries",
+        SYNC_ISSUES_FOLDER_ID => "sync_issues",
+        CONFLICTS_FOLDER_ID => "conflicts",
+        LOCAL_FAILURES_FOLDER_ID => "local_failures",
+        SERVER_FAILURES_FOLDER_ID => "server_failures",
+        JUNK_FOLDER_ID => "junk",
+        RSS_FEEDS_FOLDER_ID => "rss_feeds",
+        TRACKED_MAIL_PROCESSING_FOLDER_ID => "tracked_mail_processing",
+        TODO_SEARCH_FOLDER_ID => "todo_search",
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "conversation_action_settings",
+        ARCHIVE_FOLDER_ID => "archive",
+        FREEBUSY_DATA_FOLDER_ID => "freebusy_data",
+        CONVERSATION_HISTORY_FOLDER_ID => "conversation_history",
         _ => "other",
+    }
+}
+
+pub(in crate::mapi) fn debug_role_for_folder_id(folder_id: u64) -> &'static str {
+    role_for_folder_id(folder_id).unwrap_or_else(|| post_hierarchy_probe_folder_name(folder_id))
+}
+
+pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'static str {
+    match folder_id {
+        COMMON_VIEWS_FOLDER_ID
+        | SCHEDULE_FOLDER_ID
+        | SEARCH_FOLDER_ID
+        | VIEWS_FOLDER_ID
+        | SHORTCUTS_FOLDER_ID
+        | FREEBUSY_DATA_FOLDER_ID => "IPF.Root",
+        CONTACTS_SEARCH_FOLDER_ID => "IPF.Contact",
+        TODO_SEARCH_FOLDER_ID => "IPF.Task",
+        REMINDERS_FOLDER_ID => "Outlook.Reminder",
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPF.Configuration",
+        _ => expected_special_folder_container_class(folder_id),
     }
 }
 
@@ -1860,6 +1930,8 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
     let handle_summary = summarize_handle_table(handle_table, &mut summary.parse_error);
     summary.handle_count = handle_summary.0;
     summary.handle_table_summary = handle_summary.1;
+    summary.request_payload_bytes = requests.len();
+    summary.handle_table_bytes = handle_table.len();
 
     let mut cursor = Cursor::new(requests);
     while cursor.remaining() > 0 && summary.ids.len() < MAX_ROP_DEBUG_ENTRIES {
@@ -1882,7 +1954,63 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
         }
     }
     summary.ids_csv = rop_ids_csv(&summary.ids);
+    let raw = summarize_request_rop_raw_frames(requests);
+    summary.raw_frame_count = raw.0;
+    summary.raw_frames = raw.1;
     summary
+}
+
+fn summarize_request_rop_raw_frames(requests: &[u8]) -> (usize, String) {
+    let mut cursor = Cursor::new(requests);
+    let mut frames = Vec::new();
+    while cursor.remaining() > 0 && frames.len() < MAX_ROP_DEBUG_ENTRIES {
+        let start = cursor.position();
+        let rop_id = requests.get(start).copied().unwrap_or_default();
+        let logon_id = requests.get(start + 1).copied().unwrap_or_default();
+        match read_rop_request(&mut cursor) {
+            Ok(request) => {
+                let end = cursor.position();
+                frames.push(format!(
+                    "0x{rop_id:02x}@{start}..{end}:len={}:logon={logon_id}:in={}:out={}:payload={}:preview={}",
+                    end.saturating_sub(start),
+                    request
+                        .input_handle_index
+                        .map(|index| index.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    request
+                        .output_handle_index
+                        .map(|index| index.to_string())
+                        .unwrap_or_else(|| "-".to_string()),
+                    request.payload.len(),
+                    hex_preview(&requests[start..end], 16)
+                ));
+            }
+            Err(error) => {
+                let offset = cursor.position();
+                frames.push(format!(
+                    "0x{rop_id:02x}@{start}..{offset}:error={error}:remaining={}:next={}",
+                    cursor.remaining(),
+                    requests
+                        .get(offset..)
+                        .map(|bytes| hex_preview(bytes, 16))
+                        .unwrap_or_default()
+                ));
+                break;
+            }
+        }
+    }
+    if cursor.remaining() > 0 {
+        frames.push(format!(
+            "trailing@{}:bytes={}:preview={}",
+            cursor.position(),
+            cursor.remaining(),
+            requests
+                .get(cursor.position()..)
+                .map(|bytes| hex_preview(bytes, 16))
+                .unwrap_or_default()
+        ));
+    }
+    (frames.len(), frames.join("|"))
 }
 
 fn summarize_response_rop_buffer(
@@ -2774,7 +2902,8 @@ where
                     response_handle_index = request.output_handle_index.unwrap_or(0),
                     folder_id = format!("0x{folder_id:016x}"),
                     folder_name = post_hierarchy_probe_folder_name(folder_id),
-                    role = role_for_folder_id(folder_id).unwrap_or(""),
+                    role = debug_role_for_folder_id(folder_id),
+                    container_class = debug_container_class_for_folder_id(folder_id),
                     mailbox_folder_found = mailbox_folder_found,
                     collaboration_folder_found = collaboration_folder_found,
                     advertised_special_folder = advertised_special_folder,
@@ -5989,6 +6118,8 @@ where
                             request_type = "Execute",
                             request_rop_id = "0x4e",
                             folder_id = format_args!("0x{:016x}", *folder_id),
+                            folder_role = debug_role_for_folder_id(*folder_id),
+                            folder_container_class = debug_container_class_for_folder_id(*folder_id),
                             sync_type = format_args!("0x{:02x}", *sync_type),
                             checkpoint_kind = checkpoint_kind.as_str(),
                             checkpoint_mailbox_id = (*mailbox_id)
@@ -6075,6 +6206,9 @@ where
                                     request_type = "Execute",
                                     request_rop_id = "0x4e",
                                     folder_id = format_args!("0x{:016x}", *folder_id),
+                                    folder_role = debug_role_for_folder_id(*folder_id),
+                                    folder_container_class =
+                                        debug_container_class_for_folder_id(*folder_id),
                                     sync_type = format_args!("0x{:02x}", checkpoint.4),
                                     checkpoint_kind = checkpoint.1.as_str(),
                                     checkpoint_mailbox_id = "",
@@ -6087,6 +6221,8 @@ where
                                     transfer_buffer_bytes = transfer_buffer.len(),
                                     transfer_position = *transfer_position,
                                     checkpoint_store_status = "skipped_no_mailbox_id",
+                                    checkpoint_skip_reason =
+                                        "content_or_read_state_sync_without_canonical_mailbox_id",
                                     "rca debug mapi sync checkpoint store"
                                 );
                             } else {
@@ -6109,6 +6245,9 @@ where
                                         request_type = "Execute",
                                         request_rop_id = "0x4e",
                                         folder_id = format_args!("0x{:016x}", *folder_id),
+                                        folder_role = debug_role_for_folder_id(*folder_id),
+                                        folder_container_class =
+                                            debug_container_class_for_folder_id(*folder_id),
                                         sync_type = format_args!("0x{:02x}", checkpoint.4),
                                         checkpoint_kind = checkpoint.1.as_str(),
                                         checkpoint_mailbox_id = checkpoint
@@ -6126,6 +6265,7 @@ where
                                         transfer_buffer_bytes = transfer_buffer.len(),
                                         transfer_position = *transfer_position,
                                         checkpoint_store_status = "ok",
+                                        checkpoint_skip_reason = "",
                                         "rca debug mapi sync checkpoint store"
                                     ),
                                     Err(error) => tracing::warn!(
@@ -6136,6 +6276,9 @@ where
                                         request_type = "Execute",
                                         request_rop_id = "0x4e",
                                         folder_id = format_args!("0x{:016x}", *folder_id),
+                                        folder_role = debug_role_for_folder_id(*folder_id),
+                                        folder_container_class =
+                                            debug_container_class_for_folder_id(*folder_id),
                                         sync_type = format_args!("0x{:02x}", checkpoint.4),
                                         checkpoint_kind = checkpoint.1.as_str(),
                                         checkpoint_mailbox_id = checkpoint
@@ -6151,6 +6294,7 @@ where
                                         transfer_buffer_bytes = transfer_buffer.len(),
                                         transfer_position = *transfer_position,
                                         checkpoint_store_status = "error",
+                                        checkpoint_skip_reason = "",
                                         error = %error,
                                         "rca debug mapi sync checkpoint store"
                                     ),

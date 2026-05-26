@@ -561,6 +561,28 @@ fn log_mapi_session_disconnect(
         })
         .collect::<Vec<_>>()
         .join("|");
+    let live_handle_summaries = session
+        .handles
+        .iter()
+        .map(|(handle, object)| {
+            let folder = object
+                .folder_id()
+                .map(|folder_id| {
+                    format!(
+                        "folder=0x{folder_id:016x};role={};container={}",
+                        debug_role_for_folder_id(folder_id),
+                        debug_container_class_for_folder_id(folder_id)
+                    )
+                })
+                .unwrap_or_else(|| "folder=;role=;container=".to_string());
+            format!(
+                "handle={handle};kind={};{}",
+                mapi_object_debug_kind(object),
+                folder
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
     let mut hierarchy_sync_source_count = 0usize;
     let mut content_sync_source_count = 0usize;
     let mut read_state_sync_source_count = 0usize;
@@ -664,6 +686,7 @@ fn log_mapi_session_disconnect(
         post_hierarchy_last_get_buffer_summary =
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         sync_source_summaries = %sync_source_summaries,
+        live_handle_summaries = %live_handle_summaries,
         "rca debug mapi session disconnect"
     );
 
@@ -706,8 +729,42 @@ fn log_mapi_session_disconnect(
             post_hierarchy_last_get_buffer_summary =
                 %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
             sync_source_summaries = %sync_source_summaries,
+            live_handle_summaries = %live_handle_summaries,
             "rca debug mapi post hierarchy disconnect before content sync"
         );
+    }
+}
+
+fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
+    match object {
+        MapiObject::Logon => "logon",
+        MapiObject::Folder { .. } => "folder",
+        MapiObject::Message { .. } => "message",
+        MapiObject::Contact { .. } => "contact",
+        MapiObject::Event { .. } => "event",
+        MapiObject::Task { .. } => "task",
+        MapiObject::Note { .. } => "note",
+        MapiObject::JournalEntry { .. } => "journal_entry",
+        MapiObject::SearchFolderDefinition { .. } => "search_folder_definition",
+        MapiObject::ConversationAction { .. } => "conversation_action",
+        MapiObject::PendingMessage { .. } => "pending_message",
+        MapiObject::PendingContact { .. } => "pending_contact",
+        MapiObject::PendingEvent { .. } => "pending_event",
+        MapiObject::PendingTask { .. } => "pending_task",
+        MapiObject::PendingNote { .. } => "pending_note",
+        MapiObject::PendingJournalEntry { .. } => "pending_journal_entry",
+        MapiObject::PendingConversationAction { .. } => "pending_conversation_action",
+        MapiObject::HierarchyTable { .. } => "hierarchy_table",
+        MapiObject::ContentsTable { .. } => "contents_table",
+        MapiObject::AttachmentTable { .. } => "attachment_table",
+        MapiObject::PermissionTable { .. } => "permission_table",
+        MapiObject::Attachment { .. } => "attachment",
+        MapiObject::PendingAttachment { .. } => "pending_attachment",
+        MapiObject::SavedAttachment { .. } => "saved_attachment",
+        MapiObject::AttachmentStream { .. } => "attachment_stream",
+        MapiObject::NotificationSubscription { .. } => "notification_subscription",
+        MapiObject::SynchronizationSource { .. } => "synchronization_source",
+        MapiObject::SynchronizationCollector { .. } => "synchronization_collector",
     }
 }
 
