@@ -73,6 +73,9 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         if let Some(message_id) = request.message_id() {
             push_unique(&mut plan.object_ids, message_id);
         }
+        if let Some(object_id) = request.long_term_source_object_id() {
+            push_unique(&mut plan.object_ids, object_id);
+        }
         for message_id in request
             .message_ids()
             .into_iter()
@@ -1480,7 +1483,7 @@ mod tests {
     }
 
     #[test]
-    fn access_plan_does_not_preload_long_term_id_from_id_source() {
+    fn access_plan_preloads_long_term_id_from_id_source() {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 59,
         );
@@ -1492,7 +1495,7 @@ mod tests {
 
         let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
 
-        assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+        assert_eq!(plan.object_ids, vec![object_id]);
     }
 
     #[test]

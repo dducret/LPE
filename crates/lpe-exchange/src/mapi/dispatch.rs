@@ -2149,7 +2149,7 @@ fn debug_object_scope_for_id(
 }
 
 fn long_term_id_from_id_scope_is_loaded(scope: &str) -> bool {
-    scope != "unparsed"
+    scope != "unparsed" && scope != "not_loaded"
 }
 
 fn rop_long_term_id_from_id_response_for_scope(request: &RopRequest, scope: &str) -> Vec<u8> {
@@ -8630,7 +8630,7 @@ mod tests {
     }
 
     #[test]
-    fn long_term_id_from_id_allows_not_loaded_scope() {
+    fn long_term_id_from_id_rejects_unparsed_or_not_loaded_scope() {
         let object_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 1,
         );
@@ -8644,8 +8644,8 @@ mod tests {
         };
 
         assert_eq!(
-            &rop_long_term_id_from_id_response_for_scope(&request, "not_loaded")[..6],
-            &[RopId::LongTermIdFromId as u8, 0x00, 0, 0, 0, 0]
+            rop_long_term_id_from_id_response_for_scope(&request, "not_loaded"),
+            vec![RopId::LongTermIdFromId as u8, 0x00, 0x0F, 0x01, 0x04, 0x80]
         );
         assert_eq!(
             &rop_long_term_id_from_id_response_for_scope(&request, "message")[..6],
