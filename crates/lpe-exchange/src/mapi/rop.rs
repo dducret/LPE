@@ -1407,6 +1407,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
             storage_tag,
             PID_TAG_CONTENT_COUNT
                 | PID_TAG_CONTENT_UNREAD_COUNT
+                | PID_TAG_DELETED_COUNT_TOTAL
                 | PID_TAG_SUBFOLDERS
                 | PID_TAG_PARENT_FOLDER_ID
                 | PID_TAG_PARENT_SOURCE_KEY
@@ -5451,6 +5452,19 @@ mod tests {
             property_tag_debug_name(PID_TAG_CHANGE_KEY),
             "PidTagChangeKey"
         );
+    }
+
+    #[test]
+    pub(in crate::mapi) fn folder_deleted_count_total_zero_is_modeled_not_fallback() {
+        let folder = MapiObject::Folder {
+            folder_id: SHORTCUTS_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        assert!(modeled_zero_or_default_property(
+            Some(&folder),
+            PID_TAG_DELETED_COUNT_TOTAL
+        ));
     }
 
     #[test]
