@@ -2449,6 +2449,10 @@ impl<'a> Cursor<'a> {
     pub(in crate::mapi) fn remaining(&self) -> usize {
         self.bytes.len().saturating_sub(self.position)
     }
+
+    pub(in crate::mapi) fn position(&self) -> usize {
+        self.position
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
