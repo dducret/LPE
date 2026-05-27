@@ -792,6 +792,15 @@ fn log_nspi_rowset_debug(
         .map(|value| format!("{value:#010x}"))
         .unwrap_or_default();
     let row_limit = row_limit.map(|limit| limit.to_string()).unwrap_or_default();
+    let query_rows_count = nspi_query_rows_count_details(request_type, request);
+    let query_rows_explicit_table_count = query_rows_count
+        .as_ref()
+        .map(|details| details.explicit_table_count.to_string())
+        .unwrap_or_default();
+    let query_rows_count_offset = query_rows_count
+        .as_ref()
+        .map(|details| details.count_offset.to_string())
+        .unwrap_or_default();
     let (duplicate_entry_key_count, duplicate_entry_keys) =
         format_nspi_duplicate_entry_keys_for_debug(entries);
     let message = "rca debug mapi nspi rowset";
@@ -812,6 +821,8 @@ fn log_nspi_rowset_debug(
         available_entry_count = available_entry_count,
         returned_entry_count = entries.len(),
         row_limit = %row_limit,
+        query_rows_explicit_table_count = %query_rows_explicit_table_count,
+        query_rows_count_offset = %query_rows_count_offset,
         duplicate_entry_key_count = duplicate_entry_key_count,
         duplicate_entry_keys = %duplicate_entry_keys,
         returned_entries = %format_nspi_entry_summaries_for_debug(principal.account_id, entries),
@@ -933,6 +944,19 @@ where
 }
 
 pub(in crate::mapi) fn nspi_query_rows_count(request_type: &str, request: &[u8]) -> Option<usize> {
+    nspi_query_rows_count_details(request_type, request).map(|details| details.count)
+}
+
+struct NspiQueryRowsCountDetails {
+    count: usize,
+    explicit_table_count: usize,
+    count_offset: usize,
+}
+
+fn nspi_query_rows_count_details(
+    request_type: &str,
+    request: &[u8],
+) -> Option<NspiQueryRowsCountDetails> {
     if !request_type.eq_ignore_ascii_case("QueryRows") {
         return None;
     }
@@ -948,7 +972,11 @@ pub(in crate::mapi) fn nspi_query_rows_count(request_type: &str, request: &[u8])
         .checked_add(ETABLE_COUNT_BYTES)?
         .checked_add(etable_bytes)?;
     let count_bytes = request.get(count_offset..count_offset + 4)?;
-    Some(u32::from_le_bytes(count_bytes.try_into().ok()?) as usize)
+    Some(NspiQueryRowsCountDetails {
+        count: u32::from_le_bytes(count_bytes.try_into().ok()?) as usize,
+        explicit_table_count: etable_count,
+        count_offset,
+    })
 }
 
 pub(in crate::mapi) async fn nspi_matches_response<S>(
@@ -1868,6 +1896,15 @@ mod tests {
         request.extend_from_slice(&7u32.to_le_bytes());
 
         assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(7));
+    }
+
+    #[test]
+    fn query_rows_count_parses_outlook_explicit_table_body() {
+        let request = hex_bytes(
+            "00000000ff0000000000000000000000000000000000000000000000e40400000904000009080000010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f0003301f0002300b00403a1f00ff391f00",
+        );
+
+        assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(1));
     }
 
     #[test]
