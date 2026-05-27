@@ -2199,6 +2199,10 @@ fn uploaded_state_has_delta_anchor(marker_mask: u8) -> bool {
     marker_mask & 0x03 == 0x03
 }
 
+fn mark_uploaded_state_stream(marker_mask: &mut u8, property_tag: u32) {
+    *marker_mask |= upload_state_marker_bit(property_tag);
+}
+
 fn uploaded_state_marker_summary(marker_mask: u8) -> String {
     let mut markers = Vec::new();
     if marker_mask & 0x01 != 0 {
@@ -4576,6 +4580,8 @@ where
                 };
                 let input =
                     jmap_import_from_pending_message(principal, mailbox, &properties, &recipients);
+                let reserved_global_counter =
+                    imported_source_key_reserved_global_counter(&properties);
                 match store
                     .import_jmap_email(
                         input,
@@ -4606,7 +4612,7 @@ where
                             principal,
                             MapiIdentityObjectKind::Message,
                             email.id,
-                            None,
+                            reserved_global_counter,
                         )
                         .await
                         {
@@ -4632,6 +4638,25 @@ where
                             folder_id,
                             kind: MapiNotificationKind::Content,
                         });
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x0c",
+                            input_handle_index = request.input_handle_index.unwrap_or(0),
+                            response_handle_index = request.response_handle_index(),
+                            object_kind = "message",
+                            folder_id = %format!("{folder_id:#018x}"),
+                            folder_role = role_for_folder_id(folder_id).unwrap_or(""),
+                            item_id = %format!("{message_id:#018x}"),
+                            reserved_global_counter = reserved_global_counter
+                                .map(|counter| counter.to_string())
+                                .unwrap_or_default(),
+                            preserved_import_source_key = reserved_global_counter.is_some(),
+                            "rca debug mapi save changes message"
+                        );
                         responses.extend_from_slice(&rop_save_changes_message_response(
                             &request, message_id,
                         ));
@@ -7341,10 +7366,7 @@ where
                         let property_tag = state_upload_property_tag.take().unwrap_or_default();
                         let upload_state_empty_stream_after_client_state =
                             uploaded_bytes == 0 && *client_state_uploaded_bytes > 0;
-                        if uploaded_bytes > 0 {
-                            *client_state_uploaded_marker_mask |=
-                                upload_state_marker_bit(property_tag);
-                        }
+                        mark_uploaded_state_stream(client_state_uploaded_marker_mask, property_tag);
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
                             (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
@@ -8721,6 +8743,18 @@ where
     Ok(object_id)
 }
 
+fn imported_source_key_reserved_global_counter(
+    properties: &HashMap<u32, MapiValue>,
+) -> Option<u64> {
+    let source_key = match properties.get(&PID_TAG_SOURCE_KEY)? {
+        MapiValue::Binary(bytes) => bytes,
+        _ => return None,
+    };
+    let object_id = crate::mapi::identity::object_id_from_source_key(source_key)?;
+    let counter = crate::mapi::identity::global_counter_from_store_id(object_id)?;
+    (counter >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER).then_some(counter)
+}
+
 fn hierarchy_checkpoint_status(
     checkpoint_kind: MapiCheckpointKind,
     folder_id: u64,
@@ -8864,6 +8898,16 @@ mod tests {
         assert!(!uploaded_state_has_delta_anchor(cnset_only));
 
         assert!(uploaded_state_has_delta_anchor(idset_only | cnset_only));
+    }
+
+    #[test]
+    fn uploaded_state_empty_stream_still_marks_property_presence() {
+        let mut marker_mask = 0;
+
+        mark_uploaded_state_stream(&mut marker_mask, 0x4017_0003);
+        mark_uploaded_state_stream(&mut marker_mask, 0x6796_0102);
+
+        assert!(uploaded_state_has_delta_anchor(marker_mask));
     }
 
     #[test]

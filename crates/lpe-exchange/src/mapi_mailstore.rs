@@ -303,34 +303,42 @@ pub(crate) fn sync_state_token_with_special_objects(
     attachment_facts: &[MessageAttachmentSyncFacts],
     special_objects: &[SpecialMessageSyncFact],
 ) -> Vec<u8> {
+    if sync_type != SYNC_TYPE_CONTENTS {
+        return final_sync_state_stream(
+            sync_type,
+            &sync_state_object_ids(sync_type, folder_id, mailboxes, emails),
+            &sync_state_change_numbers(sync_type, folder_id, mailboxes, emails, attachment_facts),
+        );
+    }
     let scoped_emails = if content_sync_includes_normal(sync_type, sync_flags) {
         emails
     } else {
         &[]
     };
-    let mut object_ids = sync_state_object_ids(sync_type, folder_id, mailboxes, scoped_emails);
-    let mut change_numbers = sync_state_change_numbers(
+    let normal_object_ids = sync_state_object_ids(sync_type, folder_id, mailboxes, scoped_emails);
+    let normal_change_numbers = sync_state_change_numbers(
         sync_type,
         folder_id,
         mailboxes,
         scoped_emails,
         attachment_facts,
     );
-    if sync_type == SYNC_TYPE_CONTENTS {
-        object_ids.extend(
-            special_objects
-                .iter()
-                .filter(|object| {
-                    content_sync_includes_associated(sync_type, sync_flags, object.associated)
-                })
-                .map(|object| object.item_id),
-        );
-        change_numbers.extend(special_objects.iter().filter_map(|object| {
-            content_sync_includes_associated(sync_type, sync_flags, object.associated)
-                .then_some(change_number_for_store_id(object.item_id))
-        }));
-    }
-    final_sync_state_stream(sync_type, &object_ids, &change_numbers)
+    let fai_objects = special_objects
+        .iter()
+        .filter(|object| content_sync_includes_associated(sync_type, sync_flags, object.associated))
+        .collect::<Vec<_>>();
+    let mut object_ids = normal_object_ids;
+    object_ids.extend(fai_objects.iter().map(|object| object.item_id));
+    let fai_change_numbers = fai_objects
+        .iter()
+        .map(|object| change_number_for_store_id(object.item_id))
+        .collect::<Vec<_>>();
+    final_content_sync_state_stream(
+        &object_ids,
+        &normal_change_numbers,
+        &fai_change_numbers,
+        &normal_change_numbers,
+    )
 }
 
 #[cfg(test)]
@@ -3113,15 +3121,51 @@ pub(crate) fn final_sync_state_stream(
     object_ids: &[u64],
     change_numbers: &[u64],
 ) -> Vec<u8> {
+    if sync_type == SYNC_TYPE_CONTENTS {
+        return final_content_sync_state_stream(object_ids, change_numbers, &[], change_numbers);
+    }
+    final_sync_state_stream_with_cnsets(sync_type, object_ids, change_numbers, &[], &[])
+}
+
+fn final_content_sync_state_stream(
+    object_ids: &[u64],
+    normal_change_numbers: &[u64],
+    fai_change_numbers: &[u64],
+    read_change_numbers: &[u64],
+) -> Vec<u8> {
+    final_sync_state_stream_with_cnsets(
+        SYNC_TYPE_CONTENTS,
+        object_ids,
+        normal_change_numbers,
+        fai_change_numbers,
+        read_change_numbers,
+    )
+}
+
+fn final_sync_state_stream_with_cnsets(
+    sync_type: u8,
+    object_ids: &[u64],
+    normal_change_numbers: &[u64],
+    fai_change_numbers: &[u64],
+    read_change_numbers: &[u64],
+) -> Vec<u8> {
     let idset_given = replguid_idset_from_object_ids(object_ids);
-    let cnset_seen = replguid_idset_from_counters(change_numbers);
+    let cnset_seen = replguid_idset_from_counters(normal_change_numbers);
     let mut token = Vec::new();
     write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
     write_binary_property(&mut token, META_TAG_IDSET_GIVEN, &idset_given);
     write_binary_property(&mut token, META_TAG_CNSET_SEEN, &cnset_seen);
     if sync_type == SYNC_TYPE_CONTENTS {
-        write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, &cnset_seen);
-        write_binary_property(&mut token, META_TAG_CNSET_READ, &cnset_seen);
+        write_binary_property(
+            &mut token,
+            META_TAG_CNSET_SEEN_FAI,
+            &replguid_idset_from_counters(fai_change_numbers),
+        );
+        write_binary_property(
+            &mut token,
+            META_TAG_CNSET_READ,
+            &replguid_idset_from_counters(read_change_numbers),
+        );
     }
     write_u32(&mut token, INCR_SYNC_STATE_END);
     token
@@ -4699,11 +4743,41 @@ mod tests {
         );
         let expected_hierarchy_cnset = replguid_idset_from_counters(&[10, 11, 12]);
         let expected_content_cnset = replguid_idset_from_counters(&[20, 21, 22]);
+        let empty_cnset = replguid_idset_from_counters(&[]);
 
         assert_variable_property(&hierarchy, META_TAG_CNSET_SEEN, &expected_hierarchy_cnset);
         assert_variable_property(&content, META_TAG_CNSET_SEEN, &expected_content_cnset);
-        assert_variable_property(&content, META_TAG_CNSET_SEEN_FAI, &expected_content_cnset);
+        assert_variable_property(&content, META_TAG_CNSET_SEEN_FAI, &empty_cnset);
         assert_variable_property(&content, META_TAG_CNSET_READ, &expected_content_cnset);
+    }
+
+    #[test]
+    fn content_sync_state_keeps_normal_and_fai_cnsets_separate() {
+        let token = final_content_sync_state_stream(
+            &[
+                crate::mapi::identity::mapi_store_id(50),
+                crate::mapi::identity::mapi_store_id(70),
+            ],
+            &[20],
+            &[30],
+            &[20],
+        );
+
+        assert_variable_property(
+            &token,
+            META_TAG_CNSET_SEEN,
+            &replguid_idset_from_counters(&[20]),
+        );
+        assert_variable_property(
+            &token,
+            META_TAG_CNSET_SEEN_FAI,
+            &replguid_idset_from_counters(&[30]),
+        );
+        assert_variable_property(
+            &token,
+            META_TAG_CNSET_READ,
+            &replguid_idset_from_counters(&[20]),
+        );
     }
 
     #[test]
