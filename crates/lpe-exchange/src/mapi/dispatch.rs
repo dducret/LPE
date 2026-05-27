@@ -4607,25 +4607,43 @@ where
                             ));
                             continue;
                         }
-                        let message_id = match remember_created_mapi_identity(
-                            store,
-                            principal,
-                            MapiIdentityObjectKind::Message,
-                            email.id,
-                            reserved_global_counter,
-                        )
-                        .await
-                        {
-                            Ok(message_id) => message_id,
-                            Err(_) => {
-                                responses.extend_from_slice(&rop_error_response(
-                                    0x0C,
-                                    request.response_handle_index(),
-                                    0x8004_010F,
-                                ));
-                                continue;
-                            }
-                        };
+                        let (message_id, preserved_import_source_key, identity_fallback_reason) =
+                            match remember_created_message_mapi_identity(
+                                store,
+                                principal,
+                                email.id,
+                                reserved_global_counter,
+                            )
+                            .await
+                            {
+                                Ok(result) => result,
+                                Err(error) => {
+                                    tracing::info!(
+                                        rca_debug = true,
+                                        adapter = "mapi",
+                                        endpoint = "emsmdb",
+                                        mailbox = %principal.email,
+                                        request_type = "Execute",
+                                        request_rop_id = "0x0c",
+                                        input_handle_index = request.input_handle_index.unwrap_or(0),
+                                        response_handle_index = request.response_handle_index(),
+                                        object_kind = "message",
+                                        folder_id = %format!("{folder_id:#018x}"),
+                                        folder_role = role_for_folder_id(folder_id).unwrap_or(""),
+                                        reserved_global_counter = reserved_global_counter
+                                            .map(|counter| counter.to_string())
+                                            .unwrap_or_default(),
+                                        identity_error = %error,
+                                        "rca debug mapi save changes message identity"
+                                    );
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
+                            };
                         session.handles.insert(
                             handle,
                             MapiObject::Message {
@@ -4654,7 +4672,8 @@ where
                             reserved_global_counter = reserved_global_counter
                                 .map(|counter| counter.to_string())
                                 .unwrap_or_default(),
-                            preserved_import_source_key = reserved_global_counter.is_some(),
+                            preserved_import_source_key,
+                            identity_fallback_reason = %identity_fallback_reason,
                             "rca debug mapi save changes message"
                         );
                         responses.extend_from_slice(&rop_save_changes_message_response(
@@ -8746,6 +8765,51 @@ where
         .ok_or_else(|| anyhow::anyhow!("MAPI identity allocator returned no record"))?;
     crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
     Ok(object_id)
+}
+
+async fn remember_created_message_mapi_identity<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    canonical_id: Uuid,
+    reserved_global_counter: Option<u64>,
+) -> Result<(u64, bool, String)>
+where
+    S: ExchangeStore,
+{
+    if reserved_global_counter.is_none() {
+        let object_id = remember_created_mapi_identity(
+            store,
+            principal,
+            MapiIdentityObjectKind::Message,
+            canonical_id,
+            None,
+        )
+        .await?;
+        return Ok((object_id, false, String::new()));
+    }
+
+    match remember_created_mapi_identity(
+        store,
+        principal,
+        MapiIdentityObjectKind::Message,
+        canonical_id,
+        reserved_global_counter,
+    )
+    .await
+    {
+        Ok(object_id) => Ok((object_id, true, String::new())),
+        Err(error) => {
+            let object_id = remember_created_mapi_identity(
+                store,
+                principal,
+                MapiIdentityObjectKind::Message,
+                canonical_id,
+                None,
+            )
+            .await?;
+            Ok((object_id, false, error.to_string()))
+        }
+    }
 }
 
 fn imported_source_key_reserved_global_counter(
