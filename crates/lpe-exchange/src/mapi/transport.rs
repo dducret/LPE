@@ -337,11 +337,24 @@ pub(in crate::mapi) fn connect_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let session_id = match reconnect_session(endpoint, principal, headers, "Connect", request_id) {
-        Ok(Some(session_id)) => session_id,
-        Ok(None) => create_session(endpoint, principal),
-        Err(response) => return response,
-    };
+    let (session_id, reconnected) =
+        match reconnect_session(endpoint, principal, headers, "Connect", request_id) {
+            Ok(Some(session_id)) => (session_id, true),
+            Ok(None) => (
+                create_session(endpoint, principal, "Connect", request_id),
+                false,
+            ),
+            Err(response) => return response,
+        };
+    log_mapi_session_establish(
+        endpoint,
+        principal,
+        headers,
+        "Connect",
+        request_id,
+        &session_id,
+        reconnected,
+    );
     let cookies = session_context_cookies(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
@@ -428,6 +441,55 @@ fn summarize_connect_body(body: &[u8]) -> ConnectBodyDebugSummary {
     summary
 }
 
+pub(in crate::mapi) fn log_mapi_session_establish(
+    endpoint: MapiEndpoint,
+    principal: &AccountPrincipal,
+    headers: &HeaderMap,
+    request_type: &str,
+    request_id: &str,
+    session_id: &str,
+    reconnected: bool,
+) {
+    let endpoint_label = match endpoint {
+        MapiEndpoint::Emsmdb => "emsmdb",
+        MapiEndpoint::Nspi => "nspi",
+    };
+    let session_cookie_debug = cookie_value_debug(Some(session_id));
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let x_request_id = safe_header(headers, "x-request-id").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let host = safe_header(headers, "host").unwrap_or_default();
+    let content_type = safe_header(headers, "content-type").unwrap_or_default();
+    let content_length = safe_header(headers, "content-length").unwrap_or_default();
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint_label,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = %request_type,
+        mapi_request_id = %request_id,
+        session_reconnected = reconnected,
+        session_id_suffix = %session_cookie_debug.suffix,
+        session_id_hash = %session_cookie_debug.hash,
+        client_application = %client_application,
+        client_request_id = %client_request_id,
+        client_info = %client_info,
+        trace_id = %trace_id,
+        x_request_id = %x_request_id,
+        user_agent = %user_agent,
+        host = %host,
+        content_type = %content_type,
+        content_length = %content_length,
+        message = "rca debug mapi session establish",
+    );
+}
+
 pub(in crate::mapi) fn connect_auxiliary_buffer() -> Vec<u8> {
     let mut buffer = Vec::new();
     write_u16(&mut buffer, 0); // RPC_HEADER_EXT Version
@@ -473,7 +535,7 @@ pub(in crate::mapi) fn disconnect_response(
             "MAPI session already has an active request",
         );
     };
-    let Some(session) = remove_session(&session_id) else {
+    let Some(mut session) = remove_session(&session_id) else {
         return mapi_diagnostic_response(
             response_request_type,
             request_id,
@@ -493,11 +555,13 @@ pub(in crate::mapi) fn disconnect_response(
             "MAPI authentication context changed",
         );
     }
+    session.record_transport_request(response_request_type, request_id);
 
     log_mapi_session_disconnect(
         endpoint,
         principal,
         headers,
+        &session_id,
         &session,
         request_id,
         response_request_type,
@@ -520,6 +584,7 @@ fn log_mapi_session_disconnect(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
     headers: &HeaderMap,
+    session_id: &str,
     session: &MapiSession,
     request_id: &str,
     request_type: &str,
@@ -643,6 +708,19 @@ fn log_mapi_session_disconnect(
     );
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let host = safe_header(headers, "host").unwrap_or_default();
+    let session_cookie_debug = cookie_value_debug(Some(session_id));
+    let session_age_ms = SystemTime::now()
+        .duration_since(session.created_at)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default();
+    let completed_sync_checkpoint_summaries = session
+        .post_hierarchy_actions
+        .completed_sync_checkpoint_summaries
+        .join("|");
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
     let all_sync_sources_completed = sync_source_count == completed_sync_source_count;
     let clean_client_close_after_sync = endpoint == MapiEndpoint::Emsmdb
@@ -659,6 +737,20 @@ fn log_mapi_session_disconnect(
         mailbox = %principal.email,
         request_type = %request_type,
         mapi_request_id = %request_id,
+        session_id_suffix = %session_cookie_debug.suffix,
+        session_id_hash = %session_cookie_debug.hash,
+        session_age_ms,
+        session_request_count = session.request_count,
+        session_execute_request_count = session.execute_request_count,
+        session_first_request_type = %session.first_request_type,
+        session_first_request_id = %session.first_request_id,
+        session_last_request_type = %session.last_request_type,
+        session_last_request_id = %session.last_request_id,
+        client_request_id = %client_request_id,
+        client_application = %client_application,
+        client_info = %client_info,
+        user_agent = %user_agent,
+        host = %host,
         handle_count = session.handles.len(),
         sync_source_count,
         sync_collector_count,
@@ -693,6 +785,7 @@ fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         sync_source_summaries = %sync_source_summaries,
         live_handle_summaries = %live_handle_summaries,
+        completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         recent_execute_summaries = %recent_execute_summaries,
         "rca debug mapi session disconnect"
     );
@@ -705,8 +798,14 @@ fn log_mapi_session_disconnect(
         mailbox = %principal.email,
         request_type = %request_type,
         mapi_request_id = %request_id,
+        session_id_suffix = %session_cookie_debug.suffix,
+        session_id_hash = %session_cookie_debug.hash,
         client_application = %client_application,
         trace_id = %trace_id,
+        client_request_id = %client_request_id,
+        client_info = %client_info,
+        user_agent = %user_agent,
+        host = %host,
         response_status_code = 0u32,
         response_error_code = 0u32,
         response_auxiliary_buffer_size = 0u32,
@@ -736,6 +835,7 @@ fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
         post_hierarchy_last_get_buffer_summary =
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
+        completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         "rca debug mapi disconnect wire contract"
     );
     tracing::info!(
@@ -747,6 +847,8 @@ fn log_mapi_session_disconnect(
         mailbox = %principal.email,
         request_type = %request_type,
         mapi_request_id = %request_id,
+        session_id_suffix = %session_cookie_debug.suffix,
+        session_id_hash = %session_cookie_debug.hash,
         transport_contract_ok = true,
         response_body_contract_ok = true,
         cookies_invalidated = true,
@@ -762,6 +864,7 @@ fn log_mapi_session_disconnect(
                 "post_hierarchy_sequence"
             },
         recent_execute_summaries = %recent_execute_summaries,
+        completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         "rca debug mapi disconnect verdict"
     );
 
@@ -1312,6 +1415,11 @@ pub(in crate::mapi) fn log_mapi_connection(
         MapiEndpoint::Nspi => "nspi",
     };
     let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
+    let host = safe_header(headers, "host").unwrap_or_default();
     let set_cookie_names = response_set_cookie_names(response);
     let message = "rca debug mapi connection";
 
@@ -1326,6 +1434,11 @@ pub(in crate::mapi) fn log_mapi_connection(
             request_type = %request_type,
             mapi_request_id = %request_id,
             client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
+            user_agent = %user_agent,
+            host = %host,
             http_status = status,
             mapi_response_code = %response_code,
             request_body_bytes,
@@ -1344,6 +1457,11 @@ pub(in crate::mapi) fn log_mapi_connection(
             request_type = %request_type,
             mapi_request_id = %request_id,
             client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
+            user_agent = %user_agent,
+            host = %host,
             http_status = status,
             mapi_response_code = %response_code,
             request_body_bytes,
@@ -1686,7 +1804,14 @@ mod tests {
             tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "user@example.test".to_string(),
+            created_at: SystemTime::now(),
             last_seen_at: SystemTime::now(),
+            first_request_type: "Connect".to_string(),
+            first_request_id: "test:1".to_string(),
+            last_request_type: "Connect".to_string(),
+            last_request_id: "test:1".to_string(),
+            request_count: 1,
+            execute_request_count: 0,
             next_handle: 1,
             handles,
             message_statuses: HashMap::new(),
@@ -1747,7 +1872,7 @@ mod tests {
     #[test]
     fn session_cookie_lookup_debug_reports_sanitized_latest_cookie_selection() {
         let principal = test_principal();
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let stale_id = "00000000-0000-0000-0000-000000000000";
         let mut headers = HeaderMap::new();
         headers.append(
@@ -1792,7 +1917,7 @@ mod tests {
     #[test]
     fn session_cookie_lookup_debug_reports_endpoint_and_principal_mismatch() {
         let principal = test_principal();
-        let session_id = create_session(MapiEndpoint::Nspi, &principal);
+        let session_id = create_session(MapiEndpoint::Nspi, &principal, "Bind", "test:1");
         let mut headers = HeaderMap::new();
         headers.insert(
             "cookie",
@@ -1809,7 +1934,7 @@ mod tests {
         assert!(summary.selected_session_principal_matches);
         remove_session(&session_id);
 
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let other_principal = AccountPrincipal {
             account_id: Uuid::from_u128(0xcccccccc_cccc_cccc_cccc_cccccccccccc),
             email: "other@example.test".to_string(),

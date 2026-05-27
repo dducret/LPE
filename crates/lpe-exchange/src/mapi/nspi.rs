@@ -89,11 +89,24 @@ pub(in crate::mapi) fn bind_response(
     headers: &HeaderMap,
     request_id: &str,
 ) -> Response {
-    let session_id = match reconnect_session(endpoint, principal, headers, "Bind", request_id) {
-        Ok(Some(session_id)) => session_id,
-        Ok(None) => create_session(endpoint, principal),
-        Err(response) => return response,
-    };
+    let (session_id, reconnected) =
+        match reconnect_session(endpoint, principal, headers, "Bind", request_id) {
+            Ok(Some(session_id)) => (session_id, true),
+            Ok(None) => (
+                create_session(endpoint, principal, "Bind", request_id),
+                false,
+            ),
+            Err(response) => return response,
+        };
+    log_mapi_session_establish(
+        endpoint,
+        principal,
+        headers,
+        "Bind",
+        request_id,
+        &session_id,
+        reconnected,
+    );
     let cookies = session_context_cookies(endpoint, &session_id, false);
     let mut body = Vec::new();
     write_u32(&mut body, 0);

@@ -15,7 +15,14 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) tenant_id: Uuid,
     pub(in crate::mapi) account_id: Uuid,
     pub(in crate::mapi) email: String,
+    pub(in crate::mapi) created_at: SystemTime,
     pub(in crate::mapi) last_seen_at: SystemTime,
+    pub(in crate::mapi) first_request_type: String,
+    pub(in crate::mapi) first_request_id: String,
+    pub(in crate::mapi) last_request_type: String,
+    pub(in crate::mapi) last_request_id: String,
+    pub(in crate::mapi) request_count: usize,
+    pub(in crate::mapi) execute_request_count: usize,
     pub(in crate::mapi) next_handle: u32,
     pub(in crate::mapi) handles: HashMap<u32, MapiObject>,
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
@@ -51,6 +58,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) content_sync_configure_observed: bool,
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
+    pub(in crate::mapi) completed_sync_checkpoint_summaries: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -324,7 +332,7 @@ pub(in crate::mapi) fn reconnect_session(
             "MAPI session already has an active request",
         ));
     }
-    let Some(session) = remove_session(&previous_session_id) else {
+    let Some(mut session) = remove_session(&previous_session_id) else {
         return Ok(None);
     };
     if !session_matches(&session, endpoint, principal) {
@@ -332,6 +340,7 @@ pub(in crate::mapi) fn reconnect_session(
         return Ok(None);
     }
 
+    session.record_transport_request(request_type, request_id);
     let session_id = Uuid::new_v4().to_string();
     if endpoint == MapiEndpoint::Emsmdb {
         store_session(previous_session_id, session.clone());
@@ -343,15 +352,24 @@ pub(in crate::mapi) fn reconnect_session(
 pub(in crate::mapi) fn create_session(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
+    request_type: &str,
+    request_id: &str,
 ) -> String {
     let session_id = Uuid::new_v4().to_string();
     let now = SystemTime::now();
-    let session = MapiSession {
+    let mut session = MapiSession {
         endpoint,
         tenant_id: principal.tenant_id,
         account_id: principal.account_id,
         email: principal.email.clone(),
+        created_at: now,
         last_seen_at: now,
+        first_request_type: String::new(),
+        first_request_id: String::new(),
+        last_request_type: String::new(),
+        last_request_id: String::new(),
+        request_count: 0,
+        execute_request_count: 0,
         next_handle: 1,
         handles: HashMap::new(),
         message_statuses: HashMap::new(),
@@ -365,6 +383,7 @@ pub(in crate::mapi) fn create_session(
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),
     };
+    session.record_transport_request(request_type, request_id);
     let mut guard = sessions()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -374,7 +393,7 @@ pub(in crate::mapi) fn create_session(
 }
 
 pub(crate) fn create_rpc_emsmdb_context(principal: &AccountPrincipal) -> [u8; 20] {
-    let session_id = create_session(MapiEndpoint::Emsmdb, principal);
+    let session_id = create_session(MapiEndpoint::Emsmdb, principal, "RpcConnect", "");
     let session_uuid = Uuid::parse_str(&session_id).unwrap_or_else(|_| Uuid::new_v4());
     let mut context = [0u8; 20];
     context[4..20].copy_from_slice(session_uuid.as_bytes());
@@ -538,6 +557,8 @@ pub(in crate::mapi) fn established_session_request(
             "MAPI authentication context changed",
         ));
     }
+    let mut session = session;
+    session.record_transport_request(request_type, request_id);
     store_session(session_id, session);
     Ok(active_request)
 }
@@ -587,6 +608,54 @@ pub(in crate::mapi) fn mapi_payload_fingerprint(bytes: &[u8]) -> u64 {
 }
 
 impl MapiSession {
+    pub(in crate::mapi) fn record_transport_request(
+        &mut self,
+        request_type: &str,
+        request_id: &str,
+    ) {
+        if self.request_count == 0 {
+            self.first_request_type = request_type.to_string();
+            self.first_request_id = request_id.to_string();
+        }
+        self.last_request_type = request_type.to_string();
+        self.last_request_id = request_id.to_string();
+        self.request_count = self.request_count.saturating_add(1);
+        if request_type == "Execute" {
+            self.execute_request_count = self.execute_request_count.saturating_add(1);
+        }
+    }
+
+    pub(in crate::mapi) fn record_completed_sync_checkpoint(
+        &mut self,
+        folder_id: u64,
+        folder_role: &str,
+        folder_container_class: &str,
+        checkpoint_kind: &str,
+        sync_type: u8,
+        status: &str,
+    ) {
+        if self
+            .post_hierarchy_actions
+            .completed_sync_checkpoint_summaries
+            .len()
+            >= 64
+        {
+            return;
+        }
+        let summary = format!(
+            "folder=0x{folder_id:016x};role={folder_role};container={folder_container_class};kind={checkpoint_kind};sync=0x{sync_type:02x};status={status}"
+        );
+        if !self
+            .post_hierarchy_actions
+            .completed_sync_checkpoint_summaries
+            .contains(&summary)
+        {
+            self.post_hierarchy_actions
+                .completed_sync_checkpoint_summaries
+                .push(summary);
+        }
+    }
+
     pub(in crate::mapi) fn allocate_output_handle(
         &mut self,
         output_handle_index: Option<u8>,
@@ -988,7 +1057,7 @@ mod tests {
     #[test]
     fn reconnect_session_rejects_active_context() {
         let principal = principal();
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let _active = begin_active_session_request(&session_id).unwrap();
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -1021,7 +1090,7 @@ mod tests {
     #[test]
     fn execute_replay_cache_evicts_oldest_inserted_request_id() {
         let principal = principal();
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let mut session = remove_session(&session_id).unwrap();
 
         for index in 0..=MAX_CACHED_EXECUTE_REQUESTS {
@@ -1053,6 +1122,57 @@ mod tests {
     }
 
     #[test]
+    fn session_records_transport_request_lifetime() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+
+        session.record_transport_request("Execute", "test:2");
+        session.record_transport_request("Disconnect", "test:3");
+
+        assert_eq!(session.first_request_type, "Connect");
+        assert_eq!(session.first_request_id, "test:1");
+        assert_eq!(session.last_request_type, "Disconnect");
+        assert_eq!(session.last_request_id, "test:3");
+        assert_eq!(session.request_count, 3);
+        assert_eq!(session.execute_request_count, 1);
+    }
+
+    #[test]
+    fn session_records_completed_sync_checkpoint_once() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+
+        session.record_completed_sync_checkpoint(
+            0x0000_0000_0010_0001,
+            "calendar",
+            "IPF.Appointment",
+            "content",
+            0x01,
+            "ok",
+        );
+        session.record_completed_sync_checkpoint(
+            0x0000_0000_0010_0001,
+            "calendar",
+            "IPF.Appointment",
+            "content",
+            0x01,
+            "ok",
+        );
+
+        assert_eq!(
+            session
+                .post_hierarchy_actions
+                .completed_sync_checkpoint_summaries,
+            vec![
+                "folder=0x0000000000100001;role=calendar;container=IPF.Appointment;kind=content;sync=0x01;status=ok"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
     fn response_handle_table_preserves_sparse_output_handle_indexes() {
         let handles = response_handle_table(&[10, 20, 30], &[20, 30], false);
 
@@ -1062,7 +1182,7 @@ mod tests {
     #[test]
     fn allocate_output_handle_prefers_free_low_output_slot_handle() {
         let principal = principal();
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let mut session = remove_session(&session_id).unwrap();
 
         let logon_handle = session.allocate_output_handle(Some(0), MapiObject::Logon);
@@ -1081,7 +1201,7 @@ mod tests {
     #[test]
     fn cached_named_property_updates_bidirectional_registry() {
         let principal = principal();
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let mut session = remove_session(&session_id).unwrap();
         let property = MapiNamedProperty {
             guid: PSETID_COMMON_GUID,
@@ -1101,7 +1221,7 @@ mod tests {
     #[test]
     fn ps_mapi_lid_maps_directly_even_in_named_property_range() {
         let principal = principal();
-        let session_id = create_session(MapiEndpoint::Emsmdb, &principal);
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
         let mut session = remove_session(&session_id).unwrap();
         let property = MapiNamedProperty {
             guid: PS_MAPI_GUID,
