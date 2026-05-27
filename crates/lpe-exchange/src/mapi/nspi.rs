@@ -961,28 +961,12 @@ pub(in crate::mapi) fn nspi_query_rows_explicit_entry_ids(
     request_type: &str,
     request: &[u8],
 ) -> Vec<u32> {
-    if !nspi_request_type_is_query_rows(request_type) && !nspi_body_looks_like_query_rows(request) {
-        return Vec::new();
-    }
-    const FLAGS_BYTES: usize = 4;
-    const STAT_BYTES: usize = 36;
-    const ETABLE_COUNT_BYTES: usize = 4;
-    let etable_count_offset = FLAGS_BYTES + STAT_BYTES;
-    let Some(etable_count_bytes) = request.get(etable_count_offset..etable_count_offset + 4) else {
+    let Some(details) = nspi_query_rows_count_details(request_type, request) else {
         return Vec::new();
     };
-    let Some(etable_count) = etable_count_bytes
-        .try_into()
-        .ok()
-        .map(u32::from_le_bytes)
-        .map(|count| count as usize)
-    else {
-        return Vec::new();
-    };
-    let table_offset = etable_count_offset + ETABLE_COUNT_BYTES;
-    (0..etable_count)
+    (0..details.explicit_table_count)
         .filter_map(|index| {
-            let offset = table_offset + index * 4;
+            let offset = details.table_offset + index * 4;
             let bytes = request.get(offset..offset + 4)?;
             let value = u32::from_le_bytes(bytes.try_into().ok()?);
             nspi_word_looks_like_entry_id(value).then_some(value)
@@ -993,6 +977,7 @@ pub(in crate::mapi) fn nspi_query_rows_explicit_entry_ids(
 struct NspiQueryRowsCountDetails {
     count: usize,
     explicit_table_count: usize,
+    table_offset: usize,
     count_offset: usize,
 }
 
@@ -1019,22 +1004,48 @@ fn nspi_body_looks_like_query_rows(request: &[u8]) -> bool {
 fn nspi_query_rows_layout_from_body(request: &[u8]) -> Option<NspiQueryRowsCountDetails> {
     const FLAGS_BYTES: usize = 4;
     const STAT_BYTES: usize = 36;
+    let documented_offset = FLAGS_BYTES + STAT_BYTES;
+    nspi_query_rows_layout_at_offset(request, documented_offset).or_else(|| {
+        (FLAGS_BYTES + 32..=FLAGS_BYTES + 44)
+            .filter(|offset| *offset != documented_offset)
+            .find_map(|offset| nspi_query_rows_layout_at_offset(request, offset))
+    })
+}
+
+fn nspi_query_rows_layout_at_offset(
+    request: &[u8],
+    etable_count_offset: usize,
+) -> Option<NspiQueryRowsCountDetails> {
     const ETABLE_COUNT_BYTES: usize = 4;
-    let etable_count_offset = FLAGS_BYTES + STAT_BYTES;
     let etable_count_bytes = request.get(etable_count_offset..etable_count_offset + 4)?;
     let etable_count = u32::from_le_bytes(etable_count_bytes.try_into().ok()?) as usize;
     if etable_count > 1024 {
         return None;
     }
     let etable_bytes = etable_count.checked_mul(4)?;
-    let count_offset = FLAGS_BYTES
-        .checked_add(STAT_BYTES)?
+    let count_offset = etable_count_offset
         .checked_add(ETABLE_COUNT_BYTES)?
         .checked_add(etable_bytes)?;
     let count_bytes = request.get(count_offset..count_offset + 4)?;
+    let count = u32::from_le_bytes(count_bytes.try_into().ok()?) as usize;
+    if count > 100_000 {
+        return None;
+    }
+    if etable_count > 0 {
+        let table_offset = etable_count_offset.checked_add(ETABLE_COUNT_BYTES)?;
+        for index in 0..etable_count {
+            let offset = table_offset.checked_add(index.checked_mul(4)?)?;
+            let bytes = request.get(offset..offset + 4)?;
+            let value = u32::from_le_bytes(bytes.try_into().ok()?);
+            if !nspi_word_looks_like_entry_id(value) {
+                return None;
+            }
+        }
+    }
     Some(NspiQueryRowsCountDetails {
-        count: u32::from_le_bytes(count_bytes.try_into().ok()?) as usize,
+        count,
         explicit_table_count: etable_count,
+        table_offset: etable_count_offset + ETABLE_COUNT_BYTES,
         count_offset,
     })
 }
@@ -2033,6 +2044,19 @@ mod tests {
         assert_eq!(nspi_query_rows_count("", &request), Some(1));
         assert_eq!(
             nspi_query_rows_explicit_entry_ids("", &request),
+            vec![0x8000_0034]
+        );
+    }
+
+    #[test]
+    fn query_rows_parser_handles_shifted_outlook_stat_boundary() {
+        let request = hex_bytes(
+            "00000000ff000000000000000000000000000000000000000000000000e40400000904000009080000010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f0003301f0002300b00403a1f00ff391f00",
+        );
+
+        assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(1));
+        assert_eq!(
+            nspi_query_rows_explicit_entry_ids("QueryRows", &request),
             vec![0x8000_0034]
         );
     }
