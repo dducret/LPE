@@ -909,7 +909,14 @@ pub(in crate::mapi) fn nspi_query_rows_count(request_type: &str, request: &[u8])
     const FLAGS_BYTES: usize = 4;
     const STAT_BYTES: usize = 36;
     const ETABLE_COUNT_BYTES: usize = 4;
-    let count_offset = FLAGS_BYTES + STAT_BYTES + ETABLE_COUNT_BYTES;
+    let etable_count_offset = FLAGS_BYTES + STAT_BYTES;
+    let etable_count_bytes = request.get(etable_count_offset..etable_count_offset + 4)?;
+    let etable_count = u32::from_le_bytes(etable_count_bytes.try_into().ok()?) as usize;
+    let etable_bytes = etable_count.checked_mul(4)?;
+    let count_offset = FLAGS_BYTES
+        .checked_add(STAT_BYTES)?
+        .checked_add(ETABLE_COUNT_BYTES)?
+        .checked_add(etable_bytes)?;
     let count_bytes = request.get(count_offset..count_offset + 4)?;
     Some(u32::from_le_bytes(count_bytes.try_into().ok()?) as usize)
 }
@@ -1623,7 +1630,7 @@ pub(in crate::mapi) fn scan_ascii_lookup_values(request: &[u8]) -> Vec<String> {
             }
             let value = String::from_utf8_lossy(bytes);
             let value = normalize_nspi_lookup_value(&value);
-            (!value.is_empty() && (value.contains('@') || value.contains("/cn="))).then_some(value)
+            nspi_lookup_value_is_plausible(&value).then_some(value)
         })
         .collect()
 }
@@ -1653,7 +1660,7 @@ pub(in crate::mapi) fn scan_utf16_lookup_values(request: &[u8]) -> Vec<String> {
         if units.len() >= 3 {
             if let Ok(value) = String::from_utf16(&units) {
                 let value = normalize_nspi_lookup_value(&value);
-                if !value.is_empty() && (value.contains('@') || value.contains("/cn=")) {
+                if nspi_lookup_value_is_plausible(&value) {
                     values.push(value);
                 }
             }
@@ -1691,6 +1698,56 @@ pub(in crate::mapi) fn normalize_nspi_lookup_value(value: &str) -> String {
         value = rest.to_string();
     }
     value
+}
+
+fn nspi_lookup_value_is_plausible(value: &str) -> bool {
+    if value.is_empty() || value.chars().any(|ch| ch.is_control() || !ch.is_ascii()) {
+        return false;
+    }
+    if value.contains("/cn=") {
+        return value.starts_with("/o=") || value.starts_with("o=");
+    }
+    if !value.contains('@') {
+        return false;
+    }
+    let mut parts = value.split('@');
+    let Some(local) = parts.next() else {
+        return false;
+    };
+    let Some(domain) = parts.next() else {
+        return false;
+    };
+    parts.next().is_none()
+        && !local.is_empty()
+        && domain.contains('.')
+        && domain
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.'))
+        && local.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(
+                    ch,
+                    '.' | '_'
+                        | '%'
+                        | '+'
+                        | '-'
+                        | '\''
+                        | '='
+                        | '!'
+                        | '#'
+                        | '$'
+                        | '&'
+                        | '*'
+                        | '/'
+                        | '?'
+                        | '^'
+                        | '`'
+                        | '{'
+                        | '|'
+                        | '}'
+                        | '~'
+                )
+        })
 }
 
 pub(in crate::mapi) fn public_endpoint_url(headers: &HeaderMap, path: &str) -> String {
@@ -1768,6 +1825,28 @@ mod tests {
 
         assert_eq!(nspi_stat_current_rec(&request), None);
         assert!(!nspi_request_has_entry_selector(&request));
+    }
+
+    #[test]
+    fn query_rows_count_skips_explicit_table_before_count() {
+        let mut request = Vec::new();
+        request.extend_from_slice(&0u32.to_le_bytes());
+        request.extend_from_slice(&[0; 36]);
+        request.extend_from_slice(&2u32.to_le_bytes());
+        request.extend_from_slice(&0x8000_0034u32.to_le_bytes());
+        request.extend_from_slice(&0x4000_0001u32.to_le_bytes());
+        request.extend_from_slice(&7u32.to_le_bytes());
+
+        assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(7));
+    }
+
+    #[test]
+    fn lookup_scanner_ignores_binary_words_that_only_contain_at_sign() {
+        assert!(scan_address_book_lookup_values(b"@\x3a\x1f\0").is_empty());
+        assert_eq!(
+            scan_address_book_lookup_values(b"SMTP:alice@example.test\0"),
+            vec!["alice@example.test".to_string()]
+        );
     }
 
     #[test]
