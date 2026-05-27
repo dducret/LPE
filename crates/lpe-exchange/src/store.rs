@@ -895,6 +895,7 @@ impl ExchangeStore for Storage {
             advance_mapi_replica_counter_past_allocated(&mut tx, tenant_id, account_id).await?;
             repair_reserved_mapi_identity_counter_collisions(&mut tx, tenant_id, account_id)
                 .await?;
+            repair_reserved_mapi_mailbox_identities(&mut tx, tenant_id, account_id).await?;
             repair_invalid_mapi_identity_change_keys(&mut tx, tenant_id, account_id).await?;
             repair_stale_mapi_collaboration_identities(&mut tx, tenant_id, account_id).await?;
 
@@ -2843,13 +2844,19 @@ async fn repair_reserved_mapi_identity_counter_collisions(
 ) -> Result<()> {
     let rows = sqlx::query(
         r#"
-        SELECT object_kind, canonical_id
-        FROM mapi_object_identities
-        WHERE tenant_id = $1
-          AND account_id = $2
-          AND mapi_global_counter >= $3
-          AND mapi_global_counter < $4
-        ORDER BY mapi_global_counter, created_at, canonical_id
+        SELECT identities.object_kind, identities.canonical_id, identities.mapi_global_counter,
+               mailboxes.role
+        FROM mapi_object_identities identities
+        LEFT JOIN mailboxes
+          ON mailboxes.tenant_id = identities.tenant_id
+         AND mailboxes.account_id = identities.account_id
+         AND mailboxes.id = identities.canonical_id
+         AND identities.object_kind = 'mailbox'
+        WHERE identities.tenant_id = $1
+          AND identities.account_id = $2
+          AND identities.mapi_global_counter >= $3
+          AND identities.mapi_global_counter < $4
+        ORDER BY identities.mapi_global_counter, identities.created_at, identities.canonical_id
         "#,
     )
     .bind(tenant_id)
@@ -2860,6 +2867,18 @@ async fn repair_reserved_mapi_identity_counter_collisions(
     .await?;
 
     for row in rows {
+        let object_kind = row.get::<String, _>("object_kind");
+        let role = row.try_get::<String, _>("role").ok();
+        let current_counter = row.get::<i64, _>("mapi_global_counter") as u64;
+        if object_kind == "mailbox"
+            && role
+                .as_deref()
+                .and_then(crate::mapi_store::reserved_folder_counter_for_role)
+                == Some(current_counter)
+        {
+            continue;
+        }
+
         let global_counter = allocate_next_mapi_global_counter(tx, tenant_id, account_id).await?;
         let (object_id, source_key, change_key, instance_key) =
             crate::mapi::identity::persisted_identity_material(global_counter);
@@ -2881,9 +2900,81 @@ async fn repair_reserved_mapi_identity_counter_collisions(
         )
         .bind(tenant_id)
         .bind(account_id)
-        .bind(row.get::<String, _>("object_kind"))
+        .bind(object_kind)
         .bind(row.get::<Uuid, _>("canonical_id"))
         .bind(global_counter as i64)
+        .bind(object_id as i64)
+        .bind(source_key)
+        .bind(change_key)
+        .bind(instance_key)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn repair_reserved_mapi_mailbox_identities(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+) -> Result<()> {
+    let rows = sqlx::query(
+        r#"
+        SELECT identities.canonical_id, identities.mapi_global_counter, mailboxes.role
+        FROM mapi_object_identities identities
+        JOIN mailboxes
+          ON mailboxes.tenant_id = identities.tenant_id
+         AND mailboxes.account_id = identities.account_id
+         AND mailboxes.id = identities.canonical_id
+        WHERE identities.tenant_id = $1
+          AND identities.account_id = $2
+          AND identities.object_kind = 'mailbox'
+          AND identities.deleted_at IS NULL
+        ORDER BY identities.created_at, identities.canonical_id
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_all(&mut **tx)
+    .await?;
+
+    for row in rows {
+        let role = row.get::<String, _>("role");
+        let Some(reserved_counter) = crate::mapi_store::reserved_folder_counter_for_role(&role)
+        else {
+            continue;
+        };
+        let current_counter = row.get::<i64, _>("mapi_global_counter") as u64;
+        if current_counter == reserved_counter {
+            continue;
+        }
+
+        let canonical_id = row.get::<Uuid, _>("canonical_id");
+        let (object_id, source_key, change_key, instance_key) =
+            crate::mapi::identity::persisted_identity_material(reserved_counter);
+
+        sqlx::query(
+            r#"
+            UPDATE mapi_object_identities
+            SET mapi_global_counter = $5,
+                mapi_object_id = $6,
+                source_key = $7,
+                change_key = $8,
+                instance_key = $9,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND object_kind = 'mailbox'
+              AND canonical_id = $3
+              AND mapi_global_counter = $4
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(account_id)
+        .bind(canonical_id)
+        .bind(current_counter as i64)
+        .bind(reserved_counter as i64)
         .bind(object_id as i64)
         .bind(source_key)
         .bind(change_key)

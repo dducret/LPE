@@ -404,6 +404,103 @@ BEGIN
   END IF;
 END $$;
 
+WITH role_counters(role, reserved_counter) AS (
+  VALUES
+    ('journal', 17::BIGINT),
+    ('notes', 18::BIGINT),
+    ('tasks', 19::BIGINT),
+    ('reminders', 20::BIGINT),
+    ('suggested_contacts', 21::BIGINT),
+    ('sync_issues', 26::BIGINT),
+    ('conflicts', 27::BIGINT),
+    ('local_failures', 28::BIGINT),
+    ('server_failures', 29::BIGINT),
+    ('junk', 30::BIGINT),
+    ('rss_feeds', 31::BIGINT),
+    ('archive', 35::BIGINT),
+    ('conversation_history', 37::BIGINT)
+),
+account_max AS (
+  SELECT tenant_id, account_id, GREATEST(COALESCE(MAX(mapi_global_counter), 37), 37) AS max_counter
+  FROM public.mapi_object_identities
+  GROUP BY tenant_id, account_id
+),
+reserved_collisions AS (
+  SELECT i.ctid, i.tenant_id, i.account_id,
+         account_max.max_counter
+           + ROW_NUMBER() OVER (
+               PARTITION BY i.tenant_id, i.account_id
+               ORDER BY i.mapi_global_counter, i.created_at, i.canonical_id
+             ) AS repaired_counter
+  FROM public.mapi_object_identities i
+  JOIN account_max
+    ON account_max.tenant_id = i.tenant_id
+   AND account_max.account_id = i.account_id
+  LEFT JOIN public.mailboxes m
+    ON m.tenant_id = i.tenant_id
+   AND m.account_id = i.account_id
+   AND m.id = i.canonical_id
+   AND i.object_kind = 'mailbox'
+  LEFT JOIN role_counters rc ON rc.role = m.role
+  WHERE i.mapi_global_counter >= 17
+    AND i.mapi_global_counter < 38
+    AND NOT (
+      i.object_kind = 'mailbox'
+      AND rc.reserved_counter = i.mapi_global_counter
+    )
+),
+moved_collisions AS (
+  UPDATE public.mapi_object_identities i
+  SET mapi_global_counter = reserved_collisions.repaired_counter,
+      mapi_object_id = reserved_collisions.repaired_counter * 65536 + 1,
+      source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(reserved_collisions.repaired_counter), 12, '0'), 'hex'),
+      change_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(reserved_collisions.repaired_counter), 12, '0'), 'hex'),
+      instance_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(reserved_collisions.repaired_counter), 12, '0'), 'hex'),
+      updated_at = NOW()
+  FROM reserved_collisions
+  WHERE i.ctid = reserved_collisions.ctid
+  RETURNING i.tenant_id, i.account_id
+),
+restored_reserved AS (
+  UPDATE public.mapi_object_identities i
+  SET mapi_global_counter = rc.reserved_counter,
+      mapi_object_id = rc.reserved_counter * 65536 + 1,
+      source_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(rc.reserved_counter), 12, '0'), 'hex'),
+      change_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(rc.reserved_counter), 12, '0'), 'hex'),
+      instance_key = decode('741f6fd38e1a654f9d422dfb451c8f10', 'hex')
+        || decode(lpad(to_hex(rc.reserved_counter), 12, '0'), 'hex'),
+      updated_at = NOW()
+  FROM public.mailboxes m
+  JOIN role_counters rc ON rc.role = m.role
+  CROSS JOIN (SELECT COUNT(*) AS moved_count FROM moved_collisions) moved_dependency
+  WHERE i.tenant_id = m.tenant_id
+    AND i.account_id = m.account_id
+    AND i.object_kind = 'mailbox'
+    AND i.canonical_id = m.id
+    AND i.deleted_at IS NULL
+    AND i.mapi_global_counter <> rc.reserved_counter
+  RETURNING i.tenant_id, i.account_id
+)
+UPDATE public.mapi_mailbox_replicas replicas
+SET next_global_counter = GREATEST(
+      replicas.next_global_counter,
+      account_counters.next_counter
+    ),
+    updated_at = NOW()
+FROM (
+  SELECT tenant_id, account_id, GREATEST(COALESCE(MAX(mapi_global_counter), 37) + 1, 38) AS next_counter
+  FROM public.mapi_object_identities
+  CROSS JOIN (SELECT COUNT(*) AS restored_count FROM restored_reserved) restored_dependency
+  GROUP BY tenant_id, account_id
+) account_counters
+WHERE replicas.tenant_id = account_counters.tenant_id
+  AND replicas.account_id = account_counters.account_id;
+
 CREATE TABLE IF NOT EXISTS public.mapi_navigation_shortcuts (
   tenant_id UUID NOT NULL,
   id UUID NOT NULL,

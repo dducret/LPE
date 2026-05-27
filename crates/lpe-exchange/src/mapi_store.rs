@@ -1215,20 +1215,50 @@ fn stable_text_counter(value: &str) -> u64 {
 
 pub(crate) fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
     match role {
+        "__mapi_deferred_action" => Some(crate::mapi::identity::DEFERRED_ACTION_FOLDER_COUNTER),
+        "__mapi_spooler_queue" => Some(crate::mapi::identity::SPOOLER_QUEUE_FOLDER_COUNTER),
+        "__mapi_ipm_subtree" => Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_COUNTER),
         "inbox" => Some(crate::mapi::identity::INBOX_FOLDER_COUNTER),
-        "drafts" => Some(crate::mapi::identity::DRAFTS_FOLDER_COUNTER),
         "outbox" => Some(crate::mapi::identity::OUTBOX_FOLDER_COUNTER),
+        "drafts" => Some(crate::mapi::identity::DRAFTS_FOLDER_COUNTER),
         "sent" => Some(crate::mapi::identity::SENT_FOLDER_COUNTER),
         "trash" => Some(crate::mapi::identity::TRASH_FOLDER_COUNTER),
+        "__mapi_common_views" => Some(crate::mapi::identity::COMMON_VIEWS_FOLDER_COUNTER),
+        "__mapi_schedule" => Some(crate::mapi::identity::SCHEDULE_FOLDER_COUNTER),
+        "__mapi_search" => Some(crate::mapi::identity::SEARCH_FOLDER_COUNTER),
+        "__mapi_views" => Some(crate::mapi::identity::VIEWS_FOLDER_COUNTER),
+        "__mapi_shortcuts" => Some(crate::mapi::identity::SHORTCUTS_FOLDER_COUNTER),
         "contacts" => Some(crate::mapi::identity::CONTACTS_FOLDER_COUNTER),
         "suggested_contacts" => Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_COUNTER),
         "quick_contacts" => Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_COUNTER),
         "im_contact_list" => Some(crate::mapi::identity::IM_CONTACT_LIST_FOLDER_COUNTER),
+        "contacts_search" => Some(crate::mapi::identity::CONTACTS_SEARCH_FOLDER_COUNTER),
+        "document_libraries" => Some(crate::mapi::identity::DOCUMENT_LIBRARIES_FOLDER_COUNTER),
         "calendar" => Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
         "journal" => Some(crate::mapi::identity::JOURNAL_FOLDER_COUNTER),
         "notes" => Some(crate::mapi::identity::NOTES_FOLDER_COUNTER),
         "tasks" => Some(crate::mapi::identity::TASKS_FOLDER_COUNTER),
         "reminders" => Some(crate::mapi::identity::REMINDERS_FOLDER_COUNTER),
+        "sync_issues" => Some(crate::mapi::identity::SYNC_ISSUES_FOLDER_COUNTER),
+        "conflicts" => Some(crate::mapi::identity::CONFLICTS_FOLDER_COUNTER),
+        "local_failures" => Some(crate::mapi::identity::LOCAL_FAILURES_FOLDER_COUNTER),
+        "server_failures" => Some(crate::mapi::identity::SERVER_FAILURES_FOLDER_COUNTER),
+        "junk" => Some(crate::mapi::identity::JUNK_FOLDER_COUNTER),
+        "rss_feeds" => Some(crate::mapi::identity::RSS_FEEDS_FOLDER_COUNTER),
+        "tracked_mail_processing" => {
+            Some(crate::mapi::identity::TRACKED_MAIL_PROCESSING_FOLDER_COUNTER)
+        }
+        "todo_search" => Some(crate::mapi::identity::TODO_SEARCH_FOLDER_COUNTER),
+        "conversation_action_settings" => {
+            Some(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_COUNTER)
+        }
+        "conversation_actions" => {
+            Some(crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_COUNTER)
+        }
+        "archive" => Some(crate::mapi::identity::ARCHIVE_FOLDER_COUNTER),
+        "__mapi_freebusy_data" => Some(crate::mapi::identity::FREEBUSY_DATA_FOLDER_COUNTER),
+        "freebusy_data" => Some(crate::mapi::identity::FREEBUSY_DATA_FOLDER_COUNTER),
+        "conversation_history" => Some(crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_COUNTER),
         _ => None,
     }
 }
@@ -1244,6 +1274,36 @@ mod tests {
         AccessibleContact, CollaborationCollection, CollaborationRights, JmapEmailAddress,
         JmapEmailMailboxState,
     };
+
+    #[test]
+    fn advertised_special_mailbox_roles_have_reserved_mapi_counters() {
+        let cases = [
+            (
+                "sync_issues",
+                crate::mapi::identity::SYNC_ISSUES_FOLDER_COUNTER,
+            ),
+            ("conflicts", crate::mapi::identity::CONFLICTS_FOLDER_COUNTER),
+            (
+                "local_failures",
+                crate::mapi::identity::LOCAL_FAILURES_FOLDER_COUNTER,
+            ),
+            (
+                "server_failures",
+                crate::mapi::identity::SERVER_FAILURES_FOLDER_COUNTER,
+            ),
+            ("junk", crate::mapi::identity::JUNK_FOLDER_COUNTER),
+            ("rss_feeds", crate::mapi::identity::RSS_FEEDS_FOLDER_COUNTER),
+            ("archive", crate::mapi::identity::ARCHIVE_FOLDER_COUNTER),
+            (
+                "conversation_history",
+                crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_COUNTER,
+            ),
+        ];
+
+        for (role, counter) in cases {
+            assert_eq!(reserved_folder_counter_for_role(role), Some(counter));
+        }
+    }
 
     #[test]
     fn snapshot_projects_canonical_mailbox_message_and_attachment_ids() {
