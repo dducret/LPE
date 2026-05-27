@@ -166,7 +166,7 @@ where
     }
 
     log_mapi_store_load_step(account_id, plan, "ensure system mailboxes", 0);
-    let mailboxes = store
+    let mut mailboxes = store
         .ensure_jmap_system_mailboxes(account_id)
         .await
         .context("ensure MAPI system mailboxes")?;
@@ -198,6 +198,28 @@ where
     log_mapi_requested_identity_resolution(account_id, plan, &identities);
     for identity in &identities {
         crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+    }
+
+    let requested_mailbox_ids = identities
+        .iter()
+        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Mailbox)
+        .map(|identity| identity.canonical_id)
+        .collect::<Vec<_>>();
+    if requested_mailbox_ids
+        .iter()
+        .any(|mailbox_id| !mailboxes.iter().any(|mailbox| mailbox.id == *mailbox_id))
+    {
+        log_mapi_store_load_step(
+            account_id,
+            plan,
+            "fetch requested mailboxes",
+            requested_mailbox_ids.len(),
+        );
+        let all_mailboxes = store
+            .fetch_jmap_mailboxes(account_id)
+            .await
+            .context("fetch requested MAPI mailbox folders")?;
+        merge_requested_mailboxes(&mut mailboxes, &all_mailboxes, &requested_mailbox_ids);
     }
 
     let mut content_windows = Vec::new();
@@ -1356,6 +1378,24 @@ fn mapi_identity_requests_for_mailboxes(mailboxes: &[JmapMailbox]) -> Vec<MapiId
         .collect()
 }
 
+fn merge_requested_mailboxes(
+    mailboxes: &mut Vec<JmapMailbox>,
+    all_mailboxes: &[JmapMailbox],
+    requested_mailbox_ids: &[Uuid],
+) {
+    for requested_id in requested_mailbox_ids {
+        if mailboxes.iter().any(|mailbox| mailbox.id == *requested_id) {
+            continue;
+        }
+        if let Some(mailbox) = all_mailboxes
+            .iter()
+            .find(|mailbox| mailbox.id == *requested_id)
+        {
+            mailboxes.push(mailbox.clone());
+        }
+    }
+}
+
 fn mailbox_id_for_mapi_folder_id(mailboxes: &[JmapMailbox], folder_id: u64) -> Option<Uuid> {
     mailboxes
         .iter()
@@ -1404,6 +1444,38 @@ mod tests {
         buffer.extend_from_slice(rop);
         buffer.extend_from_slice(&1u32.to_le_bytes());
         buffer
+    }
+
+    fn mailbox(id: &str, role: &str, name: &str) -> JmapMailbox {
+        JmapMailbox {
+            id: Uuid::parse_str(id).unwrap(),
+            parent_id: None,
+            role: role.to_string(),
+            name: name.to_string(),
+            sort_order: 40,
+            modseq: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }
+    }
+
+    #[test]
+    fn merge_requested_mailboxes_adds_custom_identity_rows() {
+        let inbox = mailbox("11111111-1111-1111-1111-111111111111", "inbox", "Inbox");
+        let custom = mailbox("22222222-2222-2222-2222-222222222222", "custom", "RCA Sync");
+        let missing = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+        let mut loaded = vec![inbox.clone()];
+        let all_mailboxes = vec![inbox, custom.clone()];
+
+        merge_requested_mailboxes(
+            &mut loaded,
+            &all_mailboxes,
+            &[custom.id, custom.id, missing],
+        );
+
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded.iter().any(|mailbox| mailbox.id == custom.id));
     }
 
     #[test]
