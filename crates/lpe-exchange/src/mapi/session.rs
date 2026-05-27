@@ -34,6 +34,10 @@ pub(in crate::mapi) struct MapiSession {
 pub(in crate::mapi) struct CachedExecuteResponse {
     pub(in crate::mapi) rop_fingerprint: u64,
     pub(in crate::mapi) response_body: Vec<u8>,
+    pub(in crate::mapi) request_rop_ids: String,
+    pub(in crate::mapi) response_rop_ids: String,
+    pub(in crate::mapi) response_rop_results: String,
+    pub(in crate::mapi) response_rop_buffer_bytes: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -543,6 +547,10 @@ pub(in crate::mapi) fn cache_execute_response(
     request_id: &str,
     rop_fingerprint: u64,
     response_body: &[u8],
+    request_rop_ids: String,
+    response_rop_ids: String,
+    response_rop_results: String,
+    response_rop_buffer_bytes: usize,
 ) {
     if !session.completed_execute_requests.contains_key(request_id) {
         while session.completed_execute_requests.len() >= MAX_CACHED_EXECUTE_REQUESTS {
@@ -561,6 +569,10 @@ pub(in crate::mapi) fn cache_execute_response(
         CachedExecuteResponse {
             rop_fingerprint,
             response_body: response_body.to_vec(),
+            request_rop_ids,
+            response_rop_ids,
+            response_rop_results,
+            response_rop_buffer_bytes,
         },
     );
 }
@@ -1018,6 +1030,10 @@ mod tests {
                 &format!("{{11111111-2222-3333-4444-555555555555}}:{index}"),
                 index as u64,
                 &[index as u8],
+                format!("request-{index}"),
+                format!("response-{index}"),
+                format!("result-{index}"),
+                index,
             );
         }
 

@@ -232,7 +232,20 @@ where
             post_hierarchy_observation,
         );
         let response_body = execute_success_body(rop_buffer, Vec::new());
-        cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
+        let response_debug = summarize_response_rop_buffer(
+            execute_success_rop_buffer(&response_body).unwrap_or_default(),
+            &request_debug.ids,
+        );
+        cache_execute_response(
+            &mut session,
+            request_id,
+            rop_fingerprint,
+            &response_body,
+            request_debug.ids_csv.clone(),
+            response_debug.ids_csv,
+            response_debug.results_csv,
+            response_debug.response_payload_bytes,
+        );
         store_session(session_id.clone(), session);
         return mapi_response_with_cookies(
             "Execute",
@@ -341,7 +354,20 @@ where
         post_hierarchy_observation,
     );
     let response_body = execute_success_body(rop_buffer, Vec::new());
-    cache_execute_response(&mut session, request_id, rop_fingerprint, &response_body);
+    let response_debug = summarize_response_rop_buffer(
+        execute_success_rop_buffer(&response_body).unwrap_or_default(),
+        &request_debug.ids,
+    );
+    cache_execute_response(
+        &mut session,
+        request_id,
+        rop_fingerprint,
+        &response_body,
+        request_debug.ids_csv.clone(),
+        response_debug.ids_csv,
+        response_debug.results_csv,
+        response_debug.response_payload_bytes,
+    );
     store_session(session_id.clone(), session);
     mapi_response_with_cookies(
         "Execute",

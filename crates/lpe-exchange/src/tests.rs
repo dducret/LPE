@@ -6803,6 +6803,11 @@ async fn mapi_over_http_disconnect_consumes_emsmdb_session() {
         .to_str()
         .unwrap()
         .contains("Max-Age=0"));
+    let body = response_bytes(response).await;
+    assert_eq!(body.len(), 12);
+    assert_eq!(u32::from_le_bytes(body[0..4].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[4..8].try_into().unwrap()), 0);
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 0);
 }
 
 #[tokio::test]

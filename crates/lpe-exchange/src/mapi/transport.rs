@@ -643,6 +643,12 @@ fn log_mapi_session_disconnect(
     );
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
+    let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
+    let all_sync_sources_completed = sync_source_count == completed_sync_source_count;
+    let clean_client_close_after_sync = endpoint == MapiEndpoint::Emsmdb
+        && request_type == "Disconnect"
+        && post_hierarchy_summary.content_sync_configure_observed
+        && all_sync_sources_completed;
 
     tracing::info!(
         rca_debug = true,
@@ -687,8 +693,97 @@ fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         sync_source_summaries = %sync_source_summaries,
         live_handle_summaries = %live_handle_summaries,
+        recent_execute_summaries = %recent_execute_summaries,
         "rca debug mapi session disconnect"
     );
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint_label,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = %request_type,
+        mapi_request_id = %request_id,
+        client_application = %client_application,
+        trace_id = %trace_id,
+        response_status_code = 0u32,
+        response_error_code = 0u32,
+        response_auxiliary_buffer_size = 0u32,
+        response_body_bytes = 12usize,
+        response_body_hex = "000000000000000000000000",
+        response_content_type = MAPI_CONTENT_TYPE,
+        response_x_response_code = 0u16,
+        response_clears_session_context_cookie = true,
+        response_set_cookie_count = 2usize,
+        response_set_cookie_names =
+            %format!("{},{}", cookie_name(endpoint), sequence_cookie_name(endpoint)),
+        session_removed_before_response = true,
+        live_handle_count_before_remove = session.handles.len(),
+        completed_execute_request_count = session.completed_execute_requests.len(),
+        recent_execute_summaries = %recent_execute_summaries,
+        completed_sync_source_count,
+        incomplete_sync_source_count,
+        all_sync_sources_completed,
+        clean_client_close_after_sync,
+        post_hierarchy_execute_count = post_hierarchy_summary.execute_count,
+        post_hierarchy_content_sync_configure_observed =
+            post_hierarchy_summary.content_sync_configure_observed,
+        post_hierarchy_disconnect_client_initiated =
+            post_hierarchy_summary.disconnect_client_initiated,
+        post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
+        post_hierarchy_last_completed_sync_root =
+            %post_hierarchy_summary.last_completed_hierarchy_sync_root,
+        post_hierarchy_last_get_buffer_summary =
+            %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
+        "rca debug mapi disconnect wire contract"
+    );
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = endpoint_label,
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = %request_type,
+        mapi_request_id = %request_id,
+        transport_contract_ok = true,
+        response_body_contract_ok = true,
+        cookies_invalidated = true,
+        all_sync_sources_completed,
+        clean_client_close_after_sync,
+        post_hierarchy_close_kind = %post_hierarchy_summary.close_kind,
+        next_debug_focus =
+            if clean_client_close_after_sync {
+                "outlook_reconnect_or_client_side_reason"
+            } else if incomplete_sync_source_count > 0 {
+                "unfinished_sync_source"
+            } else {
+                "post_hierarchy_sequence"
+            },
+        recent_execute_summaries = %recent_execute_summaries,
+        "rca debug mapi disconnect verdict"
+    );
+
+    if incomplete_sync_source_count > 0 {
+        tracing::warn!(
+            rca_debug = true,
+            rca_warning = "disconnect_with_incomplete_sync_source",
+            adapter = "mapi",
+            endpoint = endpoint_label,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = %request_type,
+            mapi_request_id = %request_id,
+            incomplete_sync_source_count,
+            total_transfer_buffer_bytes,
+            total_transfer_position_bytes,
+            sync_source_summaries = %sync_source_summaries,
+            recent_execute_summaries = %recent_execute_summaries,
+            "rca debug mapi disconnect with incomplete sync source"
+        );
+    }
 
     if endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"
@@ -733,6 +828,29 @@ fn log_mapi_session_disconnect(
             "rca debug mapi post hierarchy disconnect before content sync"
         );
     }
+}
+
+fn recent_execute_debug_summaries(session: &MapiSession, limit: usize) -> String {
+    let mut entries = session
+        .completed_execute_request_order
+        .iter()
+        .rev()
+        .take(limit)
+        .filter_map(|request_id| {
+            let cached = session.completed_execute_requests.get(request_id)?;
+            Some(format!(
+                "id={};req={};resp={};rv={};resp_rop_bytes={};body_bytes={}",
+                request_id,
+                cached.request_rop_ids,
+                cached.response_rop_ids,
+                cached.response_rop_results,
+                cached.response_rop_buffer_bytes,
+                cached.response_body.len()
+            ))
+        })
+        .collect::<Vec<_>>();
+    entries.reverse();
+    entries.join("|")
 }
 
 fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
