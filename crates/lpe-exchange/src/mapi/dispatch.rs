@@ -7366,7 +7366,12 @@ where
                         let property_tag = state_upload_property_tag.take().unwrap_or_default();
                         let upload_state_empty_stream_after_client_state =
                             uploaded_bytes == 0 && *client_state_uploaded_bytes > 0;
-                        mark_uploaded_state_stream(client_state_uploaded_marker_mask, property_tag);
+                        if uploaded_bytes > 0 {
+                            mark_uploaded_state_stream(
+                                client_state_uploaded_marker_mask,
+                                property_tag,
+                            );
+                        }
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
                             (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
@@ -8901,13 +8906,16 @@ mod tests {
     }
 
     #[test]
-    fn uploaded_state_empty_stream_still_marks_property_presence() {
+    fn uploaded_state_empty_stream_does_not_create_delta_anchor() {
         let mut marker_mask = 0;
+        let uploaded_bytes = 0usize;
 
-        mark_uploaded_state_stream(&mut marker_mask, 0x4017_0003);
-        mark_uploaded_state_stream(&mut marker_mask, 0x6796_0102);
+        if uploaded_bytes > 0 {
+            mark_uploaded_state_stream(&mut marker_mask, 0x4017_0003);
+            mark_uploaded_state_stream(&mut marker_mask, 0x6796_0102);
+        }
 
-        assert!(uploaded_state_has_delta_anchor(marker_mask));
+        assert!(!uploaded_state_has_delta_anchor(marker_mask));
     }
 
     #[test]
