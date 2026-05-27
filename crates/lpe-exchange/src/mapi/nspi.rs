@@ -793,6 +793,7 @@ fn log_nspi_rowset_debug(
         .unwrap_or_default();
     let row_limit = row_limit.map(|limit| limit.to_string()).unwrap_or_default();
     let query_rows_count = nspi_query_rows_count_details(request_type, request);
+    let query_rows_explicit_entry_ids = nspi_query_rows_explicit_entry_ids(request_type, request);
     let query_rows_explicit_table_count = query_rows_count
         .as_ref()
         .map(|details| details.explicit_table_count.to_string())
@@ -822,6 +823,7 @@ fn log_nspi_rowset_debug(
         returned_entry_count = entries.len(),
         row_limit = %row_limit,
         query_rows_explicit_table_count = %query_rows_explicit_table_count,
+        query_rows_explicit_entry_ids = %format_nspi_u32_values_for_debug(&query_rows_explicit_entry_ids),
         query_rows_count_offset = %query_rows_count_offset,
         duplicate_entry_key_count = duplicate_entry_key_count,
         duplicate_entry_keys = %duplicate_entry_keys,
@@ -901,7 +903,12 @@ where
     };
     let available_entry_count = entries.len();
     let lookup_values = scan_address_book_lookup_values(request);
-    let entries = nspi_filter_entries_for_request(entries, request);
+    let explicit_entry_ids = nspi_query_rows_explicit_entry_ids(request_type, request);
+    let entries = if explicit_entry_ids.is_empty() {
+        nspi_filter_entries_for_request(entries, request)
+    } else {
+        nspi_filter_explicit_table_entries(principal.account_id, entries, &explicit_entry_ids)
+    };
     if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
         return mapi_diagnostic_response(
             request_type,
@@ -947,6 +954,39 @@ pub(in crate::mapi) fn nspi_query_rows_count(request_type: &str, request: &[u8])
     nspi_query_rows_count_details(request_type, request).map(|details| details.count)
 }
 
+pub(in crate::mapi) fn nspi_query_rows_explicit_entry_ids(
+    request_type: &str,
+    request: &[u8],
+) -> Vec<u32> {
+    if !nspi_request_type_is_query_rows(request_type) {
+        return Vec::new();
+    }
+    const FLAGS_BYTES: usize = 4;
+    const STAT_BYTES: usize = 36;
+    const ETABLE_COUNT_BYTES: usize = 4;
+    let etable_count_offset = FLAGS_BYTES + STAT_BYTES;
+    let Some(etable_count_bytes) = request.get(etable_count_offset..etable_count_offset + 4) else {
+        return Vec::new();
+    };
+    let Some(etable_count) = etable_count_bytes
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
+        .map(|count| count as usize)
+    else {
+        return Vec::new();
+    };
+    let table_offset = etable_count_offset + ETABLE_COUNT_BYTES;
+    (0..etable_count)
+        .filter_map(|index| {
+            let offset = table_offset + index * 4;
+            let bytes = request.get(offset..offset + 4)?;
+            let value = u32::from_le_bytes(bytes.try_into().ok()?);
+            nspi_word_looks_like_entry_id(value).then_some(value)
+        })
+        .collect()
+}
+
 struct NspiQueryRowsCountDetails {
     count: usize,
     explicit_table_count: usize,
@@ -957,7 +997,7 @@ fn nspi_query_rows_count_details(
     request_type: &str,
     request: &[u8],
 ) -> Option<NspiQueryRowsCountDetails> {
-    if !request_type.eq_ignore_ascii_case("QueryRows") {
+    if !nspi_request_type_is_query_rows(request_type) {
         return None;
     }
     const FLAGS_BYTES: usize = 4;
@@ -977,6 +1017,12 @@ fn nspi_query_rows_count_details(
         explicit_table_count: etable_count,
         count_offset,
     })
+}
+
+fn nspi_request_type_is_query_rows(request_type: &str) -> bool {
+    request_type
+        .trim_matches(|ch: char| ch.is_control() || ch.is_whitespace())
+        .eq_ignore_ascii_case("QueryRows")
 }
 
 pub(in crate::mapi) async fn nspi_matches_response<S>(
@@ -1531,6 +1577,22 @@ pub(in crate::mapi) fn nspi_filter_entries_for_request(
         .collect()
 }
 
+fn nspi_filter_explicit_table_entries(
+    account_id: Uuid,
+    entries: Vec<ExchangeAddressBookEntry>,
+    requested_entry_ids: &[u32],
+) -> Vec<ExchangeAddressBookEntry> {
+    requested_entry_ids
+        .iter()
+        .filter_map(|requested_entry_id| {
+            entries
+                .iter()
+                .find(|entry| nspi_entry_id(account_id, entry) == *requested_entry_id)
+                .cloned()
+        })
+        .collect()
+}
+
 pub(in crate::mapi) fn nspi_match_entry<'a>(
     account_id: Uuid,
     entries: &'a [ExchangeAddressBookEntry],
@@ -1905,6 +1967,35 @@ mod tests {
         );
 
         assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(1));
+        assert_eq!(
+            nspi_query_rows_explicit_entry_ids("QueryRows", &request),
+            vec![0x8000_0034]
+        );
+    }
+
+    #[test]
+    fn query_rows_explicit_table_filters_rows_by_requested_mid() {
+        let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let contact = ExchangeAddressBookEntry {
+            id: Uuid::from_bytes([0x37, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            display_name: "Denis Ducret".to_string(),
+            email: "denis.ducret@sdic.ch".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        };
+        let account = ExchangeAddressBookEntry {
+            id: Uuid::from_bytes([0x34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            display_name: "test".to_string(),
+            email: "test@l-p-e.ch".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        };
+
+        let filtered =
+            nspi_filter_explicit_table_entries(account_id, vec![contact, account], &[0x8000_0034]);
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].email, "test@l-p-e.ch");
     }
 
     #[test]
