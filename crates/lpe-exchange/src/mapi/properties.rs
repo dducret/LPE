@@ -298,6 +298,10 @@ pub(in crate::mapi) const PID_LID_LOCATION: u32 = 0x0000_8208;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_DURATION: u32 = 0x0000_8213;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE: u32 = 0x0000_8215;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS: u32 = 0x0000_8217;
+pub(in crate::mapi) const PID_LID_TIME_ZONE_STRUCT: u32 = 0x0000_8233;
+pub(in crate::mapi) const PID_LID_TIME_ZONE_DESCRIPTION: u32 = 0x0000_8234;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY: u32 = 0x0000_825E;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY: u32 = 0x0000_825F;
 pub(in crate::mapi) const PID_LID_COMPANIES: u32 = 0x0000_8539;
 pub(in crate::mapi) const PID_LID_CONTACTS: u32 = 0x0000_853A;
 pub(in crate::mapi) const PID_LID_CONTACT_LINK_NAME: u32 = 0x0000_8586;
@@ -337,6 +341,12 @@ pub(in crate::mapi) const PID_LID_LOCATION_W_TAG: u32 = 0x8208_001F;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_DURATION_TAG: u32 = 0x8213_0003;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_SUB_TYPE_TAG: u32 = 0x8215_000B;
 pub(in crate::mapi) const PID_LID_APPOINTMENT_STATE_FLAGS_TAG: u32 = 0x8217_0003;
+pub(in crate::mapi) const PID_LID_TIME_ZONE_STRUCT_TAG: u32 = 0x8233_0102;
+pub(in crate::mapi) const PID_LID_TIME_ZONE_DESCRIPTION_W_TAG: u32 = 0x8234_001F;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG: u32 =
+    0x825E_0102;
+pub(in crate::mapi) const PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG: u32 =
+    0x825F_0102;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME_TAG: u32 = 0x8502_0040;
 pub(in crate::mapi) const PID_LID_REMINDER_SET_TAG: u32 = 0x8503_000B;
 pub(in crate::mapi) const PID_LID_REMINDER_DELTA_TAG: u32 = 0x8501_0003;
@@ -432,6 +442,16 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
             (PID_LID_APPOINTMENT_DURATION, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_SUB_TYPE, PSETID_APPOINTMENT_GUID),
             (PID_LID_APPOINTMENT_STATE_FLAGS, PSETID_APPOINTMENT_GUID),
+            (PID_LID_TIME_ZONE_STRUCT, PSETID_APPOINTMENT_GUID),
+            (PID_LID_TIME_ZONE_DESCRIPTION, PSETID_APPOINTMENT_GUID),
+            (
+                PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY,
+                PSETID_APPOINTMENT_GUID,
+            ),
+            (
+                PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY,
+                PSETID_APPOINTMENT_GUID,
+            ),
             (PID_LID_COMPANIES, PSETID_COMMON_GUID),
             (PID_LID_CONTACTS, PSETID_COMMON_GUID),
             (PID_LID_CONTACT_LINK_NAME, PSETID_COMMON_GUID),
@@ -1549,6 +1569,14 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_LID_APPOINTMENT_DURATION_TAG => Some(MapiValue::I32(appointment_duration(event))),
         PID_LID_APPOINTMENT_SUB_TYPE_TAG => Some(MapiValue::Bool(event.all_day)),
         PID_LID_APPOINTMENT_STATE_FLAGS_TAG => Some(MapiValue::I32(appointment_state_flags(event))),
+        PID_LID_TIME_ZONE_STRUCT_TAG => Some(MapiValue::Binary(calendar_time_zone_struct(event))),
+        PID_LID_TIME_ZONE_DESCRIPTION_W_TAG => Some(MapiValue::String(
+            calendar_time_zone_key(&event.time_zone).to_string(),
+        )),
+        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
+        | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG => {
+            Some(MapiValue::Binary(calendar_time_zone_definition(event)))
+        }
         PID_LID_GLOBAL_OBJECT_ID_TAG | PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG => {
             Some(MapiValue::Binary(calendar_global_object_id(event)))
         }
@@ -1601,6 +1629,146 @@ fn appointment_duration(event: &AccessibleEvent) -> i32 {
         return 0;
     }
     ((end - start) / 600_000_000).min(i32::MAX as u64) as i32
+}
+
+fn calendar_time_zone_key(time_zone: &str) -> &'static str {
+    if time_zone.eq_ignore_ascii_case("W. Europe Standard Time")
+        || time_zone.eq_ignore_ascii_case("Europe/Zurich")
+        || time_zone.eq_ignore_ascii_case("Europe/Berlin")
+        || time_zone.eq_ignore_ascii_case("Europe/Rome")
+        || time_zone.eq_ignore_ascii_case("Europe/Vienna")
+    {
+        "W. Europe Standard Time"
+    } else {
+        "UTC"
+    }
+}
+
+fn calendar_time_zone_struct(event: &AccessibleEvent) -> Vec<u8> {
+    let tz = calendar_time_zone(event);
+    let mut value = Vec::with_capacity(48);
+    value.extend_from_slice(&tz.bias.to_le_bytes());
+    value.extend_from_slice(&tz.standard_bias.to_le_bytes());
+    value.extend_from_slice(&tz.daylight_bias.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    push_system_time(&mut value, tz.standard_date);
+    value.extend_from_slice(&0u16.to_le_bytes());
+    push_system_time(&mut value, tz.daylight_date);
+    value
+}
+
+fn calendar_time_zone_definition(event: &AccessibleEvent) -> Vec<u8> {
+    let tz = calendar_time_zone(event);
+    let key_name = calendar_time_zone_key(&event.time_zone);
+    let key_name_units = key_name.encode_utf16().collect::<Vec<_>>();
+    let cb_header = 2usize
+        .saturating_add(2)
+        .saturating_add(key_name_units.len().saturating_mul(2))
+        .saturating_add(2)
+        .min(u16::MAX as usize) as u16;
+    let mut value = Vec::with_capacity(8 + key_name_units.len() * 2 + 66);
+    value.push(0x02);
+    value.push(0x01);
+    value.extend_from_slice(&cb_header.to_le_bytes());
+    value.extend_from_slice(&0x0002u16.to_le_bytes());
+    value.extend_from_slice(&(key_name_units.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for unit in key_name_units {
+        value.extend_from_slice(&unit.to_le_bytes());
+    }
+    value.extend_from_slice(&1u16.to_le_bytes());
+    push_time_zone_rule(&mut value, tz);
+    value
+}
+
+#[derive(Clone, Copy)]
+struct CalendarTimeZone {
+    bias: i32,
+    standard_bias: i32,
+    daylight_bias: i32,
+    standard_date: CalendarSystemTime,
+    daylight_date: CalendarSystemTime,
+}
+
+#[derive(Clone, Copy)]
+struct CalendarSystemTime {
+    year: u16,
+    month: u16,
+    day_of_week: u16,
+    day: u16,
+    hour: u16,
+    minute: u16,
+}
+
+fn calendar_time_zone(event: &AccessibleEvent) -> CalendarTimeZone {
+    if calendar_time_zone_key(&event.time_zone) == "W. Europe Standard Time" {
+        CalendarTimeZone {
+            bias: -60,
+            standard_bias: 0,
+            daylight_bias: -60,
+            standard_date: CalendarSystemTime {
+                year: 0,
+                month: 10,
+                day_of_week: 0,
+                day: 5,
+                hour: 3,
+                minute: 0,
+            },
+            daylight_date: CalendarSystemTime {
+                year: 0,
+                month: 3,
+                day_of_week: 0,
+                day: 5,
+                hour: 2,
+                minute: 0,
+            },
+        }
+    } else {
+        CalendarTimeZone {
+            bias: 0,
+            standard_bias: 0,
+            daylight_bias: 0,
+            standard_date: CalendarSystemTime::zero(),
+            daylight_date: CalendarSystemTime::zero(),
+        }
+    }
+}
+
+impl CalendarSystemTime {
+    fn zero() -> Self {
+        Self {
+            year: 0,
+            month: 0,
+            day_of_week: 0,
+            day: 0,
+            hour: 0,
+            minute: 0,
+        }
+    }
+}
+
+fn push_time_zone_rule(value: &mut Vec<u8>, tz: CalendarTimeZone) {
+    value.push(0x02);
+    value.push(0x01);
+    value.extend_from_slice(&0x003Eu16.to_le_bytes());
+    value.extend_from_slice(&0x0002u16.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&[0; 14]);
+    value.extend_from_slice(&tz.bias.to_le_bytes());
+    value.extend_from_slice(&tz.standard_bias.to_le_bytes());
+    value.extend_from_slice(&tz.daylight_bias.to_le_bytes());
+    push_system_time(value, tz.standard_date);
+    push_system_time(value, tz.daylight_date);
+}
+
+fn push_system_time(value: &mut Vec<u8>, system_time: CalendarSystemTime) {
+    value.extend_from_slice(&system_time.year.to_le_bytes());
+    value.extend_from_slice(&system_time.month.to_le_bytes());
+    value.extend_from_slice(&system_time.day_of_week.to_le_bytes());
+    value.extend_from_slice(&system_time.day.to_le_bytes());
+    value.extend_from_slice(&system_time.hour.to_le_bytes());
+    value.extend_from_slice(&system_time.minute.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
 }
 
 fn calendar_global_object_id(event: &AccessibleEvent) -> Vec<u8> {
@@ -5338,6 +5506,28 @@ mod tests {
             ),
             Some(MapiValue::I32(60))
         );
+        assert_eq!(
+            event_property_value(
+                &event,
+                1,
+                CALENDAR_FOLDER_ID,
+                PID_LID_TIME_ZONE_DESCRIPTION_W_TAG
+            ),
+            Some(MapiValue::String("UTC".to_string()))
+        );
+        assert!(matches!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_TIME_ZONE_STRUCT_TAG),
+            Some(MapiValue::Binary(value)) if value.len() == 48
+        ));
+        assert!(matches!(
+            event_property_value(
+                &event,
+                1,
+                CALENDAR_FOLDER_ID,
+                PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
+            ),
+            Some(MapiValue::Binary(value)) if value.starts_with(&[0x02, 0x01]) && value.ends_with(&[0; 16])
+        ));
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_HAS_ATTACHMENTS),
             Some(MapiValue::Bool(false))

@@ -16706,9 +16706,14 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
         0x820E_0040,
         0x8215_000B,
         0x8217_0003,
+        0x8233_0102,
+        0x8234_001F,
+        0x825E_0102,
+        0x825F_0102,
     ] {
         assert!(contains_bytes(&response_rops, &property_tag.to_le_bytes()));
     }
+    assert!(contains_bytes(&response_rops, &utf16z("UTC")));
     assert!(contains_bytes(
         &response_rops,
         &[
