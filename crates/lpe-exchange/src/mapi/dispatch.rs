@@ -4578,6 +4578,29 @@ where
                     ));
                     continue;
                 };
+                if pending_message_is_sync_metadata_only(&properties, &recipients) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x0c",
+                        input_handle_index = request.input_handle_index.unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        object_kind = "pending_message",
+                        folder_id = %format!("{folder_id:#018x}"),
+                        folder_role = role_for_folder_id(folder_id).unwrap_or(""),
+                        property_tag_count = properties.len(),
+                        property_tags = %format_debug_property_tags(
+                            &properties.keys().copied().collect::<Vec<_>>()
+                        ),
+                        save_skipped_reason = "sync_metadata_only",
+                        "rca debug mapi save changes message"
+                    );
+                    responses.extend_from_slice(&rop_save_changes_message_response(&request, 0));
+                    continue;
+                }
                 let input =
                     jmap_import_from_pending_message(principal, mailbox, &properties, &recipients);
                 let reserved_global_counter =
@@ -6700,6 +6723,13 @@ where
                     .iter()
                     .filter(|object| object.associated && !fai_scope_requested)
                     .count();
+                let checkpoint_store_allowed = suppressed_normal_sync_object_count == 0
+                    && suppressed_fai_sync_object_count == 0;
+                let checkpoint_skip_reason = if checkpoint_store_allowed {
+                    ""
+                } else {
+                    "partial_content_scope_suppressed_objects"
+                };
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -6749,6 +6779,8 @@ where
                     wire_sync_special_object_count,
                     suppressed_normal_sync_object_count,
                     suppressed_fai_sync_object_count,
+                    checkpoint_store_allowed,
+                    checkpoint_skip_reason,
                     checkpoint_delta_mailbox_count,
                     checkpoint_delta_email_count,
                     checkpoint_delta_special_object_count = delta_special_sync_objects.len(),
@@ -6776,6 +6808,8 @@ where
                         checkpoint_kind,
                         checkpoint_change_sequence: changes.current_change_sequence,
                         checkpoint_modseq: changes.current_modseq,
+                        checkpoint_store_allowed,
+                        checkpoint_skip_reason,
                         sync_type,
                         state,
                         state_upload_property_tag: None,
@@ -6827,6 +6861,8 @@ where
                         checkpoint_kind: MapiCheckpointKind::Content,
                         checkpoint_change_sequence: 0,
                         checkpoint_modseq: 1,
+                        checkpoint_store_allowed: true,
+                        checkpoint_skip_reason: "",
                         sync_type: 0,
                         state: Vec::new(),
                         state_upload_property_tag: None,
@@ -6884,6 +6920,8 @@ where
                         checkpoint_kind: MapiCheckpointKind::Content,
                         checkpoint_change_sequence: 0,
                         checkpoint_modseq: 1,
+                        checkpoint_store_allowed: true,
+                        checkpoint_skip_reason: "",
                         sync_type: 0,
                         state: Vec::new(),
                         state_upload_property_tag: None,
@@ -6907,6 +6945,8 @@ where
                         checkpoint_kind,
                         checkpoint_change_sequence,
                         checkpoint_modseq,
+                        checkpoint_store_allowed,
+                        checkpoint_skip_reason,
                         sync_type,
                         state,
                         state_upload_buffer,
@@ -7089,6 +7129,44 @@ where
                                     checkpoint.1.as_str(),
                                     checkpoint.4,
                                     "skipped_no_mailbox_id",
+                                );
+                            } else if !*checkpoint_store_allowed {
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x4e",
+                                    folder_id = format_args!("0x{:016x}", *folder_id),
+                                    folder_role = debug_role_for_folder_id(*folder_id),
+                                    folder_container_class =
+                                        debug_container_class_for_folder_id(*folder_id),
+                                    sync_type = format_args!("0x{:02x}", checkpoint.4),
+                                    checkpoint_kind = checkpoint.1.as_str(),
+                                    checkpoint_mailbox_id = checkpoint
+                                        .0
+                                        .map(|id| id.to_string())
+                                        .unwrap_or_default(),
+                                    checkpoint_change_sequence = checkpoint.2,
+                                    checkpoint_modseq = checkpoint.3,
+                                    sync_state_bytes = state.len(),
+                                    upload_state_buffer_bytes = state_upload_buffer.len(),
+                                    upload_state_client_bytes = *client_state_uploaded_bytes,
+                                    incremental_transfer_available = incremental_transfer_buffer.is_some(),
+                                    transfer_buffer_bytes = transfer_buffer.len(),
+                                    transfer_position = *transfer_position,
+                                    checkpoint_store_status = "skipped_partial_scope",
+                                    checkpoint_skip_reason = *checkpoint_skip_reason,
+                                    "rca debug mapi sync checkpoint store"
+                                );
+                                session.record_completed_sync_checkpoint(
+                                    checkpoint.5,
+                                    debug_role_for_folder_id(checkpoint.5),
+                                    debug_container_class_for_folder_id(checkpoint.5),
+                                    checkpoint.1.as_str(),
+                                    checkpoint.4,
+                                    "skipped_partial_scope",
                                 );
                             } else {
                                 let checkpoint_result = store
@@ -7512,6 +7590,8 @@ where
                     checkpoint_kind,
                     checkpoint_change_sequence,
                     checkpoint_modseq,
+                    checkpoint_store_allowed,
+                    checkpoint_skip_reason,
                     sync_type,
                     state,
                 )) = synchronization_context_state(input_object(session, &handle_slots, &request))
@@ -7546,6 +7626,8 @@ where
                         checkpoint_kind,
                         checkpoint_change_sequence,
                         checkpoint_modseq,
+                        checkpoint_store_allowed,
+                        checkpoint_skip_reason,
                         sync_type,
                         state: transfer_buffer.clone(),
                         state_upload_property_tag: None,
@@ -8829,6 +8911,23 @@ fn imported_source_key_reserved_global_counter(
         _ => return None,
     };
     persistable_import_source_key_global_counter(source_key)
+}
+
+fn pending_message_is_sync_metadata_only(
+    properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
+) -> bool {
+    !properties.is_empty()
+        && recipients.is_empty()
+        && properties.keys().all(|tag| {
+            matches!(
+                *tag,
+                PID_TAG_SOURCE_KEY
+                    | PID_TAG_LAST_MODIFICATION_TIME
+                    | PID_TAG_CHANGE_KEY
+                    | PID_TAG_PREDECESSOR_CHANGE_LIST
+            )
+        })
 }
 
 fn imported_property_source_key_global_counter(properties: &[(u32, MapiValue)]) -> Option<u64> {

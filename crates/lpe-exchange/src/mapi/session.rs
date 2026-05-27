@@ -247,6 +247,8 @@ pub(in crate::mapi) enum MapiObject {
         checkpoint_kind: MapiCheckpointKind,
         checkpoint_change_sequence: u64,
         checkpoint_modseq: u64,
+        checkpoint_store_allowed: bool,
+        checkpoint_skip_reason: &'static str,
         sync_type: u8,
         state: Vec<u8>,
         state_upload_property_tag: Option<u32>,
@@ -931,7 +933,17 @@ pub(in crate::mapi) fn input_object_mut<'a>(
 
 pub(in crate::mapi) fn synchronization_context_state(
     object: Option<&MapiObject>,
-) -> Option<(u64, Option<Uuid>, MapiCheckpointKind, u64, u64, u8, Vec<u8>)> {
+) -> Option<(
+    u64,
+    Option<Uuid>,
+    MapiCheckpointKind,
+    u64,
+    u64,
+    bool,
+    &'static str,
+    u8,
+    Vec<u8>,
+)> {
     match object {
         Some(MapiObject::SynchronizationSource {
             folder_id,
@@ -939,6 +951,8 @@ pub(in crate::mapi) fn synchronization_context_state(
             checkpoint_kind,
             checkpoint_change_sequence,
             checkpoint_modseq,
+            checkpoint_store_allowed,
+            checkpoint_skip_reason,
             sync_type,
             state,
             ..
@@ -948,6 +962,8 @@ pub(in crate::mapi) fn synchronization_context_state(
             *checkpoint_kind,
             *checkpoint_change_sequence,
             *checkpoint_modseq,
+            *checkpoint_store_allowed,
+            *checkpoint_skip_reason,
             *sync_type,
             state.clone(),
         )),
@@ -963,6 +979,8 @@ pub(in crate::mapi) fn synchronization_context_state(
             *checkpoint_kind,
             0,
             1,
+            true,
+            "",
             0,
             state.clone(),
         )),
