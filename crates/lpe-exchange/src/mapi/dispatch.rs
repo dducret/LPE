@@ -7597,6 +7597,11 @@ where
                         _ => None,
                     })
                     .unwrap_or_default();
+                let import_source_key_global_counter =
+                    imported_property_source_key_global_counter(&property_values);
+                let import_source_key_identity_scope = import_source_key_global_counter
+                    .map(import_source_key_identity_scope)
+                    .unwrap_or("");
                 let message_id = request.import_message_id().unwrap_or(0);
                 tracing::info!(
                     rca_debug = true,
@@ -7614,6 +7619,10 @@ where
                     import_property_tag_count = property_values.len(),
                     import_property_tags = %import_property_tags,
                     import_source_key = %import_source_key,
+                    import_source_key_global_counter = import_source_key_global_counter
+                        .map(|counter| counter.to_string())
+                        .unwrap_or_default(),
+                    import_source_key_identity_scope,
                     parsed_message_id = format_args!("0x{message_id:016x}"),
                     "rca debug mapi sync import message change"
                 );
@@ -8819,9 +8828,40 @@ fn imported_source_key_reserved_global_counter(
         MapiValue::Binary(bytes) => bytes,
         _ => return None,
     };
-    let object_id = crate::mapi::identity::object_id_from_source_key(source_key)?;
-    let counter = crate::mapi::identity::global_counter_from_store_id(object_id)?;
-    (counter >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER).then_some(counter)
+    persistable_import_source_key_global_counter(source_key)
+}
+
+fn imported_property_source_key_global_counter(properties: &[(u32, MapiValue)]) -> Option<u64> {
+    properties
+        .iter()
+        .find_map(|(tag, value)| match (*tag, value) {
+            (PID_TAG_SOURCE_KEY, MapiValue::Binary(bytes)) => {
+                source_key_global_counter(bytes.as_slice())
+            }
+            _ => None,
+        })
+}
+
+fn persistable_import_source_key_global_counter(source_key: &[u8]) -> Option<u64> {
+    let counter = source_key_global_counter(source_key)?;
+    (import_source_key_identity_scope(counter) == "persistable_dynamic").then_some(counter)
+}
+
+fn source_key_global_counter(source_key: &[u8]) -> Option<u64> {
+    if source_key.len() != 22 || source_key[..16] != crate::mapi::identity::STORE_REPLICA_GUID {
+        return None;
+    }
+    crate::mapi::identity::global_counter_from_globcnt(source_key.get(16..22)?)
+}
+
+fn import_source_key_identity_scope(counter: u64) -> &'static str {
+    if counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
+        "system_reserved"
+    } else if counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER {
+        "out_of_lpe_persisted_range"
+    } else {
+        "persistable_dynamic"
+    }
 }
 
 fn hierarchy_checkpoint_status(
