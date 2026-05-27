@@ -1,4 +1,6 @@
-use super::properties::{write_ascii_z, write_multi_string, write_multi_string8};
+use super::properties::{
+    write_ascii_z, write_multi_string, write_multi_string8, NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID,
+};
 use super::rop::*;
 use super::session::*;
 use super::transport::*;
@@ -7,7 +9,7 @@ use super::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
-const NSPI_ROWSET_DEBUG_SCHEMA: &str = "nspi-rowset-explicit-table-v1";
+const NSPI_ROWSET_DEBUG_SCHEMA: &str = "nspi-rowset-explicit-table-v2";
 
 static NSPI_OBJECT_IDS: OnceLock<Mutex<HashMap<(Uuid, u8, Uuid), u64>>> = OnceLock::new();
 
@@ -173,11 +175,7 @@ const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
 ];
 
 const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
-    (0x0FF6_0102, "PidTagInstanceKey"),
     (0x0FF8_0102, "PidTagMappingSignature"),
-    (0x0FF9_0102, "PidTagRecordKey"),
-    (0x0FFF_0102, "PidTagEntryId"),
-    (0x300B_0102, "PidTagSearchKey"),
     (0x3902_0102, "PidTagTemplateid"),
     (0x39FF_001E, "PidTag7BitDisplayName"),
     (0x39FF_001F, "PidTag7BitDisplayName"),
@@ -686,7 +684,6 @@ fn log_nspi_get_props_debug(
     let message = "rca debug mapi nspi get props";
     tracing::info!(
         rca_debug = true,
-        nspi_rowset_debug_schema = NSPI_ROWSET_DEBUG_SCHEMA,
         adapter = "mapi",
         endpoint = "nspi",
         mailbox = %principal.email,
@@ -810,10 +807,13 @@ fn log_nspi_rowset_debug(
     let message = "rca debug mapi nspi rowset";
     tracing::info!(
         rca_debug = true,
+        nspi_rowset_debug_schema = NSPI_ROWSET_DEBUG_SCHEMA,
         adapter = "mapi",
         endpoint = "nspi",
         mailbox = %principal.email,
         request_type = request_type,
+        request_type_is_query_rows = nspi_request_type_is_query_rows(request_type),
+        request_type_debug = ?request_type,
         request_body_bytes = request.len(),
         request_body_preview_hex = %hex_preview(request, 96),
         current_rec = %current_rec,
@@ -961,7 +961,7 @@ pub(in crate::mapi) fn nspi_query_rows_explicit_entry_ids(
     request_type: &str,
     request: &[u8],
 ) -> Vec<u32> {
-    if !nspi_request_type_is_query_rows(request_type) {
+    if !nspi_request_type_is_query_rows(request_type) && !nspi_body_looks_like_query_rows(request) {
         return Vec::new();
     }
     const FLAGS_BYTES: usize = 4;
@@ -1000,15 +1000,32 @@ fn nspi_query_rows_count_details(
     request_type: &str,
     request: &[u8],
 ) -> Option<NspiQueryRowsCountDetails> {
-    if !nspi_request_type_is_query_rows(request_type) {
+    if !nspi_request_type_is_query_rows(request_type) && !nspi_body_looks_like_query_rows(request) {
         return None;
     }
+    nspi_query_rows_layout_from_body(request)
+}
+
+fn nspi_request_type_is_query_rows(request_type: &str) -> bool {
+    request_type
+        .trim_matches(|ch: char| ch.is_control() || ch.is_whitespace())
+        .eq_ignore_ascii_case("QueryRows")
+}
+
+fn nspi_body_looks_like_query_rows(request: &[u8]) -> bool {
+    nspi_query_rows_layout_from_body(request).is_some()
+}
+
+fn nspi_query_rows_layout_from_body(request: &[u8]) -> Option<NspiQueryRowsCountDetails> {
     const FLAGS_BYTES: usize = 4;
     const STAT_BYTES: usize = 36;
     const ETABLE_COUNT_BYTES: usize = 4;
     let etable_count_offset = FLAGS_BYTES + STAT_BYTES;
     let etable_count_bytes = request.get(etable_count_offset..etable_count_offset + 4)?;
     let etable_count = u32::from_le_bytes(etable_count_bytes.try_into().ok()?) as usize;
+    if etable_count > 1024 {
+        return None;
+    }
     let etable_bytes = etable_count.checked_mul(4)?;
     let count_offset = FLAGS_BYTES
         .checked_add(STAT_BYTES)?
@@ -1020,12 +1037,6 @@ fn nspi_query_rows_count_details(
         explicit_table_count: etable_count,
         count_offset,
     })
-}
-
-fn nspi_request_type_is_query_rows(request_type: &str) -> bool {
-    request_type
-        .trim_matches(|ch: char| ch.is_control() || ch.is_whitespace())
-        .eq_ignore_ascii_case("QueryRows")
 }
 
 pub(in crate::mapi) async fn nspi_matches_response<S>(
@@ -1247,6 +1258,10 @@ pub(in crate::mapi) fn nspi_entry_value(
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
         0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
         0x3000_0003 => NspiValue::U32(nspi_entry_id(account_id, entry)),
+        0x0FF6_0102 => NspiValue::OwnedBinary(nspi_entry_instance_key(account_id, entry)),
+        0x0FF9_0102 => NspiValue::OwnedBinary(nspi_entry_record_key(entry)),
+        0x0FFF_0102 => NspiValue::OwnedBinary(nspi_entry_permanent_entry_id(entry)),
+        0x300B_0102 => NspiValue::OwnedBinary(nspi_entry_search_key(entry)),
         0x3004_001F | 0x3004_001E => NspiValue::String(&entry.email),
         0x3002_001F | 0x3002_001E => NspiValue::String("SMTP"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
@@ -1483,6 +1498,34 @@ fn write_nspi_binary(body: &mut Vec<u8>, value: &[u8]) {
     body.extend_from_slice(&value[..len]);
 }
 
+fn nspi_entry_instance_key(account_id: Uuid, entry: &ExchangeAddressBookEntry) -> Vec<u8> {
+    let mut value = Vec::with_capacity(20);
+    value.extend_from_slice(&nspi_entry_id(account_id, entry).to_le_bytes());
+    value.extend_from_slice(entry.id.as_bytes());
+    value
+}
+
+fn nspi_entry_record_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
+    entry.id.as_bytes().to_vec()
+}
+
+fn nspi_entry_permanent_entry_id(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
+    let legacy_dn = nspi_entry_unprefixed_legacy_dn(entry);
+    let mut value = Vec::with_capacity(28 + legacy_dn.len() + 1);
+    value.extend_from_slice(&[0, 0, 0, 0]);
+    value.extend_from_slice(&NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID);
+    value.extend_from_slice(&1u32.to_le_bytes());
+    value.extend_from_slice(&nspi_entry_display_type(entry).to_le_bytes());
+    value.extend_from_slice(legacy_dn.as_bytes());
+    value.push(0);
+    value
+}
+
+fn nspi_entry_search_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
+    let legacy_dn = nspi_entry_legacy_dn(entry).to_ascii_uppercase();
+    format!("EX:{}", legacy_dn).into_bytes()
+}
+
 pub(in crate::mapi) fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
     nspi_entry_legacy_dn_with_prefix(entry, true)
 }
@@ -1499,10 +1542,15 @@ pub(in crate::mapi) fn nspi_entry_legacy_dn_with_prefix(
         ExchangeAddressBookEntryKind::Account => "acct",
         ExchangeAddressBookEntryKind::Contact => "contact",
     };
-    let source = if entry.email.trim().is_empty() {
-        entry.id.to_string()
-    } else {
-        entry.email.clone()
+    let source = match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account if entry.email.trim().is_empty() => {
+            entry.id.to_string()
+        }
+        ExchangeAddressBookEntryKind::Account => entry.email.clone(),
+        ExchangeAddressBookEntryKind::Contact if entry.email.trim().is_empty() => {
+            entry.id.to_string()
+        }
+        ExchangeAddressBookEntryKind::Contact => format!("{}-{}", entry.email, entry.id),
     };
     let legacy_user = source
         .chars()
@@ -1918,8 +1966,8 @@ mod tests {
             Some("PidTagGivenName")
         );
         assert_eq!(
-            nspi_known_unsupported_property_tag_name(0x0FFF_0102),
-            Some("PidTagEntryId")
+            nspi_known_unsupported_property_tag_name(0x0FF8_0102),
+            Some("PidTagMappingSignature")
         );
         assert_eq!(
             nspi_known_unsupported_property_tag_name(0x3A20_001F),
@@ -1972,6 +2020,19 @@ mod tests {
         assert_eq!(nspi_query_rows_count("QueryRows", &request), Some(1));
         assert_eq!(
             nspi_query_rows_explicit_entry_ids("QueryRows", &request),
+            vec![0x8000_0034]
+        );
+    }
+
+    #[test]
+    fn query_rows_parser_falls_back_to_body_shape_for_logged_outlook_body() {
+        let request = hex_bytes(
+            "00000000ff0000000000000000000000000000000000000000000000e40400000904000009080000010000003400008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a1f0003301f0002300b00403a1f00ff391f00",
+        );
+
+        assert_eq!(nspi_query_rows_count("", &request), Some(1));
+        assert_eq!(
+            nspi_query_rows_explicit_entry_ids("", &request),
             vec![0x8000_0034]
         );
     }
@@ -2049,6 +2110,73 @@ mod tests {
 
         assert_eq!(count, 1);
         assert_eq!(keys, "contact:bob.contact@example.test:bob contactx2");
+    }
+
+    #[test]
+    fn nspi_duplicate_contacts_have_distinct_outlook_identity_fields() {
+        let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let first = ExchangeAddressBookEntry {
+            id: Uuid::parse_str("26b8ebbd-63a5-4741-b8d6-d7eda9c31c3d").unwrap(),
+            display_name: "Bob Contact".to_string(),
+            email: "bob.contact@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        };
+        let second = ExchangeAddressBookEntry {
+            id: Uuid::parse_str("9bd2958d-9858-4fe3-8e6b-4ddd9dcc6bc6").unwrap(),
+            display_name: "Bob Contact".to_string(),
+            email: "bob.contact@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        };
+
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &first, 0x39FE_001F)),
+            nspi_string_value(nspi_entry_value(account_id, &second, 0x39FE_001F))
+        );
+        assert_ne!(
+            nspi_u32_value(nspi_entry_value(account_id, &first, 0x3000_0003)),
+            nspi_u32_value(nspi_entry_value(account_id, &second, 0x3000_0003))
+        );
+        assert_ne!(nspi_entry_legacy_dn(&first), nspi_entry_legacy_dn(&second));
+        assert_ne!(
+            nspi_binary_value(nspi_entry_value(account_id, &first, 0x0FF6_0102)),
+            nspi_binary_value(nspi_entry_value(account_id, &second, 0x0FF6_0102))
+        );
+        assert_ne!(
+            nspi_binary_value(nspi_entry_value(account_id, &first, 0x0FF9_0102)),
+            nspi_binary_value(nspi_entry_value(account_id, &second, 0x0FF9_0102))
+        );
+        assert_ne!(
+            nspi_binary_value(nspi_entry_value(account_id, &first, 0x0FFF_0102)),
+            nspi_binary_value(nspi_entry_value(account_id, &second, 0x0FFF_0102))
+        );
+        assert_ne!(
+            nspi_binary_value(nspi_entry_value(account_id, &first, 0x300B_0102)),
+            nspi_binary_value(nspi_entry_value(account_id, &second, 0x300B_0102))
+        );
+    }
+
+    fn nspi_binary_value(value: NspiValue<'_>) -> Vec<u8> {
+        match value {
+            NspiValue::OwnedBinary(value) => value,
+            _ => panic!("expected binary NSPI value"),
+        }
+    }
+
+    fn nspi_u32_value(value: NspiValue<'_>) -> u32 {
+        match value {
+            NspiValue::U32(value) => value,
+            _ => panic!("expected u32 NSPI value"),
+        }
+    }
+
+    fn nspi_string_value(value: NspiValue<'_>) -> String {
+        match value {
+            NspiValue::String(value) => value.to_string(),
+            NspiValue::OwnedString(value) => value,
+            _ => panic!("expected string NSPI value"),
+        }
     }
 
     fn hex_bytes(hex: &str) -> Vec<u8> {
