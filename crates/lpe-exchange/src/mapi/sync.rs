@@ -132,31 +132,28 @@ pub(in crate::mapi) fn commit_uploaded_sync_state(
 
 pub(in crate::mapi) fn rop_synchronization_import_message_change_response(
     request: &RopRequest,
-    message_id: u64,
 ) -> Vec<u8> {
     let mut response = vec![0x72, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
-    write_object_id(&mut response, message_id);
+    write_object_id(&mut response, 0);
     response
 }
 
 pub(in crate::mapi) fn rop_synchronization_import_hierarchy_change_response(
     request: &RopRequest,
-    folder_id: u64,
 ) -> Vec<u8> {
     let mut response = vec![0x73, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_object_id(&mut response, folder_id);
+    write_object_id(&mut response, 0);
     response
 }
 
 pub(in crate::mapi) fn rop_synchronization_import_message_move_response(
     request: &RopRequest,
-    message_id: u64,
 ) -> Vec<u8> {
     let mut response = vec![0x78, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_object_id(&mut response, message_id);
+    write_object_id(&mut response, 0);
     response
 }
 
@@ -1126,6 +1123,7 @@ pub(in crate::mapi) fn email_matches_folder(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapi::rop::RopRequest;
 
     fn mailbox(id: u128, role: &str, name: &str) -> JmapMailbox {
         JmapMailbox {
@@ -1139,6 +1137,41 @@ mod tests {
             unread_emails: 0,
             is_subscribed: true,
         }
+    }
+
+    #[test]
+    fn import_rop_success_responses_return_zero_object_ids() {
+        let import_change = RopRequest {
+            rop_id: 0x72,
+            input_handle_index: Some(1),
+            output_handle_index: Some(3),
+            payload: Vec::new(),
+        };
+        let import_hierarchy = RopRequest {
+            rop_id: 0x73,
+            input_handle_index: Some(2),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let import_move = RopRequest {
+            rop_id: 0x78,
+            input_handle_index: Some(4),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        assert_eq!(
+            rop_synchronization_import_message_change_response(&import_change),
+            vec![0x72, 0x03, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            rop_synchronization_import_hierarchy_change_response(&import_hierarchy),
+            vec![0x73, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            rop_synchronization_import_message_move_response(&import_move),
+            vec![0x78, 0x04, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
     }
 
     #[test]

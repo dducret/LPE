@@ -2185,6 +2185,37 @@ fn upload_state_property_name(tag: u32) -> &'static str {
     }
 }
 
+fn upload_state_marker_bit(tag: u32) -> u8 {
+    match tag {
+        0x4017_0003 | 0x4017_0102 => 0x01,
+        0x6796_0102 => 0x02,
+        0x67DA_0102 => 0x04,
+        0x67D2_0102 => 0x08,
+        _ => 0,
+    }
+}
+
+fn uploaded_state_has_delta_anchor(marker_mask: u8) -> bool {
+    marker_mask & 0x03 == 0x03
+}
+
+fn uploaded_state_marker_summary(marker_mask: u8) -> String {
+    let mut markers = Vec::new();
+    if marker_mask & 0x01 != 0 {
+        markers.push("MetaTagIdsetGiven");
+    }
+    if marker_mask & 0x02 != 0 {
+        markers.push("MetaTagCnsetSeen");
+    }
+    if marker_mask & 0x04 != 0 {
+        markers.push("MetaTagCnsetSeenFAI");
+    }
+    if marker_mask & 0x08 != 0 {
+        markers.push("MetaTagCnsetRead");
+    }
+    markers.join(",")
+}
+
 fn sync_checkpoint_scope(
     folder_id: u64,
     checkpoint_mailbox_id: Option<Uuid>,
@@ -6666,8 +6697,10 @@ where
                         checkpoint_modseq: changes.current_modseq,
                         sync_type,
                         state,
+                        state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
+                        client_state_uploaded_marker_mask: 0,
                         incremental_transfer_buffer,
                         transfer_buffer,
                         transfer_position: 0,
@@ -6715,8 +6748,10 @@ where
                         checkpoint_modseq: 1,
                         sync_type: 0,
                         state: Vec::new(),
+                        state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
+                        client_state_uploaded_marker_mask: 0,
                         incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,
@@ -6770,8 +6805,10 @@ where
                         checkpoint_modseq: 1,
                         sync_type: 0,
                         state: Vec::new(),
+                        state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
+                        client_state_uploaded_marker_mask: 0,
                         incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,
@@ -6793,6 +6830,7 @@ where
                         state,
                         state_upload_buffer,
                         client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
                         incremental_transfer_buffer,
                         transfer_buffer,
                         transfer_position,
@@ -6864,6 +6902,12 @@ where
                                 %mapi_mailstore::final_sync_state_debug_summary(state),
                             upload_state_buffer_bytes = state_upload_buffer.len(),
                             upload_state_client_bytes = *client_state_uploaded_bytes,
+                            upload_state_marker_mask =
+                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
+                            upload_state_markers =
+                                %uploaded_state_marker_summary(*client_state_uploaded_marker_mask),
+                            upload_state_has_delta_anchor =
+                                uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask),
                             incremental_transfer_available = incremental_transfer_buffer.is_some(),
                             incremental_transfer_buffer_bytes = incremental_transfer_buffer
                                 .as_ref()
@@ -7087,12 +7131,14 @@ where
                         mailbox_id,
                         checkpoint_kind,
                         sync_type,
+                        state_upload_property_tag,
                         state_upload_buffer,
                         ..
                     }) => {
                         let property_tag = request.upload_state_property_tag().unwrap_or_default();
                         let declared_bytes =
                             request.upload_state_transfer_size().unwrap_or_default();
+                        *state_upload_property_tag = Some(property_tag);
                         state_upload_buffer.clear();
                         tracing::info!(
                             rca_debug = true,
@@ -7240,8 +7286,10 @@ where
                         checkpoint_kind,
                         sync_type,
                         state,
+                        state_upload_property_tag,
                         state_upload_buffer,
                         client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
                         incremental_transfer_buffer,
                         transfer_buffer,
                         transfer_position,
@@ -7253,14 +7301,20 @@ where
                         } else {
                             mapi_mailstore::replguid_globset_debug_summary(state_upload_buffer)
                         };
-                        let may_use_incremental = *client_state_uploaded_bytes == 0;
+                        let property_tag = state_upload_property_tag.take().unwrap_or_default();
                         let upload_state_empty_stream_after_client_state =
                             uploaded_bytes == 0 && *client_state_uploaded_bytes > 0;
+                        if uploaded_bytes > 0 {
+                            *client_state_uploaded_marker_mask |=
+                                upload_state_marker_bit(property_tag);
+                        }
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
                             (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
                         let mut selected_checkpoint_delta = false;
-                        if may_use_incremental && uploaded_bytes > 0 {
+                        let has_delta_anchor =
+                            uploaded_state_has_delta_anchor(*client_state_uploaded_marker_mask);
+                        if has_delta_anchor {
                             if let Some(buffer) = incremental_transfer_buffer.take() {
                                 *transfer_buffer = buffer;
                                 *transfer_position = 0;
@@ -7288,8 +7342,15 @@ where
                             upload_state_empty_stream = uploaded_bytes == 0,
                             upload_state_empty_stream_expected = uploaded_bytes == 0,
                             upload_state_empty_stream_after_client_state,
+                            upload_state_property_tag = format_args!("0x{property_tag:08x}"),
+                            upload_state_property_name = upload_state_property_name(property_tag),
                             upload_state_stream_summary = %upload_state_stream_summary,
                             upload_state_client_bytes = *client_state_uploaded_bytes,
+                            upload_state_marker_mask =
+                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
+                            upload_state_markers =
+                                %uploaded_state_marker_summary(*client_state_uploaded_marker_mask),
+                            upload_state_has_delta_anchor = has_delta_anchor,
                             upload_state_selected_checkpoint_delta = selected_checkpoint_delta,
                             transfer_buffer_bytes = transfer_buffer.len(),
                             transfer_position = *transfer_position,
@@ -7404,8 +7465,10 @@ where
                         checkpoint_modseq,
                         sync_type,
                         state: transfer_buffer.clone(),
+                        state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
                         client_state_uploaded_bytes: 0,
+                        client_state_uploaded_marker_mask: 0,
                         incremental_transfer_buffer: None,
                         transfer_buffer,
                         transfer_position: 0,
@@ -7520,10 +7583,7 @@ where
                             );
                             set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                             responses.extend_from_slice(
-                                &rop_synchronization_import_message_change_response(
-                                    &request,
-                                    shortcut_id,
-                                ),
+                                &rop_synchronization_import_message_change_response(&request),
                             );
                             output_handles.push(handle);
                         }
@@ -7566,7 +7626,7 @@ where
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(
-                        &rop_synchronization_import_message_change_response(&request, message_id),
+                        &rop_synchronization_import_message_change_response(&request),
                     );
                     output_handles.push(handle);
                 } else if message_id != 0 && snapshot.note_for_id(folder_id, message_id).is_some() {
@@ -7597,7 +7657,7 @@ where
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(
-                        &rop_synchronization_import_message_change_response(&request, message_id),
+                        &rop_synchronization_import_message_change_response(&request),
                     );
                     output_handles.push(handle);
                 } else if message_id != 0
@@ -7632,7 +7692,7 @@ where
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(
-                        &rop_synchronization_import_message_change_response(&request, message_id),
+                        &rop_synchronization_import_message_change_response(&request),
                     );
                     output_handles.push(handle);
                 } else {
@@ -7655,7 +7715,7 @@ where
                         session.allocate_output_handle(request.output_handle_index, pending_object);
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(
-                        &rop_synchronization_import_message_change_response(&request, 0),
+                        &rop_synchronization_import_message_change_response(&request),
                     );
                     output_handles.push(handle);
                 }
@@ -7706,10 +7766,7 @@ where
                         && existing.name.eq_ignore_ascii_case(&display_name)
                     {
                         responses.extend_from_slice(
-                            &rop_synchronization_import_hierarchy_change_response(
-                                &request,
-                                mapi_folder_id(existing),
-                            ),
+                            &rop_synchronization_import_hierarchy_change_response(&request),
                         );
                     } else {
                         responses.extend_from_slice(&rop_error_response(
@@ -7739,7 +7796,7 @@ where
                     .await
                 {
                     Ok(mailbox) => {
-                        let folder_id = match remember_created_mapi_identity(
+                        match remember_created_mapi_identity(
                             store,
                             principal,
                             MapiIdentityObjectKind::Mailbox,
@@ -7748,7 +7805,7 @@ where
                         )
                         .await
                         {
-                            Ok(folder_id) => folder_id,
+                            Ok(_) => {}
                             Err(_) => {
                                 responses.extend_from_slice(&rop_error_response(
                                     0x73,
@@ -7759,9 +7816,7 @@ where
                             }
                         };
                         responses.extend_from_slice(
-                            &rop_synchronization_import_hierarchy_change_response(
-                                &request, folder_id,
-                            ),
+                            &rop_synchronization_import_hierarchy_change_response(&request),
                         );
                     }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
@@ -7878,10 +7933,10 @@ where
                 let source_folder_id = input_object(session, &handle_slots, &request)
                     .and_then(MapiObject::folder_id)
                     .unwrap_or(INBOX_FOLDER_ID);
-                if let Some(note) = snapshot.note_for_id(source_folder_id, message_id) {
+                if snapshot.note_for_id(source_folder_id, message_id).is_some() {
                     if target_folder_id == NOTES_FOLDER_ID {
                         responses.extend_from_slice(
-                            &rop_synchronization_import_message_move_response(&request, note.id),
+                            &rop_synchronization_import_message_move_response(&request),
                         );
                     } else {
                         responses.extend_from_slice(&rop_error_response(
@@ -7892,10 +7947,13 @@ where
                     }
                     continue;
                 }
-                if let Some(entry) = snapshot.journal_entry_for_id(source_folder_id, message_id) {
+                if snapshot
+                    .journal_entry_for_id(source_folder_id, message_id)
+                    .is_some()
+                {
                     if target_folder_id == JOURNAL_FOLDER_ID {
                         responses.extend_from_slice(
-                            &rop_synchronization_import_message_move_response(&request, entry.id),
+                            &rop_synchronization_import_message_move_response(&request),
                         );
                     } else {
                         responses.extend_from_slice(&rop_error_response(
@@ -7938,7 +7996,7 @@ where
                     .await
                 {
                     Ok(moved) => {
-                        let moved_id = match remember_created_mapi_identity(
+                        match remember_created_mapi_identity(
                             store,
                             principal,
                             MapiIdentityObjectKind::Message,
@@ -7947,7 +8005,7 @@ where
                         )
                         .await
                         {
-                            Ok(moved_id) => moved_id,
+                            Ok(_) => {}
                             Err(_) => {
                                 responses.extend_from_slice(&rop_error_response(
                                     0x78,
@@ -7958,7 +8016,7 @@ where
                             }
                         };
                         responses.extend_from_slice(
-                            &rop_synchronization_import_message_move_response(&request, moved_id),
+                            &rop_synchronization_import_message_move_response(&request),
                         );
                     }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
@@ -8759,6 +8817,17 @@ fn summarize_fast_transfer_get_buffer_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uploaded_state_delta_anchor_requires_idset_and_cnset_seen() {
+        let idset_only = upload_state_marker_bit(0x4017_0003);
+        assert!(!uploaded_state_has_delta_anchor(idset_only));
+
+        let cnset_only = upload_state_marker_bit(0x6796_0102);
+        assert!(!uploaded_state_has_delta_anchor(cnset_only));
+
+        assert!(uploaded_state_has_delta_anchor(idset_only | cnset_only));
+    }
 
     #[test]
     fn execute_rop_debug_summary_decodes_ids_and_return_codes() {
