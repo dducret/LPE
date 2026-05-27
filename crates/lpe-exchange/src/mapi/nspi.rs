@@ -7,6 +7,8 @@ use super::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
+const NSPI_ROWSET_DEBUG_SCHEMA: &str = "nspi-rowset-explicit-table-v1";
+
 static NSPI_OBJECT_IDS: OnceLock<Mutex<HashMap<(Uuid, u8, Uuid), u64>>> = OnceLock::new();
 
 pub(in crate::mapi) async fn handle_nspi_request<S>(
@@ -684,6 +686,7 @@ fn log_nspi_get_props_debug(
     let message = "rca debug mapi nspi get props";
     tracing::info!(
         rca_debug = true,
+        nspi_rowset_debug_schema = NSPI_ROWSET_DEBUG_SCHEMA,
         adapter = "mapi",
         endpoint = "nspi",
         mailbox = %principal.email,
