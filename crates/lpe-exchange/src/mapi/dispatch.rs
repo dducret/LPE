@@ -6559,6 +6559,7 @@ where
                 }
                 let state = mapi_mailstore::sync_state_token_with_special_objects(
                     sync_type,
+                    sync_flags,
                     folder_id,
                     &state_sync_mailboxes,
                     &all_sync_emails,
@@ -6625,6 +6626,36 @@ where
                     .as_ref()
                     .map(|buffer| buffer.len())
                     .unwrap_or_default();
+                let scope_flags_present = sync_type != 0x01 || sync_flags & 0x0030 != 0;
+                let normal_scope_requested =
+                    sync_type != 0x01 || !scope_flags_present || sync_flags & 0x0020 != 0;
+                let fai_scope_requested =
+                    sync_type != 0x01 || !scope_flags_present || sync_flags & 0x0010 != 0;
+                let wire_sync_email_count = if normal_scope_requested {
+                    all_sync_emails.len()
+                } else {
+                    0
+                };
+                let wire_sync_special_object_count = all_special_sync_objects
+                    .iter()
+                    .filter(|object| {
+                        if object.associated {
+                            fai_scope_requested
+                        } else {
+                            normal_scope_requested
+                        }
+                    })
+                    .count();
+                let suppressed_normal_sync_object_count =
+                    all_sync_emails.len().saturating_sub(wire_sync_email_count)
+                        + all_special_sync_objects
+                            .iter()
+                            .filter(|object| !object.associated && !normal_scope_requested)
+                            .count();
+                let suppressed_fai_sync_object_count = all_special_sync_objects
+                    .iter()
+                    .filter(|object| object.associated && !fai_scope_requested)
+                    .count();
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -6668,6 +6699,12 @@ where
                     sync_state_mailbox_count = state_sync_mailboxes.len(),
                     sync_email_count = all_sync_emails.len(),
                     sync_special_object_count = all_special_sync_objects.len(),
+                    normal_scope_requested,
+                    fai_scope_requested,
+                    wire_sync_email_count,
+                    wire_sync_special_object_count,
+                    suppressed_normal_sync_object_count,
+                    suppressed_fai_sync_object_count,
                     checkpoint_delta_mailbox_count,
                     checkpoint_delta_email_count,
                     checkpoint_delta_special_object_count = delta_special_sync_objects.len(),

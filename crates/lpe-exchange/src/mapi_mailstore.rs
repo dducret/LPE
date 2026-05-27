@@ -20,6 +20,7 @@ const PID_TAG_CONTENT_COUNT: u32 = 0x3602_0003;
 const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
+const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_BODY_W: u32 = 0x1000_001F;
@@ -66,6 +67,8 @@ const META_TAG_CNSET_SEEN_FAI: u32 = 0x67DA_0102;
 const META_TAG_CNSET_READ: u32 = 0x67D2_0102;
 const SYNC_TYPE_CONTENTS: u8 = MapiSyncType::Contents.as_u8();
 const SYNC_TYPE_HIERARCHY: u8 = MapiSyncType::Hierarchy.as_u8();
+const SYNC_FLAG_FAI: u16 = 0x0010;
+const SYNC_FLAG_NORMAL: u16 = 0x0020;
 const SYNC_FLAG_NO_FOREIGN_IDENTIFIERS: u16 = 0x0100;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
@@ -293,22 +296,39 @@ pub(crate) fn sync_state_token_with_attachments(
 
 pub(crate) fn sync_state_token_with_special_objects(
     sync_type: u8,
+    sync_flags: u16,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     attachment_facts: &[MessageAttachmentSyncFacts],
     special_objects: &[SpecialMessageSyncFact],
 ) -> Vec<u8> {
-    let mut object_ids = sync_state_object_ids(sync_type, folder_id, mailboxes, emails);
-    let mut change_numbers =
-        sync_state_change_numbers(sync_type, folder_id, mailboxes, emails, attachment_facts);
+    let scoped_emails = if content_sync_includes_normal(sync_type, sync_flags) {
+        emails
+    } else {
+        &[]
+    };
+    let mut object_ids = sync_state_object_ids(sync_type, folder_id, mailboxes, scoped_emails);
+    let mut change_numbers = sync_state_change_numbers(
+        sync_type,
+        folder_id,
+        mailboxes,
+        scoped_emails,
+        attachment_facts,
+    );
     if sync_type == SYNC_TYPE_CONTENTS {
-        object_ids.extend(special_objects.iter().map(|object| object.item_id));
-        change_numbers.extend(
+        object_ids.extend(
             special_objects
                 .iter()
-                .map(|object| change_number_for_store_id(object.item_id)),
+                .filter(|object| {
+                    content_sync_includes_associated(sync_type, sync_flags, object.associated)
+                })
+                .map(|object| object.item_id),
         );
+        change_numbers.extend(special_objects.iter().filter_map(|object| {
+            content_sync_includes_associated(sync_type, sync_flags, object.associated)
+                .then_some(change_number_for_store_id(object.item_id))
+        }));
     }
     final_sync_state_stream(sync_type, &object_ids, &change_numbers)
 }
@@ -578,7 +598,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         }
     }
 
-    let mut messages = emails.iter().collect::<Vec<_>>();
+    let mut messages = emails
+        .iter()
+        .filter(|_| content_sync_includes_normal(sync_type, sync_flags))
+        .collect::<Vec<_>>();
     messages.sort_by(|left, right| {
         left.received_at
             .cmp(&right.received_at)
@@ -696,7 +719,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         }
     }
 
-    let mut special_objects = special_objects.iter().collect::<Vec<_>>();
+    let mut special_objects = special_objects
+        .iter()
+        .filter(|object| content_sync_includes_associated(sync_type, sync_flags, object.associated))
+        .collect::<Vec<_>>();
     special_objects.sort_by(|left, right| {
         left.folder_id
             .cmp(&right.folder_id)
@@ -773,15 +799,33 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         ) {
             write_string8_property(&mut buffer, PID_TAG_NORMALIZED_SUBJECT_A, &object.subject);
         }
-        write_utf16_property(&mut buffer, 0x001A_001F, &object.message_class);
-        write_utf16_property(&mut buffer, 0x1000_001F, &object.body_text);
-        write_i32_property(
-            &mut buffer,
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
+            PID_TAG_MESSAGE_CLASS_W,
+        ) {
+            write_utf16_property(&mut buffer, PID_TAG_MESSAGE_CLASS_W, &object.message_class);
+        }
+        if content_property_in_scope(sync_type, sync_flags, sync_property_tags, PID_TAG_BODY_W) {
+            write_utf16_property(&mut buffer, PID_TAG_BODY_W, &object.body_text);
+        }
+        if content_property_in_scope(
+            sync_type,
+            sync_flags,
+            sync_property_tags,
             PID_TAG_MESSAGE_SIZE,
-            object.message_size as i32,
-        );
+        ) {
+            write_i32_property(
+                &mut buffer,
+                PID_TAG_MESSAGE_SIZE,
+                object.message_size as i32,
+            );
+        }
         for (tag, value) in &object.named_properties {
-            write_special_message_property(&mut buffer, *tag, value);
+            if content_property_in_scope(sync_type, sync_flags, sync_property_tags, *tag) {
+                write_special_message_property(&mut buffer, *tag, value);
+            }
         }
         buffer.extend_from_slice(&0u16.to_le_bytes());
         buffer.extend_from_slice(&0u16.to_le_bytes());
@@ -828,6 +872,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
 
     buffer.extend_from_slice(&sync_state_token_with_special_objects(
         sync_type,
+        sync_flags,
         folder_id,
         state_mailboxes,
         state_emails,
@@ -2958,6 +3003,26 @@ fn content_property_in_scope(
     }
 }
 
+fn content_sync_includes_normal(sync_type: u8, sync_flags: u16) -> bool {
+    sync_type != SYNC_TYPE_CONTENTS
+        || sync_flags & (SYNC_FLAG_NORMAL | SYNC_FLAG_FAI) == 0
+        || sync_flags & SYNC_FLAG_NORMAL != 0
+}
+
+fn content_sync_includes_associated(sync_type: u8, sync_flags: u16, associated: bool) -> bool {
+    if sync_type != SYNC_TYPE_CONTENTS {
+        return true;
+    }
+    if sync_flags & (SYNC_FLAG_NORMAL | SYNC_FLAG_FAI) == 0 {
+        return true;
+    }
+    if associated {
+        sync_flags & SYNC_FLAG_FAI != 0
+    } else {
+        sync_flags & SYNC_FLAG_NORMAL != 0
+    }
+}
+
 fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
     if mailbox.role == "__mapi_ipm_subtree" {
         0
@@ -3724,7 +3789,7 @@ mod tests {
         let email = test_email();
         let buffer = sync_manifest_buffer_with_attachments(
             0x01,
-            0,
+            SYNC_FLAG_NORMAL,
             0x0000_0007,
             &[],
             crate::mapi::identity::INBOX_FOLDER_ID,
@@ -4284,7 +4349,7 @@ mod tests {
         let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
             Uuid::nil(),
             SYNC_TYPE_CONTENTS,
-            0,
+            SYNC_FLAG_NORMAL,
             SYNC_EXTRA_FLAG_EID,
             &[],
             crate::mapi::identity::NOTES_FOLDER_ID,
@@ -4309,6 +4374,124 @@ mod tests {
         assert!(contains_bytes(&buffer, &utf16z("IPM.StickyNote")));
         assert!(contains_bytes(&buffer, &utf16z("Remember this")));
         assert!(contains_bytes(&buffer, &0x8B00_0003u32.to_le_bytes()));
+    }
+
+    #[test]
+    fn content_sync_manifest_applies_property_excludes_to_special_objects() {
+        let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999998").unwrap();
+        let item_id = crate::mapi::identity::mapi_store_id(98);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let special = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+            item_id,
+            canonical_id,
+            associated: false,
+            subject: "Kept subject".to_string(),
+            body_text: "Filtered body".to_string(),
+            message_class: "IPM.Appointment".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 19,
+            named_properties: vec![(0x8205_0003, SpecialMessagePropertyValue::I32(2))],
+        };
+        let excluded_property_tags = [
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_BODY_W,
+            PID_TAG_MESSAGE_SIZE,
+            0x8205_0003,
+        ];
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            SYNC_EXTRA_FLAG_EID,
+            &excluded_property_tags,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            &[special.clone()],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[special],
+            &[],
+            &[],
+            1,
+        );
+
+        assert!(contains_bytes(&buffer, &utf16z("Kept subject")));
+        assert!(!contains_bytes(&buffer, &utf16z("IPM.Appointment")));
+        assert!(!contains_bytes(&buffer, &utf16z("Filtered body")));
+        assert!(!contains_bytes(
+            &buffer,
+            &PID_TAG_MESSAGE_SIZE.to_le_bytes()
+        ));
+        assert!(!contains_bytes(&buffer, &0x8205_0003u32.to_le_bytes()));
+    }
+
+    #[test]
+    fn content_sync_manifest_respects_normal_and_fai_scope_flags() {
+        let normal_canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999997").unwrap();
+        let associated_canonical_id =
+            Uuid::parse_str("99999999-9999-9999-9999-999999999996").unwrap();
+        let normal_item_id = crate::mapi::identity::mapi_store_id(97);
+        let associated_item_id = crate::mapi::identity::mapi_store_id(96);
+        crate::mapi::identity::remember_mapi_identity(normal_canonical_id, normal_item_id);
+        crate::mapi::identity::remember_mapi_identity(associated_canonical_id, associated_item_id);
+        let normal_object = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+            item_id: normal_item_id,
+            canonical_id: normal_canonical_id,
+            associated: false,
+            subject: "Normal appointment".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Appointment".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 19,
+            named_properties: Vec::new(),
+        };
+        let associated_object = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            item_id: associated_item_id,
+            canonical_id: associated_canonical_id,
+            associated: true,
+            subject: "Associated view".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 19,
+            named_properties: Vec::new(),
+        };
+        let email = test_email();
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_FAI,
+            SYNC_EXTRA_FLAG_EID,
+            &[],
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            &[],
+            &[email],
+            &[],
+            &[normal_object.clone(), associated_object.clone()],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            &[normal_object, associated_object],
+            &[],
+            &[],
+            1,
+        );
+
+        assert!(!contains_bytes(&buffer, &utf16z("Hello")));
+        assert!(!contains_bytes(&buffer, &utf16z("Normal appointment")));
+        assert!(!contains_bytes(&buffer, &wire_id_bytes(normal_item_id)));
+        assert!(contains_bytes(&buffer, &utf16z("Associated view")));
+        assert!(contains_bytes(&buffer, &wire_id_bytes(associated_item_id)));
     }
 
     fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
