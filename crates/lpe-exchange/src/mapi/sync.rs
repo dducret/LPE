@@ -35,7 +35,7 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SHORTCUTS_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 20] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 21] = [
     IPM_SUBTREE_FOLDER_ID,
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
@@ -48,6 +48,7 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 20] = [
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
+    REMINDERS_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
     CONFLICTS_FOLDER_ID,
     LOCAL_FAILURES_FOLDER_ID,
@@ -332,6 +333,7 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | JOURNAL_FOLDER_ID
                 | NOTES_FOLDER_ID
                 | TASKS_FOLDER_ID
+                | REMINDERS_FOLDER_ID
                 | DOCUMENT_LIBRARIES_FOLDER_ID
                 | SYNC_ISSUES_FOLDER_ID
                 | CONFLICTS_FOLDER_ID
@@ -1232,17 +1234,21 @@ mod tests {
     }
 
     #[test]
-    fn ipm_hierarchy_does_not_emit_reminders_folder_row_yet() {
+    fn ipm_hierarchy_emits_virtual_reminders_folder_row() {
         let mailboxes = vec![mailbox(
             0x44444444444444444444444444444444,
             "reminders",
             "Reminders",
         )];
 
-        assert!(!hierarchy_virtual_folder_ids(IPM_SUBTREE_FOLDER_ID).contains(&REMINDERS_FOLDER_ID));
-        assert!(sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
-            .iter()
-            .all(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID));
+        assert!(hierarchy_virtual_folder_ids(IPM_SUBTREE_FOLDER_ID).contains(&REMINDERS_FOLDER_ID));
+        assert_eq!(
+            sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
+                .iter()
+                .filter(|mailbox| mapi_folder_id(mailbox) == REMINDERS_FOLDER_ID)
+                .count(),
+            1
+        );
     }
 
     #[test]
