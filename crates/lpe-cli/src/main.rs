@@ -20,6 +20,7 @@ use tracing::{info, warn};
 #[tokio::main]
 async fn main() -> Result<()> {
     init_observability("lpe");
+    log_startup_fingerprint();
 
     if env::args().nth(1).as_deref() == Some("bootstrap-admin") {
         return run_bootstrap_admin_command().await;
@@ -72,6 +73,32 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn log_startup_fingerprint() {
+    let executable_path = env::current_exe()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+    let working_directory = env::current_dir()
+        .ok()
+        .map(|path| path.display().to_string())
+        .unwrap_or_default();
+
+    info!(
+        package_name = env!("CARGO_PKG_NAME"),
+        package_version = env!("CARGO_PKG_VERSION"),
+        git_commit = option_env!("LPE_BUILD_GIT_COMMIT").unwrap_or(""),
+        git_commit_full = option_env!("LPE_BUILD_GIT_COMMIT_FULL").unwrap_or(""),
+        git_commit_time = option_env!("LPE_BUILD_GIT_COMMIT_TIME").unwrap_or(""),
+        git_dirty = option_env!("LPE_BUILD_GIT_DIRTY").unwrap_or(""),
+        build_unix_time = option_env!("LPE_BUILD_UNIX_TIME").unwrap_or(""),
+        target = option_env!("LPE_BUILD_TARGET").unwrap_or(""),
+        profile = option_env!("LPE_BUILD_PROFILE").unwrap_or(""),
+        executable_path = %executable_path,
+        working_directory = %working_directory,
+        "lpe startup build fingerprint"
+    );
 }
 
 async fn auto_bootstrap_admin_if_missing(storage: &Storage) -> Result<()> {
