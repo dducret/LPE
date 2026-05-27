@@ -1,4 +1,15 @@
 use super::dispatch::*;
+use super::identity::{
+    ARCHIVE_FOLDER_ID, CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, CONFLICTS_FOLDER_ID,
+    CONTACTS_FOLDER_ID, CONTACTS_SEARCH_FOLDER_ID, CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    CONVERSATION_HISTORY_FOLDER_ID, DEFERRED_ACTION_FOLDER_ID, DRAFTS_FOLDER_ID,
+    FREEBUSY_DATA_FOLDER_ID, INBOX_FOLDER_ID, IPM_SUBTREE_FOLDER_ID, JOURNAL_FOLDER_ID,
+    JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
+    REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID, SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID,
+    SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
+    SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
+    TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+};
 use super::notifications::*;
 use super::nspi::*;
 use super::rop::*;
@@ -722,6 +733,7 @@ fn log_mapi_session_disconnect(
         .completed_sync_checkpoint_summaries
         .join("|");
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
+    let special_folder_contract_summary = special_folder_contract_summary(session);
     let all_sync_sources_completed = sync_source_count == completed_sync_source_count;
     let clean_client_close_after_sync = endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"
@@ -785,6 +797,7 @@ fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         sync_source_summaries = %sync_source_summaries,
         live_handle_summaries = %live_handle_summaries,
+        special_folder_contract_summary = %special_folder_contract_summary,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         recent_execute_summaries = %recent_execute_summaries,
         "rca debug mapi session disconnect"
@@ -835,6 +848,7 @@ fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_completed_hierarchy_sync_root,
         post_hierarchy_last_get_buffer_summary =
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
+        special_folder_contract_summary = %special_folder_contract_summary,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         "rca debug mapi disconnect wire contract"
     );
@@ -864,6 +878,7 @@ fn log_mapi_session_disconnect(
                 "post_hierarchy_sequence"
             },
         recent_execute_summaries = %recent_execute_summaries,
+        special_folder_contract_summary = %special_folder_contract_summary,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         "rca debug mapi disconnect verdict"
     );
@@ -954,6 +969,82 @@ fn recent_execute_debug_summaries(session: &MapiSession, limit: usize) -> String
         .collect::<Vec<_>>();
     entries.reverse();
     entries.join("|")
+}
+
+fn special_folder_contract_summary(session: &MapiSession) -> String {
+    const SPECIAL_FOLDERS: &[(&str, u64, &str)] = &[
+        ("root", ROOT_FOLDER_ID, "logon"),
+        ("deferred_action", DEFERRED_ACTION_FOLDER_ID, "logon"),
+        ("spooler_queue", SPOOLER_QUEUE_FOLDER_ID, "logon"),
+        ("ipm_subtree", IPM_SUBTREE_FOLDER_ID, "logon"),
+        ("inbox", INBOX_FOLDER_ID, "logon"),
+        ("outbox", OUTBOX_FOLDER_ID, "logon"),
+        ("sent", SENT_FOLDER_ID, "logon"),
+        ("trash", TRASH_FOLDER_ID, "logon"),
+        ("common_views", COMMON_VIEWS_FOLDER_ID, "logon"),
+        ("schedule", SCHEDULE_FOLDER_ID, "logon"),
+        ("search", SEARCH_FOLDER_ID, "logon"),
+        ("personal_views", VIEWS_FOLDER_ID, "logon"),
+        ("shortcuts", SHORTCUTS_FOLDER_ID, "logon"),
+        ("drafts", DRAFTS_FOLDER_ID, "default_ipm"),
+        ("contacts", CONTACTS_FOLDER_ID, "default_ipm"),
+        ("calendar", CALENDAR_FOLDER_ID, "default_ipm"),
+        ("journal", JOURNAL_FOLDER_ID, "default_ipm"),
+        ("notes", NOTES_FOLDER_ID, "default_ipm"),
+        ("tasks", TASKS_FOLDER_ID, "default_ipm"),
+        ("reminders", REMINDERS_FOLDER_ID, "default_ipm"),
+        (
+            "suggested_contacts",
+            SUGGESTED_CONTACTS_FOLDER_ID,
+            "additional_ren",
+        ),
+        ("contacts_search", CONTACTS_SEARCH_FOLDER_ID, "search"),
+        ("sync_issues", SYNC_ISSUES_FOLDER_ID, "additional_ren"),
+        ("conflicts", CONFLICTS_FOLDER_ID, "additional_ren"),
+        ("local_failures", LOCAL_FAILURES_FOLDER_ID, "additional_ren"),
+        (
+            "server_failures",
+            SERVER_FAILURES_FOLDER_ID,
+            "additional_ren",
+        ),
+        ("junk", JUNK_FOLDER_ID, "additional_ren"),
+        ("rss_feeds", RSS_FEEDS_FOLDER_ID, "additional_ren"),
+        ("todo_search", TODO_SEARCH_FOLDER_ID, "search"),
+        (
+            "conversation_actions",
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            "associated",
+        ),
+        ("archive", ARCHIVE_FOLDER_ID, "additional_ren"),
+        ("freebusy_data", FREEBUSY_DATA_FOLDER_ID, "freebusy"),
+        (
+            "conversation_history",
+            CONVERSATION_HISTORY_FOLDER_ID,
+            "additional_ren",
+        ),
+    ];
+
+    SPECIAL_FOLDERS
+        .iter()
+        .map(|(role, folder_id, source)| {
+            let opened = session
+                .post_hierarchy_actions
+                .opened_folder_ids
+                .contains(folder_id);
+            let checkpointed = session
+                .post_hierarchy_actions
+                .completed_sync_checkpoint_folder_ids
+                .contains(folder_id);
+            let hierarchy_root = session
+                .post_hierarchy_actions
+                .last_completed_hierarchy_sync_root
+                .is_some_and(|root_id| root_id == *folder_id);
+            format!(
+                "{role}=0x{folder_id:016x};source={source};opened={opened};checkpointed={checkpointed};hierarchy_root={hierarchy_root}"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {

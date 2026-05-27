@@ -3455,6 +3455,7 @@ where
                     ));
                     continue;
                 }
+                session.record_opened_folder(folder_id);
                 let properties =
                     folder_properties_for_open(store, principal, session, folder_id).await;
                 let handle = session.allocate_output_handle(

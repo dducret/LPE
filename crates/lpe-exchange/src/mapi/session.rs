@@ -53,11 +53,13 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_successful_hierarchy_get_buffer_summary: String,
     pub(in crate::mapi) execute_count: usize,
     pub(in crate::mapi) rop_ids_seen: Vec<u8>,
+    pub(in crate::mapi) opened_folder_ids: Vec<u64>,
     pub(in crate::mapi) bootstrap_probe_observed: bool,
     pub(in crate::mapi) set_properties_probe_observed: bool,
     pub(in crate::mapi) content_sync_configure_observed: bool,
     pub(in crate::mapi) release_client_initiated: bool,
     pub(in crate::mapi) logoff_client_initiated: bool,
+    pub(in crate::mapi) completed_sync_checkpoint_folder_ids: Vec<u64>,
     pub(in crate::mapi) completed_sync_checkpoint_summaries: Vec<String>,
 }
 
@@ -650,10 +652,33 @@ impl MapiSession {
             .completed_sync_checkpoint_summaries
             .contains(&summary)
         {
+            if !self
+                .post_hierarchy_actions
+                .completed_sync_checkpoint_folder_ids
+                .contains(&folder_id)
+            {
+                self.post_hierarchy_actions
+                    .completed_sync_checkpoint_folder_ids
+                    .push(folder_id);
+            }
             self.post_hierarchy_actions
                 .completed_sync_checkpoint_summaries
                 .push(summary);
         }
+    }
+
+    pub(in crate::mapi) fn record_opened_folder(&mut self, folder_id: u64) {
+        if self.post_hierarchy_actions.opened_folder_ids.len() >= 64
+            || self
+                .post_hierarchy_actions
+                .opened_folder_ids
+                .contains(&folder_id)
+        {
+            return;
+        }
+        self.post_hierarchy_actions
+            .opened_folder_ids
+            .push(folder_id);
     }
 
     pub(in crate::mapi) fn allocate_output_handle(
