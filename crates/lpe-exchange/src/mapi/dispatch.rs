@@ -4601,6 +4601,32 @@ where
                     responses.extend_from_slice(&rop_save_changes_message_response(&request, 0));
                     continue;
                 }
+                if pending_message_is_unbacked_trash_sync_upload(folder_id, &properties) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x0c",
+                        input_handle_index = request.input_handle_index.unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        object_kind = "pending_message",
+                        folder_id = %format!("{folder_id:#018x}"),
+                        folder_role = role_for_folder_id(folder_id).unwrap_or(""),
+                        property_tag_count = properties.len(),
+                        property_tags = %format_debug_property_tags(
+                            &properties.keys().copied().collect::<Vec<_>>()
+                        ),
+                        import_source_key_global_counter = pending_source_key_global_counter(&properties)
+                            .map(|counter| counter.to_string())
+                            .unwrap_or_default(),
+                        save_skipped_reason = "unbacked_client_trash_sync_upload",
+                        "rca debug mapi save changes message"
+                    );
+                    responses.extend_from_slice(&rop_save_changes_message_response(&request, 0));
+                    continue;
+                }
                 let input =
                     jmap_import_from_pending_message(principal, mailbox, &properties, &recipients);
                 let reserved_global_counter =
@@ -8928,6 +8954,28 @@ fn pending_message_is_sync_metadata_only(
                     | PID_TAG_PREDECESSOR_CHANGE_LIST
             )
         })
+}
+
+fn pending_message_is_unbacked_trash_sync_upload(
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+) -> bool {
+    if folder_id != TRASH_FOLDER_ID {
+        return false;
+    }
+    let Some(counter) = pending_source_key_global_counter(properties) else {
+        return false;
+    };
+    import_source_key_identity_scope(counter) == "out_of_lpe_persisted_range"
+        && properties.contains_key(&PID_TAG_MESSAGE_CLASS_W)
+        && properties.contains_key(&PID_TAG_NORMALIZED_SUBJECT_W)
+}
+
+fn pending_source_key_global_counter(properties: &HashMap<u32, MapiValue>) -> Option<u64> {
+    match properties.get(&PID_TAG_SOURCE_KEY)? {
+        MapiValue::Binary(bytes) => source_key_global_counter(bytes.as_slice()),
+        _ => None,
+    }
 }
 
 fn imported_property_source_key_global_counter(properties: &[(u32, MapiValue)]) -> Option<u64> {

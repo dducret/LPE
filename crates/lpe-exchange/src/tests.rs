@@ -22309,6 +22309,82 @@ async fn mapi_over_http_save_message_skips_sync_metadata_only_import() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_save_message_skips_unbacked_trash_sync_upload() {
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let mapi_identities = store.mapi_identities.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let out_of_range_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1,
+    );
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_SOURCE_KEY,
+        &crate::mapi::identity::source_key_for_object_id(out_of_range_object_id),
+    );
+    append_mapi_binary_property(&mut property_values, PID_TAG_CHANGE_KEY, b"change");
+    append_mapi_utf16_property(&mut property_values, 0x001A_001F, "IPM.Note");
+    append_mapi_utf16_property(&mut property_values, 0x0E1D_001F, "Client trash upload");
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+        0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
+    ]);
+    rops.push(0);
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x03, 0x00]);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x03, // RopGetPropertiesSpecific on pending message
+    ]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&PID_TAG_CHANGE_KEY.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
+    assert_eq!(imported_emails.lock().unwrap().len(), 0);
+    assert!(!mapi_identities
+        .lock()
+        .unwrap()
+        .values()
+        .any(|object_id| *object_id == out_of_range_object_id));
+}
+
+#[tokio::test]
 async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() {
     let read_message_id = "42424242-4242-4242-4242-424242424242";
     let delete_message_id = "43434343-4343-4343-4343-434343434343";
