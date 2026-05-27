@@ -688,9 +688,6 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
         Some(MapiObject::JournalEntry { .. }) | Some(MapiObject::PendingJournalEntry { .. }) => {
             default_journal_entry_property_tags()
         }
-        Some(MapiObject::SearchFolderDefinition { .. }) => {
-            default_search_folder_definition_property_tags()
-        }
         Some(MapiObject::ConversationAction { .. })
         | Some(MapiObject::PendingConversationAction { .. }) => {
             default_conversation_action_property_tags()
@@ -914,17 +911,6 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 &columns,
                 custom_values,
             )
-        }
-        Some(MapiObject::SearchFolderDefinition { definition_id, .. }) => {
-            let Some(message) = snapshot.search_folder_definition_message_for_id(*definition_id)
-            else {
-                return rop_error_response(
-                    0x07,
-                    request.input_handle_index().unwrap_or(0),
-                    0x8004_010F,
-                );
-            };
-            serialize_search_folder_definition_row(message, &columns)
         }
         Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => {
             let Some(message) = snapshot.navigation_shortcut_message_for_id(*shortcut_id) else {
@@ -1602,14 +1588,6 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{journal_entry_id:#018x}"),
         ),
-        Some(MapiObject::SearchFolderDefinition {
-            folder_id,
-            definition_id,
-        }) => (
-            "search_folder_definition",
-            format!("{folder_id:#018x}"),
-            format!("{definition_id:#018x}"),
-        ),
         Some(MapiObject::ConversationAction {
             folder_id,
             conversation_action_id,
@@ -1882,9 +1860,6 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
         Some(MapiObject::JournalEntry { .. }) | Some(MapiObject::PendingJournalEntry { .. }) => {
             default_journal_entry_property_tags()
         }
-        Some(MapiObject::SearchFolderDefinition { .. }) => {
-            default_search_folder_definition_property_tags()
-        }
         Some(MapiObject::ConversationAction { .. })
         | Some(MapiObject::PendingConversationAction { .. }) => {
             default_conversation_action_property_tags()
@@ -2072,14 +2047,6 @@ pub(in crate::mapi) fn serialize_object_property(
             .map(|entry| {
                 serialize_journal_entry_row(&entry.entry, entry.id, entry.folder_id, &[tag])
             })
-            .unwrap_or_else(|| {
-                let mut value = Vec::new();
-                write_property_default(&mut value, tag);
-                value
-            }),
-        Some(MapiObject::SearchFolderDefinition { definition_id, .. }) => snapshot
-            .search_folder_definition_message_for_id(*definition_id)
-            .map(|message| serialize_search_folder_definition_row(message, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

@@ -7,7 +7,7 @@ use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
     MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
-    MapiMessage, MapiNavigationShortcutMessage, MapiSearchFolderDefinitionMessage, MapiTask,
+    MapiMessage, MapiNavigationShortcutMessage, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -114,7 +114,7 @@ pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
     ]
 }
 
-pub(in crate::mapi) fn default_search_folder_definition_property_tags() -> Vec<u32> {
+pub(in crate::mapi) fn default_navigation_shortcut_property_tags() -> Vec<u32> {
     vec![
         PID_TAG_MID,
         PID_TAG_ENTRY_ID,
@@ -132,10 +132,6 @@ pub(in crate::mapi) fn default_search_folder_definition_property_tags() -> Vec<u
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
-        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE,
-        PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
-        PID_TAG_SEARCH_FOLDER_TAG,
-        PID_TAG_SEARCH_FOLDER_DEFINITION,
         PID_TAG_WLINK_SAVE_STAMP,
         PID_TAG_WLINK_TYPE,
         PID_TAG_WLINK_FLAGS,
@@ -686,7 +682,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
             start_position = *table_position;
             let columns = if columns.is_empty() {
                 if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
-                    default_search_folder_definition_property_tags()
+                    default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
                 } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
@@ -959,7 +955,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
             ..
         }) => {
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
-                default_search_folder_definition_property_tags()
+                default_navigation_shortcut_property_tags()
             } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
                 default_message_property_tags()
             } else {
@@ -1822,7 +1818,7 @@ pub(in crate::mapi) fn rop_find_row_response(
         } => {
             let columns = if columns.is_empty() {
                 if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
-                    default_search_folder_definition_property_tags()
+                    default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
                 } else {
@@ -2810,7 +2806,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_associated_contents_project_search_folder_definitions_and_shortcuts() {
+    fn common_views_associated_contents_project_navigation_shortcuts_only() {
         let definition_id = Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             definition_id,
@@ -2847,7 +2843,7 @@ mod tests {
                 PID_TAG_MID,
                 PID_TAG_ASSOCIATED,
                 PID_TAG_MESSAGE_CLASS_W,
-                PID_TAG_SEARCH_FOLDER_DEFINITION,
+                0x6845_0102,
             ],
             sort_orders: Vec::new(),
             restriction: None,
@@ -2864,31 +2860,32 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            3
+            2
         );
         let response = rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
 
         assert_eq!(response[0], 0x15);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
-        let mut message_class = Vec::new();
-        for code_unit in "IPM.Microsoft.WunderBar.SFInfo".encode_utf16() {
-            message_class.extend_from_slice(&code_unit.to_le_bytes());
-        }
-        assert!(response
-            .windows(message_class.len())
-            .any(|window| window == message_class.as_slice()));
-        if let MapiObject::ContentsTable { position, .. } = &mut table {
-            *position = 1;
-        }
-        let shortcut_response =
-            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
         }
-        assert!(shortcut_response
+        assert!(response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
+        assert!(!response
+            .windows(14)
+            .any(|window| window == b"exchange_reminders"));
+    }
+
+    #[test]
+    fn common_views_default_columns_are_navigation_shortcut_columns() {
+        let columns = default_navigation_shortcut_property_tags();
+
+        assert!(columns.contains(&PID_TAG_WLINK_ENTRY_ID));
+        assert!(columns.contains(&PID_TAG_WLINK_FOLDER_TYPE));
+        assert!(!columns.contains(&0x6842_0003));
+        assert!(!columns.contains(&0x6845_0102));
     }
 
     #[test]
@@ -3175,20 +3172,6 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
     row
 }
 
-pub(in crate::mapi) fn serialize_search_folder_definition_row(
-    message: &MapiSearchFolderDefinitionMessage,
-    columns: &[u32],
-) -> Vec<u8> {
-    let mut row = Vec::new();
-    for column in columns {
-        match search_folder_definition_property_value(message, *column) {
-            Some(value) => write_mapi_value(&mut row, *column, &value),
-            None => write_property_default(&mut row, *column),
-        }
-    }
-    row
-}
-
 pub(in crate::mapi) fn serialize_navigation_shortcut_row(
     message: &MapiNavigationShortcutMessage,
     principal: Option<&AccountPrincipal>,
@@ -3208,14 +3191,11 @@ pub(in crate::mapi) fn serialize_navigation_shortcut_row(
 }
 
 fn serialize_common_views_row(
-    message: MapiCommonViewsMessage<'_>,
+    message: MapiCommonViewsMessage,
     principal: Option<&AccountPrincipal>,
     columns: &[u32],
 ) -> Vec<u8> {
     match message {
-        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
-            serialize_search_folder_definition_row(message, columns)
-        }
         MapiCommonViewsMessage::NavigationShortcut(message) => {
             serialize_navigation_shortcut_row(&message, principal, columns)
         }

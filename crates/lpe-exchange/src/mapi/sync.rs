@@ -760,44 +760,6 @@ fn journal_sync_object(
     }
 }
 
-fn search_folder_definition_sync_object(
-    message: &crate::mapi_store::MapiSearchFolderDefinitionMessage,
-) -> mapi_mailstore::SpecialMessageSyncFact {
-    let mut named_properties = Vec::new();
-    for property_tag in [
-        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE,
-        PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
-        PID_TAG_SEARCH_FOLDER_TAG,
-        PID_TAG_SEARCH_FOLDER_DEFINITION,
-    ] {
-        if let Some(value) = search_folder_definition_property_value(message, property_tag)
-            .and_then(special_message_property_value)
-        {
-            named_properties.push((property_tag, value));
-        }
-    }
-    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
-    let message_size = search_folder_definition_property_value(message, PID_TAG_MESSAGE_SIZE)
-        .and_then(|value| match value {
-            MapiValue::I32(value) => Some(value),
-            _ => None,
-        })
-        .unwrap_or(0) as i64;
-
-    mapi_mailstore::SpecialMessageSyncFact {
-        folder_id: message.folder_id,
-        item_id: message.id,
-        canonical_id: message.canonical_id,
-        associated: true,
-        subject: message.definition.display_name.clone(),
-        body_text: String::new(),
-        message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
-        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
-        message_size,
-        named_properties,
-    }
-}
-
 fn navigation_shortcut_sync_object(
     message: &crate::mapi_store::MapiNavigationShortcutMessage,
     account_id: Uuid,
@@ -840,13 +802,10 @@ fn navigation_shortcut_sync_object(
 }
 
 fn common_views_sync_object(
-    message: crate::mapi_store::MapiCommonViewsMessage<'_>,
+    message: crate::mapi_store::MapiCommonViewsMessage,
     account_id: Uuid,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     match message {
-        crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => {
-            search_folder_definition_sync_object(message)
-        }
         crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
             navigation_shortcut_sync_object(&message, account_id)
         }

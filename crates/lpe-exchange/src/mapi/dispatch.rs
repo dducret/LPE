@@ -1019,7 +1019,6 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::Task { .. }) => "task",
         Some(MapiObject::Note { .. }) => "note",
         Some(MapiObject::JournalEntry { .. }) => "journal_entry",
-        Some(MapiObject::SearchFolderDefinition { .. }) => "search_folder_definition",
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
         Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
@@ -2265,12 +2264,6 @@ fn debug_object_scope_for_id(
         .is_some()
     {
         return "journal_entry";
-    }
-    if snapshot
-        .search_folder_definition_message_for_id(object_id)
-        .is_some()
-    {
-        return "search_folder_definition";
     }
     if snapshot
         .conversation_action_message_for_id(object_id)
@@ -3584,26 +3577,7 @@ where
                     ));
                     output_handles.push(handle);
                 } else if folder_id == COMMON_VIEWS_FOLDER_ID {
-                    if let Some(message) =
-                        snapshot.search_folder_definition_message_for_id(message_id)
-                    {
-                        let handle = session.allocate_output_handle(
-                            request.output_handle_index,
-                            MapiObject::SearchFolderDefinition {
-                                folder_id,
-                                definition_id: message_id,
-                            },
-                        );
-                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                        responses.extend_from_slice(&rop_open_message_response(
-                            &request,
-                            &message.definition.display_name,
-                            0,
-                        ));
-                        output_handles.push(handle);
-                    } else if let Some(message) =
-                        snapshot.navigation_shortcut_message_for_id(message_id)
-                    {
+                    if let Some(message) = snapshot.navigation_shortcut_message_for_id(message_id) {
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::NavigationShortcut {

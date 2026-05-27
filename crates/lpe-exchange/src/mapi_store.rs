@@ -23,7 +23,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     tasks: Vec<MapiTask>,
     notes: Vec<MapiNote>,
     journal_entries: Vec<MapiJournalEntry>,
-    search_folder_definitions: Vec<MapiSearchFolderDefinitionMessage>,
+    search_folder_definitions: Vec<SearchFolderDefinition>,
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
@@ -112,15 +112,6 @@ pub(crate) struct MapiJournalEntry {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub(crate) struct MapiSearchFolderDefinitionMessage {
-    pub(crate) id: u64,
-    pub(crate) folder_id: u64,
-    pub(crate) canonical_id: Uuid,
-    pub(crate) definition: SearchFolderDefinition,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct MapiNavigationShortcutMessage {
     pub(crate) id: u64,
     pub(crate) folder_id: u64,
@@ -133,8 +124,7 @@ pub(crate) struct MapiNavigationShortcutMessage {
     pub(crate) ordinal: u32,
 }
 
-pub(crate) enum MapiCommonViewsMessage<'a> {
-    SearchFolderDefinition(&'a MapiSearchFolderDefinitionMessage),
+pub(crate) enum MapiCommonViewsMessage {
     NavigationShortcut(MapiNavigationShortcutMessage),
 }
 
@@ -364,15 +354,7 @@ impl MapiMailStoreSnapshot {
         mut self,
         search_folder_definitions: Vec<SearchFolderDefinition>,
     ) -> Self {
-        self.search_folder_definitions = search_folder_definitions
-            .into_iter()
-            .map(|definition| MapiSearchFolderDefinitionMessage {
-                id: mapi_item_id(&definition.id),
-                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                canonical_id: definition.id,
-                definition,
-            })
-            .collect();
+        self.search_folder_definitions = search_folder_definitions;
         self
     }
 
@@ -827,12 +809,7 @@ impl MapiMailStoreSnapshot {
     ) -> Option<&SearchFolderDefinition> {
         self.search_folder_definitions
             .iter()
-            .find(|message| message.definition.role == role)
-            .map(|message| &message.definition)
-    }
-
-    pub(crate) fn search_folder_definition_messages(&self) -> &[MapiSearchFolderDefinitionMessage] {
-        &self.search_folder_definitions
+            .find(|definition| definition.role == role)
     }
 
     pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
@@ -868,24 +845,10 @@ impl MapiMailStoreSnapshot {
         messages
     }
 
-    pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage<'_>> {
-        self.search_folder_definition_messages()
-            .iter()
-            .map(MapiCommonViewsMessage::SearchFolderDefinition)
-            .chain(
-                self.navigation_shortcut_messages()
-                    .into_iter()
-                    .map(MapiCommonViewsMessage::NavigationShortcut),
-            )
-    }
-
-    pub(crate) fn search_folder_definition_message_for_id(
-        &self,
-        item_id: u64,
-    ) -> Option<&MapiSearchFolderDefinitionMessage> {
-        self.search_folder_definitions
-            .iter()
-            .find(|message| message.id == item_id)
+    pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage> {
+        self.navigation_shortcut_messages()
+            .into_iter()
+            .map(MapiCommonViewsMessage::NavigationShortcut)
     }
 
     pub(crate) fn navigation_shortcut_message_for_id(

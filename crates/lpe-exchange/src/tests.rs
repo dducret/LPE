@@ -3225,8 +3225,6 @@ const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
-const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6842_0003;
-const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
 const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
 const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0102;
 const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
@@ -15840,7 +15838,7 @@ async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_definitions() {
+async fn mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_only() {
     let account = FakeStore::account();
     let definition_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
     let store = FakeStore {
@@ -15912,40 +15910,13 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 3);
-    let message = stream
-        .message_changes
-        .iter()
-        .find(|message| message.subject == "Reminders")
-        .expect("Reminders Common Views FAI row");
-    assert!(message.associated);
-    assert_eq!(message.subject, "Reminders");
-    assert_eq!(
-        message.parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
-    );
-    assert!(message.mid.is_some());
-    assert!(message.change_number.is_some());
-    let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
-        account.account_id,
-        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-        message.mid.unwrap(),
-    )
-    .expect("Common Views message EntryID");
-    assert_eq!(entry_id.len(), 70);
-    assert!(contains_bytes(&response_rops, &entry_id));
-    assert!(message
-        .body_tags
-        .contains(&PID_TAG_SEARCH_FOLDER_STORAGE_TYPE));
-    assert!(message
-        .body_tags
-        .contains(&PID_TAG_SEARCH_FOLDER_DEFINITION));
-    assert!(contains_bytes(
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.SFInfo")
     ));
-    assert!(contains_bytes(&response_rops, b"exchange_reminders"));
-    assert!(contains_bytes(&response_rops, b"occurrenceDismissals"));
+    assert!(!contains_bytes(&response_rops, b"exchange_reminders"));
+    assert!(!contains_bytes(&response_rops, b"occurrenceDismissals"));
     let shortcut = stream
         .message_changes
         .iter()

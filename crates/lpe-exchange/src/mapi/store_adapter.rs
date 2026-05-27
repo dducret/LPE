@@ -1312,13 +1312,6 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *journal_entry_id);
         }
-        MapiObject::SearchFolderDefinition {
-            folder_id,
-            definition_id,
-        } => {
-            push_unique(&mut plan.object_ids, *folder_id);
-            push_unique(&mut plan.object_ids, *definition_id);
-        }
         MapiObject::ConversationAction {
             folder_id,
             conversation_action_id,

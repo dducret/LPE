@@ -133,10 +133,6 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         journal_entry_id: u64,
     },
-    SearchFolderDefinition {
-        folder_id: u64,
-        definition_id: u64,
-    },
     ConversationAction {
         folder_id: u64,
         conversation_action_id: u64,
@@ -889,7 +885,6 @@ impl MapiObject {
             | MapiObject::Task { folder_id, .. }
             | MapiObject::Note { folder_id, .. }
             | MapiObject::JournalEntry { folder_id, .. }
-            | MapiObject::SearchFolderDefinition { folder_id, .. }
             | MapiObject::ConversationAction { folder_id, .. }
             | MapiObject::NavigationShortcut { folder_id, .. }
             | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
