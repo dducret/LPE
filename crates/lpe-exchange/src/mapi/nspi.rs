@@ -777,6 +777,66 @@ fn format_nspi_property_tags_for_debug(tags: &[u32]) -> String {
         .join(",")
 }
 
+fn log_nspi_rowset_debug(
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_type: &str,
+    available_entry_count: usize,
+    lookup_values: &[String],
+    tags: &[u32],
+    entries: &[ExchangeAddressBookEntry],
+    row_limit: Option<usize>,
+) {
+    let requested_entry_ids = nspi_requested_entry_ids(request);
+    let current_rec = nspi_stat_current_rec(request)
+        .map(|value| format!("{value:#010x}"))
+        .unwrap_or_default();
+    let row_limit = row_limit.map(|limit| limit.to_string()).unwrap_or_default();
+    let message = "rca debug mapi nspi rowset";
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "nspi",
+        mailbox = %principal.email,
+        request_type = request_type,
+        request_body_bytes = request.len(),
+        current_rec = %current_rec,
+        requested_entry_ids = %format_nspi_u32_values_for_debug(&requested_entry_ids),
+        lookup_value_count = lookup_values.len(),
+        lookup_values = %lookup_values.join(","),
+        requested_property_tag_count = tags.len(),
+        requested_property_tags = %format_nspi_property_tags_for_debug(tags),
+        available_entry_count = available_entry_count,
+        returned_entry_count = entries.len(),
+        row_limit = %row_limit,
+        returned_entries = %format_nspi_entry_summaries_for_debug(principal.account_id, entries),
+        message = message,
+    );
+}
+
+fn format_nspi_entry_summaries_for_debug(
+    account_id: Uuid,
+    entries: &[ExchangeAddressBookEntry],
+) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            let kind = match entry.entry_kind {
+                ExchangeAddressBookEntryKind::Account => "account",
+                ExchangeAddressBookEntryKind::Contact => "contact",
+            };
+            format!(
+                "{:#010x}:{}:{}:{}",
+                nspi_entry_id(account_id, entry),
+                kind,
+                entry.email,
+                entry.display_name
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 pub(in crate::mapi) async fn nspi_rowset_response<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -788,7 +848,7 @@ where
     S: ExchangeStore,
 {
     let entries = match store.fetch_address_book_entries(principal).await {
-        Ok(entries) => nspi_filter_entries_for_request(entries, request),
+        Ok(entries) => entries,
         Err(error) => {
             return mapi_diagnostic_response(
                 request_type,
@@ -798,6 +858,9 @@ where
             );
         }
     };
+    let available_entry_count = entries.len();
+    let lookup_values = scan_address_book_lookup_values(request);
+    let entries = nspi_filter_entries_for_request(entries, request);
     if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
         return mapi_diagnostic_response(
             request_type,
@@ -813,6 +876,16 @@ where
         entries
     };
     let tags = nspi_requested_property_tags(request);
+    log_nspi_rowset_debug(
+        principal,
+        request,
+        request_type,
+        available_entry_count,
+        &lookup_values,
+        &tags,
+        &entries,
+        row_limit,
+    );
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -851,7 +924,7 @@ where
     S: ExchangeStore,
 {
     let entries = match store.fetch_address_book_entries(principal).await {
-        Ok(entries) => nspi_filter_entries_for_request(entries, request),
+        Ok(entries) => entries,
         Err(error) => {
             return mapi_diagnostic_response(
                 "GetMatches",
@@ -861,6 +934,9 @@ where
             );
         }
     };
+    let available_entry_count = entries.len();
+    let lookup_values = scan_address_book_lookup_values(request);
+    let entries = nspi_filter_entries_for_request(entries, request);
     if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
         return mapi_diagnostic_response(
             "GetMatches",
@@ -870,6 +946,16 @@ where
         );
     }
     let tags = nspi_requested_property_tags(request);
+    log_nspi_rowset_debug(
+        principal,
+        request,
+        "GetMatches",
+        available_entry_count,
+        &lookup_values,
+        &tags,
+        &entries,
+        None,
+    );
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
@@ -1682,6 +1768,22 @@ mod tests {
 
         assert_eq!(nspi_stat_current_rec(&request), None);
         assert!(!nspi_request_has_entry_selector(&request));
+    }
+
+    #[test]
+    fn nspi_entry_debug_summary_includes_mid_kind_email_and_name() {
+        let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let entry = ExchangeAddressBookEntry {
+            id: Uuid::parse_str("26b8ebbd-63a5-4741-b8d6-d7eda9c31c3d").unwrap(),
+            display_name: "Bob Contact".to_string(),
+            email: "bob.contact@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        };
+
+        let summary = format_nspi_entry_summaries_for_debug(account_id, &[entry]);
+
+        assert!(summary.contains(":contact:bob.contact@example.test:Bob Contact"));
     }
 
     fn hex_bytes(hex: &str) -> Vec<u8> {
