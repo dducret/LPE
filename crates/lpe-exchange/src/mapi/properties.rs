@@ -213,14 +213,18 @@ pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6842_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_EFP_FLAGS: u32 = 0x6844_0003;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
 pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_TAG: u32 = 0x6847_0003;
-pub(in crate::mapi) const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0048;
+pub(in crate::mapi) const PID_TAG_WLINK_SAVE_STAMP: u32 = 0x6847_0003;
 pub(in crate::mapi) const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
 pub(in crate::mapi) const PID_TAG_WLINK_FLAGS: u32 = 0x684A_0003;
+pub(in crate::mapi) const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0102;
 pub(in crate::mapi) const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_RECORD_KEY: u32 = 0x684D_0102;
 pub(in crate::mapi) const PID_TAG_WLINK_STORE_ENTRY_ID: u32 = 0x684E_0102;
-pub(in crate::mapi) const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0102;
+pub(in crate::mapi) const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0048;
+pub(in crate::mapi) const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0048;
+pub(in crate::mapi) const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
 pub(in crate::mapi) const PID_TAG_WLINK_SECTION: u32 = 0x6852_0003;
-pub(in crate::mapi) const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_DATA_BINARY: u32 = 0x3701_0102;
 pub(in crate::mapi) const PID_TAG_ATTACH_SIZE: u32 = 0x0E20_0003;
 pub(in crate::mapi) const PID_TAG_ATTACH_NUM: u32 = 0x0E21_0003;
@@ -1280,27 +1284,61 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(message.id & 0x00FF_FFFF_FFFF_FFFF)),
+        PID_TAG_WLINK_SAVE_STAMP => Some(MapiValue::U32(0)),
         PID_TAG_WLINK_TYPE => Some(MapiValue::U32(message.shortcut_type)),
         PID_TAG_WLINK_FLAGS => Some(MapiValue::U32(message.flags)),
         PID_TAG_WLINK_SECTION => Some(MapiValue::U32(message.section)),
-        PID_TAG_WLINK_ORDINAL => Some(MapiValue::U32(message.ordinal)),
-        PID_TAG_WLINK_GROUP_HEADER_ID => Some(MapiValue::Binary(
-            mapi_mailstore::source_key_for_store_id(message.id),
-        )),
-        PID_TAG_WLINK_ENTRY_ID => Some(MapiValue::Binary(
+        PID_TAG_WLINK_ORDINAL => Some(MapiValue::Binary(wlink_ordinal_bytes(message.ordinal))),
+        PID_TAG_WLINK_GROUP_HEADER_ID if message.shortcut_type == 4 => {
+            Some(MapiValue::Guid(default_wlink_group_guid()))
+        }
+        PID_TAG_WLINK_GROUP_CLSID if message.shortcut_type != 4 => {
+            Some(MapiValue::Guid(default_wlink_group_guid()))
+        }
+        PID_TAG_WLINK_GROUP_NAME_W if message.shortcut_type != 4 => {
+            Some(MapiValue::String("Mail".to_string()))
+        }
+        PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
             crate::mapi::identity::folder_entry_id_from_object_id(
                 account_id,
                 message.target_folder_id,
             )
             .unwrap_or_default(),
         )),
-        PID_TAG_WLINK_STORE_ENTRY_ID => Some(MapiValue::Binary(
-            mapi_mailstore::private_store_entry_id(account_id),
-        )),
-        PID_TAG_WLINK_FOLDER_TYPE => Some(MapiValue::Binary(
+        PID_TAG_WLINK_RECORD_KEY if message.shortcut_type != 4 => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.target_folder_id),
         )),
+        PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
+            mapi_mailstore::private_store_entry_id(account_id),
+        )),
+        PID_TAG_WLINK_FOLDER_TYPE => Some(MapiValue::Guid(wlink_folder_type_guid())),
         _ => None,
+    }
+}
+
+pub(in crate::mapi) fn default_wlink_group_guid() -> [u8; 16] {
+    [
+        0x5B, 0xA9, 0x43, 0xD8, 0xDA, 0xAA, 0x46, 0x2C, 0xA6, 0x3E, 0x91, 0x36, 0xF6, 0x5C, 0x86,
+        0x81,
+    ]
+}
+
+pub(in crate::mapi) fn wlink_folder_type_guid() -> [u8; 16] {
+    [
+        0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x46,
+    ]
+}
+
+fn wlink_ordinal_bytes(value: u32) -> Vec<u8> {
+    if value <= u8::MAX as u32 {
+        vec![value as u8]
+    } else {
+        value
+            .to_be_bytes()
+            .into_iter()
+            .skip_while(|byte| *byte == 0)
+            .collect()
     }
 }
 

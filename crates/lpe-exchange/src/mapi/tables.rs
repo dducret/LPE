@@ -136,14 +136,18 @@ pub(in crate::mapi) fn default_search_folder_definition_property_tags() -> Vec<u
         PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
         PID_TAG_SEARCH_FOLDER_TAG,
         PID_TAG_SEARCH_FOLDER_DEFINITION,
+        PID_TAG_WLINK_SAVE_STAMP,
         PID_TAG_WLINK_TYPE,
         PID_TAG_WLINK_FLAGS,
+        PID_TAG_WLINK_ORDINAL,
         PID_TAG_WLINK_ENTRY_ID,
+        PID_TAG_WLINK_RECORD_KEY,
         PID_TAG_WLINK_STORE_ENTRY_ID,
         PID_TAG_WLINK_FOLDER_TYPE,
         PID_TAG_WLINK_GROUP_HEADER_ID,
+        PID_TAG_WLINK_GROUP_CLSID,
+        PID_TAG_WLINK_GROUP_NAME_W,
         PID_TAG_WLINK_SECTION,
-        PID_TAG_WLINK_ORDINAL,
     ]
 }
 
@@ -3356,8 +3360,27 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
             .unwrap_or(0),
         ordinal: properties
             .get(&PID_TAG_WLINK_ORDINAL)
-            .and_then(MapiValue::as_i64)
-            .map(|value| value as u32)
+            .and_then(|value| match value {
+                MapiValue::Binary(bytes) => Some(
+                    bytes
+                        .iter()
+                        .take(4)
+                        .fold(0u32, |value, byte| (value << 8) | u32::from(*byte)),
+                ),
+                _ => None,
+            })
+            .or_else(|| {
+                properties
+                    .get(&0x684B_0003)
+                    .and_then(MapiValue::as_i64)
+                    .map(|value| value as u32)
+            })
+            .or_else(|| {
+                properties
+                    .get(&PID_TAG_WLINK_ORDINAL)
+                    .and_then(MapiValue::as_i64)
+                    .map(|value| value as u32)
+            })
             .unwrap_or(0),
     }
 }

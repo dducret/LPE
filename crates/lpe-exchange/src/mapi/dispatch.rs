@@ -2848,7 +2848,8 @@ fn log_special_folder_contract(
         canonical_collection_name =
             collaboration_folder.map(|folder| folder.collection.display_name.as_str()).unwrap_or(""),
         canonical_item_count = collaboration_folder.map(|folder| folder.item_count).unwrap_or(0),
-        projected_special_object_count = special_sync_objects_for(folder_id, 0x01, snapshot).len(),
+        projected_special_object_count =
+            special_sync_objects_for(folder_id, 0x01, snapshot, principal.account_id).len(),
         projected_folder_content_count =
             folder_message_count(folder_id, mailboxes, emails, snapshot),
         mapi_folder_access_mask = %format!("0x{MAPI_FOLDER_ACCESS:08x}"),
@@ -3193,6 +3194,9 @@ fn special_property_shape(value: &mapi_mailstore::SpecialMessagePropertyValue) -
         }
         mapi_mailstore::SpecialMessagePropertyValue::Bool(value) => {
             format!("bool={value}")
+        }
+        mapi_mailstore::SpecialMessagePropertyValue::Guid(value) => {
+            format!("guid={}", bytes_to_hex(value))
         }
         mapi_mailstore::SpecialMessagePropertyValue::I32(value) => {
             format!("i32={value}")
@@ -6439,7 +6443,7 @@ where
                 );
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                 let all_special_sync_objects =
-                    special_sync_objects_for(folder_id, sync_type, snapshot);
+                    special_sync_objects_for(folder_id, sync_type, snapshot, principal.account_id);
                 log_calendar_special_sync_objects(
                     principal,
                     folder_id,

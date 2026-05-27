@@ -111,6 +111,7 @@ pub(crate) struct SpecialMessageSyncFact {
 pub(crate) enum SpecialMessagePropertyValue {
     Binary(Vec<u8>),
     Bool(bool),
+    Guid([u8; 16]),
     I32(i32),
     I64(i64),
     U32(u32),
@@ -3301,6 +3302,10 @@ fn write_special_message_property(
         }
         SpecialMessagePropertyValue::Bool(value) => {
             write_bool_property(buffer, property_tag, *value)
+        }
+        SpecialMessagePropertyValue::Guid(value) => {
+            write_u32(buffer, property_tag);
+            buffer.extend_from_slice(value);
         }
         SpecialMessagePropertyValue::I32(value) => write_i32_property(buffer, property_tag, *value),
         SpecialMessagePropertyValue::I64(value) => {

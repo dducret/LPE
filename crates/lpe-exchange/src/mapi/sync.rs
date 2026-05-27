@@ -422,6 +422,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
     folder_id: u64,
     sync_type: u8,
     snapshot: &MapiMailStoreSnapshot,
+    account_id: Uuid,
 ) -> Vec<mapi_mailstore::SpecialMessageSyncFact> {
     if sync_type == 0x02 {
         return Vec::new();
@@ -551,7 +552,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .collect(),
         COMMON_VIEWS_FOLDER_ID => snapshot
             .common_views_messages()
-            .map(common_views_sync_object)
+            .map(|message| common_views_sync_object(message, account_id))
             .collect(),
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
             .conversation_action_messages()
@@ -799,19 +800,24 @@ fn search_folder_definition_sync_object(
 
 fn navigation_shortcut_sync_object(
     message: &crate::mapi_store::MapiNavigationShortcutMessage,
+    account_id: Uuid,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut named_properties = Vec::new();
     for property_tag in [
         PID_TAG_WLINK_TYPE,
         PID_TAG_WLINK_FLAGS,
+        PID_TAG_WLINK_SAVE_STAMP,
+        PID_TAG_WLINK_ORDINAL,
         PID_TAG_WLINK_ENTRY_ID,
+        PID_TAG_WLINK_RECORD_KEY,
         PID_TAG_WLINK_STORE_ENTRY_ID,
         PID_TAG_WLINK_FOLDER_TYPE,
         PID_TAG_WLINK_GROUP_HEADER_ID,
+        PID_TAG_WLINK_GROUP_CLSID,
+        PID_TAG_WLINK_GROUP_NAME_W,
         PID_TAG_WLINK_SECTION,
-        PID_TAG_WLINK_ORDINAL,
     ] {
-        if let Some(value) = navigation_shortcut_property_value(message, Uuid::nil(), property_tag)
+        if let Some(value) = navigation_shortcut_property_value(message, account_id, property_tag)
             .and_then(special_message_property_value)
         {
             named_properties.push((property_tag, value));
@@ -835,13 +841,14 @@ fn navigation_shortcut_sync_object(
 
 fn common_views_sync_object(
     message: crate::mapi_store::MapiCommonViewsMessage<'_>,
+    account_id: Uuid,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     match message {
         crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => {
             search_folder_definition_sync_object(message)
         }
         crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
-            navigation_shortcut_sync_object(&message)
+            navigation_shortcut_sync_object(&message, account_id)
         }
     }
 }
@@ -926,6 +933,7 @@ fn special_message_property_value(
             Some(mapi_mailstore::SpecialMessagePropertyValue::Binary(value))
         }
         MapiValue::Bool(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::Bool(value)),
+        MapiValue::Guid(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::Guid(value)),
         MapiValue::I32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I32(value)),
         MapiValue::I64(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::I64(value)),
         MapiValue::U32(value) => Some(mapi_mailstore::SpecialMessagePropertyValue::U32(value)),
@@ -1274,5 +1282,45 @@ mod tests {
 
         assert_eq!(row_ids.as_slice(), IPM_SUBTREE_VIRTUAL_FOLDER_IDS);
         assert_eq!(state_ids, row_ids);
+    }
+
+    #[test]
+    fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = MapiMailStoreSnapshot::empty();
+
+        let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
+        let inbox_shortcut = objects
+            .iter()
+            .find(|object| object.subject == "Inbox")
+            .expect("default Inbox navigation shortcut");
+
+        let property = |tag| {
+            inbox_shortcut
+                .named_properties
+                .iter()
+                .find_map(|(property_tag, value)| (*property_tag == tag).then_some(value))
+                .expect("shortcut property")
+        };
+        assert_eq!(
+            property(PID_TAG_WLINK_ENTRY_ID),
+            &crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(
+                crate::mapi::identity::folder_entry_id_from_object_id(account_id, INBOX_FOLDER_ID,)
+                    .unwrap()
+            )
+        );
+        assert_eq!(
+            property(PID_TAG_WLINK_STORE_ENTRY_ID),
+            &crate::mapi_mailstore::SpecialMessagePropertyValue::Binary(
+                crate::mapi_mailstore::private_store_entry_id(account_id)
+            )
+        );
+        assert_eq!(
+            property(PID_TAG_WLINK_FOLDER_TYPE),
+            &crate::mapi_mailstore::SpecialMessagePropertyValue::Guid([
+                0x02, 0x78, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x46,
+            ])
+        );
     }
 }

@@ -845,10 +845,10 @@ impl MapiMailStoreSnapshot {
                 canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
                 subject: "Mail".to_string(),
                 target_folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
-                shortcut_type: 1,
+                shortcut_type: 4,
                 flags: 0,
                 section: 0,
-                ordinal: 0,
+                ordinal: 0x80,
             },
             MapiNavigationShortcutMessage {
                 id: crate::mapi::identity::mapi_store_id(
@@ -858,10 +858,10 @@ impl MapiMailStoreSnapshot {
                 canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002),
                 subject: "Inbox".to_string(),
                 target_folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
-                shortcut_type: 2,
+                shortcut_type: 0,
                 flags: 0,
                 section: 0,
-                ordinal: 1,
+                ordinal: 0x81,
             },
         ];
         messages.extend(self.navigation_shortcuts.iter().cloned());

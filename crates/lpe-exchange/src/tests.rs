@@ -3227,9 +3227,14 @@ const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
 const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6842_0003;
 const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
+const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
+const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0102;
 const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
+const PID_TAG_WLINK_RECORD_KEY: u32 = 0x684D_0102;
 const PID_TAG_WLINK_STORE_ENTRY_ID: u32 = 0x684E_0102;
-const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0102;
+const PID_TAG_WLINK_FOLDER_TYPE: u32 = 0x684F_0048;
+const PID_TAG_WLINK_GROUP_CLSID: u32 = 0x6850_0048;
+const PID_TAG_WLINK_GROUP_NAME_W: u32 = 0x6851_001F;
 const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
@@ -3478,6 +3483,7 @@ fn strict_parse_fast_transfer_property(
             (value_start, 2)
         }
         0x0014 | 0x0040 => (value_start, 8),
+        0x0048 => (value_start, 16),
         0x001E | 0x001F | 0x0102 => {
             let len = read_strict_u32(bytes, value_start)? as usize;
             let value_start = value_start + 4;
@@ -4171,7 +4177,7 @@ fn strict_content_marker(tag: u32) -> bool {
 fn strict_supported_property_type(tag: u32) -> bool {
     matches!(
         tag & 0x0000_FFFF,
-        0x0002 | 0x0003 | 0x000B | 0x0014 | 0x001E | 0x001F | 0x0040 | 0x0102 | 0x101F
+        0x0002 | 0x0003 | 0x000B | 0x0014 | 0x001E | 0x001F | 0x0040 | 0x0048 | 0x0102 | 0x101F
     )
 }
 
@@ -15950,9 +15956,14 @@ async fn mapi_over_http_common_views_content_sync_exports_search_folder_fai_defi
         shortcut.parent_source_key,
         mapi_mailstore::source_key_for_store_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
     );
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_TYPE));
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_ORDINAL));
     assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_ENTRY_ID));
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_RECORD_KEY));
     assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_STORE_ENTRY_ID));
     assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_FOLDER_TYPE));
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_CLSID));
+    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_NAME_W));
     assert!(!stream.cnset_seen_fai.is_empty());
     assert!(contains_bytes(
         &response_rops,
@@ -15992,8 +16003,8 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         PID_TAG_WLINK_ENTRY_ID,
         &inbox_entry_id,
     );
-    append_mapi_i32_property(&mut property_values, 0x6849_0003, 2);
-    append_mapi_i32_property(&mut property_values, 0x684B_0003, 9);
+    append_mapi_i32_property(&mut property_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_ORDINAL, &[0x89]);
 
     let mut rops = Vec::new();
     append_rop_create_associated_message(
@@ -16022,8 +16033,8 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         stored[0].target_folder_id,
         crate::mapi::identity::INBOX_FOLDER_ID
     );
-    assert_eq!(stored[0].shortcut_type, 2);
-    assert_eq!(stored[0].ordinal, 9);
+    assert_eq!(stored[0].shortcut_type, 0);
+    assert_eq!(stored[0].ordinal, 0x89);
 }
 
 #[tokio::test]
