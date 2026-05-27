@@ -4,7 +4,7 @@ use super::session::*;
 use super::transport::*;
 use super::wire::MapiHttpRequestType as MapiRequestType;
 use super::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock};
 
 static NSPI_OBJECT_IDS: OnceLock<Mutex<HashMap<(Uuid, u8, Uuid), u64>>> = OnceLock::new();
@@ -792,6 +792,8 @@ fn log_nspi_rowset_debug(
         .map(|value| format!("{value:#010x}"))
         .unwrap_or_default();
     let row_limit = row_limit.map(|limit| limit.to_string()).unwrap_or_default();
+    let (duplicate_entry_key_count, duplicate_entry_keys) =
+        format_nspi_duplicate_entry_keys_for_debug(entries);
     let message = "rca debug mapi nspi rowset";
     tracing::info!(
         rca_debug = true,
@@ -800,6 +802,7 @@ fn log_nspi_rowset_debug(
         mailbox = %principal.email,
         request_type = request_type,
         request_body_bytes = request.len(),
+        request_body_preview_hex = %hex_preview(request, 96),
         current_rec = %current_rec,
         requested_entry_ids = %format_nspi_u32_values_for_debug(&requested_entry_ids),
         lookup_value_count = lookup_values.len(),
@@ -809,6 +812,8 @@ fn log_nspi_rowset_debug(
         available_entry_count = available_entry_count,
         returned_entry_count = entries.len(),
         row_limit = %row_limit,
+        duplicate_entry_key_count = duplicate_entry_key_count,
+        duplicate_entry_keys = %duplicate_entry_keys,
         returned_entries = %format_nspi_entry_summaries_for_debug(principal.account_id, entries),
         message = message,
     );
@@ -835,6 +840,31 @@ fn format_nspi_entry_summaries_for_debug(
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn format_nspi_duplicate_entry_keys_for_debug(
+    entries: &[ExchangeAddressBookEntry],
+) -> (usize, String) {
+    let mut counts = BTreeMap::<String, usize>::new();
+    for entry in entries {
+        let kind = match entry.entry_kind {
+            ExchangeAddressBookEntryKind::Account => "account",
+            ExchangeAddressBookEntryKind::Contact => "contact",
+        };
+        let key = format!(
+            "{}:{}:{}",
+            kind,
+            entry.email.trim().to_ascii_lowercase(),
+            entry.display_name.trim().to_ascii_lowercase()
+        );
+        *counts.entry(key).or_insert(0) += 1;
+    }
+    let duplicates = counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .map(|(key, count)| format!("{key}x{count}"))
+        .collect::<Vec<_>>();
+    (duplicates.len(), duplicates.join("|"))
 }
 
 pub(in crate::mapi) async fn nspi_rowset_response<S>(
@@ -1863,6 +1893,31 @@ mod tests {
         let summary = format_nspi_entry_summaries_for_debug(account_id, &[entry]);
 
         assert!(summary.contains(":contact:bob.contact@example.test:Bob Contact"));
+    }
+
+    #[test]
+    fn nspi_duplicate_debug_groups_rows_by_kind_email_and_name() {
+        let entries = vec![
+            ExchangeAddressBookEntry {
+                id: Uuid::parse_str("26b8ebbd-63a5-4741-b8d6-d7eda9c31c3d").unwrap(),
+                display_name: "Bob Contact".to_string(),
+                email: "bob.contact@example.test".to_string(),
+                entry_kind: ExchangeAddressBookEntryKind::Contact,
+                directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            },
+            ExchangeAddressBookEntry {
+                id: Uuid::parse_str("9bd2958d-9858-4fe3-8e6b-4ddd9dcc6bc6").unwrap(),
+                display_name: " bob contact ".to_string(),
+                email: "BOB.CONTACT@example.test".to_string(),
+                entry_kind: ExchangeAddressBookEntryKind::Contact,
+                directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            },
+        ];
+
+        let (count, keys) = format_nspi_duplicate_entry_keys_for_debug(&entries);
+
+        assert_eq!(count, 1);
+        assert_eq!(keys, "contact:bob.contact@example.test:bob contactx2");
     }
 
     fn hex_bytes(hex: &str) -> Vec<u8> {
