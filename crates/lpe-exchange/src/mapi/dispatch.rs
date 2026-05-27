@@ -1211,7 +1211,7 @@ fn indexed_special_folder_entry_ids_for_debug(
     }
     if values.len() < expected_folder_ids.len() {
         summaries.push(format!(
-            "missing_expected_indexes={}",
+            "omitted_preserved_indexes={}",
             (values.len()..expected_folder_ids.len())
                 .map(|index| index.to_string())
                 .collect::<Vec<_>>()
@@ -8862,7 +8862,7 @@ mod tests {
         assert!(debug.contains("PidTagAdditionalRenEntryIds:count=4"));
         assert!(debug.contains("index=0"));
         assert!(debug.contains("decoded_name=conflicts"));
-        assert!(debug.contains("missing_expected_indexes=4"));
+        assert!(debug.contains("omitted_preserved_indexes=4"));
     }
 
     #[test]

@@ -76,15 +76,30 @@ pub fn trace_id_from_headers(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
+fn safe_header(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(240).collect())
+}
+
 pub async fn observe_http(mut request: Request, next: Next) -> Response {
     let started_at = Instant::now();
     let method = request.method().as_str().to_string();
-    let route = request
-        .extensions()
-        .get::<MatchedPath>()
+    let matched_path = request.extensions().get::<MatchedPath>();
+    let matched_route = matched_path.is_some();
+    let path = request.uri().path().to_string();
+    let query = request.uri().query().unwrap_or_default().to_string();
+    let route = matched_path
         .map(MatchedPath::as_str)
-        .unwrap_or_else(|| request.uri().path())
+        .unwrap_or(path.as_str())
         .to_string();
+    let user_agent = safe_header(request.headers(), "user-agent").unwrap_or_default();
+    let client_request_id = safe_header(request.headers(), "client-request-id").unwrap_or_default();
+    let x_request_id = safe_header(request.headers(), "x-requestid").unwrap_or_default();
+    let authorization_present = request.headers().contains_key("authorization");
     let trace_id = trace_id_from_headers(request.headers());
     if let Ok(value) = HeaderValue::from_str(&trace_id) {
         request.headers_mut().insert(TRACE_HEADER, value);
@@ -106,8 +121,52 @@ pub async fn observe_http(mut request: Request, next: Next) -> Response {
         duration_ms = elapsed.as_secs_f64() * 1000.0,
         "http request completed"
     );
+    if should_log_outlook_http_route_gap(&path, &user_agent, status, matched_route) {
+        tracing::warn!(
+            rca_debug = true,
+            adapter = "http",
+            outlook_probe = true,
+            trace_id = %trace_id,
+            method = %method,
+            path = %path,
+            query = %query,
+            route = %route,
+            matched_route,
+            status,
+            duration_ms = elapsed.as_secs_f64() * 1000.0,
+            user_agent = %user_agent,
+            client_request_id = %client_request_id,
+            x_request_id = %x_request_id,
+            authorization_present,
+            message = "rca debug outlook http route gap"
+        );
+    }
 
     response
+}
+
+fn should_log_outlook_http_route_gap(
+    path: &str,
+    user_agent: &str,
+    status: u16,
+    matched_route: bool,
+) -> bool {
+    if matched_route && status < 400 {
+        return false;
+    }
+
+    let lowered_path = path.to_ascii_lowercase();
+    let exchange_path = lowered_path.starts_with("/ews/")
+        || lowered_path.starts_with("/mapi/")
+        || lowered_path.starts_with("/rpc/")
+        || lowered_path.starts_with("/autodiscover/")
+        || lowered_path == "/autodiscover.xml"
+        || lowered_path.starts_with("/microsoft-server-activesync");
+    let lowered_user_agent = user_agent.to_ascii_lowercase();
+    let outlook_user_agent =
+        lowered_user_agent.contains("outlook") || lowered_user_agent.contains("microsoft office");
+
+    (!matched_route && exchange_path) || (!matched_route && outlook_user_agent)
 }
 
 pub async fn metrics_endpoint() -> impl IntoResponse {
@@ -307,4 +366,36 @@ fn unix_timestamp_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_log_outlook_http_route_gap;
+
+    #[test]
+    fn outlook_http_route_gap_logs_unmatched_exchange_paths() {
+        assert!(should_log_outlook_http_route_gap(
+            "/EWS/Exchange.asmx/wssecurity",
+            "",
+            404,
+            false
+        ));
+        assert!(should_log_outlook_http_route_gap(
+            "/owa/calendar",
+            "Microsoft Office/16.0",
+            404,
+            false
+        ));
+    }
+
+    #[test]
+    fn outlook_http_route_gap_does_not_duplicate_successful_protocol_routes() {
+        assert!(!should_log_outlook_http_route_gap(
+            "/mapi/emsmdb/",
+            "Microsoft Office/16.0",
+            200,
+            true
+        ));
+        assert!(!should_log_outlook_http_route_gap("/health", "", 200, true));
+    }
 }
