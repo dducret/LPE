@@ -568,7 +568,7 @@ def check_jmap_publication_headers(
     print("ok jmap_publication_headers")
 
 
-def check_jmap_session(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
+def check_jmap_session(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> dict:
     login_body = json.dumps({"email": email, "password": password}).encode("utf-8")
     login = request(
         "POST",
@@ -595,6 +595,48 @@ def check_jmap_session(base_url: str, email: str, password: str, insecure_tls: b
     require("urn:ietf:params:jmap:core" in payload.get("capabilities", {}), "JMAP session missing core capability")
     require("accounts" in payload and payload["accounts"], "JMAP session returned no accounts")
     print("ok jmap_session")
+    return {"token": token, "session": payload}
+
+
+def check_jmap_email_subject_absent(
+    base_url: str,
+    email: str,
+    password: str,
+    subject: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    login = check_jmap_session(base_url, email, password, insecure_tls, timeout)
+    token = login["token"]
+    session = login["session"]
+    account_id = session.get("primaryAccounts", {}).get("urn:ietf:params:jmap:mail")
+    if not account_id:
+        accounts = session.get("accounts", {})
+        account_id = next(iter(accounts.keys()), None)
+    require(account_id, "JMAP session did not expose a mail account id")
+    api_url = session.get("apiUrl") or "/api/jmap/api"
+    body = json.dumps({
+        "using": ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+        "methodCalls": [
+            ["Email/query", {"accountId": account_id, "filter": {"text": subject}, "limit": 10}, "q0"],
+            ["Email/get", {"accountId": account_id, "#ids": {"resultOf": "q0", "name": "Email/query", "path": "/ids"}, "properties": ["subject"]}, "g0"],
+        ],
+    }).encode("utf-8")
+    response = request(
+        "POST",
+        join_url(base_url, api_url),
+        body,
+        {"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "application/json"},
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(response.status == 200, f"JMAP Email/query returned HTTP {response.status}: {response.text[:300]}")
+    payload = json.loads(response.text)
+    method_responses = payload.get("methodResponses", [])
+    email_get = next((item[1] for item in method_responses if item and item[0] == "Email/get"), {})
+    for item in email_get.get("list", []):
+        require(item.get("subject") != subject, "JMAP still exposes the MAPI-emptied Deleted Items fixture")
+    print("ok jmap_mapi_empty_deleted_items_absence")
 
 
 def check_ews_basic(base_url: str, email: str, password: str, insecure_tls: bool, timeout: int) -> None:
@@ -1355,6 +1397,8 @@ def check_mapi_empty_deleted_items_fixture(
     )
     require_ews_no_error("EWS FindItem deleteditems after MAPI empty", deleted_items)
     require(subject not in deleted_items, "EWS Deleted Items still exposes the MAPI-emptied fixture")
+    check_jmap_email_subject_absent(base_url, email, password, subject, insecure_tls, timeout)
+    print("skip imap_mapi_empty_deleted_items_absence no IMAP connection helper is configured in this harness")
     print("ok mapi_empty_deleted_items_fixture")
 
 
@@ -1655,7 +1699,12 @@ def main() -> int:
     parser.add_argument(
         "--check-mapi-empty-deleted-items",
         action="store_true",
-        help="Create a temporary EWS message in Deleted Items, empty Deleted Items through MAPI EmptyFolder, and verify disappearance. This empties the target mailbox Deleted Items folder.",
+        help="Create a temporary EWS message in Deleted Items, empty Deleted Items through MAPI EmptyFolder, and verify disappearance. Requires --dangerously-empty-deleted-items because it empties the target mailbox Deleted Items folder.",
+    )
+    parser.add_argument(
+        "--dangerously-empty-deleted-items",
+        action="store_true",
+        help="Acknowledge that --check-mapi-empty-deleted-items empties the whole target mailbox Deleted Items folder.",
     )
     parser.add_argument(
         "--check-rpc-proxy-auth",
@@ -1705,6 +1754,11 @@ def main() -> int:
         require(
             args.allow_mutating_fixtures,
             "live readiness checks create and delete fixtures; pass --allow-mutating-fixtures to permit this",
+        )
+    if run_mapi_empty_deleted_items:
+        require(
+            args.dangerously_empty_deleted_items,
+            "--check-mapi-empty-deleted-items empties the target mailbox Deleted Items folder; pass --dangerously-empty-deleted-items to acknowledge this",
         )
 
     base_url = args.base_url.rstrip("/")

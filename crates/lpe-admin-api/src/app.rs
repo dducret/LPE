@@ -341,6 +341,35 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn app_router_routes_mapi_post_to_exchange_handler() {
+        let Ok(database_url) = std::env::var("TEST_DATABASE_URL") else {
+            eprintln!("skipping app router MAPI POST smoke test without TEST_DATABASE_URL");
+            return;
+        };
+        let storage = lpe_storage::Storage::connect(&database_url).await.unwrap();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/mapi/emsmdb/")
+            .header("content-type", "application/mapi-http")
+            .header("x-requesttype", "Connect")
+            .header("x-requestid", "{11111111-1111-1111-1111-111111111111}:1")
+            .header("x-clientinfo", "{22222222-2222-2222-2222-222222222222}:1")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = super::router(storage).oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response
+                .headers()
+                .get("www-authenticate")
+                .and_then(|value| value.to_str().ok()),
+            Some("Basic realm=\"LPE MAPI\"")
+        );
+    }
+
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn env_lock() -> MutexGuard<'static, ()> {

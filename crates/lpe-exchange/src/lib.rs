@@ -8,6 +8,7 @@ mod ntlm;
 mod service;
 mod store;
 
+pub use crate::mapi::{mapi_folder_purge_metrics, MapiFolderPurgeMetrics};
 pub use crate::service::router;
 
 #[cfg(test)]

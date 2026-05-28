@@ -341,6 +341,31 @@ fn render_metrics() -> String {
             value
         ));
     }
+    drop(guard);
+
+    let purge = lpe_exchange::mapi_folder_purge_metrics();
+    output.push_str(
+        "# HELP lpe_mapi_folder_purge_messages_total MAPI whole-folder purge message outcomes.\n",
+    );
+    output.push_str("# TYPE lpe_mapi_folder_purge_messages_total counter\n");
+    output.push_str(&format!(
+        "lpe_mapi_folder_purge_messages_total{{outcome=\"attempted\"}} {}\n",
+        purge.attempted_total
+    ));
+    output.push_str(&format!(
+        "lpe_mapi_folder_purge_messages_total{{outcome=\"succeeded\"}} {}\n",
+        purge.succeeded_total
+    ));
+    output.push_str(&format!(
+        "lpe_mapi_folder_purge_messages_total{{outcome=\"failed\"}} {}\n",
+        purge.failed_total
+    ));
+    output.push_str("# HELP lpe_mapi_folder_purge_partial_total MAPI whole-folder purge operations that reported partial completion.\n");
+    output.push_str("# TYPE lpe_mapi_folder_purge_partial_total counter\n");
+    output.push_str(&format!(
+        "lpe_mapi_folder_purge_partial_total {}\n",
+        purge.partial_total
+    ));
 
     output
 }

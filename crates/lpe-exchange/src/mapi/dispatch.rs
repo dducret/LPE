@@ -86,6 +86,12 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
         partial_completion,
         message = "rca debug mapi hard delete folder contents"
     );
+    record_mapi_folder_purge_metrics(
+        attempted_count,
+        succeeded_count,
+        failed_count,
+        partial_completion,
+    );
     Ok((deleted_any, partial_completion))
 }
 

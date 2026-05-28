@@ -21,7 +21,10 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet, VecDeque},
     env,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering as AtomicOrdering},
+        Mutex, OnceLock,
+    },
     time::{Duration, SystemTime},
 };
 use tracing::{info, warn};
@@ -60,3 +63,39 @@ pub(crate) use crate::mapi::{
         safe_header, MapiEndpoint,
     },
 };
+
+static MAPI_FOLDER_PURGE_ATTEMPTED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_FOLDER_PURGE_FAILED_TOTAL: AtomicU64 = AtomicU64::new(0);
+static MAPI_FOLDER_PURGE_PARTIAL_TOTAL: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MapiFolderPurgeMetrics {
+    pub attempted_total: u64,
+    pub succeeded_total: u64,
+    pub failed_total: u64,
+    pub partial_total: u64,
+}
+
+pub(crate) fn record_mapi_folder_purge_metrics(
+    attempted: usize,
+    succeeded: usize,
+    failed: usize,
+    partial_completion: bool,
+) {
+    MAPI_FOLDER_PURGE_ATTEMPTED_TOTAL.fetch_add(attempted as u64, AtomicOrdering::Relaxed);
+    MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL.fetch_add(succeeded as u64, AtomicOrdering::Relaxed);
+    MAPI_FOLDER_PURGE_FAILED_TOTAL.fetch_add(failed as u64, AtomicOrdering::Relaxed);
+    if partial_completion {
+        MAPI_FOLDER_PURGE_PARTIAL_TOTAL.fetch_add(1, AtomicOrdering::Relaxed);
+    }
+}
+
+pub fn mapi_folder_purge_metrics() -> MapiFolderPurgeMetrics {
+    MapiFolderPurgeMetrics {
+        attempted_total: MAPI_FOLDER_PURGE_ATTEMPTED_TOTAL.load(AtomicOrdering::Relaxed),
+        succeeded_total: MAPI_FOLDER_PURGE_SUCCEEDED_TOTAL.load(AtomicOrdering::Relaxed),
+        failed_total: MAPI_FOLDER_PURGE_FAILED_TOTAL.load(AtomicOrdering::Relaxed),
+        partial_total: MAPI_FOLDER_PURGE_PARTIAL_TOTAL.load(AtomicOrdering::Relaxed),
+    }
+}

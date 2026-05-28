@@ -12986,6 +12986,161 @@ async fn mapi_over_http_delete_messages_uses_trash_and_hard_delete() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_hard_delete_messages_reports_partial_when_retention_blocks_delete() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let message_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &message_id.to_string(),
+            &inbox_id.to_string(),
+            "inbox",
+            "Retained hard delete",
+        )])),
+        failed_delete_email_ids: Arc::new(Mutex::new(vec![message_id])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let canonical_emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x59, 0x00, 0x01]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(&message_id.to_string()));
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x59, 0x01, 0, 0, 0, 0, 1]));
+    assert!(deleted_emails.lock().unwrap().is_empty());
+    assert!(canonical_emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.id == message_id));
+}
+
+#[tokio::test]
+async fn mapi_over_http_delete_messages_from_trash_reports_partial_when_retention_blocks_delete() {
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let message_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &message_id.to_string(),
+            &trash_id.to_string(),
+            "trash",
+            "Retained Trash delete",
+        )])),
+        failed_delete_email_ids: Arc::new(Mutex::new(vec![message_id])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let canonical_emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x1E, 0x00, 0x01, 0x00, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(&message_id.to_string()));
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x1E, 0x01, 0, 0, 0, 0, 1]));
+    assert!(deleted_emails.lock().unwrap().is_empty());
+    assert!(canonical_emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.id == message_id));
+}
+
+#[tokio::test]
+async fn mapi_over_http_guessed_recoverable_items_folder_id_is_not_opened() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(0x7000));
+    rops.push(0);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_open_message_uses_targeted_store_lookup() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     inbox.total_emails = 2;
@@ -21174,6 +21329,77 @@ async fn mapi_over_http_empty_folder_reports_partial_completion_when_membership_
 }
 
 #[tokio::test]
+async fn mapi_over_http_empty_folder_reports_partial_when_retention_blocks_one_message() {
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let deletable_message_id = Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1").unwrap();
+    let retained_message_id = Uuid::parse_str("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(
+                &deletable_message_id.to_string(),
+                &trash_id.to_string(),
+                "trash",
+                "Deletable trash message",
+            ),
+            FakeStore::email(
+                &retained_message_id.to_string(),
+                &trash_id.to_string(),
+                "trash",
+                "Retained trash message",
+            ),
+        ])),
+        failed_delete_email_ids: Arc::new(Mutex::new(vec![retained_message_id])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let canonical_emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x58, 0x00, 0x01, 0x00, 0x00]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x58, 0x01, 0, 0, 0, 0, 1]));
+    assert_eq!(
+        deleted_emails.lock().unwrap().as_slice(),
+        &[deletable_message_id]
+    );
+    let canonical = canonical_emails.lock().unwrap();
+    assert!(canonical
+        .iter()
+        .all(|email| email.id != deletable_message_id));
+    assert!(canonical
+        .iter()
+        .any(|email| email.id == retained_message_id));
+}
+
+#[tokio::test]
 async fn mapi_over_http_empty_folder_reports_success_when_already_empty() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let store = FakeStore {
@@ -23050,6 +23276,66 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
         deleted_emails.lock().unwrap().as_slice(),
         &[Uuid::parse_str(delete_message_id).unwrap()]
     );
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_hard_delete_reports_partial_when_retention_blocks_delete() {
+    let message_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            &inbox_id.to_string(),
+            "inbox",
+            "Retained sync import delete",
+        )])),
+        failed_delete_email_ids: Arc::new(Mutex::new(vec![Uuid::parse_str(message_id).unwrap()])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let canonical_emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x7E, 0x00, 0x01, 0x02, 0x01]);
+    rops.extend_from_slice(&[0x74, 0x00, 0x02, 0x02]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 1]));
+    assert!(deleted_emails.lock().unwrap().is_empty());
+    assert!(canonical_emails
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|email| email.id == Uuid::parse_str(message_id).unwrap()));
 }
 
 #[tokio::test]
