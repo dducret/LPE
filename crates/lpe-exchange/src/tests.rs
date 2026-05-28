@@ -17356,6 +17356,105 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_message() {
+    let account = FakeStore::account();
+    let calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![calendar])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            account.account_id,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                    .unwrap()
+                    .id,
+            ),
+            MapiCheckpointKind::Content,
+            4,
+            5,
+            serde_json::json!({
+                "source": "emsmdb-ics-download",
+                "syncRootFolderId": crate::mapi::identity::CALENDAR_FOLDER_ID
+            }),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 4,
+        current_modseq: 5,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x10, 0x00, // content sync, FAI only
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x00, 0x00, // PropertyTagCount
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x4017_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x67DA_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x75, 0x00, 0x02, // RopSynchronizationUploadStateStreamBegin
+    ]);
+    rops.extend_from_slice(&0x67D2_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x77, 0x00, 0x02, // RopSynchronizationUploadStateStreamEnd
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    let message = &stream.message_changes[0];
+    assert!(message.associated);
+    assert_eq!(message.subject, "Calendar");
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Configuration.Calendar")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_virtual_contacts_content_sync_stores_virtual_checkpoint() {
     let account = FakeStore::account();
     let contacts = FakeStore::collection("default", "contacts", "Contacts");

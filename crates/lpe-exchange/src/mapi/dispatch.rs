@@ -6859,7 +6859,11 @@ where
                             .count();
                 let suppressed_fai_sync_object_count = all_special_sync_objects
                     .iter()
-                    .filter(|object| object.associated && !fai_scope_requested)
+                    .filter(|object| {
+                        object.associated
+                            && !fai_scope_requested
+                            && object.canonical_id != CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID
+                    })
                     .count();
                 let checkpoint_store_allowed = suppressed_normal_sync_object_count == 0
                     && suppressed_fai_sync_object_count == 0;

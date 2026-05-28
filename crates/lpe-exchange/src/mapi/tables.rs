@@ -63,6 +63,11 @@ pub(in crate::mapi) fn associated_folder_message_count(
             .delegate_freebusy_messages()
             .len()
             .min(u32::MAX as usize) as u32
+    } else if snapshot
+        .collaboration_folder_for_id(folder_id)
+        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+    {
+        1
     } else {
         0
     }
@@ -720,6 +725,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     default_conversation_action_property_tags()
                 } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
                     default_message_property_tags()
+                } else if *associated
+                    && snapshot
+                        .collaboration_folder_for_id(*folder_id)
+                        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+                {
+                    default_message_property_tags()
                 } else {
                     default_contents_columns()
                 }
@@ -744,6 +755,14 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .iter()
                         .map(|message| serialize_delegate_freebusy_row(message, &columns))
                         .collect::<Vec<_>>()
+                } else if snapshot
+                    .collaboration_folder_for_id(*folder_id)
+                    .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+                {
+                    vec![serialize_special_sync_object_row(
+                        &calendar_bootstrap_fai_sync_object(*folder_id),
+                        &columns,
+                    )]
                 } else {
                     Vec::new()
                 }
@@ -1008,6 +1027,12 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                 default_navigation_shortcut_property_tags()
             } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                default_message_property_tags()
+            } else if *associated
+                && snapshot
+                    .collaboration_folder_for_id(*folder_id)
+                    .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+            {
                 default_message_property_tags()
             } else {
                 match snapshot
@@ -3457,6 +3482,60 @@ pub(in crate::mapi) fn serialize_delegate_freebusy_row(
         }
     }
     row
+}
+
+fn serialize_special_sync_object_row(
+    object: &mapi_mailstore::SpecialMessageSyncFact,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match special_sync_object_property_value(object, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn special_sync_object_property_value(
+    object: &mapi_mailstore::SpecialMessageSyncFact,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let change_number = mapi_mailstore::change_number_for_store_id(object.item_id);
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID => Some(MapiValue::U64(object.item_id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(object.item_id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(object.subject.clone()))
+        }
+        PID_TAG_BODY_W => Some(MapiValue::String(object.body_text.clone())),
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(object.message_class.clone())),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(object.associated)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(object.message_size)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(object.folder_id)),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            object.item_id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(object.folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => {
+            Some(MapiValue::I64(object.last_modified_filetime as i64))
+        }
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        _ => None,
+    }
 }
 
 pub(in crate::mapi) fn delegate_freebusy_property_value(

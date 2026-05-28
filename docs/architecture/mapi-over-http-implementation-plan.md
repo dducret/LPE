@@ -160,7 +160,10 @@ non-canonical LPE state.
   identity is persisted with the reserved Calendar MAPI counter. Outlook may
   write back or cache the Calendar default-folder EntryID during profile
   bootstrap, so the advertised folder must have durable backing even when the
-  calendar has no events yet.
+  calendar has no events yet. The empty Calendar folder also projects one
+  deterministic `IPM.Configuration.Calendar` associated-content bootstrap row so
+  Outlook's FAI-only Calendar sync has a stable source key/change key even
+  before the first appointment exists.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the

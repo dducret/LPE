@@ -19,6 +19,9 @@ pub(in crate::mapi) use super::identity::{
     TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 
+pub(in crate::mapi) const CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID: Uuid =
+    Uuid::from_u128(0x6d617069_6361_6c46_8000_000000000001);
+
 pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     ROOT_FOLDER_ID,
     DEFERRED_ACTION_FOLDER_ID,
@@ -428,7 +431,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
             folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
         })
     {
-        return snapshot
+        let mut objects = snapshot
             .events_for_folder(folder_id)
             .into_iter()
             .map(|event| {
@@ -437,7 +440,9 @@ pub(in crate::mapi) fn special_sync_objects_for(
                     snapshot.reminder_for_source("calendar", event.canonical_id),
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
+        objects.push(calendar_bootstrap_fai_sync_object(folder_id));
+        return objects;
     }
     if snapshot
         .collaboration_folder_for_id(folder_id)
@@ -656,12 +661,39 @@ pub(in crate::mapi) fn changed_special_sync_objects(
     changed_ids: &[Uuid],
 ) -> Vec<mapi_mailstore::SpecialMessageSyncFact> {
     if changed_ids.is_empty() {
-        return Vec::new();
+        return objects
+            .into_iter()
+            .filter(|object| object.canonical_id == CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID)
+            .collect();
     }
     objects
         .into_iter()
-        .filter(|object| changed_ids.contains(&object.canonical_id))
+        .filter(|object| {
+            changed_ids.contains(&object.canonical_id)
+                || object.canonical_id == CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID
+        })
         .collect()
+}
+
+pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
+    folder_id: u64,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let item_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 102,
+    );
+    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id,
+        item_id,
+        canonical_id: CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID,
+        associated: true,
+        subject: "Calendar".to_string(),
+        body_text: String::new(),
+        message_class: "IPM.Configuration.Calendar".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size: 0,
+        named_properties: Vec::new(),
+    }
 }
 
 fn journal_sync_object(
