@@ -663,7 +663,9 @@ compatible. They do not replace canonical mail or collaboration tables.
 
 ## Implementation Notes
 
-- `schema.sql` v2 should create a fresh `0.3.0-sql-v2` schema.
+- `schema.sql` v2 should create a fresh `0.4.0-sql-v2` schema.
+- `0.4` has no SQL update path; initialize it only on an empty SQL database or
+  perform an explicit destructive reset.
 - Fresh schema initialization inserts the real platform tenant UUID row and the
   default PostgreSQL storage pool/policy rows. Runtime bootstrap must not
   synthesize pseudo-tenants.

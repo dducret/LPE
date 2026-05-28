@@ -617,40 +617,37 @@ fn mapi_property_store_runtime_sql_matches_durable_schema() {
 }
 
 #[test]
-fn update_script_repairs_mapi_property_store_tables() {
-    assert!(
-        UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.mapi_named_properties")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_lid_idx")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE UNIQUE INDEX IF NOT EXISTS mapi_named_properties_name_idx")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE INDEX IF NOT EXISTS mapi_custom_property_values_object_idx")
-            && UPDATE_LPE_SCRIPT.contains("delegate_freebusy_message")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE INDEX IF NOT EXISTS mapi_delegate_freebusy_messages_account_idx"),
-        "update-lpe.sh must add durable MAPI named/custom property tables for existing databases"
-    );
+fn update_script_does_not_apply_sql_schema_updates() {
+    for forbidden in [
+        "CREATE TABLE IF NOT EXISTS public.mapi_named_properties",
+        "CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values",
+        "CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages",
+        "CREATE TABLE IF NOT EXISTS public.calendar_event_attachments",
+        "ALTER TABLE public.mailbox_messages",
+        "ALTER TABLE public.mailboxes",
+        "ALTER TABLE public.mapi_object_identities",
+        "repair-notes-journal-reminders-schema.sh",
+        "repair-mapi-identity-keys.sh",
+    ] {
+        assert!(
+            !UPDATE_LPE_SCRIPT.contains(forbidden),
+            "update-lpe.sh must not apply SQL update fragment: {forbidden}"
+        );
+    }
 }
 
 #[test]
-fn update_script_repairs_calendar_event_attachment_table() {
-    assert!(
-        UPDATE_LPE_SCRIPT.contains("CREATE TABLE IF NOT EXISTS public.calendar_event_attachments")
-            && UPDATE_LPE_SCRIPT.contains(
-                "REFERENCES public.calendar_events (tenant_id, owner_account_id, calendar_id, id)"
-            )
-            && UPDATE_LPE_SCRIPT
-                .contains("REFERENCES public.blobs (tenant_id, domain_id, id, blob_kind)")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE INDEX IF NOT EXISTS calendar_event_attachments_event_idx")
-            && UPDATE_LPE_SCRIPT
-                .contains("CREATE INDEX IF NOT EXISTS calendar_event_attachments_blob_idx"),
-        "update-lpe.sh must add canonical calendar event attachments for existing databases"
+fn update_script_rejects_non_current_schema_without_mutating_it() {
+    assert_source_contains_all(
+        "update-lpe.sh",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE",
+            "INSTALLED_SCHEMA_VERSION",
+            "EXPECTED_SCHEMA_VERSION",
+            "requires an empty database initialized with init-schema.sh",
+            "does not apply SQL updates during update-lpe.sh",
+        ],
     );
 }
 

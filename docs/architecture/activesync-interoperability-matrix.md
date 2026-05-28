@@ -64,7 +64,7 @@ Record one evidence row per client/build/device. Do not mark the gate passed fro
 
 ### Outlook Mobile Checklist
 
-Run this checklist for Outlook mobile on iOS and Android when both are available. The `0.2.0` publication gate requires at least Outlook mobile and iOS Mail evidence; Android evidence is additional coverage unless the release explicitly targets it.
+Run this checklist for Outlook mobile on iOS and Android when both are available. Publication requires real Outlook mobile and iOS Mail evidence; Android evidence is additional coverage unless the release explicitly targets it.
 
 | Step | Expected evidence |
 | --- | --- |

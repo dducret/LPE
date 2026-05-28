@@ -61,4 +61,4 @@ cargo test -p lpe-exchange nspi
 ```
 
 The release/publication gate remains the MAPI over HTTP Outlook readiness path
-documented in `docs/architecture/0.2.0-protocol-depth-gates.md`.
+documented in the MAPI implementation and Outlook cached-mode evidence docs.

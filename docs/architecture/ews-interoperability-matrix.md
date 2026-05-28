@@ -27,7 +27,7 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 | Tasks | create, read, update, delete where supported |
 | Submission | canonical `Sent` copy visible after send |
 
-| Operation | 0.2.0 status |
+| Operation | Status |
 | --- | --- |
 | `SyncFolderHierarchy` | supported for canonical folder hierarchy |
 | `FindFolder` / `GetFolder` | supported for canonical folder discovery |
@@ -44,4 +44,4 @@ The EWS matrix defines the live checks required for the supported `lpe-exchange`
 | `GetServerTimeZones` | supported static compatibility response |
 | `GetUserOofSettings` / `SetUserOofSettings` | supported through canonical vacation/Sieve behavior; EWS `Enabled` and `Scheduled` states persist a canonical vacation script, and `Scheduled` duration plus external-audience metadata round-trips through EWS while remaining attached to that canonical script |
 | `Subscribe` / `GetEvents` / `Unsubscribe` | supported for bounded pull-subscription compatibility; `Subscribe` accepts pull subscriptions and honors request watermarks against a short-lived in-process mailbox event journal, mailbox `CreateItem` and `DeleteItem` calls are recorded as `CreatedEvent`, `NewMailEvent`, and `DeletedEvent` candidates, `GetEvents` returns queued notifications before falling back to visible-message projections, emits mailbox-scoped compatibility `CreatedEvent` probes when no durable event queue is available, or status notifications for non-mailbox subscriptions, and push/streaming notifications remain out of scope |
-| `GetRoomLists`, `FindPeople`, `ExpandDL`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder` | intentionally unsupported in `0.2.0`; must return EWS error responses |
+| `GetRoomLists`, `FindPeople`, `ExpandDL`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, `GetSharingFolder` | intentionally unsupported; must return EWS error responses |

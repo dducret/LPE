@@ -1,8 +1,8 @@
 # Installation
 
-These installation instructions are aligned with the current repository schema `0.3.0-sql-v2`.
+These installation instructions are aligned with the current repository schema `0.4.0-sql-v2`.
 
-Fresh installs initialize the database from the canonical schema. In-place schema migrations are not supported for this release; rebuild the database from `crates/lpe-storage/sql/schema.sql` for a new deployment.
+LPE `0.4` requires an empty SQL database initialized from the canonical schema. Create a new empty database for `0.4`, or use `LPE_RESET_SCHEMA=true` only for an intentional destructive reset.
 The schema initializer creates the real platform tenant row
 `00000000-0000-0000-0000-000000000001` and the default storage pool/policy
 metadata; runtime bootstrap must not create string pseudo-tenants.
@@ -334,21 +334,15 @@ Files:
 - `install-lpe.sh` now verifies that `LPE_DB_PASSWORD`, `DATABASE_URL`, `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_INTEGRATION_SHARED_SECRET` were actually persisted to `/etc/lpe/lpe.env` before it continues
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
-- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, applies the bounded Notes/Journal/Reminder schema repair when needed, updates the `mailboxes.role` check constraint for canonical Outlook-compatible mailbox roles, rebuilds `lpe-cli`, and restarts the service when the installed database matches the current schema
-- `update-lpe.sh` also applies the bounded Conversation Action Settings schema additions for existing databases, including the canonical `conversation_actions` table, the resolved same-store target mailbox column, and the MAPI identity/check-constraint allow-list entries required by Outlook FAI rows
-- `update-lpe.sh` also creates `mapi_navigation_shortcuts` and extends the MAPI identity allow-list for persisted Common Views navigation shortcut FAI rows.
-- `update-lpe.sh` also adds the durable MAPI named-property and custom-property tables required by Outlook MAPI/HTTP bootstrap on existing databases
-- `update-lpe.sh` also relaxes the `mapi_sync_checkpoints.mailbox_id` mailbox foreign key on existing databases so Outlook MAPI/HTTP can persist content checkpoints for virtual special folders such as Calendar
-- `update-lpe.sh` refuses to continue when the installed MAPI identity key constraints still use an older shape; run `repair-mapi-identity-keys.sh` for that specific 22-byte key repair, or use `init-schema.sh` only for an intentional reset
+- `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
+- `update-lpe.sh` does not apply SQL updates in `0.4`; it performs a read-only schema-version check and refuses to continue unless the installed database is already an initialized `0.4` empty-database schema
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
-- `update-lpe.sh` also rebuilds `web/admin` and `web/client`, redeploys static assets, and reloads `nginx`
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
 - `create-lpe-database.sql` provides a SQL-native bootstrap alternative for creating the PostgreSQL role and database
 - `crates/lpe-storage/sql/schema.sql` provides the canonical full schema for fresh databases
-- `repair-notes-journal-reminders-schema.sh` applies the bounded non-destructive schema additions for canonical Notes, Journal, and computed Reminder support on an existing v2 database
 - the installation scripts use the system `rustup` binary and initialize the `stable` toolchain before building
-- `init-schema.sh` drops and recreates the PostgreSQL `public` schema, then applies the canonical `0.3.0-sql-v2` schema, including the platform tenant UUID row and default storage pool/policy metadata; use it only for fresh installs or intentional resets
+- `init-schema.sh` applies the canonical `0.4.0-sql-v2` schema, including the platform tenant UUID row and default storage pool/policy metadata, only when the SQL database is empty; set `LPE_RESET_SCHEMA=true` only for an intentional destructive reset
 - `check-lpe.sh` verifies the installation, PostgreSQL, the service, and the HTTP endpoints
 - `check-lpe-ready.sh` returns success only when the local `LPE` node is ready for traffic
 - `lpe-ha-set-role.sh` writes the local HA role (`active`, `standby`, `drain`, `maintenance`)
@@ -692,10 +686,10 @@ defaults to the RPC/HTTP connection timeout.
 For public client auto-configuration, the exposed front end must remain `LPE-CT` or an equivalent HTTPS publication layer. In v1:
 
 - `Thunderbird` receives an `IMAP` profile
-- Outlook support is a `0.2.0` goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, `0.2.0` deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` plus Outlook Anywhere / RPC over HTTP release path
+- Outlook support remains a release goal: Outlook mobile uses `ActiveSync`, Outlook for Windows desktop receives an `IMAP` profile by default when configured that way, deployments may explicitly enable EWS autodiscovery for Exchange-style mail, contacts, calendar, and task compatibility, and full classic Outlook desktop Exchange-account support is the `MAPI over HTTP` plus Outlook Anywhere / RPC over HTTP release path
 - `ActiveSync` remains exposed for mobile/native clients that actually support `Exchange ActiveSync`
 - `EWS` remains opt-in through `LPE_AUTOCONFIG_EWS_ENABLED` and must not be treated as `MAPI`, `RPC`, or client `SMTP`
-- `MAPI over HTTP` routes are the `0.2.0` classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or fully gated MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
+- `MAPI over HTTP` routes are the classic Outlook desktop Exchange-account path; the public edge publishes `/mapi/` so Outlook can reach the authenticated endpoints, but autodiscover publishes `mapiHttp` only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are explicitly enabled, SOAP Exchange `GetUserSettings` only when `LPE_AUTOCONFIG_SOAP_EXCHANGE_AUTODISCOVER_ENABLED` is also enabled, legacy `EXCH` provider metadata only when `LPE_AUTOCONFIG_EXCH_AUTODISCOVER_ENABLED` is also enabled with an explicitly published EWS or fully gated MAPI surface, and legacy `EXPR` provider metadata only when `LPE_AUTOCONFIG_EXPR_AUTODISCOVER_ENABLED`, `LPE_AUTOCONFIG_RPC_PROXY_ENABLED`, and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are also enabled with a real `/rpc/rpcproxy.dll` Outlook Anywhere path
 - MAPI over HTTP session context, request-id replay protection, ROP handles, and FastTransfer / ICS handles are in-process state on the core `LPE` node. Multi-node deployments must keep `/mapi/emsmdb`, `/mapi/nspi`, and `/rpc/rpcproxy.dll` traffic sticky to the same active core node for the life of the MAPI session, or expect Outlook to reconnect through fresh `Connect` / `Bind` / `Logon` probes after a restart or failover.
 - Outlook Anywhere / RPC over HTTP is required when legacy `EXPR` is published; `/rpc/rpcproxy.dll` must be routed by `LPE-CT` to the core exchange adapter and must not be replaced by a static web-server response.
 - The public `/rpc/rpcproxy.dll` route must use streaming proxy settings equivalent to `/mapi/`: long read/send timeouts, `proxy_buffering off`, `proxy_request_buffering off`, and `client_max_body_size 0`. RCA `RPC_IN_DATA` opens a long upload channel with a very large advertised request body; without the explicit body-size override, nginx can reject the mailbox-store channel with `413` before the core service can drain it.
@@ -765,7 +759,7 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` rebuilds and redeploys code and web assets. It applies only documented bounded repair steps such as `repair-notes-journal-reminders-schema.sh` for notes, journal, reminders, recurrence reminder dismissals, the Outlook follow-up/search-folder compatibility patch, durable MAPI named/custom property tables, the canonical calendar event attachment table, removal of the retired protocol-local MAPI folder-property table, virtual special-folder MAPI checkpoint scope repair, and the current Exchange special-folder role constraint refresh; it does not apply general schema migrations. For an intentional fresh schema reset, run `init-schema.sh` explicitly. If `check-lpe.sh` reports that `mapi_object_identities` still has older MAPI identity key constraints, run `repair-mapi-identity-keys.sh` once before retrying Outlook MAPI/HTTP profile creation.
+`update-lpe.sh` rebuilds and redeploys code and web assets only after a read-only schema-version check. It does not apply SQL updates in `0.4`. For a `0.4` deployment, point `DATABASE_URL` at an empty SQL database and run `init-schema.sh`; for a disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before running `init-schema.sh`.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 

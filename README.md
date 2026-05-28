@@ -2,11 +2,11 @@
 
 `LPE` is a modern mail and collaboration platform written primarily in Rust.
 
-The repository is aligned for release `0.2.0`.
+The repository is aligned for release `0.4.0`.
 
-Release `0.2.0` is the EWS plus full MAPI/Outlook implementation release. A fresh install and database initialization from the canonical schema are required.
+Release `0.4.0` requires a fresh empty SQL database initialized from the canonical schema.
 
-See `docs/releases/0.2.0.md` for the short release note.
+See `docs/releases/0.4.0.md` for the short release note.
 
 ## Initial Principles
 
@@ -17,20 +17,20 @@ See `docs/releases/0.2.0.md` for the short release note.
 - `IMAP` is a permanently supported mailbox-access communication protocol and compatibility layer
 - inbound and outbound `SMTP` transport is handled by the `LPE-CT` sorting center
 - `ActiveSync` is the first targeted native mobile compatibility layer for clients that support `Exchange ActiveSync`
-- `EWS` is the `0.2.0` Exchange compatibility implementation for Exchange-style mail, contacts, calendar, and task clients
-- full Outlook support is a `0.2.0` release goal: Outlook mobile through `ActiveSync`, Exchange-style compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through the `MAPI over HTTP` track
+- `EWS` is the bounded Exchange compatibility implementation for Exchange-style mail, contacts, calendar, and task clients
+- full Outlook support remains a release goal: Outlook mobile through `ActiveSync`, Exchange-style compatibility through `EWS`, and classic Outlook for Windows Exchange-account support through the `MAPI over HTTP` track
 - the architecture remains compatible with future local AI without data leaving the server
 
 ## Current Priority
 
-The current repository priority is implementing `EWS` and full classic Outlook `MAPI over HTTP` support in `0.2.0` while preserving the canonical `LPE` mailbox, contacts, calendar, tasks, and submission model.
+The current repository priority is implementing `EWS` and full classic Outlook `MAPI over HTTP` support while preserving the canonical `LPE` mailbox, contacts, calendar, tasks, and submission model.
 
 The near-term order is:
 
 - `JMAP` depth first: state or change semantics, WebSocket reliability, delegation, and shared-collection consistency
 - `IMAP` support as a continuing client communication protocol: sync behavior, `UID` handling, flags, and client compatibility
-- `EWS` in `0.2.0`: Exchange-style folder, mail, contacts, calendar, and task synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
-- `MAPI over HTTP` in `0.2.0`: complete the classic Outlook for Windows Exchange-account path over authenticated `/mapi/emsmdb` and `/mapi/nspi`; supported publication remains gated until profile creation, mailbox sync, NSPI, send, reconnect, and canonical `Sent` behavior pass the Outlook interoperability matrix
+- `EWS`: Exchange-style folder, mail, contacts, calendar, and task synchronization without `RPC`, client `SMTP`, or a parallel `Sent` / `Outbox`
+- `MAPI over HTTP`: complete the classic Outlook for Windows Exchange-account path over authenticated `/mapi/emsmdb` and `/mapi/nspi`; supported publication remains gated until profile creation, mailbox sync, NSPI, send, reconnect, and canonical `Sent` behavior pass the Outlook interoperability matrix
 - `ActiveSync` as the flagship compatibility target for Outlook mobile and other native mobile clients
 - `DAV` and `ManageSieve` interoperability work after the higher-priority mail protocols are stable
 
