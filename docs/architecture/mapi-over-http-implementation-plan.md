@@ -161,11 +161,10 @@ non-canonical LPE state.
   folder/message global counters used by `PidTagSourceKey`. Outlook relies on
   this identity material when deriving local item-friendly identifiers during
   cached-mode sync.
-- Private-mailbox `RopLogon` responses expose only implemented Microsoft
-  special-folder IDs before `ResponseFlags` and `MailboxGuid`; adding
-  compatibility-only virtual folders, such as navigation shortcuts, shifts
-  `MailboxGuid` and causes Outlook to construct malformed private-store
-  EntryIDs.
+- Private-mailbox `RopLogon` responses expose the Microsoft fixed folder-id
+  slots before `ResponseFlags` and `MailboxGuid`, including the `Shortcuts`
+  slot required by current Outlook clients. The `Shortcuts` FID is a bounded
+  wire-compatibility identifier only; it does not create a canonical LPE folder.
 - Common Views and Personal Views are Root children outside the IPM subtree.
   Navigation shortcuts are projected as folder-associated information messages
   in Common Views, not as a separate Shortcuts folder. This follows

@@ -5523,7 +5523,7 @@ mod tests {
     }
 
     #[test]
-    pub(in crate::mapi) fn private_logon_places_exactly_12_folder_ids_before_response_flags() {
+    pub(in crate::mapi) fn private_logon_places_exactly_13_folder_ids_before_response_flags() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::nil(),
             account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
@@ -5540,7 +5540,7 @@ mod tests {
         let response = rop_logon_response_body(&principal, &request);
         let response_flags_offset = 7 + PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len() * 8;
 
-        assert_eq!(PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len(), 12);
+        assert_eq!(PRIVATE_LOGON_SPECIAL_FOLDER_IDS.len(), 13);
         assert_eq!(response[response_flags_offset], 0x07);
         assert_eq!(
             &response[response_flags_offset + 1..response_flags_offset + 17],
