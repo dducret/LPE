@@ -23715,7 +23715,12 @@ async fn mapi_over_http_save_message_skips_sync_metadata_only_import() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    let mut save_response = vec![0x0C, 0x01, 0, 0, 0, 0, 0x03];
+    save_response.extend_from_slice(&mapi_wire_id_bytes(out_of_range_object_id));
+    assert!(
+        contains_bytes(&response_rops, &save_response),
+        "response={response_rops:02x?} expected={save_response:02x?}"
+    );
     assert_eq!(imported_emails.lock().unwrap().len(), 0);
     assert!(!mapi_identities
         .lock()
@@ -23790,7 +23795,12 @@ async fn mapi_over_http_save_message_skips_unbacked_trash_sync_upload() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    let mut save_response = vec![0x0C, 0x01, 0, 0, 0, 0, 0x03];
+    save_response.extend_from_slice(&mapi_wire_id_bytes(out_of_range_object_id));
+    assert!(
+        contains_bytes(&response_rops, &save_response),
+        "response={response_rops:02x?} expected={save_response:02x?}"
+    );
     assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
     assert_eq!(imported_emails.lock().unwrap().len(), 0);
     assert!(!mapi_identities
@@ -26181,7 +26191,7 @@ async fn mapi_over_http_bind_reestablishes_nspi_session_cookie() {
         .handle_mapi(MapiEndpoint::Nspi, &old_unbind_headers, b"")
         .await
         .unwrap();
-    assert_eq!(old_unbind.headers().get("x-responsecode").unwrap(), "10");
+    assert_eq!(old_unbind.headers().get("x-responsecode").unwrap(), "0");
 
     let mut new_unbind_headers = mapi_headers("Unbind");
     new_unbind_headers.insert(
@@ -26298,7 +26308,7 @@ async fn mapi_over_http_nspi_operation_rejects_mismatched_sequence_cookie() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_nspi_bootstrap_requests_reject_stale_and_wrong_endpoint_cookies() {
+async fn mapi_over_http_nspi_bootstrap_requests_handle_stale_cleanup_and_reject_stateful_cookies() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -26317,8 +26327,34 @@ async fn mapi_over_http_nspi_bootstrap_requests_reject_stale_and_wrong_endpoint_
         .unwrap();
     assert_eq!(unbind.headers().get("x-responsecode").unwrap(), "0");
 
+    let repeated_unbind = service
+        .handle_mapi(MapiEndpoint::Nspi, &unbind_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(
+        repeated_unbind.headers().get("x-requesttype").unwrap(),
+        "Unbind"
+    );
+    assert_eq!(
+        repeated_unbind.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+
+    let mut dn_to_mid_headers = mapi_headers("DNToMId");
+    dn_to_mid_headers.insert("cookie", HeaderValue::from_str(&stale_cookie).unwrap());
+    let dn_to_mid = service
+        .handle_mapi(
+            MapiEndpoint::Nspi,
+            &dn_to_mid_headers,
+            b"alice@example.test\0",
+        )
+        .await
+        .unwrap();
+    assert_eq!(dn_to_mid.status(), StatusCode::OK);
+    assert_eq!(dn_to_mid.headers().get("x-requesttype").unwrap(), "DNToMId");
+    assert_eq!(dn_to_mid.headers().get("x-responsecode").unwrap(), "0");
+
     for request_type in [
-        "DNToMId",
         "GetProps",
         "GetSpecialTable",
         "GetMatches",

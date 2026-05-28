@@ -137,6 +137,10 @@ non-canonical LPE state.
   account/contact visibility. `ModLinkAtt`, `ModProps`, and other NSPI mutation
   surfaces remain disabled until canonical write semantics are explicitly
   designed.
+- NSPI `DNToMId` is authenticated but stateless so Outlook's late bootstrap
+  name-resolution probes can complete after session rotation. NSPI `Unbind` is
+  idempotent for already-removed session cookies and clears the session cookies;
+  stateful NSPI table/property operations still require a live bound session.
 - Outlook default-folder properties must be projected from canonical folder
   identities. Generated special-folder binary identifiers use the documented
   46-byte folder EntryID form; cached 24-byte LongTermIDs and 46-byte folder
@@ -362,6 +366,11 @@ not by itself authorize broad client publication.
 - Content sync honors Outlook's extra flag contract for `Eid`, message size,
   and change number; when Outlook requests message size in the change header,
   LPE emits a non-zero value for projected normal and associated messages.
+- Bounded skipped sync-upload saves, such as metadata-only imports or
+  client-local Deleted Items sync reports that must not become canonical mailbox
+  state, still return the MID implied by the imported source key instead of a
+  null MID so Outlook can complete its current sync transaction without an
+  immediate local `ItemNotFound`.
 - Hierarchy final state scopes `MetaTagIdsetGiven` to emitted folder IDs, and
   `MetaTagCnsetSeen` covers emitted folder changes plus the sync root change
   counter.

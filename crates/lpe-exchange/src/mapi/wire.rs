@@ -90,7 +90,6 @@ impl MapiHttpRequestType {
         matches!(
             self,
             Self::CompareMids
-                | Self::DnToMid
                 | Self::GetMatches
                 | Self::GetPropList
                 | Self::GetProps

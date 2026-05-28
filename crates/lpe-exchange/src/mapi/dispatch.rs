@@ -4691,6 +4691,7 @@ where
                     continue;
                 };
                 if pending_message_is_sync_metadata_only(&properties, &recipients) {
+                    let response_message_id = pending_source_key_message_id(&properties);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -4710,10 +4711,14 @@ where
                         save_skipped_reason = "sync_metadata_only",
                         "rca debug mapi save changes message"
                     );
-                    responses.extend_from_slice(&rop_save_changes_message_response(&request, 0));
+                    responses.extend_from_slice(&rop_save_changes_message_response(
+                        &request,
+                        response_message_id,
+                    ));
                     continue;
                 }
                 if pending_message_is_unbacked_trash_sync_upload(folder_id, &properties) {
+                    let response_message_id = pending_source_key_message_id(&properties);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -4733,10 +4738,14 @@ where
                         import_source_key_global_counter = pending_source_key_global_counter(&properties)
                             .map(|counter| counter.to_string())
                             .unwrap_or_default(),
+                        response_message_id = %format!("{response_message_id:#018x}"),
                         save_skipped_reason = "unbacked_client_trash_sync_upload",
                         "rca debug mapi save changes message"
                     );
-                    responses.extend_from_slice(&rop_save_changes_message_response(&request, 0));
+                    responses.extend_from_slice(&rop_save_changes_message_response(
+                        &request,
+                        response_message_id,
+                    ));
                     continue;
                 }
                 let input =
@@ -9137,6 +9146,12 @@ fn pending_source_key_global_counter(properties: &HashMap<u32, MapiValue>) -> Op
         MapiValue::Binary(bytes) => source_key_global_counter(bytes.as_slice()),
         _ => None,
     }
+}
+
+fn pending_source_key_message_id(properties: &HashMap<u32, MapiValue>) -> u64 {
+    pending_source_key_global_counter(properties)
+        .map(crate::mapi::identity::mapi_store_id)
+        .unwrap_or(0)
 }
 
 fn imported_property_source_key_global_counter(properties: &[(u32, MapiValue)]) -> Option<u64> {

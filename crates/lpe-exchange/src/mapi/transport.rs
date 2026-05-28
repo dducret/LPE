@@ -547,6 +547,9 @@ pub(in crate::mapi) fn disconnect_response(
         );
     };
     let Some(mut session) = remove_session(&session_id) else {
+        if endpoint == MapiEndpoint::Nspi && response_request_type == "Unbind" {
+            return disconnect_success_response(endpoint, request_id, response_request_type);
+        }
         return mapi_diagnostic_response(
             response_request_type,
             request_id,
@@ -578,6 +581,14 @@ pub(in crate::mapi) fn disconnect_response(
         response_request_type,
     );
 
+    disconnect_success_response(endpoint, request_id, response_request_type)
+}
+
+fn disconnect_success_response(
+    endpoint: MapiEndpoint,
+    request_id: &str,
+    response_request_type: &str,
+) -> Response {
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);

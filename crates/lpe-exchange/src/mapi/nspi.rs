@@ -1976,7 +1976,7 @@ mod tests {
                 request_type.requires_nspi_session()
                     || matches!(
                         request_type,
-                        MapiRequestType::Bind | MapiRequestType::Unbind
+                        MapiRequestType::Bind | MapiRequestType::DnToMid | MapiRequestType::Unbind
                     )
             );
             assert_ne!(request_type.header_value(), "");
