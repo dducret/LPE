@@ -163,7 +163,9 @@ non-canonical LPE state.
   calendar has no events yet. The empty Calendar folder also projects one
   deterministic `IPM.Configuration.Calendar` associated-content bootstrap row so
   Outlook's FAI-only Calendar sync has a stable source key/change key even
-  before the first appointment exists.
+  before the first appointment exists. That bootstrap row carries the minimal
+  appointment identity, date, time-zone, and global-object-id properties Outlook
+  expects while validating a newly downloaded Calendar folder.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the

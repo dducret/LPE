@@ -17459,6 +17459,26 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
         &response_rops,
         &utf16z("IPM.Configuration.Calendar")
     ));
+    for property_tag in [
+        0x0060_0040u32,
+        0x0061_0040,
+        0x8205_0003,
+        0x8208_001F,
+        0x820D_0040,
+        0x820E_0040,
+        0x8213_0003,
+        0x8233_0102,
+        0x8234_001F,
+        0x825E_0102,
+        0x825F_0102,
+        0x8001_0102,
+        0x8002_0102,
+    ] {
+        assert!(
+            message.body_tags.contains(&property_tag),
+            "missing bootstrap calendar property 0x{property_tag:08x}"
+        );
+    }
 }
 
 #[tokio::test]

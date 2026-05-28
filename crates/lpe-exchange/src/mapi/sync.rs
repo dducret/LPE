@@ -684,6 +684,29 @@ pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
         crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 102,
     );
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    let event = calendar_bootstrap_fai_event();
+    let mut named_properties = Vec::new();
+    for property_tag in [
+        PID_TAG_START_DATE,
+        PID_TAG_END_DATE,
+        PID_LID_BUSY_STATUS_TAG,
+        PID_LID_LOCATION_W_TAG,
+        PID_LID_APPOINTMENT_START_WHOLE_TAG,
+        PID_LID_APPOINTMENT_END_WHOLE_TAG,
+        PID_LID_APPOINTMENT_DURATION_TAG,
+        PID_LID_TIME_ZONE_STRUCT_TAG,
+        PID_LID_TIME_ZONE_DESCRIPTION_W_TAG,
+        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG,
+        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG,
+        PID_LID_GLOBAL_OBJECT_ID_TAG,
+        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
+    ] {
+        if let Some(value) = event_property_value(&event, item_id, folder_id, property_tag)
+            .and_then(special_message_property_value)
+        {
+            named_properties.push((property_tag, value));
+        }
+    }
     mapi_mailstore::SpecialMessageSyncFact {
         folder_id,
         item_id,
@@ -694,7 +717,41 @@ pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
         message_class: "IPM.Configuration.Calendar".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size: 0,
-        named_properties: Vec::new(),
+        named_properties,
+    }
+}
+
+fn calendar_bootstrap_fai_event() -> lpe_storage::AccessibleEvent {
+    lpe_storage::AccessibleEvent {
+        id: CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID,
+        uid: "lpe-calendar-bootstrap".to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: Uuid::nil(),
+        owner_email: String::new(),
+        owner_display_name: String::new(),
+        rights: lpe_storage::CollaborationRights {
+            may_read: true,
+            may_write: false,
+            may_delete: false,
+            may_share: false,
+        },
+        date: "2000-01-01".to_string(),
+        time: "00:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: String::new(),
+        recurrence_exceptions_json: String::new(),
+        title: "Calendar".to_string(),
+        location: String::new(),
+        organizer_json: String::new(),
+        attendees: String::new(),
+        attendees_json: String::new(),
+        notes: String::new(),
+        body_html: String::new(),
     }
 }
 

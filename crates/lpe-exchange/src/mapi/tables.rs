@@ -3536,8 +3536,39 @@ fn special_sync_object_property_value(
             Some(MapiValue::I64(object.last_modified_filetime as i64))
         }
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
-        _ => None,
+        _ => special_sync_object_named_property_value(object, property_tag),
     }
+}
+
+fn special_sync_object_named_property_value(
+    object: &mapi_mailstore::SpecialMessageSyncFact,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    object
+        .named_properties
+        .iter()
+        .find(|(tag, _)| canonical_property_storage_tag(*tag) == property_tag)
+        .map(|(_, value)| match value {
+            mapi_mailstore::SpecialMessagePropertyValue::Binary(value) => {
+                MapiValue::Binary(value.clone())
+            }
+            mapi_mailstore::SpecialMessagePropertyValue::Bool(value) => MapiValue::Bool(*value),
+            mapi_mailstore::SpecialMessagePropertyValue::Guid(value) => MapiValue::Guid(*value),
+            mapi_mailstore::SpecialMessagePropertyValue::I32(value) => MapiValue::I32(*value),
+            mapi_mailstore::SpecialMessagePropertyValue::I64(value) => MapiValue::I64(*value),
+            mapi_mailstore::SpecialMessagePropertyValue::U32(value) => MapiValue::U32(*value),
+            mapi_mailstore::SpecialMessagePropertyValue::U64(value) => MapiValue::U64(*value),
+            mapi_mailstore::SpecialMessagePropertyValue::String(value) => {
+                MapiValue::String(value.clone())
+            }
+            mapi_mailstore::SpecialMessagePropertyValue::MultiString(values) => {
+                MapiValue::MultiString(values.clone())
+            }
+            mapi_mailstore::SpecialMessagePropertyValue::Time(value) => {
+                MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc(value) as i64)
+            }
+        })
 }
 
 pub(in crate::mapi) fn delegate_freebusy_property_value(
