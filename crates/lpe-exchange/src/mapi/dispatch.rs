@@ -2277,13 +2277,13 @@ fn debug_object_scope_for_id(
     }
     if mailboxes
         .iter()
-        .any(|mailbox| crate::mapi::identity::mapped_mapi_object_id(&mailbox.id) == Some(object_id))
+        .any(|mailbox| mapi_item_id_matches(&mailbox.id, object_id))
     {
         return "mailbox";
     }
     if emails
         .iter()
-        .any(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id) == Some(object_id))
+        .any(|email| mapi_item_id_matches(&email.id, object_id))
     {
         return "message";
     }
@@ -2337,8 +2337,21 @@ fn long_term_id_from_id_scope_is_loaded(scope: &str) -> bool {
     scope != "unparsed" && scope != "not_loaded"
 }
 
-fn rop_long_term_id_from_id_response_for_scope(request: &RopRequest, scope: &str) -> Vec<u8> {
+fn long_term_id_from_id_object_is_loaded(object_id: Option<u64>, scope: &str) -> bool {
     if long_term_id_from_id_scope_is_loaded(scope) {
+        return true;
+    }
+    object_id
+        .and_then(crate::mapi::identity::global_counter_from_store_id)
+        .is_some_and(|counter| counter >= crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER)
+}
+
+fn rop_long_term_id_from_id_response_for_scope(
+    request: &RopRequest,
+    object_id: Option<u64>,
+    scope: &str,
+) -> Vec<u8> {
+    if long_term_id_from_id_object_is_loaded(object_id, scope) {
         rop_long_term_id_from_id_response(request)
     } else {
         rop_error_response(
@@ -5455,7 +5468,14 @@ where
                     }
                 };
                 let message_id = request.status_message_id().unwrap_or(0);
-                if message_for_id(folder_id, message_id, mailboxes, emails).is_none() {
+                if message_for_id(folder_id, message_id, mailboxes, emails)
+                    .or_else(|| {
+                        emails
+                            .iter()
+                            .find(|email| mapi_item_id_matches(&email.id, message_id))
+                    })
+                    .is_none()
+                {
                     responses.extend_from_slice(&rop_error_response(
                         0x20,
                         request.response_handle_index(),
@@ -6405,6 +6425,11 @@ where
                 let mut partial_completion = false;
                 for message_id in request.message_ids() {
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
+                        .or_else(|| {
+                            emails
+                                .iter()
+                                .find(|email| mapi_item_id_matches(&email.id, message_id))
+                        })
                     else {
                         partial_completion = true;
                         continue;
@@ -8367,8 +8392,11 @@ where
                 let decoded_object_id = request.long_term_source_object_id();
                 let decoded_object_scope =
                     debug_object_scope_for_id(decoded_object_id, mailboxes, emails, snapshot);
-                let response =
-                    rop_long_term_id_from_id_response_for_scope(&request, decoded_object_scope);
+                let response = rop_long_term_id_from_id_response_for_scope(
+                    &request,
+                    decoded_object_id,
+                    decoded_object_scope,
+                );
                 let response_status = if response.len() > 6 {
                     "ok"
                 } else {
@@ -9353,15 +9381,15 @@ mod tests {
         };
 
         assert_eq!(
-            rop_long_term_id_from_id_response_for_scope(&request, "not_loaded"),
+            rop_long_term_id_from_id_response_for_scope(&request, None, "not_loaded"),
             vec![RopId::LongTermIdFromId as u8, 0x00, 0x0F, 0x01, 0x04, 0x80]
         );
         assert_eq!(
-            &rop_long_term_id_from_id_response_for_scope(&request, "message")[..6],
+            &rop_long_term_id_from_id_response_for_scope(&request, None, "message")[..6],
             &[RopId::LongTermIdFromId as u8, 0x00, 0, 0, 0, 0]
         );
         assert_eq!(
-            rop_long_term_id_from_id_response_for_scope(&request, "unparsed"),
+            rop_long_term_id_from_id_response_for_scope(&request, None, "unparsed"),
             vec![RopId::LongTermIdFromId as u8, 0x00, 0x0F, 0x01, 0x04, 0x80]
         );
     }

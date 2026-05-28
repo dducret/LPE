@@ -1050,8 +1050,14 @@ pub(in crate::mapi) fn message_for_id<'a>(
     emails: &'a [JmapEmail],
 ) -> Option<&'a JmapEmail> {
     emails.iter().find(|email| {
-        mapi_message_id(email) == message_id && email_matches_folder(email, folder_id, mailboxes)
+        mapi_item_id_matches(&email.id, message_id)
+            && email_matches_folder(email, folder_id, mailboxes)
     })
+}
+
+pub(in crate::mapi) fn mapi_item_id_matches(canonical_id: &Uuid, object_id: u64) -> bool {
+    crate::mapi::identity::mapped_mapi_object_id(canonical_id) == Some(object_id)
+        || crate::mapi::identity::legacy_migration_object_id(canonical_id) == object_id
 }
 
 pub(in crate::mapi) fn next_pending_attachment_num(

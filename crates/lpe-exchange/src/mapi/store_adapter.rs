@@ -73,6 +73,9 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         if let Some(message_id) = request.message_id() {
             push_unique(&mut plan.object_ids, message_id);
         }
+        if let Some(message_id) = request.status_message_id() {
+            push_unique(&mut plan.object_ids, message_id);
+        }
         if let Some(object_id) = request.long_term_source_object_id() {
             push_unique(&mut plan.object_ids, object_id);
         }

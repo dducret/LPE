@@ -378,7 +378,9 @@ pub(in crate::mapi) fn parse_resolve_names_columns(request: &[u8]) -> Option<Vec
 }
 
 pub(in crate::mapi) fn resolve_names_requested_values(request: &[u8]) -> Vec<String> {
-    parse_resolve_names_values(request).unwrap_or_else(|| scan_address_book_lookup_values(request))
+    parse_resolve_names_values(request)
+        .filter(|values| !values.is_empty())
+        .unwrap_or_else(|| scan_address_book_lookup_values(request))
 }
 
 pub(in crate::mapi) fn parse_resolve_names_values(request: &[u8]) -> Option<Vec<String>> {
@@ -464,7 +466,7 @@ where
             &format!("failed to project authenticated address book identifier: {error}"),
         );
     }
-    let values = scan_address_book_lookup_values(request);
+    let values = resolve_names_requested_values(request);
     let matched_mid = values
         .first()
         .and_then(|value| nspi_match_entry(principal.account_id, &entries, value))
@@ -608,6 +610,7 @@ where
         .collect::<Vec<_>>();
     let principal_entry = principal_address_book_entry(principal);
     let principal_id = nspi_entry_id(principal.account_id, &principal_entry);
+    let lookup_values = resolve_names_requested_values(request);
     let entry = nspi_stat_current_rec(request)
         .and_then(|current_rec| {
             entries
@@ -623,13 +626,13 @@ where
                 .then_some(principal_entry.clone())
         })
         .or_else(|| {
-            scan_address_book_lookup_values(request)
+            lookup_values
                 .iter()
                 .any(|value| nspi_lookup_matches_principal(value, principal))
                 .then_some(principal_entry.clone())
         })
         .or_else(|| {
-            (!nspi_request_has_entry_selector(request)).then(|| {
+            (lookup_values.is_empty() && !nspi_request_has_entry_selector(request)).then(|| {
                 entries
                     .iter()
                     .find(|entry| nspi_entry_is_principal(entry, principal))
@@ -1642,7 +1645,7 @@ pub(in crate::mapi) fn nspi_filter_entries_for_request(
     entries: Vec<ExchangeAddressBookEntry>,
     request: &[u8],
 ) -> Vec<ExchangeAddressBookEntry> {
-    let values = scan_address_book_lookup_values(request);
+    let values = resolve_names_requested_values(request);
     if values.is_empty() {
         return entries;
     }

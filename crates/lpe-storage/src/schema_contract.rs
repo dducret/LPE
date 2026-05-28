@@ -1336,7 +1336,7 @@ fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
             "mapi_over_http_contact_crud_uses_canonical_contacts",
             "mapi_over_http_calendar_crud_uses_canonical_events",
             "mapi_over_http_task_crud_uses_canonical_tasks",
-            "mapi_over_http_common_views_content_sync_exports_search_folder_fai_definitions",
+            "mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_only",
             "SearchFolderDefinition",
             "mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc",
             "mapi_over_http_non_empty_modify_rules_is_terminal_without_canonical_side_effects",

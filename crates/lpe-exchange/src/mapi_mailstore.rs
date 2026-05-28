@@ -323,14 +323,22 @@ pub(crate) fn sync_state_token_with_special_objects(
         scoped_emails,
         attachment_facts,
     );
-    let fai_objects = special_objects
+    let scoped_special_objects = special_objects
         .iter()
         .filter(|object| content_sync_includes_associated(sync_type, sync_flags, object.associated))
         .collect::<Vec<_>>();
     let mut object_ids = normal_object_ids;
-    object_ids.extend(fai_objects.iter().map(|object| object.item_id));
-    let fai_change_numbers = fai_objects
+    object_ids.extend(scoped_special_objects.iter().map(|object| object.item_id));
+    let mut normal_change_numbers = normal_change_numbers;
+    normal_change_numbers.extend(
+        scoped_special_objects
+            .iter()
+            .filter(|object| !object.associated)
+            .map(|object| change_number_for_store_id(object.item_id)),
+    );
+    let fai_change_numbers = scoped_special_objects
         .iter()
+        .filter(|object| object.associated)
         .map(|object| change_number_for_store_id(object.item_id))
         .collect::<Vec<_>>();
     final_content_sync_state_stream(

@@ -3154,11 +3154,7 @@ fn assert_content_final_state_includes_counters(
         );
     }
 
-    for tag in [
-        META_TAG_CNSET_SEEN,
-        META_TAG_CNSET_SEEN_FAI,
-        META_TAG_CNSET_READ,
-    ] {
+    for tag in [META_TAG_CNSET_SEEN, META_TAG_CNSET_READ] {
         let cnset = mapi_binary_property_value(bytes, tag);
         for change_number in change_numbers {
             assert!(
@@ -3252,8 +3248,8 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 19;
-const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 26;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 20;
+const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 27;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 12;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
 const META_TAG_IDSET_GIVEN_BINARY: u32 = 0x4017_0102;
@@ -4877,6 +4873,23 @@ fn append_rop_sync_manifest_get_buffer_with_state(
     }
     rops.extend_from_slice(&[
         0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
+    ]);
+    if !state.is_empty() {
+        rops.extend_from_slice(&[
+            0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
+        ]);
+        rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
+        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+        rops.extend_from_slice(&[
+            0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
+        ]);
+        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+        rops.extend_from_slice(state);
+        rops.extend_from_slice(&[
+            0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
+        ]);
+    }
+    rops.extend_from_slice(&[
         0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
     ]);
     rops.extend_from_slice(&buffer_size.to_le_bytes());
@@ -4992,7 +5005,14 @@ fn append_rop_outlook_hierarchy_sync_manifest_get_buffer_with_state(
         0x75, 0x00, output, // RopSynchronizationUploadStateStreamBegin
     ]);
     rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
-    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+    if !state.is_empty() {
+        rops.extend_from_slice(&[
+            0x76, 0x00, output, // RopSynchronizationUploadStateStreamContinue
+        ]);
+        rops.extend_from_slice(&(state.len() as u32).to_le_bytes());
+        rops.extend_from_slice(state);
+    }
     rops.extend_from_slice(&[
         0x77, 0x00, output, // RopSynchronizationUploadStateStreamEnd
         0x4E, 0x00, output, // RopFastTransferSourceGetBuffer
@@ -16645,7 +16665,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((12, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((11, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
@@ -18498,7 +18518,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("Notes")));
     assert!(contains_bytes(&response_rops, &utf16z("Tasks")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Reminders")));
+    assert!(contains_bytes(&response_rops, &utf16z("Reminders")));
     let mut folder_offsets = Vec::new();
     for name in [
         "Inbox",
@@ -18526,7 +18546,7 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
-    assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
+    assert!(contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("Top of Information Store")

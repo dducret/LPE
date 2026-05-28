@@ -3149,6 +3149,15 @@ impl RopRequest {
             .and_then(|bytes| bytes.try_into().ok())
             .map(u16::from_le_bytes)
             .unwrap_or(0) as usize;
+        if self.payload.len() == 2 + size.saturating_mul(9) {
+            return self.payload[2..]
+                .chunks_exact(9)
+                .filter_map(|chunk| {
+                    crate::mapi::identity::object_id_from_wire_id(&chunk[..8])
+                        .map(|message_id| (message_id, chunk[8] == 0))
+                })
+                .collect();
+        }
         let mut cursor = Cursor::new(self.payload.get(2..2 + size).unwrap_or_default());
         let mut changes = Vec::new();
         while cursor.remaining() >= 3 {
@@ -4595,10 +4604,15 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         }
         Some(RopId::SynchronizationImportReadStateChanges) => {
             let input_handle_index = cursor.read_u8()?;
-            let states_size = cursor.read_u16()? as usize;
+            let count_or_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();
-            payload.extend_from_slice(&(states_size as u16).to_le_bytes());
-            payload.extend_from_slice(cursor.read_bytes(states_size)?);
+            payload.extend_from_slice(&(count_or_size as u16).to_le_bytes());
+            let compact_size = count_or_size.saturating_mul(9);
+            if count_or_size > 0 && count_or_size <= 1024 && cursor.remaining() >= compact_size {
+                payload.extend_from_slice(cursor.read_bytes(compact_size)?);
+            } else {
+                payload.extend_from_slice(cursor.read_bytes(count_or_size)?);
+            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),

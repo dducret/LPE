@@ -1862,9 +1862,8 @@ mod tests {
         }]);
 
         assert_eq!(snapshot.todo_search_messages().len(), 1);
-        assert!(snapshot
-            .todo_search_message_for_id(crate::mapi::identity::mapi_store_id(19))
-            .is_some());
+        let message_id = snapshot.todo_search_messages()[0].id;
+        assert!(snapshot.todo_search_message_for_id(message_id).is_some());
     }
 
     #[test]
