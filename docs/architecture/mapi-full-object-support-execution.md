@@ -215,16 +215,17 @@ authenticated endpoints, EMSMDB and NSPI surfaces, session cookies, ROP
 dispatch, handle tables, MAPI identity projection, table/property support,
 ICS/FastTransfer work, permissions, and canonical store integration.
 
-Durable Microsoft property/object fidelity is now split into two concrete
-parts. Named-property ID mappings are stored per account in
-`mapi_named_properties` and the MAPI ROP registry loads them through storage
-instead of relying only on session-local allocation. A durable
+Durable Microsoft property/object fidelity is now split into concrete parts.
+Named-property ID mappings are stored per account in `mapi_named_properties`,
+and both name lookup and zero-count Logon enumeration load durable mappings
+through storage instead of relying only on session-local allocation. A durable
 `mapi_custom_property_values` table and storage runtime set/get/delete methods
-exist for opaque Outlook-specific values. Existing supported object-property
-ROP paths now round-trip custom named-property values through that store for
-canonical object kinds without copying built-in/canonical fields into the
-custom table. Full Exchange property-bag parity remains incomplete and must
-not be claimed from this bounded round trip.
+exist for opaque Outlook-specific values, including attachment object values
+where the canonical attachment identity is known. Existing supported
+object-property ROP paths now round-trip custom named-property values through
+that store for canonical object kinds without copying built-in/canonical fields
+into the custom table. Full Exchange property-bag parity remains incomplete and
+must not be claimed from this bounded round trip.
 
 Readiness level after this plan:
 
@@ -232,8 +233,8 @@ Readiness level after this plan:
   MAPI session/provider objects.
 - `IMAP`: suitable as a mail invariant gate only.
 - `MAPI over HTTP`: promising but still guarded; correct next work is broader
-  property-bag coverage, restart-safe session/reconnect behavior, full
-  notification payloads, and Outlook lab evidence.
+  property-bag coverage, restart-safe session/reconnect behavior, fuller
+  notification registration/delivery parity, and Outlook lab evidence.
 - `NSPI`: bounded address book support is in place, but provider-family
   completeness requires directory/group semantics and tenant-bound lookup tests.
 - `Client Web UI`: should wait for canonical object APIs rather than bind to

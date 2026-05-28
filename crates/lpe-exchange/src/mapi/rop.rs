@@ -958,16 +958,25 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             message_id,
             attach_num,
         }) => {
-            let Some(attachment) =
-                snapshot.attachment_for_message(*folder_id, *message_id, *attach_num)
-            else {
+            if snapshot
+                .attachment_for_message(*folder_id, *message_id, *attach_num)
+                .is_none()
+            {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
-            };
-            serialize_attachment_row(attachment, &columns)
+            }
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::PendingAttachment {
             attach_num,

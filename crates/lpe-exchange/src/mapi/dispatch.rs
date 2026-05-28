@@ -2085,6 +2085,18 @@ fn custom_property_object_identity(
                     entry.canonical_id,
                 )
             }),
+        MapiObject::Attachment {
+            folder_id,
+            message_id,
+            attach_num,
+        } => snapshot
+            .attachment_for_message(*folder_id, *message_id, *attach_num)
+            .map(|attachment| {
+                (
+                    MapiCustomPropertyObjectKind::Attachment,
+                    attachment.canonical_id,
+                )
+            }),
         _ => None,
     }
 }
@@ -3988,7 +4000,8 @@ where
                         | MapiObject::JournalEntry { .. }
                         | MapiObject::ConversationAction { .. }
                         | MapiObject::NavigationShortcut { .. }
-                        | MapiObject::DelegateFreeBusyMessage { .. }),
+                        | MapiObject::DelegateFreeBusyMessage { .. }
+                        | MapiObject::Attachment { .. }),
                     ) => {
                         apply_supported_object_property_values(
                             store, principal, &object, values, mailboxes, emails, snapshot,
@@ -4146,10 +4159,10 @@ where
                                         contact_id,
                                     },
                                 );
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(contact_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request, contact_id,
                                 ));
@@ -4225,10 +4238,10 @@ where
                                         event_id,
                                     },
                                 );
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(event_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request, event_id,
                                 ));
@@ -4287,10 +4300,10 @@ where
                                 session
                                     .handles
                                     .insert(handle, MapiObject::Task { folder_id, task_id });
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(task_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request, task_id,
                                 ));
@@ -4337,10 +4350,10 @@ where
                                 session
                                     .handles
                                     .insert(handle, MapiObject::Note { folder_id, note_id });
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(note_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request, note_id,
                                 ));
@@ -4391,10 +4404,10 @@ where
                                         journal_entry_id,
                                     },
                                 );
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(journal_entry_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request,
                                     journal_entry_id,
@@ -4477,10 +4490,10 @@ where
                                         conversation_action_id,
                                     },
                                 );
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(conversation_action_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request,
                                     conversation_action_id,
@@ -4541,10 +4554,10 @@ where
                                         shortcut_id,
                                     },
                                 );
-                                session.record_notification(MapiNotificationEvent {
+                                session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
-                                    kind: MapiNotificationKind::Content,
-                                });
+                                    Some(shortcut_id),
+                                ));
                                 responses.extend_from_slice(&rop_save_changes_message_response(
                                     &request,
                                     shortcut_id,
@@ -4738,10 +4751,10 @@ where
                             },
                         );
                         created_emails.push(email);
-                        session.record_notification(MapiNotificationEvent {
+                        session.record_notification(MapiNotificationEvent::content(
                             folder_id,
-                            kind: MapiNotificationKind::Content,
-                        });
+                            Some(message_id),
+                        ));
                         tracing::info!(
                             rca_debug = true,
                             adapter = "mapi",
@@ -4943,10 +4956,7 @@ where
                     }
                 }
                 if changed {
-                    session.record_notification(MapiNotificationEvent {
-                        folder_id: *folder_id,
-                        kind: MapiNotificationKind::Content,
-                    });
+                    session.record_notification(MapiNotificationEvent::content(*folder_id, None));
                 }
                 responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
             }
@@ -5212,10 +5222,10 @@ where
                         responses.extend_from_slice(&rop_create_folder_response(
                             &request, folder_id, false,
                         ));
-                        session.record_notification(MapiNotificationEvent {
-                            folder_id: parent_folder_id,
-                            kind: MapiNotificationKind::Hierarchy,
-                        });
+                        session.record_notification(MapiNotificationEvent::hierarchy(
+                            parent_folder_id,
+                            Some(folder_id),
+                        ));
                         output_handles.push(handle);
                     }
                     Err(_) => responses.extend_from_slice(&rop_error_response(
@@ -5274,10 +5284,10 @@ where
                     .await
                     .is_err();
                 if !partial_completion {
-                    session.record_notification(MapiNotificationEvent {
-                        folder_id: _parent_folder_id,
-                        kind: MapiNotificationKind::Hierarchy,
-                    });
+                    session.record_notification(MapiNotificationEvent::hierarchy(
+                        _parent_folder_id,
+                        Some(folder_id),
+                    ));
                 }
                 responses.extend_from_slice(&rop_partial_completion_response(
                     0x1D,
@@ -5442,10 +5452,7 @@ where
                     }
                 }
                 if !partial_completion {
-                    session.record_notification(MapiNotificationEvent {
-                        folder_id,
-                        kind: MapiNotificationKind::Content,
-                    });
+                    session.record_notification(MapiNotificationEvent::content(folder_id, None));
                 }
                 responses.extend_from_slice(&rop_partial_completion_response(
                     request.rop_id,
@@ -8357,10 +8364,9 @@ where
                 {
                     Ok((deleted_any, partial_completion)) => {
                         if deleted_any {
-                            session.record_notification(MapiNotificationEvent {
-                                folder_id,
-                                kind: MapiNotificationKind::Content,
-                            });
+                            session.record_notification(MapiNotificationEvent::content(
+                                folder_id, None,
+                            ));
                         }
                         responses.extend_from_slice(&rop_partial_completion_response(
                             request.rop_id,
@@ -8482,6 +8488,14 @@ where
                         Some(MapiObject::Logon)
                     )
                 {
+                    if let Ok(mappings) = store
+                        .fetch_mapi_named_properties(principal.account_id, None)
+                        .await
+                    {
+                        for mapping in mappings {
+                            session.cache_named_property(mapping.property_id, mapping.property);
+                        }
+                    }
                     let property_ids = session
                         .named_properties_for_query(None)
                         .into_iter()

@@ -1200,20 +1200,22 @@ where
     }
 
     let mut session = session;
-    let mut event_pending = session.take_pending_notification().is_some();
+    let mut events = session.take_pending_notifications();
+    let mut event_pending = !events.is_empty();
     if !event_pending {
         if let Some(cursor) = session.notification_cursor {
             if let Ok(poll) = store
                 .poll_mapi_notifications(principal.account_id, cursor)
                 .await
             {
+                events = poll.events;
                 event_pending = poll.event_pending;
                 session.notification_cursor = poll.cursor.or(Some(cursor));
             }
         }
     }
     store_session(session_id.clone(), session);
-    let body = notification_wait_body(event_pending);
+    let body = notification_wait_body_with_events(event_pending, &events);
     mapi_response_with_cookies(
         "NotificationWait",
         request_id,

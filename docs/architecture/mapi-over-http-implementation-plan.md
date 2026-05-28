@@ -265,8 +265,10 @@ not by itself authorize broad client publication.
 - Notes and Journal item projection uses canonical item state and must remain
   aligned with canonical API behavior.
 - Session-scoped notification support can mark content and hierarchy changes as
-  pending and replay canonical change cursors. Full notification registration
-  and delivery parity remains deferred.
+  pending, include bounded TableModified-style payloads with the changed folder
+  ID and, when known in the current session, the changed message/object ID, and
+  replay canonical change cursors. Full notification registration, all table row
+  values, and delivery parity remain deferred.
 
 ## Deferred Surfaces
 
@@ -283,7 +285,7 @@ not by itself authorize broad client publication.
 | Full search-folder parity | Partially implemented. Full Microsoft template BLOB parity and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Deferred until canonical rules/deferred-action state is designed. |
 | Folder permission mutation | Deferred. Read-only permission table projection is supported. |
-| Full notification registration and delivery | Partially implemented through pending session events and change-cursor replay; full parity remains deferred. |
+| Full notification registration and delivery | Partially implemented through pending session events with bounded folder/message/table payloads and change-cursor replay; full parity remains deferred. |
 | Outlook tolerance beyond the documented lab matrix | Unknown until captured through the release gates below. |
 
 ## State-Management Invariants

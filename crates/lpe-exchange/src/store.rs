@@ -13,6 +13,7 @@ use lpe_storage::{
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::mapi::notifications::MapiNotificationEvent;
 use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
 use crate::mapi::properties::{
     is_reserved_named_property_id, MapiNamedProperty, MapiNamedPropertyKind,
@@ -170,6 +171,7 @@ pub(crate) struct MapiSyncCheckpoint {
 pub(crate) struct MapiNotificationPoll {
     pub(crate) event_pending: bool,
     pub(crate) cursor: Option<i64>,
+    pub(crate) events: Vec<MapiNotificationEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1784,6 +1786,7 @@ impl ExchangeStore for Storage {
             Ok(MapiNotificationPoll {
                 event_pending: replay.truncated || !replay.change_set.is_empty(),
                 cursor,
+                events: Vec::new(),
             })
         })
     }

@@ -710,8 +710,8 @@ impl MapiSession {
         }
     }
 
-    pub(in crate::mapi) fn take_pending_notification(&mut self) -> Option<MapiNotificationEvent> {
-        self.pending_notifications.pop_front()
+    pub(in crate::mapi) fn take_pending_notifications(&mut self) -> Vec<MapiNotificationEvent> {
+        self.pending_notifications.drain(..).collect()
     }
 
     pub(in crate::mapi) fn hierarchy_sync_completed(&self) -> bool {
