@@ -248,6 +248,10 @@ not by itself authorize broad client publication.
   keeps canonical values for the documented indexes and preserves client data at
   other indexes, matching the special-folder property contract without creating
   durable MAPI-only folder truth.
+- Outlook scalar default-folder EntryID writebacks on Root or Inbox are validated
+  against the canonical special-folder map and acknowledged for interoperability,
+  but they do not override the canonical projection or create session-local
+  folder identity state.
 - Outlook store bootstrap metadata includes the private-store marker, store
   state, mailbox owner, user GUID, server icons, and max submit message size.
 - Profile settings needed for cached-mode reuse are canonical account settings,

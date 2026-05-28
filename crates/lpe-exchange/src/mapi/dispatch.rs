@@ -1175,11 +1175,11 @@ fn log_set_properties_specific_debug(
     } else if matches!(
         object,
         Some(MapiObject::Folder {
-            folder_id: ROOT_FOLDER_ID,
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
             ..
         })
     ) {
-        "accepted_session_projection_not_persisted"
+        "accepted_canonical_projection_not_persisted"
     } else {
         "normal_property_validation"
     };
@@ -1352,6 +1352,7 @@ fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
         PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
         PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(DRAFTS_FOLDER_ID),
+        tag if is_scalar_default_folder_entry_id_property_tag(tag) => None,
         _ => None,
     }
 }
@@ -1508,7 +1509,7 @@ fn strips_default_folder_identification_value(object: Option<&MapiObject>, tag: 
                 PID_TAG_ADDITIONAL_REN_ENTRY_IDS
                     | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
                     | PID_TAG_FREE_BUSY_ENTRY_IDS
-            )
+            ) || is_scalar_default_folder_entry_id_property_tag(tag)
         }
         Some(MapiObject::Folder {
             folder_id: INBOX_FOLDER_ID,
@@ -1519,7 +1520,7 @@ fn strips_default_folder_identification_value(object: Option<&MapiObject>, tag: 
                 PID_TAG_ADDITIONAL_REN_ENTRY_IDS
                     | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
                     | PID_TAG_FREE_BUSY_ENTRY_IDS
-            )
+            ) || is_scalar_default_folder_entry_id_property_tag(tag)
         }
         _ => false,
     }
@@ -9802,7 +9803,7 @@ mod tests {
     }
 
     #[test]
-    fn root_scalar_default_folder_entry_ids_are_retained_for_session_writeback() {
+    fn root_scalar_default_folder_entry_ids_do_not_shadow_canonical_projection() {
         let root = MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID,
             properties: std::collections::HashMap::new(),
@@ -9828,17 +9829,11 @@ mod tests {
             ],
         );
 
-        assert_eq!(
-            retained,
-            vec![(
-                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
-                MapiValue::Binary(calendar_entry_id)
-            )]
-        );
+        assert!(retained.is_empty());
     }
 
     #[test]
-    fn root_scalar_default_folder_entry_id_write_is_retained_as_session_state() {
+    fn root_scalar_default_folder_entry_id_write_is_not_retained_as_session_state() {
         let mut root = MapiObject::Folder {
             folder_id: ROOT_FOLDER_ID,
             properties: std::collections::HashMap::new(),
@@ -9849,22 +9844,20 @@ mod tests {
         )
         .unwrap();
 
-        apply_mapi_property_values(
-            Some(&mut root),
+        let values = default_folder_identification_safe_property_values(
+            &test_principal(),
+            Some(&root),
             vec![(
                 PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
                 MapiValue::Binary(calendar_entry_id.clone()),
             )],
-        )
-        .unwrap();
+        );
+        apply_mapi_property_values(Some(&mut root), values).unwrap();
 
         let MapiObject::Folder { properties, .. } = root else {
             panic!("expected folder object");
         };
-        assert_eq!(
-            properties.get(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID),
-            Some(&MapiValue::Binary(calendar_entry_id))
-        );
+        assert!(!properties.contains_key(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID));
     }
 
     #[test]
