@@ -34,7 +34,6 @@ async fn main() -> Result<()> {
         env::var("LPE_MANAGESIEVE_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:4190".to_string());
     let database_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgres://lpe:change-me@localhost:5432/lpe".to_string());
-    integration_shared_secret()?;
     let storage = Storage::connect(&database_url).await?;
     auto_bootstrap_admin_if_missing(&storage).await?;
     let listener = TcpListener::bind(&bind_address).await?;
@@ -137,7 +136,6 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
         .unwrap_or_else(|_| "http://127.0.0.1:8380".to_string())
         .trim_end_matches('/')
         .to_string();
-    let integration_key = integration_shared_secret()?;
     let interval_ms = env::var("LPE_OUTBOUND_WORKER_INTERVAL_MS")
         .ok()
         .and_then(|value| value.trim().parse::<u64>().ok())
@@ -156,6 +154,7 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
     );
 
     let mut last_worker_gate_state: Option<String> = None;
+    let mut integration_secret_ready = true;
     loop {
         match ha_allows_active_work() {
             Ok(true) => {
@@ -189,6 +188,27 @@ async fn run_outbound_worker(storage: Storage) -> Result<()> {
                 continue;
             }
         }
+
+        let integration_key = match integration_shared_secret() {
+            Ok(secret) => {
+                if !integration_secret_ready {
+                    info!("lpe outbound worker resumed after integration shared secret recovery");
+                    integration_secret_ready = true;
+                }
+                secret
+            }
+            Err(error) => {
+                if integration_secret_ready {
+                    warn!(
+                        error = %error,
+                        "lpe outbound worker paused because the integration shared secret is invalid"
+                    );
+                    integration_secret_ready = false;
+                }
+                sleep(Duration::from_millis(interval_ms)).await;
+                continue;
+            }
+        };
 
         let batch = storage.fetch_outbound_handoff_batch(batch_size).await?;
         observe_outbound_worker_poll(batch.len());
