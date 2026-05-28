@@ -38,7 +38,7 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SHORTCUTS_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 21] = [
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 28] = [
     IPM_SUBTREE_FOLDER_ID,
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
@@ -47,17 +47,24 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 21] = [
     TRASH_FOLDER_ID,
     CONTACTS_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID,
+    QUICK_CONTACTS_FOLDER_ID,
+    IM_CONTACT_LIST_FOLDER_ID,
+    CONTACTS_SEARCH_FOLDER_ID,
     CALENDAR_FOLDER_ID,
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
     REMINDERS_FOLDER_ID,
+    DOCUMENT_LIBRARIES_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
     CONFLICTS_FOLDER_ID,
     LOCAL_FAILURES_FOLDER_ID,
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID,
+    TODO_SEARCH_FOLDER_ID,
+    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
@@ -191,7 +198,10 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         let mut folder_ids = HashSet::new();
         let mut rows = mailboxes
             .iter()
-            .filter(|mailbox| mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes))
+            .filter(|mailbox| {
+                mapi_folder_id(mailbox) == folder_id
+                    || mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes)
+            })
             .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
             .filter(|mailbox| folder_ids.insert(mapi_folder_id(mailbox)))
             .cloned()
@@ -315,7 +325,7 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
 
 fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: u64) -> bool {
     match sync_root_folder_id {
-        ROOT_FOLDER_ID => special_folder_id != ROOT_FOLDER_ID,
+        ROOT_FOLDER_ID => true,
         IPM_SUBTREE_FOLDER_ID => matches!(
             special_folder_id,
             IPM_SUBTREE_FOLDER_ID
@@ -1288,6 +1298,24 @@ mod tests {
             .count();
 
         assert_eq!(duplicate_rows, 1);
+    }
+
+    #[test]
+    fn hierarchy_sync_mailboxes_include_custom_sync_root() {
+        let root_id = Uuid::from_u128(0x11111111111111111111111111111112);
+        let child_id = Uuid::from_u128(0x22222222222222222222222222222223);
+        let root_folder_id = crate::mapi::identity::mapi_store_id(101);
+        let child_folder_id = crate::mapi::identity::mapi_store_id(102);
+        crate::mapi::identity::remember_mapi_identity(root_id, root_folder_id);
+        crate::mapi::identity::remember_mapi_identity(child_id, child_folder_id);
+        let root = mailbox(root_id.as_u128(), "custom", "Project");
+        let mut child = mailbox(child_id.as_u128(), "custom", "Archive");
+        child.parent_id = Some(root_id);
+        let rows = sync_mailboxes_for(root_folder_id, 0x02, &[child, root]);
+        let row_ids = rows.iter().map(mapi_folder_id).collect::<Vec<_>>();
+
+        assert!(row_ids.contains(&root_folder_id));
+        assert!(row_ids.contains(&child_folder_id));
     }
 
     #[test]

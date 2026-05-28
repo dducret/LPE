@@ -478,9 +478,6 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
         });
         for mailbox in folders {
             let folder_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            if folder_id == sync_root_folder_id {
-                continue;
-            }
             let parent_folder_id =
                 mapi_folder_parent_id_for_mailbox(mailbox, parent_context_mailboxes);
             let change_number = canonical_hierarchy_change_number(sync_root_folder_id, mailbox);
@@ -2698,10 +2695,10 @@ fn hierarchy_sort_depth(
     }
     let mut parent_folder_id = mapi_folder_parent_id_for_mailbox(mailbox, mailboxes);
     if parent_folder_id == sync_root_folder_id {
-        return 0;
+        return 1;
     }
 
-    let mut depth = 1u8;
+    let mut depth = 2u8;
     let mut visited = BTreeSet::new();
     while parent_folder_id != 0 && visited.insert(parent_folder_id) {
         let Some(next_parent_folder_id) =
@@ -3084,10 +3081,7 @@ fn sync_state_object_ids(
     if sync_type == SYNC_TYPE_HIERARCHY {
         mailboxes
             .iter()
-            .filter_map(|mailbox| {
-                let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-                (object_id != folder_id).then_some(object_id)
-            })
+            .map(|mailbox| mapi_folder_id_for_mailbox(mailbox, folder_id))
             .collect()
     } else {
         emails
@@ -3105,13 +3099,13 @@ fn sync_state_change_numbers(
     attachment_facts: &[MessageAttachmentSyncFacts],
 ) -> Vec<u64> {
     if sync_type == SYNC_TYPE_HIERARCHY {
-        let mut change_numbers = vec![change_number_for_store_id(folder_id)];
-        change_numbers.extend(mailboxes.iter().filter_map(|mailbox| {
-            let object_id = mapi_folder_id_for_mailbox(mailbox, folder_id);
-            (object_id != folder_id)
-                .then_some(canonical_hierarchy_change_number(folder_id, mailbox))
-        }));
-        change_numbers
+        let mut change_numbers = BTreeSet::from([change_number_for_store_id(folder_id)]);
+        change_numbers.extend(
+            mailboxes
+                .iter()
+                .map(|mailbox| canonical_hierarchy_change_number(folder_id, mailbox)),
+        );
+        change_numbers.into_iter().collect()
     } else {
         emails
             .iter()
@@ -4392,6 +4386,56 @@ mod tests {
             Some(crate::mapi::identity::INBOX_FOLDER_ID)
         );
         assert!(summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
+    }
+
+    #[test]
+    fn hierarchy_transfer_orders_custom_sync_root_before_children() {
+        let root_id = Uuid::parse_str("33333333-3333-3333-3333-333333333334").unwrap();
+        let child_id = Uuid::parse_str("33333333-3333-3333-3333-333333333335").unwrap();
+        let root_folder_id = crate::mapi::identity::mapi_store_id(6);
+        let child_folder_id = crate::mapi::identity::mapi_store_id(7);
+        crate::mapi::identity::remember_mapi_identity(root_id, root_folder_id);
+        crate::mapi::identity::remember_mapi_identity(child_id, child_folder_id);
+        let root = JmapMailbox {
+            id: root_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Project".to_string(),
+            sort_order: 40,
+            modseq: 42,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let child = JmapMailbox {
+            id: child_id,
+            parent_id: Some(root_id),
+            role: "custom".to_string(),
+            name: "Archive".to_string(),
+            sort_order: 40,
+            modseq: 43,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let buffer = sync_manifest_buffer_with_attachments(
+            0x02,
+            0x0100,
+            0,
+            &[],
+            root_folder_id,
+            &[child, root],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+
+        assert_eq!(summary.rows.len(), 2);
+        assert_eq!(summary.rows[0].folder_id, Some(root_folder_id));
+        assert_eq!(summary.rows[1].folder_id, Some(child_folder_id));
     }
 
     #[test]
