@@ -84,6 +84,22 @@ Operations protect canonical `LPE` PostgreSQL state, blob storage, and `LPE-CT` 
   - verify schema compatibility
   - verify bridge signatures and integration secret presence
   - verify client autodiscovery gates after deployment
+- Admin test snapshots:
+  - the admin console exposes operator-created PostgreSQL snapshots for bounded
+    interoperability tests such as new Outlook profile setup
+  - snapshots are PostgreSQL custom-format dumps created with `pg_dump` and
+    restored with `pg_restore --clean --if-exists`
+  - snapshots protect core PostgreSQL state only; operators must separately
+    preserve any external S3-compatible object storage that already contains
+    active placements
+  - restore is a whole-database operation for controlled test windows, not a
+    selective mailbox cleanup; stop client traffic before restore and validate
+    `/health/ready` afterward
+  - successful profile tests should remove the snapshot manually from the admin
+    console
+  - failed profile tests may restore the snapshot to remove server-side Outlook
+    setup artifacts such as test messages, sync state, or folders created during
+    the test
 - Operations benchmark evidence:
   - run `tools/operations_benchmark.py` against deployed services, not mocked protocol handlers
   - capture cold-start readiness when a real service restart command is supplied
@@ -114,6 +130,7 @@ Operations protect canonical `LPE` PostgreSQL state, blob storage, and `LPE-CT` 
 | `/var/spool/lpe-ct` | sorting-center spool |
 | `/opt/lpe-ct/bin/lpe-ct-host-action` | host action helper |
 | `tools/operations_benchmark.py` | live cold-start, protocol latency, SMTP acceptance, and retry-throughput benchmark |
+| Admin snapshots | PostgreSQL snapshots for controlled client interoperability rollback |
 
 | Benchmark variable | Purpose |
 | --- | --- |

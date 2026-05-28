@@ -48,6 +48,7 @@ use crate::{
         delete_sieve_script, get_sieve_overview, get_sieve_script, put_sieve_script,
         rename_sieve_script, set_active_sieve_script,
     },
+    snapshots::{create_snapshot, delete_snapshot, list_snapshots, restore_snapshot},
     storage::{
         create_storage_pool, get_storage_cleanup, get_storage_health, get_storage_migrations,
         get_storage_policies, list_storage_pools, update_account_storage_policy,
@@ -263,6 +264,15 @@ pub fn router(storage: Storage) -> Router {
         .route("/console/storage/health", get(get_storage_health))
         .route("/console/storage/migrations", get(get_storage_migrations))
         .route("/console/storage/cleanup", get(get_storage_cleanup))
+        .route(
+            "/console/snapshots",
+            get(list_snapshots).post(create_snapshot),
+        )
+        .route("/console/snapshots/{snapshot_id}", delete(delete_snapshot))
+        .route(
+            "/console/snapshots/{snapshot_id}/restore",
+            post(restore_snapshot),
+        )
         .merge(client_config::router())
         .nest("/jmap", lpe_jmap::router())
         .merge(lpe_exchange::router())
@@ -488,6 +498,22 @@ mod tests {
             assert!(
                 app_source.contains(route),
                 "storage policy route is not registered: {route}"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshot_routes_are_registered() {
+        let app_source = include_str!("app.rs");
+
+        for route in [
+            "/console/snapshots",
+            "/console/snapshots/{snapshot_id}",
+            "/console/snapshots/{snapshot_id}/restore",
+        ] {
+            assert!(
+                app_source.contains(route),
+                "snapshot route is not registered: {route}"
             );
         }
     }

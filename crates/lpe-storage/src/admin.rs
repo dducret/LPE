@@ -21,6 +21,14 @@ use crate::{
 };
 
 impl Storage {
+    pub async fn record_platform_audit(&self, audit: AuditEntryInput) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.insert_audit(&mut tx, &PLATFORM_TENANT_ID, audit)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn fetch_admin_dashboard(&self) -> Result<AdminDashboard> {
         let tenant_id = PLATFORM_TENANT_ID;
         let account_rows = sqlx::query_as::<_, AccountRow>(

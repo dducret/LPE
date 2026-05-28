@@ -69,6 +69,8 @@ type MailFlowEntry = {
   last_smtp_code: number | null;
   last_enhanced_status: string | null;
 };
+type SnapshotRecord = { id: string; label: string; created_at: string; created_by: string; dump_path: string };
+type SnapshotResponse = { snapshots: SnapshotRecord[]; snapshot_dir: string; restore_notice: string };
 type PstFormState = { direction: "import" | "export"; server_path: string; requested_by: string };
 type AccountRecord = DashboardState["accounts"][number];
 type MailboxRecord = AccountRecord["mailboxes"][number];
@@ -80,12 +82,13 @@ type ServerTab = "status" | "server" | "security" | "ai" | "domains" | "admins";
 type DomainTab = "overview" | "accounts" | "aliases" | "admins";
 type AntispamTab = "content" | "engines" | "rules" | "quarantine";
 type AuditTab = "journal" | "trace";
-type OperationsTab = "protocols" | "storage" | "mailflow";
+type OperationsTab = "protocols" | "storage" | "mailflow" | "snapshots";
 
 function authHeaders(token: string | null): Record<string, string> { return token ? { Authorization: `Bearer ${token}` } : {}; }
 async function apiError(response: Response, path: string): Promise<Error> { const text = await response.text(); return new Error(text.trim() || `Request failed for ${path}: ${response.status}`); }
 async function fetchJson<T>(path: string, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { headers: authHeaders(token), credentials: "same-origin" }); if (!response.ok) throw await apiError(response, path); return (await response.json()) as T; }
 async function sendJson<T>(path: string, method: "POST" | "PUT", payload: unknown, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { method, headers: { "Content-Type": "application/json", ...authHeaders(token) }, body: JSON.stringify(payload), credentials: "same-origin" }); if (!response.ok) throw await apiError(response, path); return (await response.json()) as T; }
+async function sendDelete<T>(path: string, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { method: "DELETE", headers: authHeaders(token), credentials: "same-origin" }); if (!response.ok) throw await apiError(response, path); return (await response.json()) as T; }
 async function sendFormData<T>(path: string, payload: FormData, token: string | null): Promise<T> { const response = await fetch(`/api/${path}`, { method: "POST", headers: authHeaders(token), body: payload, credentials: "same-origin" }); if (!response.ok) throw await apiError(response, path); return (await response.json()) as T; }
 function Field(props: { label: string; value: string; onChange: (value: string) => void; type?: "text" | "number" | "password"; placeholder?: string }) { return <label className="field"><span>{props.label}</span><Input type={props.type ?? "text"} value={props.value} placeholder={props.placeholder} onChange={(event) => props.onChange(event.target.value)} /></label>; }
 function ToggleField(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) { return <label className="toggle-field"><span>{props.label}</span><input type="checkbox" checked={props.checked} onChange={(event) => props.onChange(event.target.checked)} /></label>; }
@@ -124,6 +127,8 @@ function App() {
   const [traceQuery, setTraceQuery] = React.useState("");
   const [traceResults, setTraceResults] = React.useState<TraceResult[]>([]);
   const [mailFlow, setMailFlow] = React.useState<MailFlowEntry[]>([]);
+  const [snapshots, setSnapshots] = React.useState<SnapshotResponse | null>(null);
+  const [snapshotLabel, setSnapshotLabel] = React.useState("Outlook profile test");
   const [pstForms, setPstForms] = React.useState<Record<string, PstFormState>>({});
 
   const [domainForm, setDomainForm] = React.useState({ name: "", default_quota_mb: "4096", inbound_enabled: true, outbound_enabled: true, default_sieve_script: "", jmap_push_journal_retention_days: "30" });
@@ -160,14 +165,16 @@ function App() {
     if (!token) return;
     setBusy("load");
     try {
-      const [identity, dashboard, mailFlowResponse] = await Promise.all([
+      const [identity, dashboard, mailFlowResponse, snapshotResponse] = await Promise.all([
         fetchJson<LoginResponse["admin"]>("auth/me", token),
         fetchJson<DashboardState>("console/dashboard", token),
-        fetchJson<{ items: MailFlowEntry[] }>("console/mail-flow", token)
+        fetchJson<{ items: MailFlowEntry[] }>("console/mail-flow", token),
+        fetchJson<SnapshotResponse>("console/snapshots", token)
       ]);
       setAdminIdentity(identity);
       syncState(dashboard);
       setMailFlow(mailFlowResponse.items);
+      setSnapshots(snapshotResponse);
       setError(null);
     }
     catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
@@ -231,6 +238,28 @@ function App() {
 
   function pstFormFor(mailboxId: string): PstFormState {
     return pstForms[mailboxId] ?? { direction: "export", server_path: "", requested_by: adminIdentity?.email ?? "" };
+  }
+
+  async function createSnapshot() {
+    setBusy("snapshot-create");
+    try { setSnapshots(await sendJson<SnapshotResponse>("console/snapshots", "POST", { label: snapshotLabel }, token)); setNotice(copy.saved); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
+    finally { setBusy(null); }
+  }
+
+  async function deleteSnapshot(snapshot: SnapshotRecord) {
+    setBusy(`snapshot-delete-${snapshot.id}`);
+    try { setSnapshots(await sendDelete<SnapshotResponse>(`console/snapshots/${snapshot.id}`, token)); setNotice(copy.saved); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
+    finally { setBusy(null); }
+  }
+
+  async function restoreSnapshot(snapshot: SnapshotRecord) {
+    if (!window.confirm(copy.snapshotRestoreConfirm)) return;
+    setBusy(`snapshot-restore-${snapshot.id}`);
+    try { setSnapshots(await sendJson<SnapshotResponse>(`console/snapshots/${snapshot.id}/restore`, "POST", {}, token)); await load(); setNotice(copy.saved); setError(null); }
+    catch (e) { setError(e instanceof Error ? e.message : "Unknown error"); if (e instanceof Error && e.message.includes("401")) setToken(null); }
+    finally { setBusy(null); }
   }
 
   function primaryMailbox(account: AccountRecord): MailboxRecord | null {
@@ -454,7 +483,7 @@ function App() {
           {auditTab === "trace" ? <div className="card form-stack"><h3>{copy.emailTrace}</h3><div className="inline-form"><Field label={copy.searchQuery} value={traceQuery} onChange={setTraceQuery} placeholder="message-id, trace-id, sender, subject, account" /><button className="primary-button" type="button" disabled={busy==="trace"} onClick={() => void searchTrace()}>{copy.search}</button></div><div className="list">{traceResults.map((result)=><div className="row multi" key={result.message_id}><strong>{result.subject}</strong><span>{compactMeta([result.sender, result.account_email, result.mailbox])}</span><span>{compactMeta([`submitted ${yesNo(result.was_submitted)}`, `sent ${yesNo(result.in_sent_mailbox)}`, `delivery ${result.delivery_status}`, result.queue_status ? `queue ${result.queue_status}` : null])}</span><span>{compactMeta([result.latest_trace_id ? `trace ${result.latest_trace_id}` : null, result.remote_message_ref ? `ref ${result.remote_message_ref}` : null, result.last_smtp_code !== null ? `smtp ${result.last_smtp_code}` : null, result.last_dsn_status ? `dsn ${result.last_dsn_status}` : null])}</span><span>{compactMeta([result.sent_at ? `sent ${result.sent_at}` : null, result.last_attempt_at ? `last ${result.last_attempt_at}` : null, result.next_attempt_at ? `next ${result.next_attempt_at}` : null, `seen ${result.received_at}`])}</span><span>{result.last_error ?? ""}</span></div>)}</div></div> : null}
         </section> : null}
 
-        {page === "operations" ? <section className="page-card"><div className="tabs">{(["protocols","storage","mailflow"] as OperationsTab[]).map((tab)=><TabButton key={tab} active={operationsTab===tab} onClick={()=>setOperationsTab(tab)} label={copy.operationsTabs[tab]} />)}</div>{operationsTab === "protocols" ? <article className="card"><h3>{copy.protocolStatus}</h3><div className="list">{state.protocols.map((protocol)=><div className="row" key={protocol.name}><strong>{protocol.name}</strong><span>{protocol.bind_address}</span><span className={protocol.enabled ? "pill ok" : "pill warn"}>{protocol.state}</span></div>)}</div></article> : null}{operationsTab === "storage" ? <StorageManagement token={token} admin={adminIdentity} locale={locale} /> : null}{operationsTab === "mailflow" ? <article className="card"><h3>{copy.mailFlowMonitor}</h3><div className="list">{mailFlow.map((item)=><div className="row multi" key={item.queue_id}><strong>{item.subject}</strong><span>{compactMeta([item.account_email, item.internet_message_id])}</span><span>{compactMeta([`submitted ${yesNo(item.was_submitted)}`, `sent ${yesNo(item.in_sent_mailbox)}`, `queue ${item.status}`, `delivery ${item.delivery_status}`, `attempts ${item.attempts}`])}</span><span>{compactMeta([item.trace_id ? `trace ${item.trace_id}` : null, item.remote_message_ref ? `ref ${item.remote_message_ref}` : null, item.last_smtp_code !== null ? `smtp ${item.last_smtp_code}` : null, item.last_dsn_status ? `dsn ${item.last_dsn_status}` : null])}</span><span>{compactMeta([`submitted ${item.submitted_at}`, item.sent_at ? `sent ${item.sent_at}` : null, item.last_attempt_at ? `last ${item.last_attempt_at}` : null, item.next_attempt_at ? `next ${item.next_attempt_at}` : null])}</span><span>{compactMeta([item.last_error, item.retry_policy ? `retry ${item.retry_policy}` : null, item.retry_after_seconds !== null ? `${item.retry_after_seconds}s` : null, item.last_enhanced_status])}</span></div>)}</div></article> : null}</section> : null}
+        {page === "operations" ? <section className="page-card"><div className="tabs">{(["protocols","storage","mailflow","snapshots"] as OperationsTab[]).map((tab)=><TabButton key={tab} active={operationsTab===tab} onClick={()=>setOperationsTab(tab)} label={copy.operationsTabs[tab]} />)}</div>{operationsTab === "protocols" ? <article className="card"><h3>{copy.protocolStatus}</h3><div className="list">{state.protocols.map((protocol)=><div className="row" key={protocol.name}><strong>{protocol.name}</strong><span>{protocol.bind_address}</span><span className={protocol.enabled ? "pill ok" : "pill warn"}>{protocol.state}</span></div>)}</div></article> : null}{operationsTab === "storage" ? <StorageManagement token={token} admin={adminIdentity} locale={locale} /> : null}{operationsTab === "mailflow" ? <article className="card"><h3>{copy.mailFlowMonitor}</h3><div className="list">{mailFlow.map((item)=><div className="row multi" key={item.queue_id}><strong>{item.subject}</strong><span>{compactMeta([item.account_email, item.internet_message_id])}</span><span>{compactMeta([`submitted ${yesNo(item.was_submitted)}`, `sent ${yesNo(item.in_sent_mailbox)}`, `queue ${item.status}`, `delivery ${item.delivery_status}`, `attempts ${item.attempts}`])}</span><span>{compactMeta([item.trace_id ? `trace ${item.trace_id}` : null, item.remote_message_ref ? `ref ${item.remote_message_ref}` : null, item.last_smtp_code !== null ? `smtp ${item.last_smtp_code}` : null, item.last_dsn_status ? `dsn ${item.last_dsn_status}` : null])}</span><span>{compactMeta([`submitted ${item.submitted_at}`, item.sent_at ? `sent ${item.sent_at}` : null, item.last_attempt_at ? `last ${item.last_attempt_at}` : null, item.next_attempt_at ? `next ${item.next_attempt_at}` : null])}</span><span>{compactMeta([item.last_error, item.retry_policy ? `retry ${item.retry_policy}` : null, item.retry_after_seconds !== null ? `${item.retry_after_seconds}s` : null, item.last_enhanced_status])}</span></div>)}</div></article> : null}{operationsTab === "snapshots" ? <div className="management-workbench"><article className="card management-list-card"><div className="section-title-row"><div><h3>{copy.snapshots}</h3><p className="muted">{snapshots?.snapshot_dir ?? copy.loading}</p></div><div className="management-actions"><button className="primary-button" type="button" disabled={busy==="snapshot-create"} onClick={()=>void createSnapshot()}>{copy.createSnapshot}</button></div></div><div className="inline-form"><Field label={copy.snapshotLabel} value={snapshotLabel} onChange={setSnapshotLabel} /></div>{snapshots ? <p className="feedback muted">{snapshots.restore_notice}</p> : null}<div className="management-list full-width">{snapshots?.snapshots.map((snapshot)=><div className="management-list-item" key={snapshot.id}><span className="management-main"><strong>{snapshot.label}</strong><span>{snapshot.id}</span></span><span className="management-meta"><span>{snapshot.created_at}</span><span>{snapshot.created_by}</span></span><span className="management-actions"><button className="secondary-button" type="button" disabled={busy===`snapshot-restore-${snapshot.id}`} onClick={()=>void restoreSnapshot(snapshot)}>{copy.restoreSnapshot}</button><button className="secondary-button" type="button" disabled={busy===`snapshot-delete-${snapshot.id}`} onClick={()=>void deleteSnapshot(snapshot)}>{copy.deleteSnapshot}</button></span></div>)}</div>{snapshots && !snapshots.snapshots.length ? <p className="feedback muted">{copy.noSnapshots}</p> : null}</article></div> : null}</section> : null}
       </> : null}
     </section>
   </main>;

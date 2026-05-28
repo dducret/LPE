@@ -6,22 +6,33 @@ use crate::EXPECTED_SCHEMA_VERSION;
 #[derive(Clone)]
 pub struct Storage {
     pub(crate) pool: Pool<Postgres>,
+    database_url: Option<String>,
 }
 
 impl Storage {
     pub fn new(pool: Pool<Postgres>) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            database_url: None,
+        }
     }
 
     pub async fn connect(database_url: &str) -> Result<Self> {
         let pool = Pool::<Postgres>::connect(database_url).await?;
-        let storage = Self::new(pool);
+        let storage = Self {
+            pool,
+            database_url: Some(database_url.to_string()),
+        };
         storage.assert_schema_version().await?;
         Ok(storage)
     }
 
     pub fn pool(&self) -> &Pool<Postgres> {
         &self.pool
+    }
+
+    pub fn database_url(&self) -> Option<&str> {
+        self.database_url.as_deref()
     }
 
     async fn assert_schema_version(&self) -> Result<()> {

@@ -16,6 +16,7 @@ mod pst;
 mod readiness;
 mod security;
 mod sieve;
+mod snapshots;
 mod storage;
 mod totp;
 mod types;
