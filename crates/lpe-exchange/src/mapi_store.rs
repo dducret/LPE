@@ -1073,6 +1073,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let identity_requests = mapi_identity_requests(
                 &mailboxes,
                 &emails,
+                &calendar_collections,
                 &contacts,
                 &events,
                 &tasks,
@@ -1126,6 +1127,7 @@ impl<T: ExchangeStore> MapiStore for T {
 fn mapi_identity_requests(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    calendar_collections: &[CollaborationCollection],
     contacts: &[AccessibleContact],
     events: &[AccessibleEvent],
     tasks: &[ClientTask],
@@ -1148,6 +1150,9 @@ fn mapi_identity_requests(
         canonical_id: email.id,
         reserved_global_counter: None,
     }));
+    if let Some(request) = default_calendar_folder_identity_request(calendar_collections) {
+        requests.push(request);
+    }
     requests.extend(contacts.iter().map(|contact| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::Contact,
         canonical_id: contact.id,
@@ -1215,6 +1220,25 @@ fn mapi_identity_requests(
             }),
     );
     requests
+}
+
+pub(crate) fn default_calendar_folder_identity_request(
+    calendar_collections: &[CollaborationCollection],
+) -> Option<MapiIdentityRequest> {
+    calendar_collections
+        .iter()
+        .any(|collection| matches!(collection.id.as_str(), "default" | "calendar"))
+        .then(|| {
+            crate::mapi_mailstore::virtual_special_mailbox(
+                crate::mapi::identity::CALENDAR_FOLDER_ID,
+            )
+        })
+        .flatten()
+        .map(|mailbox| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Mailbox,
+            canonical_id: mailbox.id,
+            reserved_global_counter: Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
+        })
 }
 
 fn mapi_message_folder_id(email: &JmapEmail, folders: &[MapiFolder]) -> u64 {

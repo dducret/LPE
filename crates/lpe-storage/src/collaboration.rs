@@ -1689,6 +1689,11 @@ impl Storage {
     ) -> Result<Vec<CollaborationCollection>> {
         let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
         let principal = self.account_identity_for_id(principal_account_id).await?;
+        if kind == CollaborationResourceKind::Calendar {
+            let mut tx = self.pool.begin().await?;
+            Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, principal.id).await?;
+            tx.commit().await?;
+        }
         let mut collections = vec![CollaborationCollection {
             id: DEFAULT_COLLECTION_ID.to_string(),
             kind: kind.as_str().to_string(),

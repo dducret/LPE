@@ -55,6 +55,35 @@ impl Storage {
             );
         }
 
+        self.assert_required_schema_objects().await?;
+
+        Ok(())
+    }
+
+    async fn assert_required_schema_objects(&self) -> Result<()> {
+        for table in [
+            "accounts",
+            "mapi_named_properties",
+            "mapi_custom_property_values",
+            "mapi_profile_settings",
+        ] {
+            let present = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT to_regclass($1) IS NOT NULL
+                "#,
+            )
+            .bind(format!("public.{table}"))
+            .fetch_one(&self.pool)
+            .await
+            .with_context(|| format!("unable to inspect required table public.{table}"))?;
+
+            if !present {
+                bail!(
+                    "required table public.{table} is missing; LPE 0.4 requires an empty database initialized from crates/lpe-storage/sql/schema.sql"
+                );
+            }
+        }
+
         Ok(())
     }
 }

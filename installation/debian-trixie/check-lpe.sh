@@ -101,6 +101,10 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_cu
   || fail "Table public.mapi_custom_property_values is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_custom_property_values"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_profile_settings');" | grep -qx 'mapi_profile_settings' \
+  || fail "Table public.mapi_profile_settings is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
+pass "Found table public.mapi_profile_settings"
+
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 expected_schema_version="$(

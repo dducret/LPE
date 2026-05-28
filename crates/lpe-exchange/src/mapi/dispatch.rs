@@ -4066,12 +4066,16 @@ where
                                 .await
                                 .is_err()
                                 {
-                                    responses.extend_from_slice(&rop_error_response(
-                                        request.rop_id,
-                                        request.response_handle_index(),
-                                        0x8004_0102,
-                                    ));
-                                    continue;
+                                    tracing::warn!(
+                                        adapter = "mapi",
+                                        endpoint = "emsmdb",
+                                        mailbox = %principal.email,
+                                        folder_id = format_args!("0x{folder_id:016x}"),
+                                        property_tags = %format_debug_property_tags(
+                                            &values.iter().map(|(tag, _value)| *tag).collect::<Vec<_>>()
+                                        ),
+                                        "accepted MAPI folder property write but failed to persist profile state"
+                                    );
                                 }
                             }
                         }

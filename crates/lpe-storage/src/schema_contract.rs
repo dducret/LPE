@@ -4,6 +4,7 @@ const BLOB_STORE_STORAGE: &str = include_str!("blob_store.rs");
 const CHANGE_STORAGE: &str = include_str!("change.rs");
 const COLLABORATION_STORAGE: &str = include_str!("collaboration.rs");
 const CONVERSATION_ACTIONS_STORAGE: &str = include_str!("conversation_actions.rs");
+const CORE_STORAGE: &str = include_str!("core.rs");
 const INBOUND_STORAGE: &str = include_str!("inbound.rs");
 const MESSAGE_OPS_STORAGE: &str = include_str!("message_ops.rs");
 const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
@@ -683,10 +684,28 @@ fn update_script_rejects_non_current_schema_without_mutating_it() {
         UPDATE_LPE_SCRIPT,
         &[
             "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE",
+            "SELECT to_regclass('public.mapi_profile_settings');",
             "INSTALLED_SCHEMA_VERSION",
             "EXPECTED_SCHEMA_VERSION",
             "requires an empty database initialized with init-schema.sh",
             "does not apply SQL updates during update-lpe.sh",
+        ],
+    );
+}
+
+#[test]
+fn runtime_schema_check_rejects_missing_required_mapi_tables() {
+    assert_source_contains_all(
+        "storage core schema assertion",
+        CORE_STORAGE,
+        &[
+            "assert_required_schema_objects",
+            "\"mapi_named_properties\"",
+            "\"mapi_custom_property_values\"",
+            "\"mapi_profile_settings\"",
+            "SELECT to_regclass($1) IS NOT NULL",
+            "required table public.{table} is missing",
+            "LPE 0.4 requires an empty database initialized from crates/lpe-storage/sql/schema.sql",
         ],
     );
 }

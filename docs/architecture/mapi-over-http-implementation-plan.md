@@ -155,6 +155,12 @@ non-canonical LPE state.
   User-saved definitions project as MAPI `FOLDER_SEARCH` hierarchy rows with
   stable canonical identities and container classes derived from their canonical
   result object kind.
+- The default Calendar collection is materialized in canonical collaboration
+  storage when calendar collections are read, and the projected Calendar folder
+  identity is persisted with the reserved Calendar MAPI counter. Outlook may
+  write back or cache the Calendar default-folder EntryID during profile
+  bootstrap, so the advertised folder must have durable backing even when the
+  calendar has no events yet.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the
@@ -228,7 +234,10 @@ not by itself authorize broad client publication.
   not session-only state. Outlook's IPM subtree OST identity value
   (`0x7C04_0102` in the current bounded profile path) is persisted in
   `mapi_profile_settings.ipm_subtree_ost_id` when Outlook writes it to the IPM
-  subtree and is reloaded when the folder is opened in a later session.
+  subtree and is reloaded when the folder is opened in a later session. If the
+  persistence path is unavailable, the accepted write remains visible in the
+  current session so Outlook bootstrap can continue, and installation checks
+  must report the missing canonical schema state.
 - `RopGetReceiveFolder` maps Outlook `IPM.Appointment` probes to the canonical
   Calendar folder so cached-mode bootstrap does not fall back to Inbox.
 - Calendar RCA diagnostics log the `PR_IPM_APPOINTMENT_ENTRYID` folder EntryID,

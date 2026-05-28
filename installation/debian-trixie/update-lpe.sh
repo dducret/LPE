@@ -132,6 +132,11 @@ if [[ "${INSTALLED_SCHEMA_VERSION}" != "${EXPECTED_SCHEMA_VERSION}" ]]; then
   exit 1
 fi
 
+if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_profile_settings');" | grep -qx 'mapi_profile_settings'; then
+  echo "Table public.mapi_profile_settings is missing. LPE 0.4 requires an empty database initialized with init-schema.sh." >&2
+  exit 1
+fi
+
 echo "LPE 0.4 does not apply SQL updates during update-lpe.sh."
 echo "The installed database must already be an initialized 0.4 empty-database schema."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"

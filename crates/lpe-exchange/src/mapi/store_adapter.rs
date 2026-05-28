@@ -540,6 +540,9 @@ where
             canonical_id: event.id,
             reserved_global_counter: None,
         }))
+        .chain(crate::mapi_store::default_calendar_folder_identity_request(
+            &calendar_collections,
+        ))
         .chain(tasks.iter().map(|task| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Task,
             canonical_id: task.id,

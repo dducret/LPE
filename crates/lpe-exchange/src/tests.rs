@@ -209,6 +209,47 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
 }
 
 #[tokio::test]
+async fn mapi_default_calendar_folder_identity_is_persisted() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![CollaborationCollection {
+            id: "default".to_string(),
+            kind: "calendar".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            display_name: "Calendar".to_string(),
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+        }])),
+        ..FakeStore::default()
+    };
+
+    store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+
+    let calendar_folder =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID).unwrap();
+    assert_eq!(
+        store
+            .mapi_identities
+            .lock()
+            .unwrap()
+            .get(&calendar_folder.id)
+            .copied(),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+}
+
+#[tokio::test]
 async fn mapi_full_snapshot_loads_messages_without_search_index_query() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -333,6 +374,7 @@ struct FakeStore {
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
     mapi_ipm_subtree_ost_id: Arc<Mutex<Option<Vec<u8>>>>,
+    fail_mapi_ipm_subtree_ost_id_store: bool,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
@@ -1095,6 +1137,9 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
         ost_id: &'a [u8],
     ) -> StoreFuture<'a, ()> {
+        if self.fail_mapi_ipm_subtree_ost_id_store {
+            return Box::pin(async move { anyhow::bail!("simulated OST identity store failure") });
+        }
         *self.mapi_ipm_subtree_ost_id.lock().unwrap() = Some(ost_id.to_vec());
         Box::pin(async move { Ok(()) })
     }
@@ -15844,6 +15889,73 @@ async fn mapi_over_http_ipm_subtree_ost_identity_retains_client_session_blob() {
         stored_ost_id.lock().unwrap().as_deref(),
         Some(client_blob.as_slice())
     );
+}
+
+#[tokio::test]
+async fn mapi_over_http_ipm_subtree_ost_identity_write_survives_store_failure() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        fail_mapi_ipm_subtree_ost_id_store: true,
+        ..Default::default()
+    };
+    let stored_ost_id = store.mapi_ipm_subtree_ost_id.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let client_blob = [0x66; 40];
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(&mut property_values, 0x7C04_0102, &client_blob);
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(4));
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on the IPM subtree
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x01, // RopGetPropertiesSpecific on the same folder
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x7C04_0102u32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0x00, 0, 0, 0, 0, 0]
+    ));
+    let mut overridden = 40u16.to_le_bytes().to_vec();
+    overridden.extend_from_slice(&client_blob);
+    assert!(contains_bytes(&response_rops, &overridden));
+    assert!(stored_ost_id.lock().unwrap().is_none());
 }
 
 #[tokio::test]
