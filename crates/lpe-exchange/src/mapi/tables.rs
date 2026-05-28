@@ -3657,18 +3657,43 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "Shortcut".to_string());
     let shortcut_id = id.unwrap_or_else(Uuid::new_v4);
+    let shortcut_type = properties
+        .get(&PID_TAG_WLINK_TYPE)
+        .and_then(MapiValue::as_i64)
+        .map(|value| value as u32)
+        .unwrap_or(2);
+    let group_header_id = properties
+        .get(if shortcut_type == 4 {
+            &PID_TAG_WLINK_GROUP_HEADER_ID
+        } else {
+            &PID_TAG_WLINK_GROUP_CLSID
+        })
+        .and_then(|value| match value {
+            MapiValue::Guid(value) => Some(Uuid::from_bytes(*value)),
+            _ => None,
+        });
+    let group_name = properties
+        .get(&PID_TAG_WLINK_GROUP_NAME_W)
+        .and_then(|value| match value {
+            MapiValue::String(value) => Some(value.clone()),
+            _ => None,
+        })
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| {
+            if shortcut_type == 4 {
+                subject.clone()
+            } else {
+                "Mail".to_string()
+            }
+        });
     MapiNavigationShortcutMessage {
         id: crate::mapi::identity::mapped_mapi_object_id(&shortcut_id)
             .unwrap_or_else(|| crate::mapi::identity::mapi_store_id(0x7fff)),
         folder_id: COMMON_VIEWS_FOLDER_ID,
         canonical_id: shortcut_id,
         subject,
-        target_folder_id: entry_target.unwrap_or(INBOX_FOLDER_ID),
-        shortcut_type: properties
-            .get(&PID_TAG_WLINK_TYPE)
-            .and_then(MapiValue::as_i64)
-            .map(|value| value as u32)
-            .unwrap_or(2),
+        target_folder_id: entry_target,
+        shortcut_type,
         flags: properties
             .get(&PID_TAG_WLINK_FLAGS)
             .and_then(MapiValue::as_i64)
@@ -3703,6 +3728,8 @@ pub(in crate::mapi) fn navigation_shortcut_from_mapi_properties(
                     .map(|value| value as u32)
             })
             .unwrap_or(0),
+        group_header_id,
+        group_name,
     }
 }
 

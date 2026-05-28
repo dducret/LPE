@@ -62,11 +62,13 @@ pub(crate) struct MapiNavigationShortcutRecord {
     pub(crate) id: Uuid,
     pub(crate) account_id: Uuid,
     pub(crate) subject: String,
-    pub(crate) target_folder_id: u64,
+    pub(crate) target_folder_id: Option<u64>,
     pub(crate) shortcut_type: u32,
     pub(crate) flags: u32,
     pub(crate) section: u32,
     pub(crate) ordinal: u32,
+    pub(crate) group_header_id: Option<Uuid>,
+    pub(crate) group_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,11 +76,13 @@ pub(crate) struct UpsertMapiNavigationShortcutInput {
     pub(crate) id: Option<Uuid>,
     pub(crate) account_id: Uuid,
     pub(crate) subject: String,
-    pub(crate) target_folder_id: u64,
+    pub(crate) target_folder_id: Option<u64>,
     pub(crate) shortcut_type: u32,
     pub(crate) flags: u32,
     pub(crate) section: u32,
     pub(crate) ordinal: u32,
+    pub(crate) group_header_id: Option<Uuid>,
+    pub(crate) group_name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2348,7 +2352,7 @@ impl ExchangeStore for Storage {
             let rows = sqlx::query(
                 r#"
                 SELECT id, account_id, subject, target_folder_id, shortcut_type,
-                       flags, section, ordinal
+                       flags, section, ordinal, group_header_id, group_name
                 FROM mapi_navigation_shortcuts
                 WHERE tenant_id = $1 AND account_id = $2
                 ORDER BY section, ordinal, subject, id
@@ -2376,9 +2380,9 @@ impl ExchangeStore for Storage {
                 r#"
                 INSERT INTO mapi_navigation_shortcuts (
                     tenant_id, id, account_id, subject, target_folder_id,
-                    shortcut_type, flags, section, ordinal
+                    shortcut_type, flags, section, ordinal, group_header_id, group_name
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (tenant_id, id)
                 DO UPDATE SET
                     subject = EXCLUDED.subject,
@@ -2387,20 +2391,24 @@ impl ExchangeStore for Storage {
                     flags = EXCLUDED.flags,
                     section = EXCLUDED.section,
                     ordinal = EXCLUDED.ordinal,
+                    group_header_id = EXCLUDED.group_header_id,
+                    group_name = EXCLUDED.group_name,
                     updated_at = NOW()
                 RETURNING id, account_id, subject, target_folder_id, shortcut_type,
-                          flags, section, ordinal
+                          flags, section, ordinal, group_header_id, group_name
                 "#,
             )
             .bind(tenant_id)
             .bind(id)
             .bind(input.account_id)
             .bind(input.subject)
-            .bind(input.target_folder_id as i64)
+            .bind(input.target_folder_id.map(|value| value as i64))
             .bind(input.shortcut_type as i64)
             .bind(input.flags as i64)
             .bind(input.section as i64)
             .bind(input.ordinal as i64)
+            .bind(input.group_header_id)
+            .bind(input.group_name)
             .fetch_one(self.pool())
             .await?;
 
@@ -3221,11 +3229,15 @@ fn mapi_navigation_shortcut_from_row(
         id: row.try_get("id")?,
         account_id: row.try_get("account_id")?,
         subject: row.try_get("subject")?,
-        target_folder_id: row.try_get::<i64, _>("target_folder_id")? as u64,
+        target_folder_id: row
+            .try_get::<Option<i64>, _>("target_folder_id")?
+            .map(|value| value as u64),
         shortcut_type: row.try_get::<i64, _>("shortcut_type")? as u32,
         flags: row.try_get::<i64, _>("flags")? as u32,
         section: row.try_get::<i64, _>("section")? as u32,
         ordinal: row.try_get::<i64, _>("ordinal")? as u32,
+        group_header_id: row.try_get("group_header_id")?,
+        group_name: row.try_get("group_name")?,
     })
 }
 

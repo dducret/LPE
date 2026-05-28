@@ -224,7 +224,10 @@ Common Views navigation shortcut FAI messages are persisted as
 `mapi_navigation_shortcuts` rows with durable MAPI identity rows using
 `object_kind = 'navigation_shortcut'`. The table stores only the bounded
 Outlook shortcut facts LPE currently supports: subject, target folder id,
-shortcut type, flags, section, and ordinal.
+shortcut type, flags, section, ordinal, group header GUID, and group display
+name. `target_folder_id` is populated only for non-header shortcuts; group
+headers carry their `WunderBar` group GUID/name without inventing a folder
+target.
 
 Protocol adapters store only cursor rows:
 

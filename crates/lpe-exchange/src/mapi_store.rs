@@ -130,11 +130,13 @@ pub(crate) struct MapiNavigationShortcutMessage {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) subject: String,
-    pub(crate) target_folder_id: u64,
+    pub(crate) target_folder_id: Option<u64>,
     pub(crate) shortcut_type: u32,
     pub(crate) flags: u32,
     pub(crate) section: u32,
     pub(crate) ordinal: u32,
+    pub(crate) group_header_id: Option<Uuid>,
+    pub(crate) group_name: String,
 }
 
 pub(crate) enum MapiCommonViewsMessage {
@@ -446,6 +448,8 @@ impl MapiMailStoreSnapshot {
                 flags: shortcut.flags,
                 section: shortcut.section,
                 ordinal: shortcut.ordinal,
+                group_header_id: shortcut.group_header_id,
+                group_name: shortcut.group_name,
             })
             .collect();
         self
@@ -865,11 +869,13 @@ impl MapiMailStoreSnapshot {
                 folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
                 canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
                 subject: "Mail".to_string(),
-                target_folder_id: crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+                target_folder_id: None,
                 shortcut_type: 4,
                 flags: 0,
                 section: 0,
                 ordinal: 0x80,
+                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
             },
             MapiNavigationShortcutMessage {
                 id: crate::mapi::identity::mapi_store_id(
@@ -878,11 +884,13 @@ impl MapiMailStoreSnapshot {
                 folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
                 canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002),
                 subject: "Inbox".to_string(),
-                target_folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
                 shortcut_type: 0,
                 flags: 0,
                 section: 0,
                 ordinal: 0x81,
+                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
             },
         ];
         messages.extend(self.navigation_shortcuts.iter().cloned());

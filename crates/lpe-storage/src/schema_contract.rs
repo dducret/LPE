@@ -527,6 +527,22 @@ fn mapi_identity_mapping_is_store_backed() {
 }
 
 #[test]
+fn mapi_navigation_shortcuts_persist_group_header_links() {
+    let shortcuts = table_definition("mapi_navigation_shortcuts");
+    for required in [
+        "target_folder_id BIGINT CHECK (target_folder_id IS NULL OR target_folder_id > 0)",
+        "shortcut_type BIGINT NOT NULL CHECK (shortcut_type >= 0 AND shortcut_type <= 4294967295)",
+        "group_header_id UUID",
+        "group_name TEXT NOT NULL DEFAULT ''",
+    ] {
+        assert!(
+            shortcuts.contains(required),
+            "mapi_navigation_shortcuts must persist Common Views shortcut group/header state: {required}"
+        );
+    }
+}
+
+#[test]
 fn mapi_delegate_freebusy_messages_are_materialized_canonical_state() {
     let messages = table_definition("mapi_delegate_freebusy_messages");
     for required in [

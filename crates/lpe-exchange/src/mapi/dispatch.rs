@@ -1834,6 +1834,8 @@ where
                         flags: shortcut.flags,
                         section: shortcut.section,
                         ordinal: shortcut.ordinal,
+                        group_header_id: shortcut.group_header_id,
+                        group_name: shortcut.group_name,
                     })
                     .await?;
             }
@@ -4725,6 +4727,8 @@ where
                             flags: shortcut.flags,
                             section: shortcut.section,
                             ordinal: shortcut.ordinal,
+                            group_header_id: shortcut.group_header_id,
+                            group_name: shortcut.group_name,
                         };
                         match store.upsert_mapi_navigation_shortcut(input).await {
                             Ok(saved) => {
@@ -8020,6 +8024,8 @@ where
                             flags: shortcut.flags,
                             section: shortcut.section,
                             ordinal: shortcut.ordinal,
+                            group_header_id: shortcut.group_header_id,
+                            group_name: shortcut.group_name,
                         })
                         .await
                     {

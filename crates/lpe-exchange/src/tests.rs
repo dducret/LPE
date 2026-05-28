@@ -1901,6 +1901,8 @@ impl ExchangeStore for FakeStore {
                 flags: input.flags,
                 section: input.section,
                 ordinal: input.ordinal,
+                group_header_id: input.group_header_id,
+                group_name: input.group_name,
             };
             if let Some(existing) = shortcuts.iter_mut().find(|shortcut| shortcut.id == id) {
                 *existing = record.clone();
@@ -3318,6 +3320,7 @@ const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
 const PID_TAG_CHANGE_KEY: u32 = 0x65E2_0102;
 const PID_TAG_PREDECESSOR_CHANGE_LIST: u32 = 0x65E3_0102;
+const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0048;
 const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
 const PID_TAG_WLINK_ORDINAL: u32 = 0x684B_0102;
 const PID_TAG_WLINK_ENTRY_ID: u32 = 0x684C_0102;
@@ -4807,6 +4810,11 @@ fn append_mapi_binary_property(values: &mut Vec<u8>, property_tag: u32, value: &
     values.extend_from_slice(&property_tag.to_le_bytes());
     values.extend_from_slice(&(value.len() as u16).to_le_bytes());
     values.extend_from_slice(value);
+}
+
+fn append_mapi_guid_property(values: &mut Vec<u8>, property_tag: u32, value: [u8; 16]) {
+    values.extend_from_slice(&property_tag.to_le_bytes());
+    values.extend_from_slice(&value);
 }
 
 fn append_mapi_multi_binary_property(values: &mut Vec<u8>, property_tag: u32, items: &[&[u8]]) {
@@ -16574,6 +16582,15 @@ async fn mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_o
     ));
     assert!(!contains_bytes(&response_rops, b"exchange_reminders"));
     assert!(!contains_bytes(&response_rops, b"occurrenceDismissals"));
+    let group = stream
+        .message_changes
+        .iter()
+        .find(|message| message.subject == "Mail")
+        .expect("Mail group header FAI row");
+    assert!(group.associated);
+    assert!(group.body_tags.contains(&PID_TAG_WLINK_GROUP_HEADER_ID));
+    assert!(group.body_tags.contains(&PID_TAG_WLINK_TYPE));
+    assert!(!group.body_tags.contains(&PID_TAG_WLINK_ENTRY_ID));
     let shortcut = stream
         .message_changes
         .iter()
@@ -16592,6 +16609,7 @@ async fn mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_o
     assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_FOLDER_TYPE));
     assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_CLSID));
     assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_NAME_W));
+    assert!(!shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_HEADER_ID));
     assert!(!stream.cnset_seen_fai.is_empty());
     assert!(contains_bytes(
         &response_rops,
@@ -16633,6 +16651,8 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
     );
     append_mapi_i32_property(&mut property_values, PID_TAG_WLINK_TYPE, 0);
     append_mapi_binary_property(&mut property_values, PID_TAG_WLINK_ORDINAL, &[0x89]);
+    append_mapi_guid_property(&mut property_values, PID_TAG_WLINK_GROUP_CLSID, [0x11; 16]);
+    append_mapi_utf16_property(&mut property_values, PID_TAG_WLINK_GROUP_NAME_W, "Custom");
 
     let mut rops = Vec::new();
     append_rop_create_associated_message(
@@ -16641,7 +16661,7 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
         1,
         crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
     );
-    append_rop_set_properties(&mut rops, 1, 4, &property_values);
+    append_rop_set_properties(&mut rops, 1, 6, &property_values);
     rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x01, 0x00]);
 
     let response = service
@@ -16659,10 +16679,112 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
     assert_eq!(stored[0].subject, "Persisted Inbox");
     assert_eq!(
         stored[0].target_folder_id,
-        crate::mapi::identity::INBOX_FOLDER_ID
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
     );
     assert_eq!(stored[0].shortcut_type, 0);
     assert_eq!(stored[0].ordinal, 0x89);
+    assert_eq!(
+        stored[0].group_header_id,
+        Some(Uuid::from_bytes([0x11; 16]))
+    );
+    assert_eq!(stored[0].group_name, "Custom");
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let shortcuts = store.navigation_shortcuts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let group_id = [0x22; 16];
+    let mut group_values = Vec::new();
+    append_mapi_utf16_property(&mut group_values, PID_TAG_SUBJECT_W, "Projects");
+    append_mapi_guid_property(&mut group_values, PID_TAG_WLINK_GROUP_HEADER_ID, group_id);
+    append_mapi_i32_property(&mut group_values, PID_TAG_WLINK_TYPE, 4);
+    append_mapi_binary_property(&mut group_values, PID_TAG_WLINK_ORDINAL, &[0x90]);
+
+    let inbox_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    )
+    .unwrap();
+    let mut link_values = Vec::new();
+    append_mapi_utf16_property(&mut link_values, PID_TAG_SUBJECT_W, "Project Inbox");
+    append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_ENTRY_ID, &inbox_entry_id);
+    append_mapi_i32_property(&mut link_values, PID_TAG_WLINK_TYPE, 0);
+    append_mapi_binary_property(&mut link_values, PID_TAG_WLINK_ORDINAL, &[0x91]);
+    append_mapi_guid_property(&mut link_values, PID_TAG_WLINK_GROUP_CLSID, group_id);
+    append_mapi_utf16_property(&mut link_values, PID_TAG_WLINK_GROUP_NAME_W, "Projects");
+
+    let mut rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 1, 4, &group_values);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x01, 0x00]);
+    append_rop_create_associated_message(
+        &mut rops,
+        0,
+        2,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut rops, 2, 6, &link_values);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x02, 0x02, 0x00]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let stored = shortcuts.lock().unwrap().clone();
+    let group = stored
+        .iter()
+        .find(|shortcut| shortcut.shortcut_type == 4 && shortcut.subject == "Projects")
+        .expect("stored group header");
+    let link = stored
+        .iter()
+        .find(|shortcut| shortcut.shortcut_type == 0 && shortcut.subject == "Project Inbox")
+        .expect("stored linked shortcut");
+    assert_eq!(group.group_header_id, Some(Uuid::from_bytes(group_id)));
+    assert_eq!(link.group_header_id, group.group_header_id);
+    assert_eq!(link.group_name, "Projects");
+    assert_eq!(
+        link.target_folder_id,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+    );
+
+    let snapshot =
+        crate::mapi_store::MapiMailStoreSnapshot::empty().with_navigation_shortcuts(stored);
+    let reloaded_group = snapshot
+        .navigation_shortcut_messages()
+        .into_iter()
+        .find(|shortcut| shortcut.subject == "Projects")
+        .expect("reloaded group header");
+    assert_eq!(
+        reloaded_group.group_header_id,
+        Some(Uuid::from_bytes(group_id))
+    );
 }
 
 #[tokio::test]

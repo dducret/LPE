@@ -1296,25 +1296,30 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_WLINK_FLAGS => Some(MapiValue::U32(message.flags)),
         PID_TAG_WLINK_SECTION => Some(MapiValue::U32(message.section)),
         PID_TAG_WLINK_ORDINAL => Some(MapiValue::Binary(wlink_ordinal_bytes(message.ordinal))),
-        PID_TAG_WLINK_GROUP_HEADER_ID if message.shortcut_type == 4 => {
-            Some(MapiValue::Guid(default_wlink_group_guid()))
-        }
+        PID_TAG_WLINK_GROUP_HEADER_ID if message.shortcut_type == 4 => message
+            .group_header_id
+            .map(|group_id| MapiValue::Guid(*group_id.as_bytes()))
+            .or_else(|| Some(MapiValue::Guid(default_wlink_group_guid()))),
         PID_TAG_WLINK_GROUP_CLSID if message.shortcut_type != 4 => {
-            Some(MapiValue::Guid(default_wlink_group_guid()))
+            let group_id = message
+                .group_header_id
+                .map(|group_id| *group_id.as_bytes())
+                .unwrap_or_else(default_wlink_group_guid);
+            Some(MapiValue::Guid(group_id))
         }
         PID_TAG_WLINK_GROUP_NAME_W if message.shortcut_type != 4 => {
-            Some(MapiValue::String("Mail".to_string()))
+            Some(MapiValue::String(wlink_group_name(message)))
         }
-        PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
-            crate::mapi::identity::folder_entry_id_from_object_id(
-                account_id,
-                message.target_folder_id,
-            )
-            .unwrap_or_default(),
-        )),
-        PID_TAG_WLINK_RECORD_KEY if message.shortcut_type != 4 => Some(MapiValue::Binary(
-            mapi_mailstore::source_key_for_store_id(message.target_folder_id),
-        )),
+        PID_TAG_WLINK_ENTRY_ID if message.shortcut_type != 4 => message
+            .target_folder_id
+            .and_then(|folder_id| {
+                crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
+            })
+            .map(MapiValue::Binary),
+        PID_TAG_WLINK_RECORD_KEY if message.shortcut_type != 4 => message
+            .target_folder_id
+            .map(mapi_mailstore::source_key_for_store_id)
+            .map(MapiValue::Binary),
         PID_TAG_WLINK_STORE_ENTRY_ID if message.shortcut_type != 4 => Some(MapiValue::Binary(
             mapi_mailstore::private_store_entry_id(account_id),
         )),
@@ -1328,6 +1333,18 @@ pub(in crate::mapi) fn default_wlink_group_guid() -> [u8; 16] {
         0x5B, 0xA9, 0x43, 0xD8, 0xDA, 0xAA, 0x46, 0x2C, 0xA6, 0x3E, 0x91, 0x36, 0xF6, 0x5C, 0x86,
         0x81,
     ]
+}
+
+pub(crate) fn default_wlink_group_uuid() -> Uuid {
+    Uuid::from_bytes(default_wlink_group_guid())
+}
+
+fn wlink_group_name(message: &MapiNavigationShortcutMessage) -> String {
+    if message.group_name.trim().is_empty() {
+        "Mail".to_string()
+    } else {
+        message.group_name.clone()
+    }
 }
 
 pub(in crate::mapi) fn wlink_folder_type_guid() -> [u8; 16] {
@@ -5673,6 +5690,51 @@ mod tests {
         assert_eq!(
             logon_property_value(&principal, PID_TAG_PRIVATE),
             Some(MapiValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn navigation_shortcut_group_header_and_link_properties_round_trip_group_identity() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let group_id = Uuid::from_bytes([0x33; 16]);
+        let header = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(900),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x1111),
+            subject: "Projects".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            section: 3,
+            ordinal: 0x80,
+            group_header_id: Some(group_id),
+            group_name: "Projects".to_string(),
+        };
+        let link = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(901),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x2222),
+            subject: "Project Inbox".to_string(),
+            target_folder_id: Some(INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 3,
+            ordinal: 0x81,
+            group_header_id: Some(group_id),
+            group_name: "Projects".to_string(),
+        };
+
+        assert_eq!(
+            navigation_shortcut_property_value(&header, account_id, PID_TAG_WLINK_GROUP_HEADER_ID),
+            Some(MapiValue::Guid([0x33; 16]))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_CLSID),
+            Some(MapiValue::Guid([0x33; 16]))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_NAME_W),
+            Some(MapiValue::String("Projects".to_string()))
         );
     }
 

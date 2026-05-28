@@ -197,10 +197,15 @@ non-canonical LPE state.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
-  EntryID, type, flags, section, and ordinal. LPE also seeds minimal Mail and
-  Inbox shortcut rows for cached-mode bootstrap. Full Outlook shortcut group
-  header parity remains unproven until real Outlook traces require additional
-  `WunderBar` group/header rows.
+  EntryID, type, flags, section, ordinal, group header GUID, and group display
+  name. LPE also seeds a minimal Mail group header plus Inbox shortcut row for
+  cached-mode bootstrap. Outlook-created `WunderBar` group headers are persisted
+  as Common Views FAI rows with `PidTagWlinkType = 4` and linked shortcuts retain
+  the matching `PidTagWlinkGroupClsid`. This scope covers cached-mode profile
+  creation and reopen; full Exchange navigation-pane presentation parity,
+  shared-folder shortcut semantics, public-folder shortcut flags, and
+  read-only group-type extensions remain deferred until real Outlook traces
+  require them.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store.
 - Delegate and free/busy objects are canonical projections over
@@ -363,7 +368,7 @@ not by itself authorize broad client publication.
 | Folder identity and hierarchy | `mailboxes`, built-in projected folder IDs, `search_folders`, and `mapi_object_identities` | Stable FIDs/source keys/change keys are reused across cached-mode sessions. Default-folder EntryIDs remain computed canonical projections. |
 | Named property IDs | `mapi_named_properties` | Durable per-account Outlook named-property ID mapping; session registry is only a cache. |
 | Opaque item custom properties | `mapi_custom_property_values` | Stored only for canonical item/attachment objects where the value is not a canonical built-in property. |
-| Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut FAI rows are durable canonical profile-visible state. |
+| Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut and group-header FAI rows are durable canonical profile-visible state for cached-mode profile creation and reopen. |
 | Sync checkpoints | `mapi_sync_checkpoints` | Durable EMSMDB/ICS cursors for hierarchy/content/read-state reuse; they do not store mailbox content. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
 | Default-folder EntryID writes | computed canonical folder projections | Valid writes are accepted for compatibility and stripped from session storage; invalid values are rejected. |
