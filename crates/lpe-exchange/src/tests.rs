@@ -8414,7 +8414,7 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_execute_rejects_compat_shortcuts_folder() {
+async fn mapi_over_http_execute_opens_compat_shortcuts_folder() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -8438,6 +8438,16 @@ async fn mapi_over_http_execute_rejects_compat_shortcuts_folder() {
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, crate::mapi::identity::SHORTCUTS_FOLDER_ID);
     rops.push(0);
+    append_rop_get_properties_specific(
+        &mut rops,
+        1,
+        &[
+            PID_TAG_LOCAL_COMMIT_TIME_MAX,
+            PID_TAG_DELETED_COUNT_TOTAL,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            PID_TAG_CONTENT_COUNT,
+        ],
+    );
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -8452,11 +8462,8 @@ async fn mapi_over_http_execute_rejects_compat_shortcuts_folder() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x02, 0x01, 0x0f, 0x01, 0x04, 0x80]
-    ));
-    assert!(!contains_bytes(&response_rops, &[0x02, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x02, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
 }
 
 #[tokio::test]
@@ -17052,7 +17059,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((11, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((12, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
@@ -19865,10 +19872,16 @@ async fn mapi_over_http_root_hierarchy_sync_keeps_parent_keys_root_relative() {
         assert!(folder.parent_source_key.is_empty());
         assert_eq!(folder.container_class.as_deref(), Some(""));
     }
-    assert!(!decoded
+    let shortcuts = decoded
         .folder_changes
         .iter()
-        .any(|folder| folder.display_name == "Shortcuts"));
+        .find(|folder| folder.display_name == "Shortcuts")
+        .expect("Shortcuts folderChange");
+    assert!(shortcuts.parent_source_key.is_empty());
+    assert_eq!(
+        shortcuts.container_class.as_deref(),
+        Some("IPF.ShortcutFolder")
+    );
     let ipm_source_key = mapi_mailstore::source_key_for_store_id(test_mapi_folder_id(4));
     for name in ["Inbox", "Outbox", "Sent Items", "Deleted Items"] {
         let folder = decoded

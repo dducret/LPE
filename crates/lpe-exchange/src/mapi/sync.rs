@@ -256,6 +256,7 @@ fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) ->
         | "__mapi_schedule"
         | "__mapi_search"
         | "__mapi_views"
+        | "__mapi_shortcuts"
         | "__mapi_freebusy_data" => ROOT_FOLDER_ID,
         "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
         _ => mailbox
@@ -275,6 +276,7 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
         | VIEWS_FOLDER_ID
+        | SHORTCUTS_FOLDER_ID
         | FREEBUSY_DATA_FOLDER_ID => Some(ROOT_FOLDER_ID),
         INBOX_FOLDER_ID
         | DRAFTS_FOLDER_ID

@@ -246,6 +246,7 @@ fn is_advertised_special_folder_id(object_id: u64) -> bool {
             | SCHEDULE_FOLDER_ID
             | SEARCH_FOLDER_ID
             | VIEWS_FOLDER_ID
+            | SHORTCUTS_FOLDER_ID
             | FREEBUSY_DATA_FOLDER_ID
             | INBOX_FOLDER_ID
             | DRAFTS_FOLDER_ID

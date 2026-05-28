@@ -173,13 +173,14 @@ non-canonical LPE state.
 - Private-mailbox `RopLogon` responses expose the Microsoft fixed folder-id
   slots before `ResponseFlags` and `MailboxGuid`, including the `Shortcuts`
   slot required by current Outlook clients. The `Shortcuts` FID is a bounded
-  wire-compatibility identifier only; it does not create a canonical LPE folder.
+  openable Root child for Outlook startup compatibility; it does not create a
+  canonical LPE shortcut store.
 - Common Views and Personal Views are Root children outside the IPM subtree.
   Navigation shortcuts are projected as folder-associated information messages
-  in Common Views, not as a separate Shortcuts folder. This follows
+  in Common Views, not as durable contents in the Shortcuts folder. This follows
   `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
   `[MS-OXOCFG]` navigation shortcut semantics: a shortcut is a Common Views FAI
-  message with `WLink` properties, not an independently advertised Root child.
+  message with `WLink` properties.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
