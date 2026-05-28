@@ -716,7 +716,7 @@ pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
         body_text: String::new(),
         message_class: "IPM.Configuration.Calendar".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
-        message_size: 0,
+        message_size: event_size(&event),
         named_properties,
     }
 }

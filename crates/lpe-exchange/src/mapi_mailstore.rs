@@ -71,6 +71,8 @@ const SYNC_FLAG_FAI: u16 = 0x0010;
 const SYNC_FLAG_NORMAL: u16 = 0x0020;
 const SYNC_FLAG_NO_FOREIGN_IDENTIFIERS: u16 = 0x0100;
 const SYNC_EXTRA_FLAG_EID: u32 = 0x0000_0001;
+const SYNC_EXTRA_FLAG_CHANGE_NUMBER: u32 = 0x0000_0004;
+const SYNC_EXTRA_FLAG_MESSAGE_SIZE: u32 = 0x0000_0008;
 const GLOBSET_RANGE_COMMAND: u8 = 0x52;
 const GLOBSET_BITMASK_COMMAND: u8 = 0x42;
 const GLOBSET_POP_COMMAND: u8 = 0x50;
@@ -627,6 +629,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     for email in messages {
         let attachments = attachments_for_message(email.id, attachment_facts);
         let change_number = canonical_message_change_number_with_attachments(email, attachments);
+        let message_size = email.size_octets.min(i32::MAX as i64) as i32;
         let source_key = source_key_for_uuid(&email.id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(&mut buffer, PID_TAG_SOURCE_KEY, &source_key);
@@ -653,10 +656,10 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 crate::mapi::identity::mapped_mapi_object_id(&email.id).unwrap_or(0),
             );
         }
-        if sync_extra_flags & 0x0000_0002 != 0 {
-            write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, 0);
+        if sync_extra_flags & SYNC_EXTRA_FLAG_MESSAGE_SIZE != 0 {
+            write_i32_property(&mut buffer, PID_TAG_MESSAGE_SIZE, message_size);
         }
-        if sync_extra_flags & 0x0000_0004 != 0 {
+        if sync_extra_flags & SYNC_EXTRA_FLAG_CHANGE_NUMBER != 0 {
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
             write_change_number(&mut buffer, change_number);
         }
@@ -770,14 +773,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             write_u32(&mut buffer, PID_TAG_MID);
             write_object_id(&mut buffer, object.item_id);
         }
-        if sync_extra_flags & 0x0000_0002 != 0 {
+        if sync_extra_flags & SYNC_EXTRA_FLAG_MESSAGE_SIZE != 0 {
             write_i32_property(
                 &mut buffer,
                 PID_TAG_MESSAGE_SIZE,
                 object.message_size as i32,
             );
         }
-        if sync_extra_flags & 0x0000_0004 != 0 {
+        if sync_extra_flags & SYNC_EXTRA_FLAG_CHANGE_NUMBER != 0 {
             write_u32(&mut buffer, PID_TAG_CHANGE_NUMBER);
             write_change_number(&mut buffer, change_number);
         }
@@ -3845,7 +3848,7 @@ mod tests {
         let buffer = sync_manifest_buffer_with_attachments(
             0x01,
             SYNC_FLAG_NORMAL,
-            0x0000_0007,
+            SYNC_EXTRA_FLAG_EID | SYNC_EXTRA_FLAG_MESSAGE_SIZE | SYNC_EXTRA_FLAG_CHANGE_NUMBER,
             &[],
             crate::mapi::identity::INBOX_FOLDER_ID,
             &[],
@@ -3872,6 +3875,7 @@ mod tests {
             ],
         );
         assert_bool_property(&buffer, PID_TAG_ASSOCIATED, false);
+        assert_i32_property(&buffer, PID_TAG_MESSAGE_SIZE, 42);
         assert_change_number_property(
             &buffer,
             PID_TAG_CHANGE_NUMBER,

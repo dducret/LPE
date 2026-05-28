@@ -165,7 +165,9 @@ non-canonical LPE state.
   Outlook's FAI-only Calendar sync has a stable source key/change key even
   before the first appointment exists. That bootstrap row carries the minimal
   appointment identity, date, time-zone, and global-object-id properties Outlook
-  expects while validating a newly downloaded Calendar folder.
+  expects while validating a newly downloaded Calendar folder, and its
+  advertised message size is derived from the projected subject instead of using
+  a zero-sized placeholder.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the
@@ -357,6 +359,9 @@ not by itself authorize broad client publication.
 - Transient deleted/read/unread sets use REPLID-scoped IDSET/GLOBSET encoding.
   These transient sets must not be confused with durable REPLGUID checkpoint
   state.
+- Content sync honors Outlook's extra flag contract for `Eid`, message size,
+  and change number; when Outlook requests message size in the change header,
+  LPE emits a non-zero value for projected normal and associated messages.
 - Hierarchy final state scopes `MetaTagIdsetGiven` to emitted folder IDs, and
   `MetaTagCnsetSeen` covers emitted folder changes plus the sync root change
   counter.

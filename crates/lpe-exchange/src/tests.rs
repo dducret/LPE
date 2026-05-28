@@ -3311,6 +3311,7 @@ const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
 const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
+const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
@@ -3692,6 +3693,18 @@ fn strict_decode_u32_property(property: &StrictFastTransferProperty) -> Result<u
     ))
 }
 
+fn strict_decode_i32_property(property: &StrictFastTransferProperty) -> Result<i32, String> {
+    if property.value.len() != 4 {
+        return Err(format!(
+            "property 0x{:08x} was not encoded as a four-byte integer",
+            property.tag
+        ));
+    }
+    Ok(i32::from_le_bytes(
+        property.value.as_slice().try_into().unwrap(),
+    ))
+}
+
 fn strict_decode_u64_property(property: &StrictFastTransferProperty) -> Result<u64, String> {
     if property.value.len() != 8 {
         return Err(format!(
@@ -4041,6 +4054,7 @@ struct StrictContentMessageChange {
     body_tags: Vec<u32>,
     mid: Option<u64>,
     change_number: Option<u64>,
+    header_message_size: Option<i32>,
     associated: bool,
     subject: String,
 }
@@ -4055,6 +4069,7 @@ struct StrictContentMessageBuilder {
     predecessor_change_list: Option<Vec<u8>>,
     mid: Option<u64>,
     change_number: Option<u64>,
+    header_message_size: Option<i32>,
     associated: Option<bool>,
     subject: Option<String>,
 }
@@ -4342,6 +4357,9 @@ fn strict_record_content_header_property(
         PID_TAG_CHANGE_NUMBER => {
             message.change_number = Some(strict_decode_change_number_property(&property)?)
         }
+        PID_TAG_MESSAGE_SIZE => {
+            message.header_message_size = Some(strict_decode_i32_property(&property)?)
+        }
         PID_TAG_ASSOCIATED => {
             if property.value.len() != 2 {
                 return Err("PidTagAssociated was not encoded as a two-byte PtypBoolean".into());
@@ -4376,6 +4394,9 @@ fn strict_record_content_body_property(
         PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
         PID_TAG_MESSAGE_FLAGS | PID_TAG_FLAG_STATUS => {
             let _ = strict_decode_u32_property(&property)?;
+        }
+        PID_TAG_MESSAGE_SIZE => {
+            let _ = strict_decode_i32_property(&property)?;
         }
         _ => {}
     }
@@ -4425,6 +4446,7 @@ fn strict_finish_content_message(
         body_tags: message.body_tags,
         mid: message.mid,
         change_number: message.change_number,
+        header_message_size: message.header_message_size,
         associated,
         subject,
     });
@@ -17455,6 +17477,7 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
     let message = &stream.message_changes[0];
     assert!(message.associated);
     assert_eq!(message.subject, "Calendar");
+    assert_eq!(message.header_message_size, Some(8));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Configuration.Calendar")

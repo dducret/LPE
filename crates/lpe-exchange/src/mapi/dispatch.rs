@@ -3011,6 +3011,11 @@ fn log_calendar_special_sync_objects(
         .map(|object| object.body_text.chars().count().to_string())
         .collect::<Vec<_>>()
         .join(",");
+    let message_sizes = objects
+        .iter()
+        .map(|object| object.message_size.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     let property_tag_count = objects
         .iter()
         .map(|object| object.named_properties.len())
@@ -3095,6 +3100,7 @@ fn log_calendar_special_sync_objects(
         calendar_message_classes = %message_classes,
         calendar_subject_char_counts = %subject_lengths,
         calendar_body_char_counts = %body_lengths,
+        calendar_message_sizes = %message_sizes,
         calendar_property_tag_count = property_tag_count,
         calendar_property_tags = %property_tags,
         calendar_property_shapes = %property_shapes,
