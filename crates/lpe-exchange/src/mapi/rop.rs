@@ -2247,39 +2247,61 @@ pub(in crate::mapi) fn valid_receive_folder_message_class(message_class: &str) -
             .all(|byte| (0x20..=0x7E).contains(&byte))
 }
 
+#[derive(Clone, Copy)]
+struct ReceiveFolderEntry {
+    message_class: &'static str,
+    folder_id: u64,
+}
+
+const RECEIVE_FOLDER_ENTRIES: &[ReceiveFolderEntry] = &[
+    ReceiveFolderEntry {
+        message_class: "",
+        folder_id: INBOX_FOLDER_ID,
+    },
+    ReceiveFolderEntry {
+        message_class: "IPM.Note",
+        folder_id: INBOX_FOLDER_ID,
+    },
+    ReceiveFolderEntry {
+        message_class: "IPM.Appointment",
+        folder_id: CALENDAR_FOLDER_ID,
+    },
+];
+
+fn receive_folder_entry_matches(entry: ReceiveFolderEntry, message_class: &str) -> bool {
+    entry.message_class.is_empty()
+        || message_class.len() >= entry.message_class.len()
+            && message_class.as_bytes()[..entry.message_class.len()]
+                .eq_ignore_ascii_case(entry.message_class.as_bytes())
+}
+
+fn receive_folder_entry_for_message_class(message_class: &str) -> ReceiveFolderEntry {
+    RECEIVE_FOLDER_ENTRIES
+        .iter()
+        .copied()
+        .filter(|entry| receive_folder_entry_matches(*entry, message_class))
+        .max_by_key(|entry| entry.message_class.len())
+        .unwrap_or(RECEIVE_FOLDER_ENTRIES[0])
+}
+
 pub(in crate::mapi) fn explicit_receive_folder_message_class(message_class: &str) -> &'static str {
-    if message_class.eq_ignore_ascii_case("IPM.Appointment")
-        || message_class
-            .get(..16)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Appointment."))
-    {
-        "IPM.Appointment"
-    } else if message_class.eq_ignore_ascii_case("IPM.Note")
-        || message_class
-            .get(..9)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("IPM.Note."))
-    {
-        "IPM.Note"
-    } else {
-        ""
-    }
+    receive_folder_entry_for_message_class(message_class).message_class
 }
 
 pub(in crate::mapi) fn receive_folder_id_for_message_class(message_class: &str) -> u64 {
-    match explicit_receive_folder_message_class(message_class) {
-        "IPM.Appointment" => CALENDAR_FOLDER_ID,
-        _ => INBOX_FOLDER_ID,
-    }
+    receive_folder_entry_for_message_class(message_class).folder_id
 }
 
 pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x68, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u32(&mut response, 1);
-    response.push(0);
-    write_object_id(&mut response, INBOX_FOLDER_ID);
-    write_utf16z(&mut response, "IPM.Note");
-    write_u64(&mut response, 0);
+    write_u32(&mut response, RECEIVE_FOLDER_ENTRIES.len() as u32);
+    for entry in RECEIVE_FOLDER_ENTRIES {
+        response.push(0);
+        write_object_id(&mut response, entry.folder_id);
+        write_utf16z(&mut response, entry.message_class);
+        write_u64(&mut response, 0);
+    }
     response
 }
 

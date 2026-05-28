@@ -152,6 +152,7 @@ Web interfaces must support at least `en`, `fr`, `de`, `it`, and `es`, with Engl
 - if a change affects behavior, prerequisites, installation, release framing, or architecture, update the relevant documentation in the same work
 - if a new durable rule appears, update `AGENTS.md`
 - tests should use realistic parameters and protocol builders; fixed literals belong only to deterministic fixtures, timestamps, IDs, or golden vectors
+- patches must be correctly implemented, API-compliant, and integrated through the existing architecture; do not ship trace-specific workarounds when a documented protocol rule, shared abstraction, canonical data path, or existing subsystem contract should own the behavior
 - when protocol work is planned, prefer correctness, state consistency, long-lived sync reliability, and real-client interoperability testing over introducing additional protocol surface area
 - prefer explicit architectural documentation over leaving structural assumptions implicit in code
 - keep ad hoc text state columns with table-level `CHECK` constraints while state machines are still changing; replace them with PostgreSQL enums only after state churn settles and the migration semantics are worth the added rigidity

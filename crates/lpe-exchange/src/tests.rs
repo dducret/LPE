@@ -25613,9 +25613,10 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
                 .try_into()
                 .unwrap()
         ),
-        1
+        3
     );
     assert!(contains_bytes(response_rops, &utf16z("IPM.Note")));
+    assert!(contains_bytes(response_rops, &utf16z("IPM.Appointment")));
 
     let store_offset = response_rops.len() - 10;
     assert_eq!(response_rops[store_offset], 0x7B);
@@ -25726,7 +25727,7 @@ async fn mapi_over_http_get_receive_folder_empty_class_returns_empty_explicit_me
         crate::mapi::identity::object_id_from_wire_id(&response_rops[6..14]).unwrap(),
         test_mapi_folder_id(5)
     );
-    assert_eq!(response_rops[14], 0);
+    assert_eq!(&response_rops[14..], b"\0");
 }
 
 #[tokio::test]
