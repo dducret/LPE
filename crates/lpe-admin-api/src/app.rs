@@ -297,6 +297,10 @@ mod tests {
         parse_smtp_submission_sender,
     };
     use crate::pst::validate_uploaded_pst_file_with_validator;
+    use axum::{
+        body::Body,
+        http::{Method, Request, StatusCode},
+    };
     use lpe_domain::SmtpSubmissionRequest;
     use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
     use lpe_mail_auth::AccountPrincipal;
@@ -309,7 +313,33 @@ mod tests {
         sync::{Mutex, MutexGuard},
         time::{SystemTime, UNIX_EPOCH},
     };
+    use tower::ServiceExt;
     use uuid::Uuid;
+
+    #[tokio::test]
+    async fn app_router_serves_exchange_mapi_options_route() {
+        let Ok(database_url) = std::env::var("TEST_DATABASE_URL") else {
+            eprintln!("skipping app router MAPI route smoke test without TEST_DATABASE_URL");
+            return;
+        };
+        let storage = lpe_storage::Storage::connect(&database_url).await.unwrap();
+        let request = Request::builder()
+            .method(Method::OPTIONS)
+            .uri("/mapi/emsmdb/")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = super::router(storage).oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            response
+                .headers()
+                .get("x-lpe-mapi-status")
+                .and_then(|value| value.to_str().ok()),
+            Some("transport-session-ready")
+        );
+    }
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 

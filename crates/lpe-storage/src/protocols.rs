@@ -3456,13 +3456,18 @@ impl Storage {
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
             r#"
-            SELECT id, mailbox_id, thread_id, imap_uid, is_seen
-            FROM mailbox_messages
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND message_id = $3
-              AND ($4::uuid IS NULL OR mailbox_id = $4)
-              AND visibility = 'visible'
+            SELECT mm.id, mm.mailbox_id, mm.thread_id, mm.imap_uid, mm.is_seen,
+                   m.retained_until IS NOT NULL AND m.retained_until > NOW() AS retention_active,
+                   m.legal_hold AS legal_hold_active
+            FROM mailbox_messages mm
+            JOIN messages m
+              ON m.tenant_id = mm.tenant_id
+             AND m.id = mm.message_id
+            WHERE mm.tenant_id = $1
+              AND mm.account_id = $2
+              AND mm.message_id = $3
+              AND ($4::uuid IS NULL OR mm.mailbox_id = $4)
+              AND mm.visibility = 'visible'
             "#,
         )
         .bind(&tenant_id)
@@ -3474,6 +3479,20 @@ impl Storage {
 
         if rows.is_empty() {
             bail!("message not found");
+        }
+
+        if rows
+            .iter()
+            .any(|row| row.try_get::<bool, _>("retention_active").unwrap_or(false))
+        {
+            bail!("message retention is active");
+        }
+
+        if rows
+            .iter()
+            .any(|row| row.try_get::<bool, _>("legal_hold_active").unwrap_or(false))
+        {
+            bail!("message legal hold is active");
         }
 
         let modseq = self

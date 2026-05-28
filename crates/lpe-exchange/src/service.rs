@@ -238,7 +238,7 @@ async fn post_handler(
     response
 }
 
-async fn mapi_options_handler() -> Response {
+pub(crate) async fn mapi_options_handler() -> Response {
     let mut response = StatusCode::NO_CONTENT.into_response();
     response
         .headers_mut()

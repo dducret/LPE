@@ -2,8 +2,8 @@ use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery,
+    AttachmentUploadInput, AuditEntryInput, JmapImportedEmailInput, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery,
     SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput, UpsertJournalEntryInput,
 };
@@ -203,6 +203,16 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
                 .await,
             );
         }
+        collect(
+            &mut failures,
+            "MAPI Trash purge cross-protocol visibility",
+            exercise_mapi_trash_purge_cross_protocol_path(&storage, pool, &fixture).await,
+        );
+        collect(
+            &mut failures,
+            "MAPI Trash purge retention and legal-hold guard",
+            exercise_mapi_trash_purge_retention_guard(&storage, pool, &fixture).await,
+        );
 
         collect(
             &mut failures,
@@ -3206,6 +3216,309 @@ async fn exercise_mapi_delete_cross_protocol_path(
     anyhow::ensure!(
         mapi_delete_replay_rows == 1,
         "MAPI content sync must be able to export the JMAP-visible delete from canonical tombstones"
+    );
+
+    Ok(())
+}
+
+async fn exercise_mapi_trash_purge_cross_protocol_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let trash_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM mailboxes
+        WHERE tenant_id = $1 AND account_id = $2 AND role = 'trash'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load canonical Trash mailbox")?;
+    let before_cursor = storage
+        .fetch_jmap_mail_change_cursor(fixture.account_id)
+        .await?
+        .unwrap_or(0);
+
+    let mut message_ids = Vec::new();
+    let mut membership_ids = Vec::new();
+    for index in 0..2 {
+        let imported = storage
+            .import_jmap_email(
+                JmapImportedEmailInput {
+                    account_id: fixture.account_id,
+                    submitted_by_account_id: fixture.account_id,
+                    mailbox_id: trash_id,
+                    source: "mapi-save-message".to_string(),
+                    raw_message: None,
+                    from_display: Some("Alice Trash".to_string()),
+                    from_address: fixture.account_email.clone(),
+                    sender_display: None,
+                    sender_address: None,
+                    to: Vec::new(),
+                    cc: Vec::new(),
+                    bcc: Vec::new(),
+                    subject: format!("Runtime MAPI Trash purge {index}"),
+                    body_text: "Trash purge body".to_string(),
+                    body_html_sanitized: None,
+                    internet_message_id: Some(format!(
+                        "<trash-purge-{index}-{}@example.test>",
+                        Uuid::new_v4()
+                    )),
+                    mime_blob_ref: String::new(),
+                    size_octets: 64,
+                    received_at: None,
+                    thread_id: None,
+                    attachments: Vec::new(),
+                },
+                audit(
+                    "alice@example.test",
+                    "mapi-save-message",
+                    "runtime trash purge seed",
+                ),
+            )
+            .await
+            .context("seed MAPI-sourced Trash message")?;
+        message_ids.push(imported.id);
+        let membership_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT id
+            FROM mailbox_messages
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND mailbox_id = $3
+              AND message_id = $4
+              AND visibility = 'visible'
+            LIMIT 1
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(trash_id)
+        .bind(imported.id)
+        .fetch_one(pool)
+        .await
+        .context("load seeded Trash membership")?;
+        membership_ids.push(membership_id);
+    }
+
+    for message_id in &message_ids {
+        storage
+            .delete_jmap_email_from_mailbox(
+                fixture.account_id,
+                trash_id,
+                *message_id,
+                audit(
+                    "alice@example.test",
+                    "mapi-hard-delete-folder-contents",
+                    "runtime trash purge",
+                ),
+            )
+            .await
+            .context("hard-delete Trash membership through canonical purge path")?;
+    }
+
+    let jmap = storage
+        .fetch_jmap_emails(fixture.account_id, &message_ids)
+        .await
+        .context("fetch JMAP emails after Trash purge")?;
+    anyhow::ensure!(
+        jmap.is_empty(),
+        "JMAP Email/get must not return messages after MAPI Trash purge"
+    );
+    let imap = storage
+        .fetch_imap_emails(fixture.account_id, trash_id)
+        .await
+        .context("fetch IMAP Trash after purge")?;
+    anyhow::ensure!(
+        message_ids
+            .iter()
+            .all(|message_id| imap.iter().all(|email| email.id != *message_id)),
+        "IMAP Trash must not list messages after MAPI Trash purge"
+    );
+
+    for (message_id, membership_id) in message_ids.iter().zip(membership_ids.iter()) {
+        let tombstone_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM tombstones tombstone
+            JOIN mail_change_log log
+              ON log.tenant_id = tombstone.tenant_id
+             AND log.cursor = tombstone.change_cursor
+             AND log.object_kind = tombstone.object_kind
+             AND log.object_id = tombstone.object_id
+            WHERE tombstone.tenant_id = $1
+              AND tombstone.account_id = $2
+              AND tombstone.mailbox_id = $3
+              AND tombstone.mailbox_message_id = $4
+              AND tombstone.message_id = $5
+              AND tombstone.change_cursor > $6
+              AND log.change_kind = 'destroyed'
+            "#,
+        )
+        .bind(fixture.tenant_id)
+        .bind(fixture.account_id)
+        .bind(trash_id)
+        .bind(*membership_id)
+        .bind(*message_id)
+        .bind(before_cursor)
+        .fetch_one(pool)
+        .await
+        .context("count Trash purge tombstone replay rows")?;
+        anyhow::ensure!(
+            tombstone_count == 1,
+            "MAPI Trash purge must write one canonical tombstone per purged membership"
+        );
+    }
+
+    Ok(())
+}
+
+async fn exercise_mapi_trash_purge_retention_guard(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let trash_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM mailboxes
+        WHERE tenant_id = $1 AND account_id = $2 AND role = 'trash'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load canonical Trash mailbox for retention guard")?;
+    let imported = storage
+        .import_jmap_email(
+            JmapImportedEmailInput {
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                mailbox_id: trash_id,
+                source: "mapi-save-message".to_string(),
+                raw_message: None,
+                from_display: Some("Alice Trash".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: Vec::new(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Runtime MAPI retained Trash purge".to_string(),
+                body_text: "Retained Trash purge body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!(
+                    "<trash-retained-{}@example.test>",
+                    Uuid::new_v4()
+                )),
+                mime_blob_ref: String::new(),
+                size_octets: 64,
+                received_at: None,
+                thread_id: None,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "mapi-save-message",
+                "runtime retained trash purge seed",
+            ),
+        )
+        .await
+        .context("seed retained MAPI-sourced Trash message")?;
+    let membership_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(trash_id)
+    .bind(imported.id)
+    .fetch_one(pool)
+    .await
+    .context("load retained Trash membership")?;
+    sqlx::query(
+        r#"
+        UPDATE messages
+        SET retained_until = NOW() + INTERVAL '7 days',
+            legal_hold = TRUE
+        WHERE tenant_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(imported.id)
+    .execute(pool)
+    .await
+    .context("mark Trash message retained and under legal hold")?;
+
+    let result = storage
+        .delete_jmap_email_from_mailbox(
+            fixture.account_id,
+            trash_id,
+            imported.id,
+            audit(
+                "alice@example.test",
+                "mapi-hard-delete-folder-contents",
+                "runtime retained trash purge",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        result.is_err(),
+        "MAPI Trash purge must reject retained or legal-hold messages"
+    );
+    let visibility = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT visibility
+        FROM mailbox_messages
+        WHERE tenant_id = $1 AND id = $2
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load retained Trash membership visibility")?;
+    anyhow::ensure!(
+        visibility == "visible",
+        "retained Trash membership must remain visible after rejected purge"
+    );
+    let tombstone_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM tombstones
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND mailbox_message_id = $5
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(trash_id)
+    .bind(imported.id)
+    .bind(membership_id)
+    .fetch_one(pool)
+    .await
+    .context("count retained Trash purge tombstones")?;
+    anyhow::ensure!(
+        tombstone_count == 0,
+        "rejected retained Trash purge must not write a delete tombstone"
     );
 
     Ok(())

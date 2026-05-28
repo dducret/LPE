@@ -318,6 +318,15 @@ def mapi_sent_content_sync_rops(buffer_size: int = 4096) -> bytes:
     return bytes(rops)
 
 
+def mapi_empty_deleted_items_rops() -> bytes:
+    rops = bytearray()
+    rops.extend([0x02, 0x00, 0x00, 0x01])  # RopOpenFolder
+    rops.extend(struct.pack("<Q", mapi_folder_id(8)))  # canonical Deleted Items / Trash
+    rops.append(0)
+    rops.extend([0x58, 0x00, 0x01, 0x00, 0x00])  # RopEmptyFolder, no flags
+    return bytes(rops)
+
+
 def resolve_names_request(search_address: str, columns: list[int]) -> bytes:
     body = bytearray()
     body.extend(struct.pack("<I", 0))
@@ -1261,6 +1270,94 @@ def check_mapi_emsmdb_sent_sync_manifest(
     print("ok mapi_emsmdb_sent_sync_manifest")
 
 
+def check_mapi_empty_deleted_items_fixture(
+    base_url: str,
+    email: str,
+    password: str,
+    insecure_tls: bool,
+    timeout: int,
+) -> None:
+    marker = uuid.uuid4().hex[:12]
+    subject = f"LPE RCA MAPI empty Deleted Items {marker}"
+    created = ews_call(
+        base_url,
+        email,
+        password,
+        "CreateItem deleteditems",
+        f"""
+        <m:CreateItem>
+          <m:SavedItemFolderId><t:DistinguishedFolderId Id="deleteditems"/></m:SavedItemFolderId>
+          <m:Items>
+            <t:Message>
+              <t:Subject>{xml_escape(subject)}</t:Subject>
+              <t:Body BodyType="Text">MAPI empty Deleted Items fixture {xml_escape(marker)}</t:Body>
+            </t:Message>
+          </m:Items>
+        </m:CreateItem>
+        """,
+        insecure_tls,
+        timeout,
+    )
+    require_ews_no_error("EWS CreateItem deleteditems", created)
+
+    connect = request(
+        "POST",
+        join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        b"",
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/mapi-http",
+            "X-RequestType": "Connect",
+            "X-RequestId": mapi_request_id("ConnectTrash"),
+            "X-ClientInfo": mapi_client_info(),
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(connect.status == 200, f"MAPI EMSMDB Trash Connect returned HTTP {connect.status}: {connect.text[:300]}")
+    require(header_value(connect.headers, "x-responsecode") == "0", "MAPI EMSMDB Trash Connect did not return success")
+    cookie = cookie_header(connect)
+    execute = request(
+        "POST",
+        join_url(base_url, f"/mapi/emsmdb/?mailboxId={urllib.parse.quote(email, safe='@')}"),
+        mapi_execute_body(mapi_rop_buffer(mapi_empty_deleted_items_rops(), [1, 0xFFFF_FFFF])),
+        {
+            "Authorization": basic_auth_header(email, password),
+            "Content-Type": "application/mapi-http",
+            "Cookie": cookie,
+            "X-RequestType": "Execute",
+            "X-RequestId": mapi_request_id("EmptyTrash"),
+            "X-ClientInfo": mapi_client_info(),
+            "User-Agent": "MapiHttpClient",
+        },
+        timeout,
+        insecure_tls=insecure_tls,
+    )
+    require(execute.status == 200, f"MAPI EMSMDB Empty Deleted Items returned HTTP {execute.status}: {execute.text[:300]}")
+    require(header_value(execute.headers, "x-responsecode") == "0", "MAPI EMSMDB Empty Deleted Items did not return success")
+    response_rops = mapi_execute_response_rops(mapi_http_binary_payload(execute.body), "MAPI EMSMDB Empty Deleted Items")
+    require(contains_bytes(response_rops, bytes([0x58, 0x01, 0, 0, 0, 0])), "MAPI EmptyFolder did not return success")
+
+    deleted_items = ews_call(
+        base_url,
+        email,
+        password,
+        "FindItem deleteditems after MAPI empty",
+        """
+        <m:FindItem Traversal="Shallow">
+          <m:ItemShape><t:BaseShape>AllProperties</t:BaseShape></m:ItemShape>
+          <m:ParentFolderIds><t:DistinguishedFolderId Id="deleteditems"/></m:ParentFolderIds>
+        </m:FindItem>
+        """,
+        insecure_tls,
+        timeout,
+    )
+    require_ews_no_error("EWS FindItem deleteditems after MAPI empty", deleted_items)
+    require(subject not in deleted_items, "EWS Deleted Items still exposes the MAPI-emptied fixture")
+    print("ok mapi_empty_deleted_items_fixture")
+
+
 def check_rpc_proxy_auth(base_url: str, email: str, password: str | None, insecure_tls: bool, timeout: int) -> None:
     parsed = urllib.parse.urlparse(base_url)
     rpc_url = join_url(base_url, "/rpc/rpcproxy.dll")
@@ -1556,6 +1653,11 @@ def main() -> int:
         help="Exercise RCA-style NSPI address-book Check Name operations.",
     )
     parser.add_argument(
+        "--check-mapi-empty-deleted-items",
+        action="store_true",
+        help="Create a temporary EWS message in Deleted Items, empty Deleted Items through MAPI EmptyFolder, and verify disappearance. This empties the target mailbox Deleted Items folder.",
+    )
+    parser.add_argument(
         "--check-rpc-proxy-auth",
         action="store_true",
         help="Exercise RCA-style /rpc/rpcproxy.dll anonymous challenge and optional authenticated echo.",
@@ -1583,6 +1685,7 @@ def main() -> int:
     run_mapi_ping = args.check_mapi_ping or args.outlook_rca_readiness
     run_mapi_nspi_bind = args.check_mapi_nspi_bind_octet_stream or args.outlook_rca_readiness
     run_mapi_nspi_address_book = args.check_mapi_nspi_address_book
+    run_mapi_empty_deleted_items = args.check_mapi_empty_deleted_items
     run_rpc_proxy_auth = args.check_rpc_proxy_auth or args.outlook_rca_readiness
     run_rpc_proxy_mailstore_ping = args.check_rpc_proxy_mailstore_ping or args.outlook_rca_readiness
 
@@ -1593,11 +1696,12 @@ def main() -> int:
         or run_mapi_ping
         or run_mapi_nspi_bind
         or run_mapi_nspi_address_book
+        or run_mapi_empty_deleted_items
         or run_live_fixtures
         or run_rpc_proxy_mailstore_ping
     ):
         require(args.password, "requested authenticated checks require --password or LPE_RCA_PASSWORD")
-    if run_live_fixtures:
+    if run_live_fixtures or run_mapi_empty_deleted_items:
         require(
             args.allow_mutating_fixtures,
             "live readiness checks create and delete fixtures; pass --allow-mutating-fixtures to permit this",
@@ -1657,6 +1761,8 @@ def main() -> int:
             check_mapi_nspi_resolve_authenticated_mailbox(base_url, args.email, args.password, args.insecure, args.timeout)
         if run_mapi_nspi_address_book:
             check_mapi_nspi_address_book(base_url, args.email, args.password, args.insecure, args.timeout)
+        if run_mapi_empty_deleted_items:
+            check_mapi_empty_deleted_items_fixture(base_url, args.email, args.password, args.insecure, args.timeout)
     else:
         print("skip jmap_session password not provided")
         if (
@@ -1664,6 +1770,7 @@ def main() -> int:
             or run_mapi_ping
             or run_mapi_nspi_bind
             or run_mapi_nspi_address_book
+            or run_mapi_empty_deleted_items
             or run_live_fixtures
             or run_rpc_proxy_mailstore_ping
         ):

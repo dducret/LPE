@@ -2745,14 +2745,14 @@ fn virtual_special_folder_metadata(
             "Deferred Action",
             1,
             crate::mapi::identity::ROOT_FOLDER_ID,
-            "IPF.Root",
+            "",
         )),
         crate::mapi::identity::SPOOLER_QUEUE_FOLDER_ID => Some((
             "__mapi_spooler_queue",
             "Spooler Queue",
             2,
             crate::mapi::identity::ROOT_FOLDER_ID,
-            "IPF.Root",
+            "",
         )),
         crate::mapi::identity::INBOX_FOLDER_ID => Some((
             "inbox",
@@ -2969,7 +2969,7 @@ fn virtual_special_folder_metadata(
             "FreeBusy Data",
             190,
             crate::mapi::identity::ROOT_FOLDER_ID,
-            "IPF.Root",
+            "",
         )),
         crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID => Some((
             "conversation_history",

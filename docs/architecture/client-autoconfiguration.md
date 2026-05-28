@@ -92,6 +92,7 @@ Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap
 | Readiness command | Scope |
 | --- | --- |
 | `python tools/rca_outlook_connectivity_check.py --outlook-rca-readiness --allow-mutating-fixtures` | Project-owned scripted readiness harness for `IMAP`, `EWS`, `EXCH`, `mapiHttp`, canonical `Sent`, `NSPI`, and RPC proxy checks when legacy `EXPR` / RPC publication is being validated; this is not Microsoft RCA or real Outlook profile evidence |
+| `python tools/rca_outlook_connectivity_check.py --check-mapi-empty-deleted-items --allow-mutating-fixtures` | Project-owned destructive fixture check that creates a message in `Deleted Items`, empties `Deleted Items` through MAPI `RopEmptyFolder`, and verifies disappearance through EWS |
 | `python tools/rca_outlook_connectivity_check.py --ews-readiness --allow-mutating-fixtures` | EWS autodiscover, authentication, canonical send-to-`Sent`, contact/calendar create-read-delete |
 
 ## Outlook Publication Evidence Checklist

@@ -18,6 +18,7 @@ These exceptions are currently accepted because they are common in the Rust ecos
 - `tokio`
 - `tokio-stream` for bounded RPC/HTTP streaming responses that keep Outlook Anywhere `RPC_OUT_DATA` channels open without adding a custom stream implementation
 - `axum`
+- `tower` for route-level service smoke tests and existing `axum` service composition
 - `multer` (transitive dependency enabled by `axum` multipart upload support)
 - `tracing`
 - `tracing-subscriber`

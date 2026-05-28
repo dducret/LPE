@@ -2408,8 +2408,8 @@ fn serialize_advertised_special_folder_row(
 
 fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, bool) {
     match folder_id {
-        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "IPF.Root", false),
-        SPOOLER_QUEUE_FOLDER_ID => ("Spooler Queue", ROOT_FOLDER_ID, "IPF.Root", false),
+        DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "", false),
+        SPOOLER_QUEUE_FOLDER_ID => ("Spooler Queue", ROOT_FOLDER_ID, "", false),
         INBOX_FOLDER_ID => ("Inbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         OUTBOX_FOLDER_ID => ("Outbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         SENT_FOLDER_ID => ("Sent", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
@@ -2479,7 +2479,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             false,
         ),
         ARCHIVE_FOLDER_ID => ("Archive", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
-        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "IPF.Root", false),
+        FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "", false),
         CONVERSATION_HISTORY_FOLDER_ID => (
             "Conversation History",
             IPM_SUBTREE_FOLDER_ID,
@@ -2492,7 +2492,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             "Outlook.Reminder",
             false,
         ),
-        _ => ("Root", 0, "IPF.Root", true),
+        _ => ("Root", 0, "", true),
     }
 }
 
@@ -2526,8 +2526,9 @@ pub(in crate::mapi) fn serialize_root_folder_row(
                 write_u32(&mut row, 0)
             }
             PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
-            PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
-            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Root"),
+            PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
+                write_property_default(&mut row, *column)
+            }
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_LOCAL_COMMIT_TIME_MAX
@@ -2925,6 +2926,22 @@ mod tests {
 
         assert_eq!(&row[..expected.len()], expected.as_slice());
         assert_eq!(&row[expected.len()..], expected.as_slice());
+    }
+
+    #[test]
+    fn ms_oxosfld_none_container_classes_serialize_as_empty_strings() {
+        for folder_id in [
+            ROOT_FOLDER_ID,
+            DEFERRED_ACTION_FOLDER_ID,
+            SPOOLER_QUEUE_FOLDER_ID,
+            COMMON_VIEWS_FOLDER_ID,
+            VIEWS_FOLDER_ID,
+            FREEBUSY_DATA_FOLDER_ID,
+        ] {
+            let row =
+                serialize_special_folder_row(folder_id, &[], &[PID_TAG_CONTAINER_CLASS_W], None);
+            assert_eq!(row, utf16z_test_bytes(""));
+        }
     }
 
     #[test]
@@ -3993,6 +4010,11 @@ pub(in crate::mapi) fn unread_from_read_flags(read_flags: Option<u8>) -> Option<
 
 pub(in crate::mapi) fn folder_message_class(mailbox: &JmapMailbox) -> &'static str {
     match mailbox.role.as_str() {
+        "__mapi_deferred_action"
+        | "__mapi_spooler_queue"
+        | "__mapi_common_views"
+        | "__mapi_views"
+        | "__mapi_freebusy_data" => "",
         "contacts" => "IPF.Contact",
         "calendar" => "IPF.Appointment",
         "journal" => "IPF.Journal",

@@ -23,7 +23,7 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
-) -> Result<bool, u32> {
+) -> Result<(bool, bool), u32> {
     let mailbox = role_for_folder_id(folder_id)
         .and_then(|role| mailboxes.iter().find(|mailbox| mailbox.role == role))
         .or_else(|| {
@@ -42,11 +42,15 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
     }
 
     let mut partial_completion = false;
+    let mut deleted_any = false;
     let message_ids = emails
         .iter()
         .filter(|email| email_matches_folder(email, folder_id, mailboxes))
         .map(|email| email.id)
         .collect::<Vec<_>>();
+    let attempted_count = message_ids.len();
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
 
     for message_id in message_ids {
         if store
@@ -64,9 +68,25 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
             .is_err()
         {
             partial_completion = true;
+            failed_count += 1;
+        } else {
+            deleted_any = true;
+            succeeded_count += 1;
         }
     }
-    Ok(partial_completion)
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        mailbox = %principal.email,
+        folder_id = %format!("{folder_id:#018x}"),
+        folder_role = debug_role_for_folder_id(folder_id),
+        attempted_count,
+        succeeded_count,
+        failed_count,
+        partial_completion,
+        message = "rca debug mapi hard delete folder contents"
+    );
+    Ok((deleted_any, partial_completion))
 }
 
 pub(in crate::mapi) async fn execute_response<S, V>(
@@ -8304,8 +8324,8 @@ where
                 )
                 .await
                 {
-                    Ok(partial_completion) => {
-                        if !partial_completion {
+                    Ok((deleted_any, partial_completion)) => {
+                        if deleted_any {
                             session.record_notification(MapiNotificationEvent {
                                 folder_id,
                                 kind: MapiNotificationKind::Content,
