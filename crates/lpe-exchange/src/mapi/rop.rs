@@ -2255,10 +2255,6 @@ struct ReceiveFolderEntry {
 
 const RECEIVE_FOLDER_ENTRIES: &[ReceiveFolderEntry] = &[
     ReceiveFolderEntry {
-        message_class: "",
-        folder_id: INBOX_FOLDER_ID,
-    },
-    ReceiveFolderEntry {
         message_class: "IPM.Note",
         folder_id: INBOX_FOLDER_ID,
     },
@@ -2276,12 +2272,18 @@ fn receive_folder_entry_matches(entry: ReceiveFolderEntry, message_class: &str) 
 }
 
 fn receive_folder_entry_for_message_class(message_class: &str) -> ReceiveFolderEntry {
+    if message_class.is_empty() {
+        return RECEIVE_FOLDER_ENTRIES[0];
+    }
     RECEIVE_FOLDER_ENTRIES
         .iter()
         .copied()
         .filter(|entry| receive_folder_entry_matches(*entry, message_class))
         .max_by_key(|entry| entry.message_class.len())
-        .unwrap_or(RECEIVE_FOLDER_ENTRIES[0])
+        .unwrap_or(ReceiveFolderEntry {
+            message_class: "",
+            folder_id: INBOX_FOLDER_ID,
+        })
 }
 
 pub(in crate::mapi) fn explicit_receive_folder_message_class(message_class: &str) -> &'static str {

@@ -259,11 +259,11 @@ not by itself authorize broad client publication.
   current session so Outlook bootstrap can continue, and installation checks
   must report the missing canonical schema state.
 - `RopGetReceiveFolder` and `RopGetReceiveFolderTable` use the same primed
-  receive-folder table: the empty default entry and `IPM.Note` resolve to Inbox,
-  while `IPM.Appointment` resolves to the canonical Calendar folder. Lookup uses
-  the protocol-defined longest case-insensitive prefix match, so empty
-  message-class probes return Inbox with an empty explicit message class instead
-  of an Outlook-trace-specific override.
+  receive-folder table: `IPM.Note` resolves to Inbox and `IPM.Appointment`
+  resolves to the canonical Calendar folder. Empty message-class probes return
+  the default Inbox receive-folder entry with explicit class `IPM.Note`, matching
+  Outlook's `IMsgStore::GetReceiveFolder` default receive-folder contract. Other
+  unmatched message classes still return Inbox with an empty explicit class.
 - Calendar RCA diagnostics log the `PR_IPM_APPOINTMENT_ENTRYID` folder EntryID,
   decoded Calendar FID, `IPF.Appointment` folder contract, default calendar
   collection presence, projected event count, and effective access state when
