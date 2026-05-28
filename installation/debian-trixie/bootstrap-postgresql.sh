@@ -37,17 +37,16 @@ run_as_postgres() {
   su -s /bin/sh postgres -c "$(printf '%q ' "$@")"
 }
 
-run_as_postgres psql <<SQL
-DO \$\$
-BEGIN
-   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_USER}') THEN
-      CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}';
-   END IF;
-END
-\$\$;
-SQL
+if ! run_as_postgres psql -v ON_ERROR_STOP=1 --set=db_user="${DB_USER}" -Atc \
+  "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :'db_user'" | grep -q 1; then
+  run_as_postgres psql -v ON_ERROR_STOP=1 \
+    --set=db_user="${DB_USER}" \
+    --set=db_password="${DB_PASSWORD}" \
+    -c "CREATE ROLE :\"db_user\" LOGIN PASSWORD :'db_password';"
+fi
 
-run_as_postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '${DB_NAME}'" | grep -q 1 || \
+run_as_postgres psql -v ON_ERROR_STOP=1 --set=db_name="${DB_NAME}" -tc \
+  "SELECT 1 FROM pg_database WHERE datname = :'db_name'" | grep -q 1 || \
   run_as_postgres createdb --owner="${DB_USER}" "${DB_NAME}"
 
 echo "PostgreSQL bootstrap complete."

@@ -330,7 +330,7 @@ Files:
 - `install-lpe.sh` is now interactive when run in a terminal for first-install values such as the public hostname, PostgreSQL settings, bootstrap administrator, integration secret, install directory, and service actions
 - `install-lpe.sh` also provisions the pinned `Magika` CLI binary with checksum verification into `/opt/lpe/bin/magika`
 - `install-lpe.sh` writes installer layout settings to `/etc/lpe/install.env`, writes runtime settings to `/etc/lpe/lpe.env`, and starts `lpe.service` only when the selected service action enables it
-- `install-lpe.sh` now defaults to running `init-schema.sh` on first install before starting services, so a fresh node comes up against the initialized current schema
+- `install-lpe.sh` now creates the local PostgreSQL role and database when `LPE_DB_HOST` is `localhost` or `127.0.0.1`, then defaults to running `init-schema.sh` on first install before starting services, so a fresh node comes up against the initialized current schema
 - `install-lpe.sh` now verifies that `LPE_DB_PASSWORD`, `DATABASE_URL`, `LPE_BOOTSTRAP_ADMIN_EMAIL`, `LPE_BOOTSTRAP_ADMIN_PASSWORD`, and `LPE_INTEGRATION_SHARED_SECRET` were actually persisted to `/etc/lpe/lpe.env` before it continues
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site

@@ -285,6 +285,31 @@ install_prerequisites() {
     xz-utils
 }
 
+is_local_postgresql_host() {
+  case "${LPE_DB_HOST}" in
+    localhost|127.0.0.1)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+bootstrap_local_postgresql_if_requested() {
+  if ! is_local_postgresql_host; then
+    echo "Skipping local PostgreSQL bootstrap for remote host ${LPE_DB_HOST}."
+    return 0
+  fi
+
+  DB_NAME="${LPE_DB_NAME}" \
+    DB_USER="${LPE_DB_USER}" \
+    DB_PASSWORD="${LPE_DB_PASSWORD}" \
+    DB_HOST="${LPE_DB_HOST}" \
+    DB_PORT="${LPE_DB_PORT}" \
+    bash "${SCRIPT_DIR}/bootstrap-postgresql.sh"
+}
+
 ensure_service_user() {
   if ! id -u "${SERVICE_USER}" >/dev/null 2>&1; then
     useradd --system --home-dir "${INSTALL_ROOT}" --create-home --shell /usr/sbin/nologin "${SERVICE_USER}"
@@ -400,6 +425,7 @@ main() {
   collect_runtime_values
   validate_runtime_values
   install_prerequisites
+  bootstrap_local_postgresql_if_requested
   ensure_service_user
   prepare_directories
   write_install_layout_file
