@@ -8046,7 +8046,7 @@ async fn mapi_over_http_execute_returns_logon_replid_guid_map_for_outlook_bootst
         crate::mapi::identity::object_id_from_wire_id(&response_rop[6..14]).unwrap(),
         test_mapi_folder_id(5)
     );
-    assert_eq!(&response_rop[14..], b"IPM.Note\0");
+    assert_eq!(&response_rop[14..], b"\0");
     assert_eq!(response_rop_size, response_rop.len() + 2);
     assert_eq!(
         &payload[response_rop_size..response_rop_size + 8],
@@ -25671,7 +25671,7 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_get_receive_folder_empty_class_returns_default_message_class() {
+async fn mapi_over_http_get_receive_folder_empty_class_returns_empty_explicit_message_class() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -25708,7 +25708,7 @@ async fn mapi_over_http_get_receive_folder_empty_class_returns_default_message_c
         crate::mapi::identity::object_id_from_wire_id(&response_rops[6..14]).unwrap(),
         test_mapi_folder_id(5)
     );
-    assert!(contains_bytes(&response_rops, b"IPM.Note\0"));
+    assert_eq!(response_rops[14], 0);
 }
 
 #[tokio::test]

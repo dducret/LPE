@@ -251,7 +251,10 @@ not by itself authorize broad client publication.
   current session so Outlook bootstrap can continue, and installation checks
   must report the missing canonical schema state.
 - `RopGetReceiveFolder` maps Outlook `IPM.Appointment` probes to the canonical
-  Calendar folder so cached-mode bootstrap does not fall back to Inbox.
+  Calendar folder so cached-mode bootstrap does not fall back to Inbox. Empty
+  message-class probes return Inbox with an empty explicit message class, matching
+  Exchange longest-prefix receive-folder matching for the default receive-folder
+  entry.
 - Calendar RCA diagnostics log the `PR_IPM_APPOINTMENT_ENTRYID` folder EntryID,
   decoded Calendar FID, `IPF.Appointment` folder contract, default calendar
   collection presence, projected event count, and effective access state when
