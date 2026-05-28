@@ -142,11 +142,14 @@ non-canonical LPE state.
   idempotent for already-removed session cookies and clears the session cookies;
   stateful NSPI table/property operations still require a live bound session.
 - Outlook default-folder properties must be projected from canonical folder
-  identities. Generated special-folder binary identifiers use the documented
-  46-byte folder EntryID form; cached 24-byte LongTermIDs and 46-byte folder
-  EntryIDs written back by Outlook remain accepted, normalized, and retained on
-  the live root-folder handle for cached-mode bootstrap, while canonical
-  projection still wins after reconnect.
+  identities on both the Inbox and Root folder. Generated special-folder binary
+  identifiers use the documented 46-byte folder EntryID form for the scalar
+  special-folder properties, including IPM subtree, Outbox, Deleted Items, Sent
+  Items, Views, Common Views, Finder/Search, Archive, Calendar, Contacts,
+  Journal, Notes, Tasks, Reminders, and Drafts. Cached 24-byte LongTermIDs and
+  46-byte folder EntryIDs written back by Outlook remain accepted, normalized,
+  and retained on the live root-folder handle for cached-mode bootstrap, while
+  canonical projection still wins after reconnect.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook

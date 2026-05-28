@@ -122,12 +122,21 @@ pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 pub(in crate::mapi) const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 pub(in crate::mapi) const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
 pub(in crate::mapi) const PID_TAG_VALID_FOLDER_MASK: u32 = 0x35DF_0003;
+pub(in crate::mapi) const PID_TAG_IPM_SUBTREE_ENTRY_ID: u32 = 0x35E0_0102;
+pub(in crate::mapi) const PID_TAG_IPM_OUTBOX_ENTRY_ID: u32 = 0x35E2_0102;
+pub(in crate::mapi) const PID_TAG_IPM_WASTEBASKET_ENTRY_ID: u32 = 0x35E3_0102;
+pub(in crate::mapi) const PID_TAG_IPM_SENTMAIL_ENTRY_ID: u32 = 0x35E4_0102;
+pub(in crate::mapi) const PID_TAG_VIEWS_ENTRY_ID: u32 = 0x35E5_0102;
+pub(in crate::mapi) const PID_TAG_COMMON_VIEWS_ENTRY_ID: u32 = 0x35E6_0102;
+pub(in crate::mapi) const PID_TAG_FINDER_ENTRY_ID: u32 = 0x35E7_0102;
+pub(in crate::mapi) const PID_TAG_IPM_ARCHIVE_ENTRY_ID: u32 = 0x35FF_0102;
 pub(in crate::mapi) const PID_TAG_IPM_APPOINTMENT_ENTRY_ID: u32 = 0x36D0_0102;
 pub(in crate::mapi) const PID_TAG_IPM_CONTACT_ENTRY_ID: u32 = 0x36D1_0102;
 pub(in crate::mapi) const PID_TAG_IPM_JOURNAL_ENTRY_ID: u32 = 0x36D2_0102;
 pub(in crate::mapi) const PID_TAG_IPM_NOTE_ENTRY_ID: u32 = 0x36D3_0102;
 pub(in crate::mapi) const PID_TAG_IPM_TASK_ENTRY_ID: u32 = 0x36D4_0102;
 pub(in crate::mapi) const PID_TAG_REM_ONLINE_ENTRY_ID: u32 = 0x36D5_0102;
+pub(in crate::mapi) const PID_TAG_IPM_DRAFTS_ENTRY_ID: u32 = 0x36D7_0102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS: u32 = 0x36D8_1102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
 pub(in crate::mapi) const PID_TAG_FREE_BUSY_ENTRY_IDS: u32 = 0x36E4_1102;
@@ -602,6 +611,35 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
 ) -> Option<MapiValue> {
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
+        PID_TAG_IPM_SUBTREE_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            IPM_SUBTREE_FOLDER_ID,
+        )),
+        PID_TAG_IPM_OUTBOX_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            OUTBOX_FOLDER_ID,
+        )),
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID => {
+            Some(special_folder_entry_id_value(mailbox_guid, TRASH_FOLDER_ID))
+        }
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID => {
+            Some(special_folder_entry_id_value(mailbox_guid, SENT_FOLDER_ID))
+        }
+        PID_TAG_VIEWS_ENTRY_ID => {
+            Some(special_folder_entry_id_value(mailbox_guid, VIEWS_FOLDER_ID))
+        }
+        PID_TAG_COMMON_VIEWS_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            COMMON_VIEWS_FOLDER_ID,
+        )),
+        PID_TAG_FINDER_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            SEARCH_FOLDER_ID,
+        )),
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            ARCHIVE_FOLDER_ID,
+        )),
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(special_folder_entry_id_value(
             mailbox_guid,
             CALENDAR_FOLDER_ID,
@@ -623,6 +661,10 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
         PID_TAG_REM_ONLINE_ENTRY_ID => Some(special_folder_entry_id_value(
             mailbox_guid,
             REMINDERS_FOLDER_ID,
+        )),
+        PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            DRAFTS_FOLDER_ID,
         )),
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS => Some(MapiValue::MultiBinary(additional_ren_entry_ids(
             mailbox_guid,
@@ -650,12 +692,21 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
 pub(in crate::mapi) fn is_scalar_default_folder_entry_id_property_tag(property_tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(property_tag),
-        PID_TAG_IPM_APPOINTMENT_ENTRY_ID
+        PID_TAG_IPM_SUBTREE_ENTRY_ID
+            | PID_TAG_IPM_OUTBOX_ENTRY_ID
+            | PID_TAG_IPM_WASTEBASKET_ENTRY_ID
+            | PID_TAG_IPM_SENTMAIL_ENTRY_ID
+            | PID_TAG_VIEWS_ENTRY_ID
+            | PID_TAG_COMMON_VIEWS_ENTRY_ID
+            | PID_TAG_FINDER_ENTRY_ID
+            | PID_TAG_IPM_ARCHIVE_ENTRY_ID
+            | PID_TAG_IPM_APPOINTMENT_ENTRY_ID
             | PID_TAG_IPM_CONTACT_ENTRY_ID
             | PID_TAG_IPM_JOURNAL_ENTRY_ID
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
             | PID_TAG_REM_ONLINE_ENTRY_ID
+            | PID_TAG_IPM_DRAFTS_ENTRY_ID
     )
 }
 
@@ -4601,12 +4652,21 @@ mod tests {
     fn special_folder_identification_properties_project_store_folder_ids() {
         let mailbox_guid = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
         assert_eq!(PID_TAG_VALID_FOLDER_MASK, 0x35DF_0003);
+        assert_eq!(PID_TAG_IPM_SUBTREE_ENTRY_ID, 0x35E0_0102);
+        assert_eq!(PID_TAG_IPM_OUTBOX_ENTRY_ID, 0x35E2_0102);
+        assert_eq!(PID_TAG_IPM_WASTEBASKET_ENTRY_ID, 0x35E3_0102);
+        assert_eq!(PID_TAG_IPM_SENTMAIL_ENTRY_ID, 0x35E4_0102);
+        assert_eq!(PID_TAG_VIEWS_ENTRY_ID, 0x35E5_0102);
+        assert_eq!(PID_TAG_COMMON_VIEWS_ENTRY_ID, 0x35E6_0102);
+        assert_eq!(PID_TAG_FINDER_ENTRY_ID, 0x35E7_0102);
+        assert_eq!(PID_TAG_IPM_ARCHIVE_ENTRY_ID, 0x35FF_0102);
         assert_eq!(PID_TAG_IPM_APPOINTMENT_ENTRY_ID, 0x36D0_0102);
         assert_eq!(PID_TAG_IPM_CONTACT_ENTRY_ID, 0x36D1_0102);
         assert_eq!(PID_TAG_IPM_JOURNAL_ENTRY_ID, 0x36D2_0102);
         assert_eq!(PID_TAG_IPM_NOTE_ENTRY_ID, 0x36D3_0102);
         assert_eq!(PID_TAG_IPM_TASK_ENTRY_ID, 0x36D4_0102);
         assert_eq!(PID_TAG_REM_ONLINE_ENTRY_ID, 0x36D5_0102);
+        assert_eq!(PID_TAG_IPM_DRAFTS_ENTRY_ID, 0x36D7_0102);
         assert_eq!(PID_TAG_FREE_BUSY_ENTRY_IDS, 0x36E4_1102);
 
         assert_eq!(
@@ -4615,11 +4675,20 @@ mod tests {
         );
 
         for (property_tag, folder_id) in [
+            (PID_TAG_IPM_SUBTREE_ENTRY_ID, IPM_SUBTREE_FOLDER_ID),
+            (PID_TAG_IPM_OUTBOX_ENTRY_ID, OUTBOX_FOLDER_ID),
+            (PID_TAG_IPM_WASTEBASKET_ENTRY_ID, TRASH_FOLDER_ID),
+            (PID_TAG_IPM_SENTMAIL_ENTRY_ID, SENT_FOLDER_ID),
+            (PID_TAG_VIEWS_ENTRY_ID, VIEWS_FOLDER_ID),
+            (PID_TAG_COMMON_VIEWS_ENTRY_ID, COMMON_VIEWS_FOLDER_ID),
+            (PID_TAG_FINDER_ENTRY_ID, SEARCH_FOLDER_ID),
+            (PID_TAG_IPM_ARCHIVE_ENTRY_ID, ARCHIVE_FOLDER_ID),
             (PID_TAG_IPM_APPOINTMENT_ENTRY_ID, CALENDAR_FOLDER_ID),
             (PID_TAG_IPM_CONTACT_ENTRY_ID, CONTACTS_FOLDER_ID),
             (PID_TAG_IPM_JOURNAL_ENTRY_ID, JOURNAL_FOLDER_ID),
             (PID_TAG_IPM_NOTE_ENTRY_ID, NOTES_FOLDER_ID),
             (PID_TAG_IPM_TASK_ENTRY_ID, TASKS_FOLDER_ID),
+            (PID_TAG_IPM_DRAFTS_ENTRY_ID, DRAFTS_FOLDER_ID),
         ] {
             let entry_id =
                 crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)

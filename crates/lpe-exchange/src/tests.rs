@@ -24831,12 +24831,21 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
-    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&14u16.to_le_bytes());
+    rops.extend_from_slice(&0x35E0_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35E2_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35E3_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35E4_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35E5_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35E6_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35E7_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x35FF_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x36D0_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x36D1_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x36D2_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x36D3_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x36D4_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x36D7_0102u32.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -24853,11 +24862,20 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
     assert_eq!(response_rops[get_props_offset], 0x07);
     assert_eq!(response_rops[get_props_offset + 6], 0);
     for folder_id in [
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+        crate::mapi::identity::OUTBOX_FOLDER_ID,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+        crate::mapi::identity::SENT_FOLDER_ID,
+        crate::mapi::identity::VIEWS_FOLDER_ID,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+        crate::mapi::identity::SEARCH_FOLDER_ID,
+        crate::mapi::identity::ARCHIVE_FOLDER_ID,
         crate::mapi::identity::CALENDAR_FOLDER_ID,
         crate::mapi::identity::CONTACTS_FOLDER_ID,
         crate::mapi::identity::JOURNAL_FOLDER_ID,
         crate::mapi::identity::NOTES_FOLDER_ID,
         crate::mapi::identity::TASKS_FOLDER_ID,
+        crate::mapi::identity::DRAFTS_FOLDER_ID,
     ] {
         let entry_id = crate::mapi::identity::long_term_id_from_object_id(folder_id)
             .unwrap()

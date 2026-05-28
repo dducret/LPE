@@ -1337,12 +1337,21 @@ fn format_optional_folder_id(folder_id: Option<u64>) -> String {
 
 fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
     match canonical_property_storage_tag(tag) {
+        PID_TAG_IPM_SUBTREE_ENTRY_ID => Some(IPM_SUBTREE_FOLDER_ID),
+        PID_TAG_IPM_OUTBOX_ENTRY_ID => Some(OUTBOX_FOLDER_ID),
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID => Some(TRASH_FOLDER_ID),
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID => Some(SENT_FOLDER_ID),
+        PID_TAG_VIEWS_ENTRY_ID => Some(VIEWS_FOLDER_ID),
+        PID_TAG_COMMON_VIEWS_ENTRY_ID => Some(COMMON_VIEWS_FOLDER_ID),
+        PID_TAG_FINDER_ENTRY_ID => Some(SEARCH_FOLDER_ID),
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID => Some(ARCHIVE_FOLDER_ID),
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID => Some(CALENDAR_FOLDER_ID),
         PID_TAG_IPM_CONTACT_ENTRY_ID => Some(CONTACTS_FOLDER_ID),
         PID_TAG_IPM_JOURNAL_ENTRY_ID => Some(JOURNAL_FOLDER_ID),
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
         PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
+        PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(DRAFTS_FOLDER_ID),
         _ => None,
     }
 }
@@ -1528,12 +1537,21 @@ fn strips_any_default_folder_identification_values(object: Option<&MapiObject>) 
 
 fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
     match canonical_property_storage_tag(tag) {
+        PID_TAG_IPM_SUBTREE_ENTRY_ID => "PidTagIpmSubtreeEntryId",
+        PID_TAG_IPM_OUTBOX_ENTRY_ID => "PidTagIpmOutboxEntryId",
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID => "PidTagIpmWastebasketEntryId",
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID => "PidTagIpmSentMailEntryId",
+        PID_TAG_VIEWS_ENTRY_ID => "PidTagViewsEntryId",
+        PID_TAG_COMMON_VIEWS_ENTRY_ID => "PidTagCommonViewsEntryId",
+        PID_TAG_FINDER_ENTRY_ID => "PidTagFinderEntryId",
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID => "PidTagIpmArchiveEntryId",
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
         PID_TAG_IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
         PID_TAG_IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
         PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
         PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
         PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
+        PID_TAG_IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
         _ => "unknown",
     }
 }
