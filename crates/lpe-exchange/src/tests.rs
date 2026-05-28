@@ -20181,7 +20181,10 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
-    assert_eq!(inbox.folder_id, None);
+    assert_eq!(
+        inbox.folder_id,
+        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+    );
     assert_eq!(inbox.content_count, None);
     assert_eq!(inbox.content_unread_count, None);
     assert!(inbox.local_commit_time_max.unwrap_or_default() > 0);
