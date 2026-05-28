@@ -2284,7 +2284,6 @@ pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
             | SCHEDULE_FOLDER_ID
             | SEARCH_FOLDER_ID
             | VIEWS_FOLDER_ID
-            | SHORTCUTS_FOLDER_ID
             | FREEBUSY_DATA_FOLDER_ID
     ) || role_for_folder_id(folder_id).is_some()
 }
@@ -2419,7 +2418,6 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         SCHEDULE_FOLDER_ID => ("Schedule", ROOT_FOLDER_ID, "", false),
         SEARCH_FOLDER_ID => ("Search", ROOT_FOLDER_ID, "", false),
         VIEWS_FOLDER_ID => ("Personal Views", ROOT_FOLDER_ID, "", false),
-        SHORTCUTS_FOLDER_ID => ("Shortcuts", ROOT_FOLDER_ID, "", false),
         DRAFTS_FOLDER_ID => ("Drafts", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         CONTACTS_FOLDER_ID => ("Contacts", IPM_SUBTREE_FOLDER_ID, "IPF.Contact", false),
         CALENDAR_FOLDER_ID => ("Calendar", IPM_SUBTREE_FOLDER_ID, "IPF.Appointment", false),
@@ -4050,7 +4048,6 @@ pub(in crate::mapi) fn try_mapi_folder_id(mailbox: &JmapMailbox) -> Option<u64> 
         "__mapi_schedule" => Some(SCHEDULE_FOLDER_ID),
         "__mapi_search" => Some(SEARCH_FOLDER_ID),
         "__mapi_views" => Some(VIEWS_FOLDER_ID),
-        "__mapi_shortcuts" => Some(SHORTCUTS_FOLDER_ID),
         "__mapi_freebusy_data" => Some(FREEBUSY_DATA_FOLDER_ID),
         "inbox" => Some(INBOX_FOLDER_ID),
         "drafts" => Some(DRAFTS_FOLDER_ID),

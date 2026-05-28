@@ -2481,7 +2481,6 @@ fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
         "__mapi_schedule" => crate::mapi::identity::SCHEDULE_FOLDER_ID,
         "__mapi_search" => crate::mapi::identity::SEARCH_FOLDER_ID,
         "__mapi_views" => crate::mapi::identity::VIEWS_FOLDER_ID,
-        "__mapi_shortcuts" => crate::mapi::identity::SHORTCUTS_FOLDER_ID,
         "contacts" => crate::mapi::identity::CONTACTS_FOLDER_ID,
         "calendar" => crate::mapi::identity::CALENDAR_FOLDER_ID,
         "journal" => crate::mapi::identity::JOURNAL_FOLDER_ID,
@@ -2519,7 +2518,6 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
         | "__mapi_schedule"
         | "__mapi_search"
         | "__mapi_views"
-        | "__mapi_shortcuts"
         | "__mapi_freebusy_data" => crate::mapi::identity::ROOT_FOLDER_ID,
         "journal"
         | "notes"
@@ -2921,13 +2919,6 @@ fn virtual_special_folder_metadata(
             "__mapi_views",
             "Personal Views",
             110,
-            crate::mapi::identity::ROOT_FOLDER_ID,
-            "",
-        )),
-        crate::mapi::identity::SHORTCUTS_FOLDER_ID => Some((
-            "__mapi_shortcuts",
-            "Shortcuts",
-            120,
             crate::mapi::identity::ROOT_FOLDER_ID,
             "",
         )),

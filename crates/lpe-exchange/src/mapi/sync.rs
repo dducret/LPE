@@ -14,12 +14,12 @@ pub(in crate::mapi) use super::identity::{
     JOURNAL_FOLDER_ID, JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
     QUICK_CONTACTS_FOLDER_ID, REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID,
     SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID, SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID,
-    SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID, STORE_REPLICA_ID, SUGGESTED_CONTACTS_FOLDER_ID,
-    SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
-    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    SPOOLER_QUEUE_FOLDER_ID, STORE_REPLICA_ID, SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID,
+    TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID, TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID,
+    VIEWS_FOLDER_ID,
 };
 
-pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
+pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 12] = [
     ROOT_FOLDER_ID,
     DEFERRED_ACTION_FOLDER_ID,
     SPOOLER_QUEUE_FOLDER_ID,
@@ -32,7 +32,6 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SCHEDULE_FOLDER_ID,
     SEARCH_FOLDER_ID,
     VIEWS_FOLDER_ID,
-    SHORTCUTS_FOLDER_ID,
 ];
 
 const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 21] = [
@@ -253,7 +252,6 @@ fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) ->
         | "__mapi_schedule"
         | "__mapi_search"
         | "__mapi_views"
-        | "__mapi_shortcuts"
         | "__mapi_freebusy_data" => ROOT_FOLDER_ID,
         "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
         _ => mailbox
@@ -273,7 +271,6 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
         | VIEWS_FOLDER_ID
-        | SHORTCUTS_FOLDER_ID
         | FREEBUSY_DATA_FOLDER_ID => Some(ROOT_FOLDER_ID),
         INBOX_FOLDER_ID
         | DRAFTS_FOLDER_ID

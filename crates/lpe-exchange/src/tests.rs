@@ -4153,9 +4153,19 @@ fn strict_decode_content_sync_stream(bytes: &[u8]) -> Result<StrictContentSyncSt
                 message.subject
             ));
         }
-        if !strict_replguid_globset_contains_counter(&cnset_seen, &message.change_key[16..22])? {
+        let cnset = if message.associated {
+            &cnset_seen_fai
+        } else {
+            &cnset_seen
+        };
+        if !strict_replguid_globset_contains_counter(cnset, &message.change_key[16..22])? {
+            let cnset_name = if message.associated {
+                "MetaTagCnsetSeenFAI"
+            } else {
+                "MetaTagCnsetSeen"
+            };
             return Err(format!(
-                "final MetaTagCnsetSeen does not include message {} change key",
+                "final {cnset_name} does not include message {} change key",
                 message.subject
             ));
         }
@@ -8270,7 +8280,7 @@ async fn mapi_over_http_execute_opens_folder_and_gets_empty_hierarchy_table() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_execute_opens_logon_shortcuts_folder() {
+async fn mapi_over_http_execute_rejects_compat_shortcuts_folder() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -8308,11 +8318,11 @@ async fn mapi_over_http_execute_opens_logon_shortcuts_folder() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &[0x02, 0x01, 0, 0, 0, 0]));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(
         &response_rops,
         &[0x02, 0x01, 0x0f, 0x01, 0x04, 0x80]
     ));
+    assert!(!contains_bytes(&response_rops, &[0x02, 0x01, 0, 0, 0, 0]));
 }
 
 #[tokio::test]

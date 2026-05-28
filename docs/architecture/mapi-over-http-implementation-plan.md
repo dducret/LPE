@@ -165,7 +165,10 @@ non-canonical LPE state.
   EntryIDs.
 - Common Views and Personal Views are Root children outside the IPM subtree.
   Navigation shortcuts are projected as folder-associated information messages
-  in Common Views, not as a separate Shortcuts folder.
+  in Common Views, not as a separate Shortcuts folder. This follows
+  `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
+  `[MS-OXOCFG]` navigation shortcut semantics: a shortcut is a Common Views FAI
+  message with `WLink` properties, not an independently advertised Root child.
 - Navigation shortcut FAI rows persist in `mapi_navigation_shortcuts` for
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder

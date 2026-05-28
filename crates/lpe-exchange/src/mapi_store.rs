@@ -1227,7 +1227,6 @@ pub(crate) fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
         "__mapi_schedule" => Some(crate::mapi::identity::SCHEDULE_FOLDER_COUNTER),
         "__mapi_search" => Some(crate::mapi::identity::SEARCH_FOLDER_COUNTER),
         "__mapi_views" => Some(crate::mapi::identity::VIEWS_FOLDER_COUNTER),
-        "__mapi_shortcuts" => Some(crate::mapi::identity::SHORTCUTS_FOLDER_COUNTER),
         "contacts" => Some(crate::mapi::identity::CONTACTS_FOLDER_COUNTER),
         "suggested_contacts" => Some(crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_COUNTER),
         "quick_contacts" => Some(crate::mapi::identity::QUICK_CONTACTS_FOLDER_COUNTER),
