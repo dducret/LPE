@@ -137,6 +137,11 @@ if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.
   exit 1
 fi
 
+if [[ "$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")" != "2" ]]; then
+  echo "Table public.mapi_navigation_shortcuts is missing the Common Views shortcut group/header columns. LPE 0.4 requires an empty database initialized with init-schema.sh." >&2
+  exit 1
+fi
+
 echo "LPE 0.4 does not apply SQL updates during update-lpe.sh."
 echo "The installed database must already be an initialized 0.4 empty-database schema."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"

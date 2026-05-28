@@ -335,7 +335,7 @@ Files:
 - `install-lpe.sh` writes `DATABASE_URL` to `/etc/lpe/lpe.env`; when an older env file still lacks it, maintenance scripts derive it from `LPE_DB_HOST`, `LPE_DB_PORT`, `LPE_DB_NAME`, `LPE_DB_USER`, and `LPE_DB_PASSWORD`
 - `install-lpe.sh` also installs `nodejs`, `npm`, and `nginx`, builds `web/admin` and `web/client`, deploys the static UIs, and enables the `nginx` site
 - `update-lpe.sh` remains non-interactive, reuses `/etc/lpe/install.env` and `/etc/lpe/lpe.env`, rebuilds `lpe-cli`, rebuilds the web assets, redeploys them, restarts `lpe.service`, and reloads `nginx`
-- `update-lpe.sh` does not apply SQL updates in `0.4`; it performs read-only schema-version and required-table checks and refuses to continue unless the installed database is already an initialized `0.4` empty-database schema
+- `update-lpe.sh` does not apply SQL updates in `0.4`; it performs read-only schema-version and required table/column checks and refuses to continue unless the installed database is already an initialized `0.4` empty-database schema
 - `update-lpe.sh` also re-provisions the same pinned `Magika` version so content validation stays deterministic
 - `bootstrap-postgresql.sh` creates a PostgreSQL role and database
 - `bootstrap-postgresql.sh` also installs the PostgreSQL server if needed and starts it
@@ -759,7 +759,7 @@ For later updates:
 1. push the desired commit to `https://github.com/dducret/LPE`
 2. run `update-lpe.sh`
 
-`update-lpe.sh` rebuilds and redeploys code and web assets only after a read-only schema-version check. It does not apply SQL updates in `0.4`. For a `0.4` deployment, point `DATABASE_URL` at an empty SQL database and run `init-schema.sh`; for a disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before running `init-schema.sh`.
+`update-lpe.sh` rebuilds and redeploys code and web assets only after read-only schema-version and required-column checks. It does not apply SQL updates in `0.4`. For a `0.4` deployment, point `DATABASE_URL` at an empty SQL database and run `init-schema.sh`; for a disposable or intentionally rebuilt node, set `LPE_RESET_SCHEMA=true` before running `init-schema.sh`.
 
 `LPE-CT/installation/debian-trixie/update-lpe-ct.sh` is not destructive by default. It rebuilds and redeploys the service while preserving the full spool, retained history, the private local PostgreSQL state, and the legacy `state.json` bootstrap/export file unless `LPE_CT_RESET_STATE_ON_UPDATE=true` is set explicitly for a disposable environment.
 
