@@ -86,7 +86,8 @@
 | `Protocol=EWS` | configured EWS URL only when `LPE_AUTOCONFIG_EWS_ENABLED` is true |
 | `Protocol=MapiHttp` | configured EMSMDB URL only when `LPE_AUTOCONFIG_MAPI_ENABLED` and `LPE_AUTOCONFIG_OUTLOOK_INTEROP_GATE_PASSED` are true |
 | `Protocol=ActiveSync` / `MobileSync` | ActiveSync endpoint for mobile-client probes |
-| `Protocol=JMAP` | configured public JMAP session URL |
+
+Microsoft Autodiscover v2 JSON does not advertise `JMAP`. Use `/.well-known/jmap` for JMAP service discovery.
 
 | Readiness command | Scope |
 | --- | --- |

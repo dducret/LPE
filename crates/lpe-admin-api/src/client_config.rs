@@ -155,13 +155,7 @@ async fn outlook_autodiscover_json(
     let endpoints = PublishedEndpoints::from_headers(&headers, Some(&email));
     let response = match render_autodiscover_json(&endpoints, query.protocol.as_deref()) {
         Some(response) => response,
-        None => (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "Error": "requested Autodiscover protocol is not published"
-            })),
-        )
-            .into_response(),
+        None => autodiscover_json_invalid_protocol_response(&endpoints, query.protocol.as_deref()),
     };
     log_autodiscover_connection(
         "GET",
@@ -324,7 +318,6 @@ fn render_autodiscover_json(
         }
         "ews" if config.ews_enabled => ("EWS", config.ews_url.as_str()),
         "activesync" | "mobilesync" => ("ActiveSync", config.activesync_url.as_str()),
-        "jmap" => ("JMAP", config.jmap_session_url.as_str()),
         "mapihttp" if config.mapi_autodiscover_enabled() => {
             ("MapiHttp", config.mapi_emsmdb_url.as_str())
         }
@@ -338,6 +331,41 @@ fn render_autodiscover_json(
         }))
         .into_response(),
     )
+}
+
+fn supported_autodiscover_json_protocols(config: &PublishedEndpoints) -> String {
+    let mut protocols = vec!["ActiveSync", "AutoDiscoverV1", "MobileSync"];
+    if config.ews_enabled {
+        protocols.push("EWS");
+    }
+    if config.mapi_autodiscover_enabled() {
+        protocols.push("MapiHttp");
+    }
+    protocols.join(",")
+}
+
+fn autodiscover_json_invalid_protocol_response(
+    config: &PublishedEndpoints,
+    protocol: Option<&str>,
+) -> Response {
+    let requested = protocol
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("");
+    let supported = supported_autodiscover_json_protocols(config);
+
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({
+            "ErrorCode": "InvalidProtocol",
+            "ErrorMessage": format!(
+                "The given protocol value '{}' is invalid. Supported values are '{}'",
+                requested,
+                supported
+            )
+        })),
+    )
+        .into_response()
 }
 
 fn valid_mapi_http_capability(value: &str) -> Option<u32> {
@@ -1057,13 +1085,14 @@ fn xml_response(body: String) -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        jmap_well_known_location, parse_autodiscover_email, render_autodiscover_json,
+        autodiscover_json_invalid_protocol_response, jmap_well_known_location,
+        outlook_autodiscover_json, parse_autodiscover_email, render_autodiscover_json,
         render_mobilesync_autodiscover, render_outlook_autodiscover,
         render_soap_user_settings_autodiscover, render_soap_user_settings_response,
         render_thunderbird_autoconfig, requested_mobilesync_schema, requested_soap_user_settings,
-        PublishedEndpoints,
+        AutodiscoverJsonQuery, PublishedEndpoints,
     };
-    use axum::{body, http::HeaderMap};
+    use axum::{body, extract::Path, extract::Query, http::HeaderMap, http::Uri};
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -1207,6 +1236,158 @@ mod tests {
             payload["Url"],
             "https://mail.example.test/autodiscover/autodiscover.xml"
         );
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_autodiscover_v1_returns_pox_endpoint() {
+        let response = render_autodiscover_json(&sample_config(), Some("AutoDiscoverV1"))
+            .expect("AutoDiscoverV1 JSON discovery should point to POX autodiscover");
+
+        assert_eq!(response.status(), 200);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["Protocol"], "AutoDiscoverV1");
+        assert_eq!(
+            payload["Url"],
+            "https://mail.example.test/autodiscover/autodiscover.xml"
+        );
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_supported_protocol_returns_protocol_and_url() {
+        let response = render_autodiscover_json(&sample_config(), Some("ActiveSync"))
+            .expect("ActiveSync JSON discovery should be available for mobile probes");
+
+        assert_eq!(response.status(), 200);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["Protocol"], "ActiveSync");
+        assert_eq!(
+            payload["Url"],
+            "https://mail.example.test/Microsoft-Server-ActiveSync"
+        );
+        assert!(payload.get("ErrorCode").is_none());
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_accepts_outlook_redirect_count_request() {
+        let uri: Uri =
+            "/autodiscover/autodiscover.json/v1.0/alice@example.test?Protocol=ActiveSync&RedirectCount=1"
+                .parse()
+                .unwrap();
+        let query = Query::<AutodiscoverJsonQuery>::try_from_uri(&uri).unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        let response =
+            outlook_autodiscover_json(uri, headers, Path("alice@example.test".to_string()), query)
+                .await;
+
+        assert_eq!(response.status(), 200);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["Protocol"], "ActiveSync");
+        assert_eq!(
+            payload["Url"],
+            "https://mail.example.test/Microsoft-Server-ActiveSync"
+        );
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_rejects_rest_without_fake_endpoint() {
+        assert!(render_autodiscover_json(&sample_config(), Some("REST")).is_none());
+
+        let response = autodiscover_json_invalid_protocol_response(&sample_config(), Some("REST"));
+
+        assert_eq!(response.status(), 400);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["ErrorCode"], "InvalidProtocol");
+        assert!(payload["ErrorMessage"]
+            .as_str()
+            .unwrap()
+            .contains("The given protocol value 'REST' is invalid."));
+        assert!(!payload["ErrorMessage"].as_str().unwrap().contains("/api"));
+        assert!(payload.get("Url").is_none());
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_rejects_jmap_protocol() {
+        assert!(render_autodiscover_json(&sample_config(), Some("JMAP")).is_none());
+
+        let response = autodiscover_json_invalid_protocol_response(&sample_config(), Some("JMAP"));
+
+        assert_eq!(response.status(), 400);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["ErrorCode"], "InvalidProtocol");
+        assert!(payload.get("Url").is_none());
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_handler_rejects_rest_request_with_redirect_count() {
+        let uri: Uri =
+            "/autodiscover/autodiscover.json/v1.0/alice@example.test?Protocol=REST&RedirectCount=1"
+                .parse()
+                .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert("host", "mail.example.test".parse().unwrap());
+        let response = outlook_autodiscover_json(
+            uri,
+            headers,
+            Path("alice@example.test".to_string()),
+            Query(AutodiscoverJsonQuery {
+                protocol: Some("REST".to_string()),
+            }),
+        )
+        .await;
+
+        assert_eq!(response.status(), 400);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["ErrorCode"], "InvalidProtocol");
+        assert!(payload["ErrorMessage"]
+            .as_str()
+            .unwrap()
+            .contains("The given protocol value 'REST' is invalid."));
+        assert!(payload.get("Url").is_none());
+    }
+
+    #[tokio::test]
+    async fn autodiscover_json_unsupported_protocol_uses_microsoft_error_shape() {
+        let response =
+            autodiscover_json_invalid_protocol_response(&sample_config(), Some("UnknownProtocol"));
+
+        assert_eq!(response.status(), 400);
+        let body = body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(payload["ErrorCode"], "InvalidProtocol");
+        assert!(payload["ErrorMessage"]
+            .as_str()
+            .unwrap()
+            .contains("Supported values are 'ActiveSync,AutoDiscoverV1,MobileSync'"));
+        assert!(payload.get("Protocol").is_none());
+        assert!(payload.get("Url").is_none());
     }
 
     #[tokio::test]
