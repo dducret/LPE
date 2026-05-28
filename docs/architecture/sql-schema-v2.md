@@ -117,6 +117,10 @@ content.
 Mailbox filtering rules are canonical `sieve_scripts` state. Protocol adapters
 that expose rule-like behavior must project to or from Sieve-backed rule state
 and must not add EWS-only, MAPI-only, or deferred-action-message rule stores.
+The admin API/JMAP `Rule/*` read surface and MAPI `RopGetRulesTable` are
+bounded projections of these rows for Outlook profile visibility; full Exchange
+rule blobs, provider-specific predicates, client-only rules, delegate rule
+templates, and deferred action messages are explicitly unsupported.
 Sieve script create, update, activation, rename, and delete paths write
 canonical rule change rows; deletes write tombstones before removing the live
 script.
@@ -208,9 +212,10 @@ objects. This fallback is compatibility behavior, not a protocol-local
 canonical store.
 Search-folder definitions, mailbox rule definitions, and Outlook conversation
 actions also replay through the same durable object log. Built-in
-Exchange-compatible search folders are stored as `search_folders` rows with
-`object_kind = 'search_folder_definition'` change rows; Sieve-backed mailbox
-rules use `object_kind = 'sieve_script'` change rows and tombstones;
+Exchange-compatible and user-saved Outlook Search Folders are stored as
+`search_folders` rows with `object_kind = 'search_folder_definition'` change
+rows; Sieve-backed mailbox rules use `object_kind = 'sieve_script'` change rows
+and tombstones;
 Conversation Action Settings FAI messages are projections of
 `conversation_actions` rows with `object_kind = 'conversation_action'` change
 rows. These rows are canonical LPE state, not Exchange-only FAI message stores
@@ -260,6 +265,15 @@ Protocol adapters store only cursor rows:
   and property type. These tables preserve object fidelity; they must not
   become protocol-local mailbox, `Sent`, outbox, search, rights, or AI/search
   projection state.
+- `mapi_profile_settings` stores only bounded account-scoped Outlook profile
+  settings required for cached-mode reuse. The initial setting is
+  `ipm_subtree_ost_id`, the client-written IPM subtree OST identity reloaded
+  when Outlook reopens the store. Default-folder EntryID properties remain
+  computed canonical folder projections and must not be stored here.
+- The read-only Outlook profile summary exposed through
+  `/api/mail/outlook-profile` and private JMAP `OutlookProfile/*` is derived
+  from these canonical tables. It must not become a separate Exchange profile
+  blob, Windows registry profile store, or PST/OST cache store.
 
 None of these tables stores canonical messages, folders, contacts, calendars,
 tasks, attachments, `Sent`, drafts, or outbox state.

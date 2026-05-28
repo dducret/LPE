@@ -1073,6 +1073,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::ContentsTable { .. } => "contents_table",
         MapiObject::AttachmentTable { .. } => "attachment_table",
         MapiObject::PermissionTable { .. } => "permission_table",
+        MapiObject::RuleTable { .. } => "rule_table",
         MapiObject::Attachment { .. } => "attachment",
         MapiObject::PendingAttachment { .. } => "pending_attachment",
         MapiObject::SavedAttachment { .. } => "saved_attachment",

@@ -617,6 +617,46 @@ fn mapi_property_store_runtime_sql_matches_durable_schema() {
 }
 
 #[test]
+fn mapi_profile_settings_are_canonical_account_settings() {
+    let profile = table_definition("mapi_profile_settings");
+    for required in [
+        "account_id UUID NOT NULL",
+        "ipm_subtree_ost_id BYTEA CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 1024))",
+        "PRIMARY KEY (tenant_id, account_id)",
+        "REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+    ] {
+        assert!(
+            profile.contains(required),
+            "mapi_profile_settings must persist bounded Outlook profile settings by account: {required}"
+        );
+    }
+
+    assert_source_contains_all(
+        "storage admin profile settings",
+        ADMIN_STORAGE,
+        &[
+            "pub async fn fetch_outlook_profile_state",
+            "pub async fn fetch_mapi_ipm_subtree_ost_id",
+            "pub async fn store_mapi_ipm_subtree_ost_id",
+            "FROM mapi_profile_settings",
+            "INSERT INTO mapi_profile_settings",
+            "ipm_subtree_ost_id = EXCLUDED.ipm_subtree_ost_id",
+        ],
+    );
+
+    assert_source_contains_all(
+        "lpe-exchange store",
+        EXCHANGE_STORE,
+        &[
+            "fn fetch_mapi_ipm_subtree_ost_id",
+            "Storage::fetch_mapi_ipm_subtree_ost_id",
+            "fn store_mapi_ipm_subtree_ost_id",
+            "Storage::store_mapi_ipm_subtree_ost_id",
+        ],
+    );
+}
+
+#[test]
 fn update_script_does_not_apply_sql_schema_updates() {
     for forbidden in [
         "CREATE TABLE IF NOT EXISTS public.mapi_named_properties",

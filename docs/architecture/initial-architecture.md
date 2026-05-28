@@ -95,3 +95,6 @@
 | `/api/mail/notes` | canonical notes API |
 | `/api/mail/journal` | canonical journal API |
 | `/api/mail/reminders` | computed reminders API |
+| `/api/mail/search-folders` | canonical Outlook Search Folder definition API |
+| `/api/mail/rules` | read-only Outlook-compatible mailbox rule projection backed by Sieve scripts |
+| `/api/mail/outlook-profile` | read-only server-side Outlook profile state summary derived from canonical tables |

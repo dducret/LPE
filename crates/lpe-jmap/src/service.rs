@@ -12,7 +12,8 @@ use lpe_magika::{ExpectedKind, IngressContext, PolicyDecision, ValidationRequest
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AuditEntryInput, AuthenticatedAccount, ClientTask,
     ClientTaskList, CollaborationCollection, JmapEmail, JmapEmailSubmission, JmapMailbox,
-    JmapUploadBlob, MailboxAccountAccess, SenderIdentity, Storage,
+    JmapUploadBlob, MailboxAccountAccess, MailboxRule, OutlookProfileState, SearchFolderDefinition,
+    SenderIdentity, Storage, UpsertSearchFolderInput,
 };
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -599,6 +600,86 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                             )
                             .await
                         }
+                        "Rule/get" => self.handle_canonical_get(account, arguments, "Rule").await,
+                        "Rule/query" => {
+                            self.handle_canonical_query(account, arguments, "Rule")
+                                .await
+                        }
+                        "Rule/changes" => {
+                            self.handle_canonical_changes(account, arguments, "Rule")
+                                .await
+                        }
+                        "Rule/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "Rule")
+                                .await
+                        }
+                        "Rule/set" | "Rule/import" | "Rule/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "Rule",
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "OutlookProfile/get" => {
+                            self.handle_canonical_get(account, arguments, "OutlookProfile")
+                                .await
+                        }
+                        "OutlookProfile/query" => {
+                            self.handle_canonical_query(account, arguments, "OutlookProfile")
+                                .await
+                        }
+                        "OutlookProfile/changes" => {
+                            self.handle_canonical_changes(account, arguments, "OutlookProfile")
+                                .await
+                        }
+                        "OutlookProfile/queryChanges" => {
+                            self.handle_canonical_query_changes(
+                                account,
+                                arguments,
+                                "OutlookProfile",
+                            )
+                            .await
+                        }
+                        "OutlookProfile/set" | "OutlookProfile/import" | "OutlookProfile/copy" => {
+                            self.handle_canonical_unsupported_write(
+                                account,
+                                arguments,
+                                "OutlookProfile",
+                                &method_name,
+                            )
+                            .await
+                        }
+                        "SearchFolder/get" => {
+                            self.handle_canonical_get(account, arguments, "SearchFolder")
+                                .await
+                        }
+                        "SearchFolder/query" => {
+                            self.handle_canonical_query(account, arguments, "SearchFolder")
+                                .await
+                        }
+                        "SearchFolder/changes" => {
+                            self.handle_canonical_changes(account, arguments, "SearchFolder")
+                                .await
+                        }
+                        "SearchFolder/queryChanges" => {
+                            self.handle_canonical_query_changes(account, arguments, "SearchFolder")
+                                .await
+                        }
+                        "SearchFolder/set" => {
+                            self.handle_search_folder_set(account, arguments, &mut created_ids)
+                                .await
+                        }
+                        "SearchFolder/import" | "SearchFolder/copy" => {
+                            self.handle_search_folder_import_or_copy(
+                                account,
+                                arguments,
+                                &mut created_ids,
+                                &method_name,
+                            )
+                            .await
+                        }
                         "Identity/get" => self.handle_identity_get(account, arguments).await,
                         "Identity/changes" => {
                             self.handle_identity_changes(account, arguments).await
@@ -1155,6 +1236,37 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .map(|reminder| StateEntry {
                         id: format!("{}:{}", reminder.source_type, reminder.source_id),
                         fingerprint: crate::notes_journal::reminder_state_fingerprint(&reminder),
+                    })
+                    .collect())
+            }
+            "Rule" => {
+                let rules = self.store.list_mailbox_rules(account_id).await?;
+                Ok(rules
+                    .into_iter()
+                    .map(|rule| StateEntry {
+                        id: rule.id.to_string(),
+                        fingerprint: opaque_state_fingerprint(&rule_to_value(rule).to_string()),
+                    })
+                    .collect())
+            }
+            "OutlookProfile" => {
+                let profile = self.store.fetch_outlook_profile_state(account_id).await?;
+                Ok(vec![StateEntry {
+                    id: profile.id.clone(),
+                    fingerprint: opaque_state_fingerprint(
+                        &outlook_profile_state_to_value(profile).to_string(),
+                    ),
+                }])
+            }
+            "SearchFolder" => {
+                let folders = self.store.fetch_search_folders(account_id).await?;
+                Ok(folders
+                    .into_iter()
+                    .map(|folder| StateEntry {
+                        id: folder.id.to_string(),
+                        fingerprint: opaque_state_fingerprint(
+                            &search_folder_to_value(folder).to_string(),
+                        ),
                     })
                     .collect())
             }
@@ -1855,6 +1967,122 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
         Ok(response)
     }
 
+    pub(crate) async fn handle_search_folder_set(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+    ) -> Result<Value> {
+        let account_id = requested_account_id_from_arguments(&arguments, account)?;
+        let old_state = self
+            .canonical_object_state(account, account_id, "SearchFolder")
+            .await?;
+        let mut created = Map::new();
+        let mut not_created = Map::new();
+        let mut updated = Map::new();
+        let mut not_updated = Map::new();
+        let mut destroyed = Vec::new();
+        let mut not_destroyed = Map::new();
+
+        if let Some(create) = arguments.get("create").and_then(Value::as_object) {
+            for (creation_id, value) in create {
+                match search_folder_input_from_value(None, account_id, value) {
+                    Ok(input) => match self.store.upsert_search_folder(input).await {
+                        Ok(folder) => {
+                            created_ids.insert(creation_id.clone(), folder.id.to_string());
+                            created
+                                .insert(creation_id.clone(), json!({"id": folder.id.to_string()}));
+                        }
+                        Err(error) => {
+                            not_created.insert(creation_id.clone(), set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_created.insert(creation_id.clone(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(update) = arguments.get("update").and_then(Value::as_object) {
+            for (id, value) in update {
+                match parse_uuid(id).and_then(|folder_id| {
+                    search_folder_input_from_value(Some(folder_id), account_id, value)
+                }) {
+                    Ok(input) => match self.store.upsert_search_folder(input).await {
+                        Ok(_) => {
+                            updated.insert(id.clone(), Value::Object(Map::new()));
+                        }
+                        Err(error) => {
+                            not_updated.insert(id.clone(), set_error(&error.to_string()));
+                        }
+                    },
+                    Err(error) => {
+                        not_updated.insert(id.clone(), set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        if let Some(ids) = string_ids_from_arguments(&arguments, "destroy") {
+            for id in ids {
+                match parse_uuid(&id) {
+                    Ok(folder_id) => {
+                        match self.store.delete_search_folder(account_id, folder_id).await {
+                            Ok(()) => destroyed.push(Value::String(id)),
+                            Err(error) => {
+                                not_destroyed.insert(id, set_error(&error.to_string()));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        not_destroyed.insert(id, set_error(&error.to_string()));
+                    }
+                }
+            }
+        }
+
+        Ok(json!({
+            "accountId": account_id.to_string(),
+            "oldState": old_state,
+            "newState": self.canonical_object_state(account, account_id, "SearchFolder").await?,
+            "created": Value::Object(created),
+            "notCreated": Value::Object(not_created),
+            "updated": Value::Object(updated),
+            "notUpdated": Value::Object(not_updated),
+            "destroyed": destroyed,
+            "notDestroyed": Value::Object(not_destroyed),
+        }))
+    }
+
+    pub(crate) async fn handle_search_folder_import_or_copy(
+        &self,
+        account: &AuthenticatedAccount,
+        arguments: Value,
+        created_ids: &mut HashMap<String, String>,
+        method_name: &str,
+    ) -> Result<Value> {
+        let mut set_arguments = Map::new();
+        if let Some(account_id) = arguments.get("accountId").cloned() {
+            set_arguments.insert("accountId".to_string(), account_id);
+        }
+        set_arguments.insert(
+            "create".to_string(),
+            arguments
+                .get("create")
+                .or_else(|| arguments.get("searchFolders"))
+                .cloned()
+                .unwrap_or_else(|| json!({})),
+        );
+        let mut response = self
+            .handle_search_folder_set(account, Value::Object(set_arguments), created_ids)
+            .await?;
+        if let Value::Object(map) = &mut response {
+            map.insert("method".to_string(), Value::String(method_name.to_string()));
+        }
+        Ok(response)
+    }
+
     pub(crate) async fn handle_canonical_import_or_copy(
         &self,
         account: &AuthenticatedAccount,
@@ -2006,7 +2234,7 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     .collect();
                 encode_state(account_id, data_type, entries)
             }
-            "Share" | "Reminder" => {
+            "Share" | "Reminder" | "Rule" => {
                 let entries = self
                     .canonical_objects(account, account_id, data_type)
                     .await?
@@ -2063,6 +2291,23 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                     Ok(object)
                 })
                 .collect::<Result<Vec<_>>>()?),
+            "Rule" => Ok(self
+                .store
+                .list_mailbox_rules(account_id)
+                .await?
+                .into_iter()
+                .map(rule_to_value)
+                .collect()),
+            "OutlookProfile" => Ok(vec![outlook_profile_state_to_value(
+                self.store.fetch_outlook_profile_state(account_id).await?,
+            )]),
+            "SearchFolder" => Ok(self
+                .store
+                .fetch_search_folders(account_id)
+                .await?
+                .into_iter()
+                .map(search_folder_to_value)
+                .collect()),
             "Share" => self.store.fetch_jmap_shares(account_id).await,
             "DurableChange" => {
                 let cursor = self.store.fetch_canonical_change_cursor(account_id).await?;
@@ -2082,8 +2327,9 @@ impl<S: JmapStore, V: lpe_magika::Detector> JmapService<S, V> {
                         {"id": "notes", "objectTypes": ["Note"]},
                         {"id": "journal", "objectTypes": ["JournalEntry"]},
                         {"id": "rights", "objectTypes": ["Identity", "Share"]},
-                        {"id": "search", "objectTypes": []},
-                        {"id": "rules", "objectTypes": []}
+                        {"id": "search", "objectTypes": ["SearchFolder"]},
+                        {"id": "rules", "objectTypes": ["Rule"]},
+                        {"id": "profile", "objectTypes": ["OutlookProfile"]}
                     ],
                 })])
             }
@@ -2403,6 +2649,48 @@ fn share_audit(account: &AuthenticatedAccount, action: &str, subject: &str) -> A
     }
 }
 
+fn rule_to_value(rule: MailboxRule) -> Value {
+    json!({
+        "id": rule.id.to_string(),
+        "@type": "Rule",
+        "name": rule.name,
+        "isActive": rule.is_active,
+        "sourceKind": rule.source_kind,
+        "conditionSummary": rule.condition_summary,
+        "actionSummary": rule.action_summary,
+        "supportedOutlookProjection": rule.supported_outlook_projection,
+        "unsupportedExchangeFeatures": rule.unsupported_exchange_features,
+        "sizeOctets": rule.size_octets,
+        "updatedAt": rule.updated_at,
+    })
+}
+
+fn outlook_profile_state_to_value(profile: OutlookProfileState) -> Value {
+    json!({
+        "id": profile.id,
+        "@type": "OutlookProfile",
+        "accountId": profile.account_id.to_string(),
+        "messagesBackedByCanonicalMailbox": profile.messages_backed_by_canonical_mailbox,
+        "contactsBackedByCanonicalStore": profile.contacts_backed_by_canonical_store,
+        "calendarsBackedByCanonicalStore": profile.calendars_backed_by_canonical_store,
+        "tasksBackedByCanonicalStore": profile.tasks_backed_by_canonical_store,
+        "notesBackedByCanonicalStore": profile.notes_backed_by_canonical_store,
+        "journalsBackedByCanonicalStore": profile.journals_backed_by_canonical_store,
+        "searchFoldersCount": profile.search_folders_count,
+        "rulesCount": profile.rules_count,
+        "senderIdentitiesCount": profile.sender_identities_count,
+        "mapiNamedPropertiesCount": profile.mapi_named_properties_count,
+        "mapiCustomPropertiesCount": profile.mapi_custom_properties_count,
+        "mapiNavigationShortcutsCount": profile.mapi_navigation_shortcuts_count,
+        "mapiSyncCheckpointsCount": profile.mapi_sync_checkpoints_count,
+        "mapiProfileSettingsPresent": profile.mapi_profile_settings_present,
+        "ipmSubtreeOstIdPresent": profile.ipm_subtree_ost_id_present,
+        "ipmSubtreeOstIdSizeOctets": profile.ipm_subtree_ost_id_size_octets,
+        "profileSettingsUpdatedAt": profile.profile_settings_updated_at,
+        "unsupportedClientLocalState": profile.unsupported_client_local_state,
+    })
+}
+
 fn canonical_query_state_method(data_type: &str) -> String {
     match data_type {
         "Reminder" => "Reminder".to_string(),
@@ -2421,6 +2709,68 @@ fn canonical_query_filter(data_type: &str, arguments: &Value) -> Option<Value> {
     } else {
         None
     }
+}
+
+fn search_folder_to_value(folder: SearchFolderDefinition) -> Value {
+    json!({
+        "id": folder.id.to_string(),
+        "@type": "SearchFolder",
+        "role": folder.role,
+        "displayName": folder.display_name,
+        "definitionKind": folder.definition_kind,
+        "resultObjectKind": folder.result_object_kind,
+        "scope": folder.scope_json,
+        "restriction": folder.restriction_json,
+        "excludedFolderRoles": folder.excluded_folder_roles,
+        "isBuiltin": folder.is_builtin,
+    })
+}
+
+fn search_folder_input_from_value(
+    id: Option<Uuid>,
+    account_id: Uuid,
+    value: &Value,
+) -> Result<UpsertSearchFolderInput> {
+    let display_name = value
+        .get("displayName")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("name").and_then(Value::as_str))
+        .ok_or_else(|| anyhow!("displayName is required"))?
+        .to_string();
+    let result_object_kind = value
+        .get("resultObjectKind")
+        .and_then(Value::as_str)
+        .unwrap_or("message")
+        .to_string();
+    let scope_json = value
+        .get("scope")
+        .cloned()
+        .unwrap_or_else(|| json!({"scope": "top_of_personal_folders", "recursive": true}));
+    let restriction_json = value
+        .get("restriction")
+        .cloned()
+        .unwrap_or_else(|| json!({"kind": "user_saved"}));
+    let excluded_folder_roles = value
+        .get("excludedFolderRoles")
+        .and_then(Value::as_array)
+        .map(|roles| {
+            roles
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(UpsertSearchFolderInput {
+        id,
+        account_id,
+        display_name,
+        result_object_kind,
+        scope_json,
+        restriction_json,
+        excluded_folder_roles,
+    })
 }
 
 pub(crate) fn validate_declared_capabilities(request: &JmapApiRequest) -> Result<()> {
@@ -2550,6 +2900,27 @@ fn method_capability(method_name: &str) -> Option<&'static str> {
         | "Reminder/set"
         | "Reminder/import"
         | "Reminder/copy"
+        | "Rule/get"
+        | "Rule/query"
+        | "Rule/queryChanges"
+        | "Rule/changes"
+        | "Rule/set"
+        | "Rule/import"
+        | "Rule/copy"
+        | "OutlookProfile/get"
+        | "OutlookProfile/query"
+        | "OutlookProfile/queryChanges"
+        | "OutlookProfile/changes"
+        | "OutlookProfile/set"
+        | "OutlookProfile/import"
+        | "OutlookProfile/copy"
+        | "SearchFolder/get"
+        | "SearchFolder/query"
+        | "SearchFolder/queryChanges"
+        | "SearchFolder/changes"
+        | "SearchFolder/set"
+        | "SearchFolder/import"
+        | "SearchFolder/copy"
         | "Share/get"
         | "Share/query"
         | "Share/queryChanges"
@@ -2661,6 +3032,9 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Note/get"
         | "JournalEntry/get"
         | "Reminder/get"
+        | "Rule/get"
+        | "OutlookProfile/get"
+        | "SearchFolder/get"
         | "Share/get"
         | "DurableChange/get"
         | "Blob/get"
@@ -2679,6 +3053,9 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Note/set"
         | "JournalEntry/set"
         | "Reminder/set"
+        | "Rule/set"
+        | "OutlookProfile/set"
+        | "SearchFolder/set"
         | "Identity/set"
         | "Thread/set"
         | "Blob/set"
@@ -2689,6 +3066,7 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Mailbox/copy"
         | "Thread/copy"
         | "EmailSubmission/copy"
+        | "OutlookProfile/copy"
         | "AddressBook/copy"
         | "Calendar/copy"
         | "ContactCard/copy"
@@ -2698,6 +3076,8 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Note/copy"
         | "JournalEntry/copy"
         | "Reminder/copy"
+        | "Rule/copy"
+        | "SearchFolder/copy"
         | "Identity/copy"
         | "Share/copy"
         | "DurableChange/copy" => object_map_len(arguments, "create"),
@@ -2714,6 +3094,8 @@ fn method_object_limit_error(method_name: &str, arguments: &Value) -> Option<Val
         | "Note/import"
         | "JournalEntry/import"
         | "Reminder/import"
+        | "Rule/import"
+        | "SearchFolder/import"
         | "Identity/import"
         | "Blob/import"
         | "Share/import"

@@ -6,6 +6,7 @@ use lpe_storage::{
     JmapMailboxUpdateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery,
     SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput, UpsertJournalEntryInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -2972,6 +2973,96 @@ async fn exercise_canonical_search_folder_and_rule_replay(
         "search-folder definitions must write canonical object change rows"
     );
 
+    let custom_search = storage
+        .upsert_search_folder(UpsertSearchFolderInput {
+            id: None,
+            account_id: fixture.account_id,
+            display_name: "Runtime unread from Alice".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "text", "query": "alice"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+        })
+        .await
+        .context("create user-saved search folder")?;
+    anyhow::ensure!(
+        !custom_search.is_builtin && custom_search.definition_kind == "user_saved",
+        "created search folder must be user-saved canonical state"
+    );
+
+    let fetched_custom = storage
+        .fetch_search_folders_by_ids(fixture.account_id, &[custom_search.id])
+        .await
+        .context("fetch user-saved search folder by id")?;
+    anyhow::ensure!(
+        fetched_custom
+            .iter()
+            .any(|folder| folder.display_name == "Runtime unread from Alice"),
+        "created search folder must be readable by id"
+    );
+
+    let updated_custom = storage
+        .upsert_search_folder(UpsertSearchFolderInput {
+            id: Some(custom_search.id),
+            account_id: fixture.account_id,
+            display_name: "Runtime unread from Alice updated".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "text", "query": "alice updated"}),
+            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+        })
+        .await
+        .context("update user-saved search folder")?;
+    anyhow::ensure!(
+        updated_custom.display_name == "Runtime unread from Alice updated"
+            && updated_custom.excluded_folder_roles
+                == vec!["trash".to_string(), "junk".to_string()],
+        "updated search folder must return canonical updated values"
+    );
+
+    storage
+        .delete_search_folder(fixture.account_id, custom_search.id)
+        .await
+        .context("delete user-saved search folder")?;
+    let deleted_custom = storage
+        .fetch_search_folders_by_ids(fixture.account_id, &[custom_search.id])
+        .await
+        .context("fetch deleted user-saved search folder by id")?;
+    anyhow::ensure!(
+        deleted_custom.is_empty(),
+        "deleted search folder must no longer be readable"
+    );
+
+    let search_folder_change_counts = sqlx::query(
+        r#"
+        SELECT change_kind, COUNT(*) AS change_count
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'search_folder_definition'
+          AND object_id = $3
+        GROUP BY change_kind
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(custom_search.id)
+    .fetch_all(pool)
+    .await
+    .context("count user-saved search folder change rows")?;
+    for expected_kind in ["created", "updated", "destroyed"] {
+        let mut count = 0;
+        for row in &search_folder_change_counts {
+            if row.try_get::<String, _>("change_kind")? == expected_kind {
+                count = row.try_get::<i64, _>("change_count")?;
+            }
+        }
+        anyhow::ensure!(
+            count == 1,
+            "search folder {expected_kind} must write one canonical change row"
+        );
+    }
+
     let script_name = format!("runtime-rule-{}", Uuid::new_v4().simple());
     storage
         .put_sieve_script(
@@ -3004,6 +3095,33 @@ if header :contains "Subject" "runtime-rule" {
     .fetch_one(pool)
     .await
     .context("load canonical Sieve script id")?;
+
+    let mailbox_rules = storage
+        .list_mailbox_rules(fixture.account_id)
+        .await
+        .context("list canonical mailbox rule projection")?;
+    let mailbox_rule = mailbox_rules
+        .iter()
+        .find(|rule| rule.id == script_id)
+        .context("created Sieve script is projected as a mailbox rule")?;
+    anyhow::ensure!(
+        mailbox_rule.name == script_name,
+        "mailbox rule keeps script name"
+    );
+    anyhow::ensure!(
+        mailbox_rule.source_kind == "sieve_script",
+        "mailbox rule projection must stay backed by Sieve state"
+    );
+    anyhow::ensure!(
+        mailbox_rule
+            .condition_summary
+            .contains("header Subject contains runtime-rule"),
+        "mailbox rule condition summary should describe the Sieve header test"
+    );
+    anyhow::ensure!(
+        mailbox_rule.action_summary == "keep",
+        "mailbox rule action summary should describe the Sieve action"
+    );
 
     let rule_change_count = sqlx::query_scalar::<_, i64>(
         r#"

@@ -65,7 +65,7 @@ pub use crate::protocols::{
     JmapEmailFollowupUpdate, JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    JmapThreadQuery, JmapUploadBlob, SearchFolderDefinition,
+    JmapThreadQuery, JmapUploadBlob, SearchFolderDefinition, UpsertSearchFolderInput,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::submission::{
@@ -82,16 +82,16 @@ pub use crate::tasks::{
 pub use crate::types::{
     AccountRecord, AdminDashboard, AliasRecord, AntispamSettings, AuditEntryInput, AuditEvent,
     DashboardUpdate, DomainRecord, EmailTraceResult, EmailTraceSearchInput, FilterRule,
-    HealthResponse, LocalAiSettings, MailFlowEntry, MailboxRecord, NewAccount, NewAlias, NewDomain,
-    NewFilterRule, NewMailbox, NewServerAdministrator, NewStoragePool, OutboundQueueStatusUpdate,
-    OverviewStats, ProtocolStatus, QuarantineItem, SecuritySettings, ServerAdministrator,
-    ServerSettings, SieveScriptDocument, SieveScriptSummary, StorageCleanupCounts,
-    StorageCleanupPlacementSummary, StorageCleanupVisibilityResponse, StorageHealthResponse,
-    StorageMetadataDiagnostics, StorageMigrationCounts, StorageMigrationJobSummary,
-    StorageMigrationVisibilityResponse, StorageOverview, StoragePlacementCounts,
-    StoragePolicyOverview, StoragePolicyScope, StoragePolicySummary, StoragePolicyUpdate,
-    StoragePoolConfigSummary, StoragePoolHealth, StoragePoolReference, StoragePoolSummary,
-    UpdateAccount, UpdateDomain, UpdateStoragePool,
+    HealthResponse, LocalAiSettings, MailFlowEntry, MailboxRecord, MailboxRule, NewAccount,
+    NewAlias, NewDomain, NewFilterRule, NewMailbox, NewServerAdministrator, NewStoragePool,
+    OutboundQueueStatusUpdate, OutlookProfileState, OverviewStats, ProtocolStatus, QuarantineItem,
+    SecuritySettings, ServerAdministrator, ServerSettings, SieveScriptDocument, SieveScriptSummary,
+    StorageCleanupCounts, StorageCleanupPlacementSummary, StorageCleanupVisibilityResponse,
+    StorageHealthResponse, StorageMetadataDiagnostics, StorageMigrationCounts,
+    StorageMigrationJobSummary, StorageMigrationVisibilityResponse, StorageOverview,
+    StoragePlacementCounts, StoragePolicyOverview, StoragePolicyScope, StoragePolicySummary,
+    StoragePolicyUpdate, StoragePoolConfigSummary, StoragePoolHealth, StoragePoolReference,
+    StoragePoolSummary, UpdateAccount, UpdateDomain, UpdateStoragePool,
 };
 pub use crate::util::{normalize_mailbox_domain, normalize_mailbox_email};
 pub use crate::workspace::{

@@ -1060,6 +1060,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::ContentsTable { .. }) => "contents_table",
         Some(MapiObject::AttachmentTable { .. }) => "attachment_table",
         Some(MapiObject::PermissionTable { .. }) => "permission_table",
+        Some(MapiObject::RuleTable { .. }) => "rule_table",
         Some(MapiObject::Attachment { .. }) => "attachment",
         Some(MapiObject::PendingAttachment { .. }) => "pending_attachment",
         Some(MapiObject::SavedAttachment { .. }) => "saved_attachment",
@@ -1116,15 +1117,24 @@ fn format_post_hierarchy_release_context(events: &[PostHierarchyReleaseDebugEven
 }
 
 async fn folder_properties_for_open<S>(
-    _store: &S,
-    _principal: &AccountPrincipal,
+    store: &S,
+    principal: &AccountPrincipal,
     _session: &MapiSession,
-    _folder_id: u64,
+    folder_id: u64,
 ) -> HashMap<u32, MapiValue>
 where
     S: ExchangeStore,
 {
-    HashMap::new()
+    let mut properties = HashMap::new();
+    if folder_id == IPM_SUBTREE_FOLDER_ID {
+        if let Ok(Some(ost_id)) = store
+            .fetch_mapi_ipm_subtree_ost_id(principal.account_id)
+            .await
+        {
+            properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
+        }
+    }
+    properties
 }
 
 fn set_properties_probe_request(request: &RopRequest) -> SetPropertiesProbeRequest {
@@ -1701,6 +1711,30 @@ where
         custom_property_object_identity(Some(object), mailboxes, emails, snapshot)
             .ok_or_else(|| anyhow!("canonical MAPI object was not found"))?;
     upsert_custom_property_values(store, principal, object_kind, canonical_id, custom_values).await
+}
+
+async fn persist_profile_folder_property_values<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    values: &[(u32, MapiValue)],
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    if folder_id != IPM_SUBTREE_FOLDER_ID {
+        return Ok(());
+    }
+    for (tag, value) in values {
+        if canonical_property_storage_tag(*tag) == PID_TAG_OST_OSTID {
+            if let MapiValue::Binary(ost_id) = value {
+                store
+                    .store_mapi_ipm_subtree_ost_id(principal.account_id, ost_id)
+                    .await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn split_custom_property_values(
@@ -4020,10 +4054,28 @@ where
                             object.as_ref(),
                             values,
                         );
-                        apply_mapi_property_values(
+                        let result = apply_mapi_property_values(
                             input_object_mut(session, &handle_slots, &request),
-                            values,
-                        )
+                            values.clone(),
+                        );
+                        if result.is_ok() {
+                            if let Some(MapiObject::Folder { folder_id, .. }) = object {
+                                if persist_profile_folder_property_values(
+                                    store, principal, folder_id, &values,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        request.rop_id,
+                                        request.response_handle_index(),
+                                        0x8004_0102,
+                                    ));
+                                    continue;
+                                }
+                            }
+                        }
+                        result
                     }
                     _object => apply_mapi_property_values(
                         input_object_mut(session, &handle_slots, &request),
@@ -8635,6 +8687,35 @@ where
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_get_permissions_table_response(&request));
+                output_handles.push(handle);
+            }
+            Some(RopId::GetRulesTable) => {
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                };
+                if folder_row_for_id(folder_id, mailboxes).is_none()
+                    && role_for_folder_id(folder_id).is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x3F,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                }
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::RuleTable {
+                        folder_id,
+                        columns: default_rule_columns(),
+                        position: 0,
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_get_rules_table_response(&request));
                 output_handles.push(handle);
             }
             Some(RopId::ModifyPermissions) => {

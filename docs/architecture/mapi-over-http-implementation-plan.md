@@ -106,7 +106,7 @@ state. The supported projection surface is:
 | Contents tables | Folder membership rows with stable message identifiers, source/change keys, predecessor lists, subject, dates, sender, recipients where supported, flags, message class, read state, size, and attachment indicators. |
 | Attachment tables | Canonical attachment rows with stable attachment numbering and properties required by Outlook cached-mode reads. |
 | Permission tables | Read-only canonical permission projection. Permission mutation is deferred. |
-| Search and reminder folders | Persisted canonical built-in search-folder definitions and FAI rows for the bounded Outlook bootstrap surfaces. |
+| Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions, hierarchy rows, and FAI rows for the bounded Outlook bootstrap surfaces. |
 
 ### Specification Basis
 
@@ -150,8 +150,11 @@ non-canonical LPE state.
   mailbox items still require the canonical store replica GUID or authenticated
   mailbox GUID.
 - Search folders are canonical persisted definitions plus folder-associated
-  information rows. Bounded evaluators cover the Outlook bootstrap surfaces such
-  as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
+  information rows. Built-in definitions cover the Outlook bootstrap surfaces
+  such as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
+  User-saved definitions project as MAPI `FOLDER_SEARCH` hierarchy rows with
+  stable canonical identities and container classes derived from their canonical
+  result object kind.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the
@@ -222,6 +225,11 @@ not by itself authorize broad client publication.
   accepted as session-local folder metadata during cached-mode bootstrap.
 - Outlook store bootstrap metadata includes the private-store marker, store
   state, mailbox owner, user GUID, server icons, and max submit message size.
+- Profile settings needed for cached-mode reuse are canonical account settings,
+  not session-only state. Outlook's IPM subtree OST identity value
+  (`0x7C04_0102` in the current bounded profile path) is persisted in
+  `mapi_profile_settings.ipm_subtree_ost_id` when Outlook writes it to the IPM
+  subtree and is reloaded when the folder is opened in a later session.
 - `RopGetReceiveFolder` maps Outlook `IPM.Appointment` probes to the canonical
   Calendar folder so cached-mode bootstrap does not fall back to Inbox.
 - Calendar RCA diagnostics log the `PR_IPM_APPOINTMENT_ENTRYID` folder EntryID,
@@ -259,7 +267,10 @@ not by itself authorize broad client publication.
 ### Canonical Projection Coverage
 
 - Search folder and reminder bootstrap projection is backed by canonical
-  persisted definitions and bounded evaluators.
+  persisted definitions and bounded evaluators. User-saved Search Folders are
+  synchronized as canonical folder definitions through hierarchy tables and
+  hierarchy sync; full arbitrary Exchange search-result materialization remains
+  deferred until the canonical restriction evaluator is widened.
 - Conversation action FAI rows and destroyed conversation actions are projected
   for the supported cached-mode sync path.
 - Notes and Journal item projection uses canonical item state and must remain
@@ -283,10 +294,40 @@ not by itself authorize broad client publication.
 | Raw FastTransfer destination upload streams | Deferred except for bounded import behavior that mutates canonical mailbox state through supported ROPs. |
 | Folder move/copy and non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
 | Full search-folder parity | Partially implemented. Full Microsoft template BLOB parity and secondary sender/recipient reminder promotion remain deferred. |
-| Rules and deferred actions | Deferred until canonical rules/deferred-action state is designed. |
+| Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Rule mutation, Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, and deferred-action messages remain deferred; no MAPI-local rule store is allowed. |
 | Folder permission mutation | Deferred. Read-only permission table projection is supported. |
 | Full notification registration and delivery | Partially implemented through pending session events with bounded folder/message/table payloads and change-cursor replay; full parity remains deferred. |
 | Outlook tolerance beyond the documented lab matrix | Unknown until captured through the release gates below. |
+
+## Outlook Server-Side Profile Data Matrix
+
+| Profile data | Canonical storage | API | JMAP | MAPI over HTTP | Tests and gaps |
+| --- | --- | --- | --- | --- | --- |
+| Messages | `messages`, `mailbox_messages`, MIME/body/blob tables, submission rows | `/api/mail/messages/submit`, draft and flag APIs | `Email/*`, `Mailbox/*`, `Thread/*`, `EmailSubmission/*` | Contents tables, ICS, FastTransfer, import/save/send ROPs | Covered by existing mail/JMAP/MAPI tests; no PST/OST content handling. |
+| Contacts | collaboration contact collections and contact rows | `/api/mail/contacts` and sharing APIs | `AddressBook/*`, `ContactCard/*` | NSPI and MAPI contact projections | Covered by collaboration/JMAP/MAPI tests; NSPI mutation remains deferred. |
+| Calendars | calendar collections, events, grants, free/busy projections | `/api/mail/calendar/events`, delegation/free-busy APIs | `Calendar/*`, `CalendarEvent/*` | Calendar folder, appointment EntryIDs, free/busy/delegate projections | Covered by calendar/JMAP/MAPI tests; full Exchange delegate data folders remain unsupported. |
+| Tasks | task lists, task rows, grants, reminder metadata | `/api/mail/tasks`, `/api/mail/task-lists`, reminders API | `TaskList/*`, `Task/*`, `Reminder/*` | Task folder and reminder/search-folder projections | Covered by task/reminder/JMAP/MAPI tests. |
+| Notes | canonical client note rows | `/api/mail/notes` | private `Note/*` | Notes folder item projection and custom properties | Covered by notes API/JMAP/MAPI tests. |
+| Journals | canonical journal rows | `/api/mail/journal` | private `JournalEntry/*` | Journal folder item projection and custom properties | Covered by journal API/JMAP/MAPI tests. |
+| Search Folders | `search_folders` definitions plus FAI/hierarchy projections | `/api/mail/search-folders` | private `SearchFolder/*` | `FOLDER_SEARCH` hierarchy rows, FAI rows, bounded evaluators | CRUD and projection tests cover canonical wiring; full Microsoft search template BLOB parity remains deferred. |
+| Rules | `sieve_scripts` | `/api/mail/rules` read projection; Sieve API mutates | private read-only `Rule/*` | `RopGetRulesTable` projection | Persistence/retrieval/profile visibility tests cover canonical wiring; Exchange rule blobs, client-only rules, provider-specific predicates, delegate templates, and deferred actions remain unsupported. |
+| Settings | `server_settings`, mailbox state, `mapi_profile_settings`, computed store/folder defaults | `/api/mail/outlook-profile` read summary and server setting APIs | private read-only `OutlookProfile/*` | Store/logon properties, default-folder properties, IPM subtree OST identity reload | Tests cover profile-state summary and OST identity reuse; full Exchange profile blobs and client registry state are unsupported. |
+| Identities | `account_identities`, authenticated account state, sender rights | workspace/session APIs and delegation APIs | `Identity/*` | mailbox owner/user GUID/store identity properties | Covered by identity/delegation tests. |
+| Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_sync_checkpoints`, `mapi_object_identities` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut FAI rows, ICS checkpoints, object IDs/source keys/change keys | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
+
+## Outlook Profile Settings Matrix
+
+| Setting area | Canonical storage today | Profile behavior |
+| --- | --- | --- |
+| Server/bootstrap defaults | `server_settings`, request host/proxy headers, and computed MAPI logon/store properties | Used for URLs, store display metadata, private-store marker, mailbox owner, max submit size, and icons. No per-profile copy is stored. |
+| Send identities | `account_identities` and authenticated account state | Projected through JMAP/EWS/MAPI identity and submission paths; MAPI does not own a separate identity store. |
+| Folder identity and hierarchy | `mailboxes`, built-in projected folder IDs, `search_folders`, and `mapi_object_identities` | Stable FIDs/source keys/change keys are reused across cached-mode sessions. Default-folder EntryIDs remain computed canonical projections. |
+| Named property IDs | `mapi_named_properties` | Durable per-account Outlook named-property ID mapping; session registry is only a cache. |
+| Opaque item custom properties | `mapi_custom_property_values` | Stored only for canonical item/attachment objects where the value is not a canonical built-in property. |
+| Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut FAI rows are durable canonical profile-visible state. |
+| Sync checkpoints | `mapi_sync_checkpoints` | Durable EMSMDB/ICS cursors for hierarchy/content/read-state reuse; they do not store mailbox content. |
+| IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
+| Default-folder EntryID writes | computed canonical folder projections | Valid writes are accepted for compatibility and stripped from session storage; invalid values are rejected. |
 
 ## State-Management Invariants
 

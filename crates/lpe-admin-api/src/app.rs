@@ -45,8 +45,8 @@ use crate::{
     observability,
     pst::pst_upload_max_bytes,
     sieve::{
-        delete_sieve_script, get_sieve_overview, get_sieve_script, put_sieve_script,
-        rename_sieve_script, set_active_sieve_script,
+        delete_sieve_script, get_sieve_overview, get_sieve_script, list_mailbox_rules,
+        put_sieve_script, rename_sieve_script, set_active_sieve_script,
     },
     snapshots::{create_snapshot, delete_snapshot, list_snapshots, restore_snapshot},
     storage::{
@@ -57,11 +57,12 @@ use crate::{
     },
     workspace::{
         client_workspace, delete_client_contact, delete_client_event, delete_client_note,
-        delete_client_task, delete_draft_message, delete_journal_entry, get_client_note,
-        get_client_task, get_journal_entry, list_client_notes, list_client_task_lists,
-        list_client_tasks, list_journal_entries, query_client_reminders, save_draft_message,
-        submit_message, update_message_flag, upsert_client_contact, upsert_client_event,
-        upsert_client_note, upsert_client_task, upsert_journal_entry,
+        delete_client_task, delete_draft_message, delete_journal_entry, delete_search_folder,
+        get_client_note, get_client_task, get_journal_entry, get_search_folder, list_client_notes,
+        list_client_task_lists, list_client_tasks, list_journal_entries, list_search_folders,
+        outlook_profile_state, query_client_reminders, save_draft_message, submit_message,
+        update_message_flag, upsert_client_contact, upsert_client_event, upsert_client_note,
+        upsert_client_task, upsert_journal_entry, upsert_search_folder,
     },
 };
 
@@ -139,6 +140,15 @@ pub fn router(storage: Storage) -> Router {
             get(get_journal_entry).delete(delete_journal_entry),
         )
         .route("/mail/reminders", get(query_client_reminders))
+        .route(
+            "/mail/search-folders",
+            get(list_search_folders).post(upsert_search_folder),
+        )
+        .route(
+            "/mail/search-folders/{search_folder_id}",
+            get(get_search_folder).delete(delete_search_folder),
+        )
+        .route("/mail/outlook-profile", get(outlook_profile_state))
         .route("/health/local-ai", get(local_ai_health))
         .route("/capabilities/attachments", get(attachment_support))
         .route("/console/dashboard", get(dashboard))
@@ -231,6 +241,7 @@ pub fn router(storage: Storage) -> Router {
             "/mail/sieve/{name}",
             get(get_sieve_script).delete(delete_sieve_script),
         )
+        .route("/mail/rules", get(list_mailbox_rules))
         .route(
             "/console/audit/email-trace-search",
             post(search_email_trace),
@@ -519,7 +530,7 @@ mod tests {
     }
 
     #[test]
-    fn notes_journal_and_reminder_routes_are_registered() {
+    fn notes_journal_reminder_and_search_folder_routes_are_registered() {
         let app_source = include_str!("app.rs");
 
         for route in [
@@ -528,10 +539,14 @@ mod tests {
             "/mail/journal",
             "/mail/journal/{entry_id}",
             "/mail/reminders",
+            "/mail/search-folders",
+            "/mail/search-folders/{search_folder_id}",
+            "/mail/rules",
+            "/mail/outlook-profile",
         ] {
             assert!(
                 app_source.contains(route),
-                "notes, journal, or reminder route is not registered: {route}"
+                "notes, journal, reminder, or search folder route is not registered: {route}"
             );
         }
     }

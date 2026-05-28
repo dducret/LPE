@@ -196,6 +196,8 @@ fn session_capabilities(websocket_url: &str) -> HashMap<String, Value> {
                 "notes": true,
                 "journal": true,
                 "reminders": true,
+                "searchFolders": true,
+                "rules": true,
                 "sharing": true,
                 "durableChanges": true,
             }),

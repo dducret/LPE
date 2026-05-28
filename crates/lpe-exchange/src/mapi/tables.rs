@@ -7,7 +7,7 @@ use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
     MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
-    MapiMessage, MapiNavigationShortcutMessage, MapiTask,
+    MapiMessage, MapiNavigationShortcutMessage, MapiRule, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -214,6 +214,39 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
     ]
+}
+
+const PID_TAG_RULE_ID: u32 = 0x6674_0014;
+const PID_TAG_RULE_SEQUENCE: u32 = 0x6676_0003;
+const PID_TAG_RULE_STATE: u32 = 0x6677_0003;
+const PID_TAG_RULE_USER_FLAGS: u32 = 0x6678_0003;
+const PID_TAG_RULE_CONDITION: u32 = 0x6679_00FD;
+const PID_TAG_RULE_ACTIONS: u32 = 0x6680_00FE;
+const PID_TAG_RULE_PROVIDER: u32 = 0x6681_001F;
+const PID_TAG_RULE_NAME: u32 = 0x6682_001F;
+const PID_TAG_RULE_LEVEL: u32 = 0x6683_0003;
+const PID_TAG_RULE_PROVIDER_DATA: u32 = 0x6684_0102;
+const ST_ENABLED: u32 = 0x0000_0001;
+
+pub(in crate::mapi) fn default_rule_columns() -> Vec<u32> {
+    vec![
+        PID_TAG_RULE_ID,
+        PID_TAG_RULE_SEQUENCE,
+        PID_TAG_RULE_STATE,
+        PID_TAG_RULE_USER_FLAGS,
+        PID_TAG_RULE_PROVIDER,
+        PID_TAG_RULE_NAME,
+        PID_TAG_RULE_LEVEL,
+        PID_TAG_RULE_PROVIDER_DATA,
+        PID_TAG_RULE_CONDITION,
+        PID_TAG_RULE_ACTIONS,
+    ]
+}
+
+pub(in crate::mapi) fn rop_get_rules_table_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x3F, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response
 }
 
 #[derive(Clone, Copy)]
@@ -901,6 +934,23 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 .map(|permission| serialize_permission_row(&permission, &columns))
                 .collect::<Vec<_>>()
         }
+        Some(MapiObject::RuleTable {
+            columns,
+            position: table_position,
+            ..
+        }) => {
+            start_position = *table_position;
+            let columns = if columns.is_empty() {
+                default_rule_columns()
+            } else {
+                columns.clone()
+            };
+            snapshot
+                .rules()
+                .iter()
+                .map(|rule| serialize_rule_row(rule, &columns))
+                .collect::<Vec<_>>()
+        }
         _ => Vec::new(),
     };
     let row_count = request.query_row_count().unwrap_or(rows.len());
@@ -929,7 +979,8 @@ pub(in crate::mapi) fn rop_query_rows_response(
             MapiObject::HierarchyTable { position, .. }
             | MapiObject::ContentsTable { position, .. }
             | MapiObject::AttachmentTable { position, .. }
-            | MapiObject::PermissionTable { position, .. },
+            | MapiObject::PermissionTable { position, .. }
+            | MapiObject::RuleTable { position, .. },
         ) = object
         {
             *position = next_position;
@@ -984,6 +1035,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
         }
         Some(MapiObject::AttachmentTable { .. }) => default_attachment_columns(),
         Some(MapiObject::PermissionTable { .. }) => default_permission_columns(),
+        Some(MapiObject::RuleTable { .. }) => default_rule_columns(),
         _ => return rop_error_response(0x37, request.response_handle_index(), 0x8004_0102),
     };
 
@@ -1538,6 +1590,41 @@ pub(in crate::mapi) fn serialize_attachment_row(
     row
 }
 
+pub(in crate::mapi) fn serialize_rule_row(rule: &MapiRule, columns: &[u32]) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match *column {
+            PID_TAG_RULE_ID => write_u64(&mut row, rule.id),
+            PID_TAG_RULE_SEQUENCE => write_u32(&mut row, rule_sequence(rule.id)),
+            PID_TAG_RULE_STATE => write_u32(&mut row, if rule.is_active { ST_ENABLED } else { 0 }),
+            PID_TAG_RULE_USER_FLAGS | PID_TAG_RULE_LEVEL => write_u32(&mut row, 0),
+            PID_TAG_RULE_PROVIDER => write_utf16z(&mut row, "LPE Sieve"),
+            PID_TAG_RULE_NAME => write_utf16z(&mut row, &rule.name),
+            PID_TAG_RULE_PROVIDER_DATA => {
+                let data = serde_json::json!({
+                    "sourceKind": "sieve_script",
+                    "conditionSummary": rule.condition_summary,
+                    "actionSummary": rule.action_summary,
+                    "updatedAt": rule.updated_at,
+                })
+                .to_string();
+                write_u16_prefixed_bytes(&mut row, data.as_bytes());
+            }
+            PID_TAG_RULE_CONDITION | PID_TAG_RULE_ACTIONS => {
+                write_property_default(&mut row, *column)
+            }
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn rule_sequence(rule_id: u64) -> u32 {
+    crate::mapi::identity::global_counter_from_store_id(rule_id)
+        .unwrap_or(rule_id)
+        .min(u64::from(u32::MAX)) as u32
+}
+
 pub(in crate::mapi) fn rop_get_status_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
@@ -1559,6 +1646,7 @@ pub(in crate::mapi) fn is_table_object(object: &MapiObject) -> bool {
             | MapiObject::ContentsTable { .. }
             | MapiObject::AttachmentTable { .. }
             | MapiObject::PermissionTable { .. }
+            | MapiObject::RuleTable { .. }
     )
 }
 
@@ -2112,6 +2200,7 @@ pub(in crate::mapi) fn table_position_and_count(
             position,
             ..
         }) => (*position, snapshot.permissions_for_folder(*folder_id).len()),
+        Some(MapiObject::RuleTable { position, .. }) => (*position, snapshot.rules().len()),
         _ => (0, 0),
     }
 }
@@ -2121,7 +2210,8 @@ pub(in crate::mapi) fn table_position_mut(object: &mut MapiObject) -> Option<&mu
         MapiObject::HierarchyTable { position, .. }
         | MapiObject::ContentsTable { position, .. }
         | MapiObject::AttachmentTable { position, .. }
-        | MapiObject::PermissionTable { position, .. } => Some(position),
+        | MapiObject::PermissionTable { position, .. }
+        | MapiObject::RuleTable { position, .. } => Some(position),
         _ => None,
     }
 }
@@ -2131,7 +2221,8 @@ pub(in crate::mapi) fn table_position(object: &MapiObject) -> Option<usize> {
         MapiObject::HierarchyTable { position, .. }
         | MapiObject::ContentsTable { position, .. }
         | MapiObject::AttachmentTable { position, .. }
-        | MapiObject::PermissionTable { position, .. } => Some(*position),
+        | MapiObject::PermissionTable { position, .. }
+        | MapiObject::RuleTable { position, .. } => Some(*position),
         _ => None,
     }
 }
@@ -2265,6 +2356,7 @@ pub(in crate::mapi) fn table_row_keys(
                     .unwrap_or(0)
             })
             .collect(),
+        MapiObject::RuleTable { .. } => snapshot.rules().iter().map(|rule| rule.id).collect(),
         _ => Vec::new(),
     }
 }
@@ -2638,7 +2730,7 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpe_storage::SearchFolderDefinition;
+    use lpe_storage::{MailboxRule, SearchFolderDefinition};
 
     #[test]
     fn default_hierarchy_columns_cover_table_projection_contract() {
@@ -2802,6 +2894,128 @@ mod tests {
                 FOLDER_SEARCH
             );
         }
+    }
+
+    #[test]
+    fn hierarchy_table_projects_user_saved_search_folder() {
+        let definition_id = Uuid::parse_str("aaaaaaaa-3333-4111-8111-aaaaaaaaaaaa").unwrap();
+        let folder_id = crate::mapi::identity::mapi_store_id(124);
+        crate::mapi::identity::remember_mapi_identity(definition_id, folder_id);
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::nil(),
+            role: "custom".to_string(),
+            display_name: "Unread from Alice".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "text", "query": "alice"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: false,
+        }]);
+        let mailboxes = snapshot.mailboxes();
+        let rows = hierarchy_rows(IPM_SUBTREE_FOLDER_ID, &mailboxes, &snapshot, None, &[]);
+        let row = rows
+            .iter()
+            .find(|row| hierarchy_row_id(row) == folder_id)
+            .expect("search folder hierarchy row");
+
+        assert_eq!(hierarchy_row_display_name(row), "Unread from Alice");
+        let serialized = serialize_hierarchy_row(
+            *row,
+            &mailboxes,
+            &[
+                PID_TAG_FOLDER_TYPE,
+                PID_TAG_PARENT_FOLDER_ID,
+                PID_TAG_CONTAINER_CLASS_W,
+            ],
+        );
+        assert_eq!(
+            u32::from_le_bytes(serialized[0..4].try_into().unwrap()),
+            FOLDER_SEARCH
+        );
+        let mailbox = match row {
+            HierarchyRow::Mailbox(mailbox) => mailbox,
+            _ => panic!("expected mailbox-backed search folder row"),
+        };
+        assert_eq!(mapi_parent_folder_id(mailbox), IPM_SUBTREE_FOLDER_ID);
+        let class = "IPF.Note"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(serialized
+            .windows(class.len())
+            .any(|window| window == class));
+    }
+
+    #[test]
+    fn rule_table_projects_canonical_sieve_rule() {
+        let rule_id = Uuid::parse_str("aaaaaaaa-4444-4111-8111-aaaaaaaaaaaa").unwrap();
+        let object_id = crate::mapi::identity::mapi_store_id(125);
+        crate::mapi::identity::remember_mapi_identity(rule_id, object_id);
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_rules(vec![MailboxRule {
+            id: rule_id,
+            name: "Reports".to_string(),
+            is_active: true,
+            source_kind: "sieve_script".to_string(),
+            condition_summary: "header Subject contains report".to_string(),
+            action_summary: "fileinto Reports".to_string(),
+            supported_outlook_projection: true,
+            unsupported_exchange_features: vec!["deferred_action_messages".to_string()],
+            size_octets: 128,
+            updated_at: "2026-05-28T08:00:00Z".to_string(),
+        }]);
+
+        let row = serialize_rule_row(
+            &snapshot.rules()[0],
+            &[
+                PID_TAG_RULE_ID,
+                PID_TAG_RULE_STATE,
+                PID_TAG_RULE_PROVIDER,
+                PID_TAG_RULE_NAME,
+                PID_TAG_RULE_PROVIDER_DATA,
+            ],
+        );
+        assert_eq!(u64::from_le_bytes(row[0..8].try_into().unwrap()), object_id);
+        assert_eq!(
+            u32::from_le_bytes(row[8..12].try_into().unwrap()),
+            ST_ENABLED
+        );
+        let provider = "LPE Sieve"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let name = "Reports"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(row.windows(provider.len()).any(|window| window == provider));
+        assert!(row.windows(name.len()).any(|window| window == name));
+        assert!(String::from_utf8_lossy(&row).contains("fileinto Reports"));
     }
 
     #[test]
@@ -3090,7 +3304,7 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),
             PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, mailbox.unread_emails),
             PID_TAG_SUBFOLDERS => row.push(mailbox_has_subfolders(mailbox, mailboxes) as u8),
-            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, folder_type(mailbox)),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
@@ -4015,12 +4229,23 @@ pub(in crate::mapi) fn folder_message_class(mailbox: &JmapMailbox) -> &'static s
         | "__mapi_common_views"
         | "__mapi_views"
         | "__mapi_freebusy_data" => "",
+        "__mapi_search_folder_contact" => "IPF.Contact",
+        "__mapi_search_folder_task" => "IPF.Task",
+        "__mapi_search_folder_mixed" | "__mapi_search_folder_message" => "IPF.Note",
         "contacts" => "IPF.Contact",
         "calendar" => "IPF.Appointment",
         "journal" => "IPF.Journal",
         "notes" => "IPF.StickyNote",
         "tasks" => "IPF.Task",
         _ => "IPF.Note",
+    }
+}
+
+fn folder_type(mailbox: &JmapMailbox) -> u32 {
+    if mailbox.role.starts_with("__mapi_search_folder_") {
+        FOLDER_SEARCH
+    } else {
+        FOLDER_GENERIC
     }
 }
 

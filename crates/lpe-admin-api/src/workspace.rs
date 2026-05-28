@@ -6,10 +6,10 @@ use axum::{
 use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
     ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JmapEmail,
-    JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, ReminderQuery, SavedDraftMessage,
-    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertJournalEntryInput,
+    JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, OutlookProfileState,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -21,6 +21,7 @@ use crate::{
         ApiResult, ReminderQueryRequest, SubmitMessageRequest, SubmitRecipientRequest,
         UpdateMessageFlagRequest, UpsertClientContactRequest, UpsertClientEventRequest,
         UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
+        UpsertSearchFolderRequest,
     },
 };
 
@@ -87,6 +88,28 @@ trait ClientOutlookStore: ClientSessionStore {
         account_id: Uuid,
         query: ReminderQuery,
     ) -> anyhow::Result<Vec<ClientReminder>>;
+    async fn fetch_search_folders(
+        &self,
+        account_id: Uuid,
+    ) -> anyhow::Result<Vec<SearchFolderDefinition>>;
+    async fn fetch_search_folders_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> anyhow::Result<Vec<SearchFolderDefinition>>;
+    async fn upsert_search_folder(
+        &self,
+        input: UpsertSearchFolderInput,
+    ) -> anyhow::Result<SearchFolderDefinition>;
+    async fn delete_search_folder(
+        &self,
+        account_id: Uuid,
+        search_folder_id: Uuid,
+    ) -> anyhow::Result<()>;
+    async fn fetch_outlook_profile_state(
+        &self,
+        account_id: Uuid,
+    ) -> anyhow::Result<OutlookProfileState>;
 }
 
 impl ClientSubmissionStore for Storage {
@@ -166,6 +189,43 @@ impl ClientOutlookStore for Storage {
         query: ReminderQuery,
     ) -> anyhow::Result<Vec<ClientReminder>> {
         Storage::query_client_reminders(self, account_id, query).await
+    }
+
+    async fn fetch_search_folders(
+        &self,
+        account_id: Uuid,
+    ) -> anyhow::Result<Vec<SearchFolderDefinition>> {
+        Storage::fetch_search_folders(self, account_id).await
+    }
+
+    async fn fetch_search_folders_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> anyhow::Result<Vec<SearchFolderDefinition>> {
+        Storage::fetch_search_folders_by_ids(self, account_id, ids).await
+    }
+
+    async fn upsert_search_folder(
+        &self,
+        input: UpsertSearchFolderInput,
+    ) -> anyhow::Result<SearchFolderDefinition> {
+        Storage::upsert_search_folder(self, input).await
+    }
+
+    async fn delete_search_folder(
+        &self,
+        account_id: Uuid,
+        search_folder_id: Uuid,
+    ) -> anyhow::Result<()> {
+        Storage::delete_search_folder(self, account_id, search_folder_id).await
+    }
+
+    async fn fetch_outlook_profile_state(
+        &self,
+        account_id: Uuid,
+    ) -> anyhow::Result<OutlookProfileState> {
+        Storage::fetch_outlook_profile_state(self, account_id).await
     }
 }
 
@@ -720,6 +780,57 @@ pub(crate) async fn query_client_reminders(
     ))
 }
 
+pub(crate) async fn list_search_folders(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<SearchFolderDefinition>> {
+    Ok(Json(
+        list_search_folders_with_store(&storage, &headers).await?,
+    ))
+}
+
+pub(crate) async fn get_search_folder(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(search_folder_id): AxumPath<Uuid>,
+) -> ApiResult<SearchFolderDefinition> {
+    Ok(Json(
+        get_search_folder_with_store(&storage, &headers, search_folder_id).await?,
+    ))
+}
+
+pub(crate) async fn upsert_search_folder(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertSearchFolderRequest>,
+) -> ApiResult<SearchFolderDefinition> {
+    Ok(Json(
+        upsert_search_folder_with_store(&storage, &headers, request).await?,
+    ))
+}
+
+pub(crate) async fn delete_search_folder(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(search_folder_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    delete_search_folder_with_store(&storage, &headers, search_folder_id).await?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn outlook_profile_state(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<OutlookProfileState> {
+    Ok(Json(
+        outlook_profile_state_with_store(&storage, &headers).await?,
+    ))
+}
+
 async fn list_client_notes_with_store<S: ClientOutlookStore>(
     storage: &S,
     headers: &HeaderMap,
@@ -854,6 +965,75 @@ async fn query_client_reminders_with_store<S: ClientOutlookStore>(
                 include_inactive: request.include_inactive.unwrap_or(false),
             },
         )
+        .await
+        .map_err(internal_error)
+}
+
+async fn list_search_folders_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+) -> std::result::Result<Vec<SearchFolderDefinition>, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .fetch_search_folders(account.account_id)
+        .await
+        .map_err(internal_error)
+}
+
+async fn get_search_folder_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    search_folder_id: Uuid,
+) -> std::result::Result<SearchFolderDefinition, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    let mut folders = storage
+        .fetch_search_folders_by_ids(account.account_id, &[search_folder_id])
+        .await
+        .map_err(internal_error)?;
+    folders
+        .pop()
+        .ok_or((StatusCode::NOT_FOUND, "search folder not found".to_string()))
+}
+
+async fn upsert_search_folder_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    request: UpsertSearchFolderRequest,
+) -> std::result::Result<SearchFolderDefinition, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .upsert_search_folder(UpsertSearchFolderInput {
+            id: request.id,
+            account_id: account.account_id,
+            display_name: request.display_name,
+            result_object_kind: request.result_object_kind,
+            scope_json: request.scope,
+            restriction_json: request.restriction,
+            excluded_folder_roles: request.excluded_folder_roles,
+        })
+        .await
+        .map_err(bad_request_error)
+}
+
+async fn delete_search_folder_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    search_folder_id: Uuid,
+) -> std::result::Result<(), (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .delete_search_folder(account.account_id, search_folder_id)
+        .await
+        .map_err(bad_request_error)
+}
+
+async fn outlook_profile_state_with_store<S: ClientOutlookStore>(
+    storage: &S,
+    headers: &HeaderMap,
+) -> std::result::Result<OutlookProfileState, (StatusCode, String)> {
+    let account = require_account_from_store(storage, headers).await?;
+    storage
+        .fetch_outlook_profile_state(account.account_id)
         .await
         .map_err(internal_error)
 }
@@ -998,22 +1178,26 @@ fn map_recipients(input: Vec<SubmitRecipientRequest>) -> Vec<SubmittedRecipientI
 mod tests {
     use super::{
         classify_client_submission_storage_error, delete_client_note_with_store,
-        delete_journal_entry_with_store, get_client_note_with_store, get_journal_entry_with_store,
-        list_client_notes_with_store, list_journal_entries_with_store, map_submit_message_request,
-        map_update_message_flag_request, query_client_reminders_with_store,
-        resolve_client_sender_fields, submit_message_with_store, update_message_flag_with_store,
-        upsert_client_note_with_store, upsert_journal_entry_with_store,
+        delete_journal_entry_with_store, delete_search_folder_with_store,
+        get_client_note_with_store, get_journal_entry_with_store, get_search_folder_with_store,
+        list_client_notes_with_store, list_journal_entries_with_store,
+        list_search_folders_with_store, map_submit_message_request,
+        map_update_message_flag_request, outlook_profile_state_with_store,
+        query_client_reminders_with_store, resolve_client_sender_fields, submit_message_with_store,
+        update_message_flag_with_store, upsert_client_note_with_store,
+        upsert_journal_entry_with_store, upsert_search_folder_with_store,
     };
     use crate::types::{
         ReminderQueryRequest, SubmitMessageRequest, UpdateMessageFlagRequest,
-        UpsertClientNoteRequest, UpsertJournalEntryRequest,
+        UpsertClientNoteRequest, UpsertJournalEntryRequest, UpsertSearchFolderRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use lpe_storage::{
         AuditEntryInput, AuthenticatedAccount, ClientNote, ClientReminder, JmapEmail,
         JmapEmailAddress, JmapEmailFollowupUpdate, JmapEmailMailboxState, JournalEntry,
-        MailboxAccountAccess, ReminderQuery, SubmitMessageInput, SubmittedMessage,
-        UpsertClientNoteInput, UpsertJournalEntryInput,
+        MailboxAccountAccess, OutlookProfileState, ReminderQuery, SearchFolderDefinition,
+        SubmitMessageInput, SubmittedMessage, UpsertClientNoteInput, UpsertJournalEntryInput,
+        UpsertSearchFolderInput,
     };
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -1041,10 +1225,13 @@ mod tests {
         notes: Arc<Mutex<Vec<ClientNote>>>,
         journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
         reminders: Arc<Mutex<Vec<ClientReminder>>>,
+        search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
         note_inputs: Arc<Mutex<Vec<UpsertClientNoteInput>>>,
         journal_inputs: Arc<Mutex<Vec<UpsertJournalEntryInput>>>,
+        search_folder_inputs: Arc<Mutex<Vec<UpsertSearchFolderInput>>>,
         deleted_notes: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
         deleted_journal_entries: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
+        deleted_search_folders: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
         reminder_queries: Arc<Mutex<Vec<(Uuid, bool)>>>,
     }
 
@@ -1055,10 +1242,13 @@ mod tests {
                 notes: Arc::new(Mutex::new(vec![note()])),
                 journal_entries: Arc::new(Mutex::new(vec![journal_entry()])),
                 reminders: Arc::new(Mutex::new(vec![reminder()])),
+                search_folders: Arc::new(Mutex::new(vec![search_folder()])),
                 note_inputs: Arc::new(Mutex::new(Vec::new())),
                 journal_inputs: Arc::new(Mutex::new(Vec::new())),
+                search_folder_inputs: Arc::new(Mutex::new(Vec::new())),
                 deleted_notes: Arc::new(Mutex::new(Vec::new())),
                 deleted_journal_entries: Arc::new(Mutex::new(Vec::new())),
+                deleted_search_folders: Arc::new(Mutex::new(Vec::new())),
                 reminder_queries: Arc::new(Mutex::new(Vec::new())),
             }
         }
@@ -1271,6 +1461,82 @@ mod tests {
                 .push((account_id, query.include_inactive));
             Ok(self.reminders.lock().unwrap().clone())
         }
+
+        async fn fetch_search_folders(
+            &self,
+            account_id: Uuid,
+        ) -> anyhow::Result<Vec<SearchFolderDefinition>> {
+            Ok(self
+                .search_folders
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|folder| folder.account_id == account_id)
+                .cloned()
+                .collect())
+        }
+
+        async fn fetch_search_folders_by_ids(
+            &self,
+            account_id: Uuid,
+            ids: &[Uuid],
+        ) -> anyhow::Result<Vec<SearchFolderDefinition>> {
+            Ok(self
+                .search_folders
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|folder| folder.account_id == account_id && ids.contains(&folder.id))
+                .cloned()
+                .collect())
+        }
+
+        async fn upsert_search_folder(
+            &self,
+            input: UpsertSearchFolderInput,
+        ) -> anyhow::Result<SearchFolderDefinition> {
+            self.search_folder_inputs
+                .lock()
+                .unwrap()
+                .push(input.clone());
+            let folder = SearchFolderDefinition {
+                id: input.id.unwrap_or_else(search_folder_id),
+                account_id: input.account_id,
+                role: "custom".to_string(),
+                display_name: input.display_name,
+                definition_kind: "user_saved".to_string(),
+                result_object_kind: input.result_object_kind,
+                scope_json: input.scope_json,
+                restriction_json: input.restriction_json,
+                excluded_folder_roles: input.excluded_folder_roles,
+                is_builtin: false,
+            };
+            self.search_folders.lock().unwrap().push(folder.clone());
+            Ok(folder)
+        }
+
+        async fn delete_search_folder(
+            &self,
+            account_id: Uuid,
+            search_folder_id: Uuid,
+        ) -> anyhow::Result<()> {
+            self.deleted_search_folders
+                .lock()
+                .unwrap()
+                .push((account_id, search_folder_id));
+            self.search_folders
+                .lock()
+                .unwrap()
+                .retain(|folder| folder.id != search_folder_id);
+            Ok(())
+        }
+
+        async fn fetch_outlook_profile_state(
+            &self,
+            account_id: Uuid,
+        ) -> anyhow::Result<OutlookProfileState> {
+            Ok(outlook_profile_state(account_id))
+        }
     }
 
     fn account() -> AuthenticatedAccount {
@@ -1293,6 +1559,10 @@ mod tests {
 
     fn journal_entry_id() -> Uuid {
         Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap()
+    }
+
+    fn search_folder_id() -> Uuid {
+        Uuid::parse_str("dddddddd-1111-1111-1111-dddddddddddd").unwrap()
     }
 
     fn note() -> ClientNote {
@@ -1335,6 +1605,46 @@ mod tests {
             dismissed_at: None,
             completed_at: None,
             status: "due".to_string(),
+        }
+    }
+
+    fn search_folder() -> SearchFolderDefinition {
+        SearchFolderDefinition {
+            id: search_folder_id(),
+            account_id: account_id(),
+            role: "custom".to_string(),
+            display_name: "Follow Up Mail".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "text", "query": "follow"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: false,
+        }
+    }
+
+    fn outlook_profile_state(account_id: Uuid) -> OutlookProfileState {
+        OutlookProfileState {
+            id: "profile".to_string(),
+            account_id,
+            messages_backed_by_canonical_mailbox: true,
+            contacts_backed_by_canonical_store: true,
+            calendars_backed_by_canonical_store: true,
+            tasks_backed_by_canonical_store: true,
+            notes_backed_by_canonical_store: true,
+            journals_backed_by_canonical_store: true,
+            search_folders_count: 1,
+            rules_count: 1,
+            sender_identities_count: 1,
+            mapi_named_properties_count: 2,
+            mapi_custom_properties_count: 3,
+            mapi_navigation_shortcuts_count: 4,
+            mapi_sync_checkpoints_count: 5,
+            mapi_profile_settings_present: true,
+            ipm_subtree_ost_id_present: true,
+            ipm_subtree_ost_id_size_octets: 16,
+            profile_settings_updated_at: Some("2026-05-20T10:00:00Z".to_string()),
+            unsupported_client_local_state: vec!["client_local_ost_cache".to_string()],
         }
     }
 
@@ -1804,6 +2114,69 @@ mod tests {
             store.deleted_journal_entries.lock().unwrap().as_slice(),
             &[(account_id(), journal_entry_id())]
         );
+    }
+
+    #[tokio::test]
+    async fn search_folder_api_helpers_cover_authenticated_crud_path() {
+        let store = FakeOutlookStore::default();
+        let headers = bearer_headers();
+
+        let listed = list_search_folders_with_store(&store, &headers)
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        let fetched = get_search_folder_with_store(&store, &headers, search_folder_id())
+            .await
+            .unwrap();
+        assert_eq!(fetched.display_name, "Follow Up Mail");
+
+        let created = upsert_search_folder_with_store(
+            &store,
+            &headers,
+            UpsertSearchFolderRequest {
+                id: None,
+                display_name: "Unread from Alice".to_string(),
+                result_object_kind: "message".to_string(),
+                scope: serde_json::json!({"scope": "top_of_personal_folders"}),
+                restriction: serde_json::json!({"kind": "text", "query": "alice"}),
+                excluded_folder_roles: vec!["trash".to_string()],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(created.display_name, "Unread from Alice");
+        let recorded = store.search_folder_inputs.lock().unwrap();
+        assert_eq!(recorded[0].account_id, account_id());
+        assert_eq!(recorded[0].result_object_kind, "message");
+        assert_eq!(recorded[0].excluded_folder_roles, vec!["trash".to_string()]);
+        drop(recorded);
+
+        delete_search_folder_with_store(&store, &headers, search_folder_id())
+            .await
+            .unwrap();
+        assert_eq!(
+            store.deleted_search_folders.lock().unwrap().as_slice(),
+            &[(account_id(), search_folder_id())]
+        );
+    }
+
+    #[tokio::test]
+    async fn outlook_profile_api_helper_reads_canonical_profile_state() {
+        let store = FakeOutlookStore::default();
+        let profile = outlook_profile_state_with_store(&store, &bearer_headers())
+            .await
+            .unwrap();
+
+        assert_eq!(profile.id, "profile");
+        assert_eq!(profile.account_id, account_id());
+        assert!(profile.messages_backed_by_canonical_mailbox);
+        assert_eq!(profile.search_folders_count, 1);
+        assert_eq!(profile.rules_count, 1);
+        assert!(profile.ipm_subtree_ost_id_present);
+        assert!(profile
+            .unsupported_client_local_state
+            .contains(&"client_local_ost_cache".to_string()));
     }
 
     #[tokio::test]

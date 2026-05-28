@@ -12,7 +12,19 @@ use axum::{
     http::{HeaderMap, StatusCode},
     Json,
 };
-use lpe_storage::{AuditEntryInput, HealthResponse, SieveScriptDocument, Storage};
+use lpe_storage::{AuditEntryInput, HealthResponse, MailboxRule, SieveScriptDocument, Storage};
+
+pub(crate) async fn list_mailbox_rules(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<MailboxRule>> {
+    let account = require_account(&storage, &headers).await?;
+    let rules = storage
+        .list_mailbox_rules(account.account_id)
+        .await
+        .map_err(internal_error)?;
+    Ok(Json(rules))
+}
 
 pub(crate) async fn get_sieve_overview(
     State(storage): State<Storage>,

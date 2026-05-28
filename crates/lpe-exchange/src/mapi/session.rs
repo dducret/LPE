@@ -212,6 +212,11 @@ pub(in crate::mapi) enum MapiObject {
         columns: Vec<u32>,
         position: usize,
     },
+    RuleTable {
+        folder_id: u64,
+        columns: Vec<u32>,
+        position: usize,
+    },
     Attachment {
         folder_id: u64,
         message_id: u64,
@@ -904,6 +909,7 @@ impl MapiObject {
             | MapiObject::ContentsTable { folder_id, .. }
             | MapiObject::AttachmentTable { folder_id, .. }
             | MapiObject::PermissionTable { folder_id, .. }
+            | MapiObject::RuleTable { folder_id, .. }
             | MapiObject::Attachment { folder_id, .. }
             | MapiObject::PendingAttachment { folder_id, .. }
             | MapiObject::SavedAttachment { folder_id, .. }
@@ -1064,6 +1070,10 @@ pub(in crate::mapi) fn reset_table_position(object: &mut MapiObject) -> bool {
             true
         }
         MapiObject::PermissionTable { position, .. } => {
+            *position = 0;
+            true
+        }
+        MapiObject::RuleTable { position, .. } => {
             *position = 0;
             true
         }

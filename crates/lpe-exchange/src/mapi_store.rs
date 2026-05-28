@@ -2,8 +2,8 @@ use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
     ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
-    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, ReminderQuery,
-    SearchFolderDefinition,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule,
+    ReminderQuery, SearchFolderDefinition,
 };
 use uuid::Uuid;
 
@@ -24,6 +24,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     notes: Vec<MapiNote>,
     journal_entries: Vec<MapiJournalEntry>,
     search_folder_definitions: Vec<SearchFolderDefinition>,
+    rules: Vec<MapiRule>,
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
@@ -108,6 +109,18 @@ pub(crate) struct MapiJournalEntry {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) entry: JournalEntry,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiRule {
+    pub(crate) id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) name: String,
+    pub(crate) is_active: bool,
+    pub(crate) condition_summary: String,
+    pub(crate) action_summary: String,
+    pub(crate) updated_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -341,6 +354,7 @@ impl MapiMailStoreSnapshot {
             notes: Vec::new(),
             journal_entries: Vec::new(),
             search_folder_definitions: Vec::new(),
+            rules: Vec::new(),
             navigation_shortcuts: Vec::new(),
             conversation_actions: Vec::new(),
             delegate_freebusy_messages: Vec::new(),
@@ -354,7 +368,33 @@ impl MapiMailStoreSnapshot {
         mut self,
         search_folder_definitions: Vec<SearchFolderDefinition>,
     ) -> Self {
+        self.folders
+            .retain(|folder| !folder.mailbox.role.starts_with("__mapi_search_folder_"));
+        self.folders.extend(
+            search_folder_definitions
+                .iter()
+                .filter_map(mapi_search_folder_definition_to_folder),
+        );
         self.search_folder_definitions = search_folder_definitions;
+        self
+    }
+
+    pub(crate) fn with_rules(mut self, rules: Vec<MailboxRule>) -> Self {
+        self.rules = rules
+            .into_iter()
+            .map(|rule| {
+                let id = mapi_item_id(&rule.id);
+                MapiRule {
+                    id,
+                    canonical_id: rule.id,
+                    name: rule.name,
+                    is_active: rule.is_active,
+                    condition_summary: rule.condition_summary,
+                    action_summary: rule.action_summary,
+                    updated_at: rule.updated_at,
+                }
+            })
+            .collect();
         self
     }
 
@@ -812,6 +852,10 @@ impl MapiMailStoreSnapshot {
             .find(|definition| definition.role == role)
     }
 
+    pub(crate) fn rules(&self) -> &[MapiRule] {
+        &self.rules
+    }
+
     pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
         let mut messages = vec![
             MapiNavigationShortcutMessage {
@@ -924,6 +968,39 @@ impl MapiMailStoreSnapshot {
     }
 }
 
+fn mapi_search_folder_definition_to_folder(
+    definition: &SearchFolderDefinition,
+) -> Option<MapiFolder> {
+    if definition.is_builtin || definition.definition_kind != "user_saved" {
+        return None;
+    }
+    let id = crate::mapi::identity::mapped_mapi_object_id(&definition.id)?;
+    Some(MapiFolder {
+        id,
+        canonical_id: definition.id,
+        mailbox: JmapMailbox {
+            id: definition.id,
+            parent_id: None,
+            role: mapi_search_folder_role(&definition.result_object_kind).to_string(),
+            name: definition.display_name.clone(),
+            sort_order: i32::MAX,
+            modseq: crate::mapi::identity::global_counter_from_store_id(id).unwrap_or(1),
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        },
+    })
+}
+
+fn mapi_search_folder_role(result_object_kind: &str) -> &'static str {
+    match result_object_kind {
+        "contact" => "__mapi_search_folder_contact",
+        "task" => "__mapi_search_folder_task",
+        "mixed" => "__mapi_search_folder_mixed",
+        _ => "__mapi_search_folder_message",
+    }
+}
+
 pub(crate) trait MapiStore: ExchangeStore {
     fn load_mapi_mail_store<'a>(
         &'a self,
@@ -980,6 +1057,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let notes = self.fetch_mapi_notes(account_id).await?;
             let journal_entries = self.fetch_mapi_journal_entries(account_id).await?;
             let search_folder_definitions = self.fetch_search_folders(account_id).await?;
+            let rules = self.list_mailbox_rules(account_id).await?;
             let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let delegate_freebusy_messages =
@@ -1001,6 +1079,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &notes,
                 &journal_entries,
                 &search_folder_definitions,
+                &rules,
                 &navigation_shortcuts,
                 &conversation_actions,
                 &delegate_freebusy_messages,
@@ -1035,6 +1114,7 @@ impl<T: ExchangeStore> MapiStore for T {
             ))
             .map(|snapshot| snapshot.with_notes_and_journal(notes, journal_entries))
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
+            .map(|snapshot| snapshot.with_rules(rules))
             .map(|snapshot| snapshot.with_navigation_shortcuts(navigation_shortcuts))
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
@@ -1052,6 +1132,7 @@ fn mapi_identity_requests(
     notes: &[ClientNote],
     journal_entries: &[JournalEntry],
     search_folder_definitions: &[SearchFolderDefinition],
+    rules: &[MailboxRule],
     navigation_shortcuts: &[MapiNavigationShortcutRecord],
     conversation_actions: &[ConversationAction],
     delegate_freebusy_messages: &[DelegateFreeBusyMessageObject],
@@ -1101,6 +1182,11 @@ fn mapi_identity_requests(
                 reserved_global_counter: None,
             }),
     );
+    requests.extend(rules.iter().map(|rule| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::Rule,
+        canonical_id: rule.id,
+        reserved_global_counter: None,
+    }));
     requests.extend(
         conversation_actions
             .iter()
@@ -1658,6 +1744,46 @@ mod tests {
         assert!(snapshot
             .search_folder_definition_for_role("todo_search")
             .is_none());
+    }
+
+    #[test]
+    fn snapshot_projects_user_saved_search_folder_as_mapi_folder() {
+        let definition_id = Uuid::parse_str("aaaaaaaa-2222-4111-8111-aaaaaaaaaaaa").unwrap();
+        let folder_id = crate::mapi::identity::mapi_store_id(122);
+        crate::mapi::identity::remember_mapi_identity(definition_id, folder_id);
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: definition_id,
+            account_id: Uuid::parse_str("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb").unwrap(),
+            role: "custom".to_string(),
+            display_name: "Unread from Alice".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+            restriction_json: serde_json::json!({"kind": "text", "query": "alice"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: false,
+        }]);
+
+        let folder = snapshot
+            .folders()
+            .iter()
+            .find(|folder| folder.canonical_id == definition_id)
+            .expect("user search folder projected");
+        assert_eq!(folder.id, folder_id);
+        assert_eq!(folder.mailbox.name, "Unread from Alice");
+        assert_eq!(folder.mailbox.role, "__mapi_search_folder_message");
     }
 
     #[test]

@@ -595,6 +595,18 @@ pub struct ReminderQueryRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct UpsertSearchFolderRequest {
+    pub id: Option<Uuid>,
+    pub display_name: String,
+    pub result_object_kind: String,
+    pub scope: Value,
+    pub restriction: Value,
+    #[serde(default)]
+    pub excluded_folder_roles: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpsertTaskListGrantRequest {
     pub grantee_email: String,
     pub may_read: bool,

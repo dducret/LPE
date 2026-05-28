@@ -1718,6 +1718,16 @@ CREATE UNIQUE INDEX mapi_sync_checkpoints_hierarchy_idx
     ON mapi_sync_checkpoints (tenant_id, account_id, checkpoint_kind, mapi_replica_guid)
     WHERE mailbox_id IS NULL;
 
+CREATE TABLE mapi_profile_settings (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    ipm_subtree_ost_id BYTEA CHECK (ipm_subtree_ost_id IS NULL OR (octet_length(ipm_subtree_ost_id) > 0 AND octet_length(ipm_subtree_ost_id) <= 1024)),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
 CREATE TABLE mapi_mailbox_replicas (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,

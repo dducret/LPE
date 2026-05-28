@@ -885,6 +885,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::Contact => "contact",
         MapiIdentityObjectKind::CalendarEvent => "calendar_event",
         MapiIdentityObjectKind::Task => "task",
+        MapiIdentityObjectKind::Rule => "sieve_script",
         MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",
         MapiIdentityObjectKind::ConversationAction => "conversation_action",
         MapiIdentityObjectKind::NavigationShortcut => "navigation_shortcut",
@@ -963,6 +964,7 @@ fn rop_requires_full_snapshot(rop_id: u8) -> bool {
             | 0x4E
             | 0x4F
             | 0x58
+            | 0x3F
             | 0x70
             | 0x72
             | 0x73
@@ -1278,6 +1280,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingNavigationShortcut { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
         | MapiObject::SynchronizationCollector { folder_id, .. }
+        | MapiObject::RuleTable { folder_id, .. }
         | MapiObject::PermissionTable { folder_id, .. } => {
             push_unique(&mut plan.object_ids, *folder_id);
         }

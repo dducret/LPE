@@ -5,10 +5,11 @@ use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CanonicalChangeCategory,
     ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
-    UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry, MailboxRule,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -33,6 +34,7 @@ pub(crate) enum MapiIdentityObjectKind {
     ConversationAction,
     NavigationShortcut,
     DelegateFreeBusyMessage,
+    Rule,
 }
 
 impl MapiIdentityObjectKind {
@@ -50,6 +52,7 @@ impl MapiIdentityObjectKind {
             Self::ConversationAction => "conversation_action",
             Self::NavigationShortcut => "navigation_shortcut",
             Self::DelegateFreeBusyMessage => "delegate_freebusy_message",
+            Self::Rule => "sieve_script",
         }
     }
 }
@@ -358,6 +361,17 @@ pub trait ExchangeStore: AccountAuthStore {
         cursor_json: serde_json::Value,
     ) -> StoreFuture<'a, MapiSyncCheckpoint>;
 
+    fn fetch_mapi_ipm_subtree_ost_id<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Option<Vec<u8>>>;
+
+    fn store_mapi_ipm_subtree_ost_id<'a>(
+        &'a self,
+        account_id: Uuid,
+        ost_id: &'a [u8],
+    ) -> StoreFuture<'a, ()>;
+
     fn fetch_mapi_sync_changes<'a>(
         &'a self,
         account_id: Uuid,
@@ -597,6 +611,8 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, Option<SieveScriptDocument>>;
+
+    fn list_mailbox_rules<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<MailboxRule>>;
 
     fn put_sieve_script<'a>(
         &'a self,
@@ -1446,6 +1462,23 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_mapi_ipm_subtree_ost_id<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Option<Vec<u8>>> {
+        Box::pin(async move { Storage::fetch_mapi_ipm_subtree_ost_id(self, account_id).await })
+    }
+
+    fn store_mapi_ipm_subtree_ost_id<'a>(
+        &'a self,
+        account_id: Uuid,
+        ost_id: &'a [u8],
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(
+            async move { Storage::store_mapi_ipm_subtree_ost_id(self, account_id, ost_id).await },
+        )
+    }
+
     fn fetch_mapi_sync_changes<'a>(
         &'a self,
         account_id: Uuid,
@@ -2202,6 +2235,10 @@ impl ExchangeStore for Storage {
         account_id: Uuid,
     ) -> StoreFuture<'a, Option<SieveScriptDocument>> {
         Box::pin(async move { self.fetch_active_sieve_script(account_id).await })
+    }
+
+    fn list_mailbox_rules<'a>(&'a self, account_id: Uuid) -> StoreFuture<'a, Vec<MailboxRule>> {
+        Box::pin(async move { self.list_mailbox_rules(account_id).await })
     }
 
     fn put_sieve_script<'a>(

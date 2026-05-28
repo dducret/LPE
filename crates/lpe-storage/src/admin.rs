@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Result};
-use lpe_core::sieve::parse_script;
+use lpe_core::sieve::{parse_script, Action, MatchType, Statement, Test};
 use lpe_domain::MailboxDisplayName;
 use sqlx::Row;
 use uuid::Uuid;
@@ -12,12 +12,12 @@ use crate::{
     AccountRow, AdminDashboard, AliasRecord, AliasRow, AntispamSettings, AuditEntryInput,
     AuditEvent, AuditRow, CanonicalChangeCategory, DashboardUpdate, DomainRecord, DomainRow,
     EmailTraceResult, EmailTraceRow, EmailTraceSearchInput, FilterRule, HealthResponse,
-    LocalAiSettings, MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, NewAccount, NewAlias,
-    NewDomain, NewMailbox, NewPstTransferJob, NewServerAdministrator, OverviewStats,
-    ProtocolStatus, PstTransferJobRecord, PstTransferJobRow, SecuritySettings, ServerAdministrator,
-    ServerAdministratorRow, ServerSettings, SieveScriptDocument, SieveScriptSummary, Storage,
-    StorageOverview, UpdateAccount, UpdateDomain, MAX_SIEVE_SCRIPTS_PER_ACCOUNT,
-    PLATFORM_TENANT_ID,
+    LocalAiSettings, MailFlowEntry, MailFlowRow, MailboxRecord, MailboxRow, MailboxRule,
+    NewAccount, NewAlias, NewDomain, NewMailbox, NewPstTransferJob, NewServerAdministrator,
+    OutlookProfileState, OverviewStats, ProtocolStatus, PstTransferJobRecord, PstTransferJobRow,
+    SecuritySettings, ServerAdministrator, ServerAdministratorRow, ServerSettings,
+    SieveScriptDocument, SieveScriptSummary, Storage, StorageOverview, UpdateAccount, UpdateDomain,
+    MAX_SIEVE_SCRIPTS_PER_ACCOUNT, PLATFORM_TENANT_ID,
 };
 
 impl Storage {
@@ -827,6 +827,167 @@ impl Storage {
                 })
             })
             .collect()
+    }
+
+    pub async fn list_mailbox_rules(&self, account_id: Uuid) -> Result<Vec<MailboxRule>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                id,
+                name,
+                content,
+                is_active,
+                octet_length(content)::BIGINT AS size_octets,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM sieve_scripts
+            WHERE tenant_id = $1 AND account_id = $2
+            ORDER BY is_active DESC, lower(name) ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let content: String = row.try_get("content")?;
+                let (condition_summary, action_summary) = mailbox_rule_summaries(&content);
+                Ok(MailboxRule {
+                    id: row.try_get("id")?,
+                    name: row.try_get("name")?,
+                    is_active: row.try_get("is_active")?,
+                    source_kind: "sieve_script".to_string(),
+                    condition_summary,
+                    action_summary,
+                    supported_outlook_projection: true,
+                    unsupported_exchange_features: unsupported_exchange_rule_features(),
+                    size_octets: row.try_get::<i64, _>("size_octets")?.max(0) as u64,
+                    updated_at: row.try_get("updated_at")?,
+                })
+            })
+            .collect()
+    }
+
+    pub async fn fetch_outlook_profile_state(
+        &self,
+        account_id: Uuid,
+    ) -> Result<OutlookProfileState> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let row = sqlx::query(
+            r#"
+            SELECT
+                (SELECT COUNT(*)
+                 FROM search_folders
+                 WHERE tenant_id = $1 AND account_id = $2) AS search_folders_count,
+                (SELECT COUNT(*)
+                 FROM sieve_scripts
+                 WHERE tenant_id = $1 AND account_id = $2) AS rules_count,
+                (SELECT COUNT(*)
+                 FROM account_identities
+                 WHERE tenant_id = $1 AND account_id = $2) AS sender_identities_count,
+                (SELECT COUNT(*)
+                 FROM mapi_named_properties
+                 WHERE tenant_id = $1 AND account_id = $2) AS mapi_named_properties_count,
+                (SELECT COUNT(*)
+                 FROM mapi_custom_property_values
+                 WHERE tenant_id = $1 AND account_id = $2) AS mapi_custom_properties_count,
+                (SELECT COUNT(*)
+                 FROM mapi_navigation_shortcuts
+                 WHERE tenant_id = $1 AND account_id = $2) AS mapi_navigation_shortcuts_count,
+                (SELECT COUNT(*)
+                 FROM mapi_sync_checkpoints
+                 WHERE tenant_id = $1 AND account_id = $2) AS mapi_sync_checkpoints_count,
+                ps.ipm_subtree_ost_id IS NOT NULL AS ipm_subtree_ost_id_present,
+                COALESCE(octet_length(ps.ipm_subtree_ost_id), 0)::BIGINT
+                    AS ipm_subtree_ost_id_size_octets,
+                to_char(ps.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    AS profile_settings_updated_at
+            FROM (SELECT 1) marker
+            LEFT JOIN mapi_profile_settings ps
+              ON ps.tenant_id = $1
+             AND ps.account_id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let ipm_subtree_ost_id_present: bool = row.try_get("ipm_subtree_ost_id_present")?;
+        Ok(OutlookProfileState {
+            id: "profile".to_string(),
+            account_id,
+            messages_backed_by_canonical_mailbox: true,
+            contacts_backed_by_canonical_store: true,
+            calendars_backed_by_canonical_store: true,
+            tasks_backed_by_canonical_store: true,
+            notes_backed_by_canonical_store: true,
+            journals_backed_by_canonical_store: true,
+            search_folders_count: count_from_row(&row, "search_folders_count")?,
+            rules_count: count_from_row(&row, "rules_count")?,
+            sender_identities_count: count_from_row(&row, "sender_identities_count")?,
+            mapi_named_properties_count: count_from_row(&row, "mapi_named_properties_count")?,
+            mapi_custom_properties_count: count_from_row(&row, "mapi_custom_properties_count")?,
+            mapi_navigation_shortcuts_count: count_from_row(
+                &row,
+                "mapi_navigation_shortcuts_count",
+            )?,
+            mapi_sync_checkpoints_count: count_from_row(&row, "mapi_sync_checkpoints_count")?,
+            mapi_profile_settings_present: ipm_subtree_ost_id_present,
+            ipm_subtree_ost_id_present,
+            ipm_subtree_ost_id_size_octets: count_from_row(&row, "ipm_subtree_ost_id_size_octets")?,
+            profile_settings_updated_at: row.try_get("profile_settings_updated_at")?,
+            unsupported_client_local_state: unsupported_client_local_profile_state(),
+        })
+    }
+
+    pub async fn fetch_mapi_ipm_subtree_ost_id(&self, account_id: Uuid) -> Result<Option<Vec<u8>>> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        Ok(sqlx::query_scalar::<_, Vec<u8>>(
+            r#"
+            SELECT ipm_subtree_ost_id
+            FROM mapi_profile_settings
+            WHERE tenant_id = $1 AND account_id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    pub async fn store_mapi_ipm_subtree_ost_id(
+        &self,
+        account_id: Uuid,
+        ost_id: &[u8],
+    ) -> Result<()> {
+        if ost_id.is_empty() || ost_id.len() > 1024 {
+            bail!("invalid MAPI IPM subtree OST identity");
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        sqlx::query(
+            r#"
+            INSERT INTO mapi_profile_settings (
+                tenant_id,
+                account_id,
+                ipm_subtree_ost_id
+            )
+            VALUES ($1, $2, $3)
+            ON CONFLICT (tenant_id, account_id)
+            DO UPDATE SET
+                ipm_subtree_ost_id = EXCLUDED.ipm_subtree_ost_id,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(ost_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn get_sieve_script(
@@ -1980,6 +2141,177 @@ fn map_email_trace_row(row: EmailTraceRow) -> EmailTraceResult {
         last_enhanced_status: row.last_enhanced_status,
         received_at: row.received_at,
     }
+}
+
+fn mailbox_rule_summaries(content: &str) -> (String, String) {
+    match parse_script(content) {
+        Ok(script) => (
+            summarize_statements_conditions(&script.statements),
+            summarize_statements_actions(&script.statements),
+        ),
+        Err(_) => (
+            "unsupported sieve".to_string(),
+            "unsupported sieve".to_string(),
+        ),
+    }
+}
+
+fn summarize_statements_conditions(statements: &[Statement]) -> String {
+    let mut parts = Vec::new();
+    collect_statement_conditions(statements, &mut parts);
+    if parts.is_empty() {
+        "always".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn collect_statement_conditions(statements: &[Statement], parts: &mut Vec<String>) {
+    for statement in statements {
+        if let Statement::If {
+            branches,
+            else_block,
+        } = statement
+        {
+            for (test, block) in branches {
+                parts.push(summarize_test(test));
+                collect_statement_conditions(block, parts);
+            }
+            if let Some(block) = else_block {
+                collect_statement_conditions(block, parts);
+            }
+        }
+    }
+}
+
+fn summarize_test(test: &Test) -> String {
+    match test {
+        Test::True => "always".to_string(),
+        Test::False => "never".to_string(),
+        Test::Header {
+            match_type,
+            fields,
+            keys,
+        } => format!(
+            "header {} {} {}",
+            fields.join(","),
+            summarize_match_type(*match_type),
+            keys.join(",")
+        ),
+        Test::Address {
+            match_type,
+            fields,
+            keys,
+        } => format!(
+            "address {} {} {}",
+            fields.join(","),
+            summarize_match_type(*match_type),
+            keys.join(",")
+        ),
+        Test::Envelope {
+            match_type,
+            parts,
+            keys,
+        } => format!(
+            "envelope {} {} {}",
+            parts.join(","),
+            summarize_match_type(*match_type),
+            keys.join(",")
+        ),
+        Test::AllOf(tests) => format!(
+            "all of ({})",
+            tests
+                .iter()
+                .map(summarize_test)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        Test::AnyOf(tests) => format!(
+            "any of ({})",
+            tests
+                .iter()
+                .map(summarize_test)
+                .collect::<Vec<_>>()
+                .join("; ")
+        ),
+        Test::Not(test) => format!("not ({})", summarize_test(test)),
+    }
+}
+
+fn summarize_match_type(match_type: MatchType) -> &'static str {
+    match match_type {
+        MatchType::Is => "is",
+        MatchType::Contains => "contains",
+    }
+}
+
+fn summarize_statements_actions(statements: &[Statement]) -> String {
+    let mut parts = Vec::new();
+    collect_statement_actions(statements, &mut parts);
+    if parts.is_empty() {
+        "keep".to_string()
+    } else {
+        parts.join("; ")
+    }
+}
+
+fn collect_statement_actions(statements: &[Statement], parts: &mut Vec<String>) {
+    for statement in statements {
+        match statement {
+            Statement::Action(action) => parts.push(summarize_action(action)),
+            Statement::If {
+                branches,
+                else_block,
+            } => {
+                for (_, block) in branches {
+                    collect_statement_actions(block, parts);
+                }
+                if let Some(block) = else_block {
+                    collect_statement_actions(block, parts);
+                }
+            }
+        }
+    }
+}
+
+fn summarize_action(action: &Action) -> String {
+    match action {
+        Action::Keep => "keep".to_string(),
+        Action::Discard => "discard".to_string(),
+        Action::FileInto(mailbox) => format!("fileinto {mailbox}"),
+        Action::Redirect(target) => format!("redirect {target}"),
+        Action::Vacation { .. } => "vacation".to_string(),
+        Action::Stop => "stop".to_string(),
+    }
+}
+
+fn unsupported_exchange_rule_features() -> Vec<String> {
+    [
+        "client_only_rules",
+        "deferred_action_messages",
+        "exchange_rule_action_blobs",
+        "provider_specific_conditions",
+        "delegate_rule_templates",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn unsupported_client_local_profile_state() -> Vec<String> {
+    [
+        "client_local_pst_files",
+        "client_local_ost_cache",
+        "windows_profile_registry",
+        "full_exchange_profile_blobs",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn count_from_row(row: &sqlx::postgres::PgRow, column: &str) -> Result<u64> {
+    Ok(row.try_get::<i64, _>(column)?.max(0) as u64)
 }
 
 #[cfg(test)]

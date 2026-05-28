@@ -52,6 +52,21 @@
   - `Identity/set`
   - `Identity/import`
   - `Identity/copy`
+  - `SearchFolder/get`
+  - `SearchFolder/query`
+  - `SearchFolder/changes`
+  - `SearchFolder/queryChanges`
+  - `SearchFolder/set`
+  - `SearchFolder/import`
+  - `SearchFolder/copy`
+  - `Rule/get`
+  - `Rule/query`
+  - `Rule/changes`
+  - `Rule/queryChanges`
+  - `OutlookProfile/get`
+  - `OutlookProfile/query`
+  - `OutlookProfile/changes`
+  - `OutlookProfile/queryChanges`
 - Push:
   - WebSocket at `/api/jmap/ws`
   - event stream at `/api/jmap/events?types={types}&closeafter={closeafter}`
@@ -71,6 +86,18 @@
   - canonical-equivalent duplicate rejection uses the shared mailbox canonical-key policy within the target parent, so siblings must be unique while the same leaf name may exist under different parents
   - standard mailbox names such as `INBOX`, `Sent`, and `Trash` remain canonical backend names; localized labels are client UI presentation driven by JMAP `role`, not stored as translated role identities
   - custom `Mailbox/set` create and update names must not collide with reserved role names or accepted IMAP compatibility aliases such as `INBOX`, `Sent Items`, `Deleted Items`, `Spam`, or `Archive`
+- Search folders:
+  - private `SearchFolder/*` methods expose canonical `search_folders` rows for Outlook-compatible saved search definitions
+  - built-in Exchange-compatible definitions are read-only canonical rows; user-saved definitions are created, updated, and destroyed through `SearchFolder/set` and the client API
+  - `scope` and `restriction` are stored as structured JSON definitions. They are canonical search-folder state, not Exchange-only FAI message payloads or protocol-local MAPI criteria blobs
+- Rules:
+  - private `Rule/*` read methods expose Outlook profile-visible mailbox rule summaries backed by canonical `sieve_scripts`
+  - `Rule/set`, `Rule/import`, and `Rule/copy` reject writes; Sieve APIs remain the canonical mutation surface
+  - returned rules include explicit unsupported Exchange features instead of storing Exchange rule blobs, provider-specific predicates, client-only rules, delegate templates, or deferred-action messages
+- Outlook profile:
+  - private `OutlookProfile/*` read methods expose a single `profile` object summarizing server-side Outlook profile state derived from canonical message, collaboration, Search Folder, rule, identity, MAPI property, shortcut, sync checkpoint, and profile-setting tables
+  - `OutlookProfile/set`, `OutlookProfile/import`, and `OutlookProfile/copy` reject writes; profile-visible state must be mutated through the canonical source APIs
+  - the summary explicitly lists unsupported client-local state such as PST files, OST cache files, Windows registry profile data, and full Exchange profile blobs
 - Submission:
   - `EmailSubmission/set` loads a persisted draft
   - canonical submission creates authoritative `Sent`
@@ -102,4 +129,7 @@
 | messages | `messages`, `message_bodies`, recipients, blobs |
 | drafts | `Drafts` mailbox messages |
 | submission | `/api/mail/messages/submit` workflow |
+| search folders | `search_folders` |
+| rules | `sieve_scripts` |
+| outlook profile summary | canonical tables plus bounded `mapi_profile_settings` |
 | push state | canonical push journal |

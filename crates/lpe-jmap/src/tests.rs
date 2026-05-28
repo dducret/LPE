@@ -30,9 +30,10 @@ use lpe_storage::{
     CollaborationRights, CreateTaskListInput, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    MailboxAccountAccess, SavedDraftMessage, SenderIdentity, UpdateTaskListInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertJournalEntryInput,
+    MailboxAccountAccess, MailboxRule, OutlookProfileState, SavedDraftMessage,
+    SearchFolderDefinition, SenderIdentity, UpdateTaskListInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    UpsertSearchFolderInput,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -61,6 +62,8 @@ struct FakeStore {
     notes: Arc<Mutex<Vec<ClientNote>>>,
     journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
+    rules: Arc<Mutex<Vec<MailboxRule>>>,
+    search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     shares: Arc<Mutex<Vec<Value>>>,
     uploads: Arc<Mutex<Vec<JmapUploadBlob>>>,
     raw_message_blobs: Arc<Mutex<HashMap<Uuid, JmapUploadBlob>>>,
@@ -620,6 +623,61 @@ impl FakeStore {
         }
     }
 
+    fn search_folder() -> SearchFolderDefinition {
+        SearchFolderDefinition {
+            id: Uuid::parse_str("89898989-8989-8989-8989-898989898989").unwrap(),
+            account_id: Self::account().account_id,
+            role: "custom".to_string(),
+            display_name: "Follow Up Mail".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: json!({"scope": "top_of_personal_folders"}),
+            restriction_json: json!({"kind": "text", "query": "follow"}),
+            excluded_folder_roles: vec!["trash".to_string()],
+            is_builtin: false,
+        }
+    }
+
+    fn mailbox_rule() -> MailboxRule {
+        MailboxRule {
+            id: Uuid::parse_str("78787878-7878-7878-7878-787878787878").unwrap(),
+            name: "Reports".to_string(),
+            is_active: true,
+            source_kind: "sieve_script".to_string(),
+            condition_summary: "header subject contains report".to_string(),
+            action_summary: "fileinto Reports".to_string(),
+            supported_outlook_projection: true,
+            unsupported_exchange_features: vec!["client_only_rules".to_string()],
+            size_octets: 72,
+            updated_at: "2026-05-20T09:00:00Z".to_string(),
+        }
+    }
+
+    fn outlook_profile_state() -> OutlookProfileState {
+        OutlookProfileState {
+            id: "profile".to_string(),
+            account_id: Self::account().account_id,
+            messages_backed_by_canonical_mailbox: true,
+            contacts_backed_by_canonical_store: true,
+            calendars_backed_by_canonical_store: true,
+            tasks_backed_by_canonical_store: true,
+            notes_backed_by_canonical_store: true,
+            journals_backed_by_canonical_store: true,
+            search_folders_count: 1,
+            rules_count: 1,
+            sender_identities_count: 1,
+            mapi_named_properties_count: 2,
+            mapi_custom_properties_count: 3,
+            mapi_navigation_shortcuts_count: 4,
+            mapi_sync_checkpoints_count: 5,
+            mapi_profile_settings_present: true,
+            ipm_subtree_ost_id_present: true,
+            ipm_subtree_ost_id_size_octets: 16,
+            profile_settings_updated_at: Some("2026-05-20T10:00:00Z".to_string()),
+            unsupported_client_local_state: vec!["client_local_ost_cache".to_string()],
+        }
+    }
+
     fn reminder() -> ClientReminder {
         ClientReminder {
             source_type: "task".to_string(),
@@ -1094,6 +1152,70 @@ impl JmapStore for FakeStore {
             used: 10,
             hard_limit: 100,
         })
+    }
+
+    async fn list_mailbox_rules(&self, _account_id: Uuid) -> Result<Vec<MailboxRule>> {
+        Ok(self.rules.lock().unwrap().clone())
+    }
+
+    async fn fetch_outlook_profile_state(&self, account_id: Uuid) -> Result<OutlookProfileState> {
+        let mut state = FakeStore::outlook_profile_state();
+        state.account_id = account_id;
+        Ok(state)
+    }
+
+    async fn fetch_search_folders(&self, _account_id: Uuid) -> Result<Vec<SearchFolderDefinition>> {
+        Ok(self.search_folders.lock().unwrap().clone())
+    }
+
+    async fn fetch_search_folders_by_ids(
+        &self,
+        _account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<SearchFolderDefinition>> {
+        Ok(self
+            .search_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|folder| ids.contains(&folder.id))
+            .cloned()
+            .collect())
+    }
+
+    async fn upsert_search_folder(
+        &self,
+        input: UpsertSearchFolderInput,
+    ) -> Result<SearchFolderDefinition> {
+        let mut folders = self.search_folders.lock().unwrap();
+        let folder = SearchFolderDefinition {
+            id: input.id.unwrap_or_else(Uuid::new_v4),
+            account_id: input.account_id,
+            role: "custom".to_string(),
+            display_name: input.display_name,
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: input.result_object_kind,
+            scope_json: input.scope_json,
+            restriction_json: input.restriction_json,
+            excluded_folder_roles: input.excluded_folder_roles,
+            is_builtin: false,
+        };
+        if let Some(existing) = folders.iter_mut().find(|existing| existing.id == folder.id) {
+            *existing = folder.clone();
+        } else {
+            folders.push(folder.clone());
+        }
+        Ok(folder)
+    }
+
+    async fn delete_search_folder(&self, _account_id: Uuid, search_folder_id: Uuid) -> Result<()> {
+        let mut folders = self.search_folders.lock().unwrap();
+        let before = folders.len();
+        folders.retain(|folder| folder.id != search_folder_id);
+        if folders.len() == before {
+            bail!("search folder not found");
+        }
+        Ok(())
     }
 
     async fn fetch_active_sieve_script(
@@ -12607,6 +12729,8 @@ async fn private_outlook_methods_use_canonical_note_journal_and_reminder_store()
         notes: Arc::new(Mutex::new(vec![FakeStore::note()])),
         journal_entries: Arc::new(Mutex::new(vec![FakeStore::journal_entry()])),
         reminders: Arc::new(Mutex::new(vec![FakeStore::reminder()])),
+        rules: Arc::new(Mutex::new(vec![FakeStore::mailbox_rule()])),
+        search_folders: Arc::new(Mutex::new(vec![FakeStore::search_folder()])),
         ..Default::default()
     };
     let service = JmapService::new(store.clone());
@@ -12656,6 +12780,38 @@ async fn private_outlook_methods_use_canonical_note_journal_and_reminder_store()
                         "j2".to_string(),
                     ),
                     JmapMethodCall("Reminder/query".to_string(), json!({}), "r1".to_string()),
+                    JmapMethodCall("Rule/query".to_string(), json!({}), "rule1".to_string()),
+                    JmapMethodCall(
+                        "Rule/get".to_string(),
+                        json!({"ids": [FakeStore::mailbox_rule().id.to_string()]}),
+                        "rule2".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "SearchFolder/query".to_string(),
+                        json!({}),
+                        "s1".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "SearchFolder/get".to_string(),
+                        json!({"ids": [FakeStore::search_folder().id.to_string()]}),
+                        "s2".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "SearchFolder/set".to_string(),
+                        json!({
+                            "create": {
+                                "new-search": {
+                                    "displayName": "Unread From Alice",
+                                    "resultObjectKind": "message",
+                                    "scope": {"scope": "top_of_personal_folders"},
+                                    "restriction": {"kind": "text", "query": "alice"},
+                                    "excludedFolderRoles": ["trash"]
+                                }
+                            },
+                            "destroy": [FakeStore::search_folder().id.to_string()]
+                        }),
+                        "s3".to_string(),
+                    ),
                 ],
             },
         )
@@ -12686,7 +12842,82 @@ async fn private_outlook_methods_use_canonical_note_journal_and_reminder_store()
         response.method_responses[6].1["list"][0]["sourceType"],
         Value::String("task".to_string())
     );
+    assert_eq!(
+        response.method_responses[7].1["ids"][0],
+        Value::String(FakeStore::mailbox_rule().id.to_string())
+    );
+    assert_eq!(
+        response.method_responses[8].1["list"][0]["name"],
+        Value::String("Reports".to_string())
+    );
+    assert_eq!(
+        response.method_responses[9].1["ids"][0],
+        Value::String(FakeStore::search_folder().id.to_string())
+    );
+    assert_eq!(
+        response.method_responses[10].1["list"][0]["displayName"],
+        Value::String("Follow Up Mail".to_string())
+    );
+    assert!(response.created_ids.contains_key("new-search"));
     assert_eq!(store.notes.lock().unwrap().len(), 2);
+    let folders = store.search_folders.lock().unwrap();
+    assert_eq!(folders.len(), 1);
+    assert_eq!(folders[0].display_name, "Unread From Alice");
+}
+
+#[tokio::test]
+async fn private_outlook_profile_methods_read_canonical_profile_state() {
+    let service = JmapService::new(FakeStore {
+        session: Some(FakeStore::account()),
+        rules: Arc::new(Mutex::new(vec![FakeStore::mailbox_rule()])),
+        search_folders: Arc::new(Mutex::new(vec![FakeStore::search_folder()])),
+        ..Default::default()
+    });
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![
+                    JMAP_CORE_CAPABILITY.to_string(),
+                    JMAP_LPE_OUTLOOK_CAPABILITY.to_string(),
+                ],
+                method_calls: vec![
+                    JmapMethodCall(
+                        "OutlookProfile/query".to_string(),
+                        json!({}),
+                        "profile-query".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "OutlookProfile/get".to_string(),
+                        json!({"ids": ["profile"]}),
+                        "profile-get".to_string(),
+                    ),
+                    JmapMethodCall(
+                        "OutlookProfile/changes".to_string(),
+                        json!({"sinceState": "0"}),
+                        "profile-changes".to_string(),
+                    ),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.method_responses[0].1["ids"][0], "profile");
+    let profile = &response.method_responses[1].1["list"][0];
+    assert_eq!(profile["@type"], "OutlookProfile");
+    assert_eq!(profile["searchFoldersCount"], 1);
+    assert_eq!(profile["rulesCount"], 1);
+    assert_eq!(profile["ipmSubtreeOstIdPresent"], true);
+    assert!(profile["unsupportedClientLocalState"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("client_local_ost_cache".to_string())));
+    assert!(response.method_responses[2].1["created"]
+        .as_array()
+        .unwrap()
+        .contains(&Value::String("profile".to_string())));
 }
 
 #[tokio::test]

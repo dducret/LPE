@@ -2573,6 +2573,9 @@ fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
             "quick_contacts" => "IPF.Contact.MOC.QuickContacts",
             "im_contact_list" => "IPF.Contact.MOC.ImContactList",
             "contacts_search" => "IPF.Contact",
+            "__mapi_search_folder_contact" => "IPF.Contact",
+            "__mapi_search_folder_task" => "IPF.Task",
+            "__mapi_search_folder_mixed" | "__mapi_search_folder_message" => "IPF.Note",
             "document_libraries" => "IPF.ShortcutFolder",
             "rss_feeds" => "IPF.Note.OutlookHomepage",
             "todo_search" => "IPF.Task",
@@ -3033,7 +3036,7 @@ fn content_sync_includes_associated(sync_type: u8, sync_flags: u16, associated: 
 fn mapi_folder_type(mailbox: &JmapMailbox) -> i32 {
     if mailbox.role == "__mapi_ipm_subtree" {
         0
-    } else if mailbox.role == "__mapi_search" {
+    } else if mailbox.role == "__mapi_search" || mailbox.role.starts_with("__mapi_search_folder_") {
         2
     } else {
         1

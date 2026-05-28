@@ -90,6 +90,17 @@ pub struct SearchFolderDefinition {
     pub is_builtin: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpsertSearchFolderInput {
+    pub id: Option<Uuid>,
+    pub account_id: Uuid,
+    pub display_name: String,
+    pub result_object_kind: String,
+    pub scope_json: Value,
+    pub restriction_json: Value,
+    pub excluded_folder_roles: Vec<String>,
+}
+
 struct BuiltinSearchFolderDefinition {
     role: &'static str,
     display_name: &'static str,
@@ -181,6 +192,25 @@ fn map_search_folder(row: SearchFolderRow) -> SearchFolderDefinition {
         excluded_folder_roles: row.excluded_folder_roles,
         is_builtin: row.is_builtin,
     }
+}
+
+fn validate_search_folder_input(input: &UpsertSearchFolderInput) -> Result<()> {
+    if input.display_name.trim().is_empty() {
+        bail!("search folder display name is required");
+    }
+    if !matches!(
+        input.result_object_kind.as_str(),
+        "message" | "contact" | "task" | "mixed"
+    ) {
+        bail!("unsupported search folder result object kind");
+    }
+    if !input.scope_json.is_object() {
+        bail!("search folder scope must be a JSON object");
+    }
+    if !input.restriction_json.is_object() {
+        bail!("search folder restriction must be a JSON object");
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1105,6 +1135,207 @@ impl Storage {
         .await?;
 
         Ok(rows.into_iter().map(map_search_folder).collect())
+    }
+
+    pub async fn fetch_search_folders_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<SearchFolderDefinition>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query_as::<_, SearchFolderRow>(
+            r#"
+            SELECT
+                id,
+                account_id,
+                role,
+                display_name,
+                definition_kind,
+                result_object_kind,
+                scope_json,
+                restriction_json,
+                excluded_folder_roles,
+                is_builtin
+            FROM search_folders
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND id = ANY($3)
+            ORDER BY is_builtin DESC, display_name ASC, id ASC
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_search_folder).collect())
+    }
+
+    pub async fn upsert_search_folder(
+        &self,
+        input: UpsertSearchFolderInput,
+    ) -> Result<SearchFolderDefinition> {
+        validate_search_folder_input(&input)?;
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
+            .await?;
+        let id = input.id.unwrap_or_else(Uuid::new_v4);
+        let existed = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM search_folders
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let row = sqlx::query_as::<_, SearchFolderRow>(
+            r#"
+            INSERT INTO search_folders (
+                id, tenant_id, account_id, role, display_name, definition_kind,
+                result_object_kind, scope_json, restriction_json, excluded_folder_roles,
+                is_builtin
+            )
+            VALUES ($1, $2, $3, 'custom', $4, 'user_saved', $5, $6, $7, $8, FALSE)
+            ON CONFLICT (id)
+            DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                result_object_kind = EXCLUDED.result_object_kind,
+                scope_json = EXCLUDED.scope_json,
+                restriction_json = EXCLUDED.restriction_json,
+                excluded_folder_roles = EXCLUDED.excluded_folder_roles,
+                updated_at = NOW()
+            WHERE search_folders.tenant_id = EXCLUDED.tenant_id
+              AND search_folders.account_id = EXCLUDED.account_id
+              AND NOT search_folders.is_builtin
+            RETURNING
+                id,
+                account_id,
+                role,
+                display_name,
+                definition_kind,
+                result_object_kind,
+                scope_json,
+                restriction_json,
+                excluded_folder_roles,
+                is_builtin
+            "#,
+        )
+        .bind(id)
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(input.display_name.trim())
+        .bind(&input.result_object_kind)
+        .bind(&input.scope_json)
+        .bind(&input.restriction_json)
+        .bind(&input.excluded_folder_roles)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("search folder not found or cannot update builtin search folder"))?;
+
+        let change_kind = if existed { "updated" } else { "created" };
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                input.account_id,
+                CanonicalChangeCategory::Search.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            None,
+            "search_folder_definition",
+            row.id,
+            change_kind,
+            modseq,
+            &[input.account_id],
+            serde_json::json!({
+                "definitionKind": row.definition_kind,
+                "resultObjectKind": row.result_object_kind
+            }),
+        )
+        .await?;
+        Self::emit_account_scoped_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Search,
+            input.account_id,
+        )
+        .await?;
+        tx.commit().await?;
+
+        Ok(map_search_folder(row))
+    }
+
+    pub async fn delete_search_folder(
+        &self,
+        account_id: Uuid,
+        search_folder_id: Uuid,
+    ) -> Result<()> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let is_builtin = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT is_builtin
+            FROM search_folders
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(search_folder_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("search folder not found"))?;
+        if is_builtin {
+            bail!("builtin search folders cannot be deleted");
+        }
+        self.insert_collaboration_tombstone_in_tx(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Search,
+            account_id,
+            None,
+            "search_folder_definition",
+            search_folder_id,
+            None,
+            &[account_id],
+        )
+        .await?;
+        sqlx::query(
+            r#"
+            DELETE FROM search_folders
+            WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(search_folder_id)
+        .execute(&mut *tx)
+        .await?;
+        Self::emit_account_scoped_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Search,
+            account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn ensure_imap_mailboxes(&self, account_id: Uuid) -> Result<Vec<JmapMailbox>> {
@@ -5053,6 +5284,8 @@ fn jmap_exact_object_kind(data_type: &str) -> Option<&'static str> {
         "Task" => Some("task"),
         "Note" => Some("note"),
         "JournalEntry" => Some("journal_entry"),
+        "SearchFolder" => Some("search_folder_definition"),
+        "Rule" => Some("sieve_script"),
         "EmailSubmission" => Some("submission"),
         _ => None,
     }
@@ -5088,6 +5321,8 @@ fn jmap_object_replay_kinds(data_type: &str) -> Option<Vec<&'static str>> {
         "Task" => Some(vec!["task", "task_list", "task_list_grant"]),
         "Note" => Some(vec!["note"]),
         "JournalEntry" => Some(vec!["journal_entry"]),
+        "SearchFolder" => Some(vec!["search_folder_definition"]),
+        "Rule" => Some(vec!["sieve_script"]),
         "EmailSubmission" => Some(vec!["submission"]),
         "Share" => Some(vec![
             "mailbox_delegation_grant",
@@ -5157,6 +5392,19 @@ mod tests {
         assert_eq!(
             jmap_object_replay_kinds("JournalEntry").unwrap(),
             vec!["journal_entry"]
+        );
+        assert_eq!(
+            jmap_exact_object_kind("SearchFolder"),
+            Some("search_folder_definition")
+        );
+        assert_eq!(
+            jmap_object_replay_kinds("SearchFolder").unwrap(),
+            vec!["search_folder_definition"]
+        );
+        assert_eq!(jmap_exact_object_kind("Rule"), Some("sieve_script"));
+        assert_eq!(
+            jmap_object_replay_kinds("Rule").unwrap(),
+            vec!["sieve_script"]
         );
         assert_eq!(
             jmap_exact_object_kind("EmailSubmission"),

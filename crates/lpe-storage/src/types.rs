@@ -551,6 +551,46 @@ pub struct SieveScriptDocument {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MailboxRule {
+    pub id: Uuid,
+    pub name: String,
+    pub is_active: bool,
+    pub source_kind: String,
+    pub condition_summary: String,
+    pub action_summary: String,
+    pub supported_outlook_projection: bool,
+    pub unsupported_exchange_features: Vec<String>,
+    pub size_octets: u64,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlookProfileState {
+    pub id: String,
+    pub account_id: Uuid,
+    pub messages_backed_by_canonical_mailbox: bool,
+    pub contacts_backed_by_canonical_store: bool,
+    pub calendars_backed_by_canonical_store: bool,
+    pub tasks_backed_by_canonical_store: bool,
+    pub notes_backed_by_canonical_store: bool,
+    pub journals_backed_by_canonical_store: bool,
+    pub search_folders_count: u64,
+    pub rules_count: u64,
+    pub sender_identities_count: u64,
+    pub mapi_named_properties_count: u64,
+    pub mapi_custom_properties_count: u64,
+    pub mapi_navigation_shortcuts_count: u64,
+    pub mapi_sync_checkpoints_count: u64,
+    pub mapi_profile_settings_present: bool,
+    pub ipm_subtree_ost_id_present: bool,
+    pub ipm_subtree_ost_id_size_octets: u64,
+    pub profile_settings_updated_at: Option<String>,
+    pub unsupported_client_local_state: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MailFlowEntry {
     pub queue_id: Uuid,
     pub message_id: Uuid,

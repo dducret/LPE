@@ -8,10 +8,11 @@ use lpe_storage::{
     JmapEmailQuery, JmapEmailSubmission, JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState,
     JmapStringObjectChange, JmapThreadQuery, JmapUploadBlob, JournalEntry, MailboxAccountAccess,
-    MailboxDelegationGrantInput, ReminderQuery, SavedDraftMessage, SenderDelegationGrantInput,
-    SenderDelegationRight, SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, TaskListGrantInput, UpdateTaskListInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    MailboxDelegationGrantInput, MailboxRule, OutlookProfileState, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput, SenderDelegationRight,
+    SenderIdentity, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    TaskListGrantInput, UpdateTaskListInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use serde_json::{json, Map, Value};
 use uuid::Uuid;
@@ -186,6 +187,19 @@ pub trait JmapStore: Clone + Send + Sync + 'static {
         ids: &[Uuid],
     ) -> Result<Vec<JmapEmailSubmission>>;
     async fn fetch_jmap_quota(&self, account_id: Uuid) -> Result<JmapQuota>;
+    async fn list_mailbox_rules(&self, account_id: Uuid) -> Result<Vec<MailboxRule>>;
+    async fn fetch_outlook_profile_state(&self, account_id: Uuid) -> Result<OutlookProfileState>;
+    async fn fetch_search_folders(&self, account_id: Uuid) -> Result<Vec<SearchFolderDefinition>>;
+    async fn fetch_search_folders_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<SearchFolderDefinition>>;
+    async fn upsert_search_folder(
+        &self,
+        input: UpsertSearchFolderInput,
+    ) -> Result<SearchFolderDefinition>;
+    async fn delete_search_folder(&self, account_id: Uuid, search_folder_id: Uuid) -> Result<()>;
     async fn fetch_active_sieve_script(
         &self,
         account_id: Uuid,
@@ -710,6 +724,38 @@ impl JmapStore for Storage {
 
     async fn fetch_jmap_quota(&self, account_id: Uuid) -> Result<JmapQuota> {
         self.fetch_jmap_quota(account_id).await
+    }
+
+    async fn list_mailbox_rules(&self, account_id: Uuid) -> Result<Vec<MailboxRule>> {
+        self.list_mailbox_rules(account_id).await
+    }
+
+    async fn fetch_outlook_profile_state(&self, account_id: Uuid) -> Result<OutlookProfileState> {
+        Storage::fetch_outlook_profile_state(self, account_id).await
+    }
+
+    async fn fetch_search_folders(&self, account_id: Uuid) -> Result<Vec<SearchFolderDefinition>> {
+        self.fetch_search_folders(account_id).await
+    }
+
+    async fn fetch_search_folders_by_ids(
+        &self,
+        account_id: Uuid,
+        ids: &[Uuid],
+    ) -> Result<Vec<SearchFolderDefinition>> {
+        self.fetch_search_folders_by_ids(account_id, ids).await
+    }
+
+    async fn upsert_search_folder(
+        &self,
+        input: UpsertSearchFolderInput,
+    ) -> Result<SearchFolderDefinition> {
+        self.upsert_search_folder(input).await
+    }
+
+    async fn delete_search_folder(&self, account_id: Uuid, search_folder_id: Uuid) -> Result<()> {
+        self.delete_search_folder(account_id, search_folder_id)
+            .await
     }
 
     async fn fetch_active_sieve_script(

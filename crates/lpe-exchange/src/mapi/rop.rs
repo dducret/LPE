@@ -1679,6 +1679,9 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             String::new(),
         ),
+        Some(MapiObject::RuleTable { folder_id, .. }) => {
+            ("rule_table", format!("{folder_id:#018x}"), String::new())
+        }
         Some(MapiObject::Attachment {
             folder_id,
             message_id,
