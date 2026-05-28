@@ -681,8 +681,10 @@ compatible. They do not replace canonical mail or collaboration tables.
 ## Implementation Notes
 
 - `schema.sql` v2 should create a fresh `0.4.0-sql-v2` schema.
-- `0.4` has no SQL update path; initialize it only on an empty SQL database or
-  perform an explicit destructive reset.
+- `0.4` installations start from an empty SQL database initialized by
+  `init-schema.sh`, but initialized `0.4` databases can be advanced by
+  documented, idempotent compatibility updates in `update-lpe.sh` when the
+  schema change is safe to apply in place.
 - Fresh schema initialization inserts the real platform tenant UUID row and the
   default PostgreSQL storage pool/policy rows. Runtime bootstrap must not
   synthesize pseudo-tenants.

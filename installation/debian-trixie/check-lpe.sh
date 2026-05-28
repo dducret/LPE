@@ -105,6 +105,18 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_pr
   || fail "Table public.mapi_profile_settings is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_profile_settings"
 
+mapi_shortcut_group_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")" \
+  || fail "Unable to inspect MAPI navigation shortcut columns"
+[[ "$mapi_shortcut_group_column_count" == "2" ]] \
+  || fail "MAPI navigation shortcut group/header columns are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI navigation shortcut group/header columns are present"
+
+mapi_shortcut_target_nullable="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")" \
+  || fail "Unable to inspect MAPI navigation shortcut target column"
+[[ "$mapi_shortcut_target_nullable" == "YES" ]] \
+  || fail "MAPI navigation shortcut target_folder_id is still NOT NULL. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI navigation shortcut target folder column supports group headers"
+
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 expected_schema_version="$(

@@ -137,13 +137,34 @@ if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.
   exit 1
 fi
 
-if [[ "$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")" != "2" ]]; then
-  echo "Table public.mapi_navigation_shortcuts is missing the Common Views shortcut group/header columns. LPE 0.4 requires an empty database initialized with init-schema.sh." >&2
+if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_navigation_shortcuts');" | grep -qx 'mapi_navigation_shortcuts'; then
+  echo "Table public.mapi_navigation_shortcuts is missing. LPE 0.4 requires an initialized database before compatibility updates can run." >&2
   exit 1
 fi
 
-echo "LPE 0.4 does not apply SQL updates during update-lpe.sh."
-echo "The installed database must already be an initialized 0.4 empty-database schema."
+echo "Applying LPE 0.4 schema compatibility updates..."
+psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
+ALTER TABLE public.mapi_navigation_shortcuts
+  ALTER COLUMN target_folder_id DROP NOT NULL,
+  ADD COLUMN IF NOT EXISTS group_header_id UUID,
+  ADD COLUMN IF NOT EXISTS group_name TEXT NOT NULL DEFAULT '';
+
+UPDATE public.mapi_navigation_shortcuts
+SET group_name = ''
+WHERE group_name IS NULL;
+
+ALTER TABLE public.mapi_navigation_shortcuts
+  ALTER COLUMN group_name SET DEFAULT '',
+  ALTER COLUMN group_name SET NOT NULL;
+SQL
+
+mapi_shortcut_group_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name IN ('group_header_id', 'group_name');")"
+mapi_shortcut_target_nullable="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")"
+if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nullable}" != "YES" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce the expected mapi_navigation_shortcuts shape." >&2
+  exit 1
+fi
+echo "Applied idempotent LPE 0.4 schema compatibility updates."
 LPE_BIND_ADDRESS="${LPE_BIND_ADDRESS:-127.0.0.1:8080}"
 LPE_IMAP_BIND_ADDRESS="${LPE_IMAP_BIND_ADDRESS:-127.0.0.1:1143}"
 validate_host_port "${LPE_IMAP_BIND_ADDRESS}" \
