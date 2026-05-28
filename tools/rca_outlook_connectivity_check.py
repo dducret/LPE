@@ -135,6 +135,8 @@ def request(
 
 
 def join_url(base_url: str, path: str) -> str:
+    if urllib.parse.urlparse(path).scheme:
+        return path
     return base_url.rstrip("/") + "/" + path.lstrip("/")
 
 
