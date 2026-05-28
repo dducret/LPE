@@ -144,7 +144,9 @@ non-canonical LPE state.
 - Outlook default-folder properties must be projected from canonical folder
   identities. Generated special-folder binary identifiers use the documented
   46-byte folder EntryID form; cached 24-byte LongTermIDs and 46-byte folder
-  EntryIDs written back by Outlook remain accepted and normalized.
+  EntryIDs written back by Outlook remain accepted, normalized, and retained on
+  the live root-folder handle for cached-mode bootstrap, while canonical
+  projection still wins after reconnect.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
@@ -239,7 +241,10 @@ not by itself authorize broad client publication.
   canonical mailbox content purges, moves, copies, and attachment reads/writes
   where backed by canonical state.
 - Outlook's `PidTagAdditionalRenEntryIds` multi-binary special-folder cache is
-  accepted as session-local folder metadata during cached-mode bootstrap.
+  accepted as session-local Inbox metadata during cached-mode bootstrap. LPE
+  keeps canonical values for the documented indexes and preserves client data at
+  other indexes, matching the special-folder property contract without creating
+  durable MAPI-only folder truth.
 - Outlook store bootstrap metadata includes the private-store marker, store
   state, mailbox owner, user GUID, server icons, and max submit message size.
 - Profile settings needed for cached-mode reuse are canonical account settings,

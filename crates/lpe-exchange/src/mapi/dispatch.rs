@@ -1167,12 +1167,19 @@ fn log_set_properties_specific_debug(
     probe: &SetPropertiesProbeRequest,
 ) {
     let default_folder_identification_values_stripped =
-        strips_default_folder_identification_values(object)
-            && !probe.default_folder_entry_id_values.is_empty();
+        default_folder_identification_values_stripped_by_safe_values(object, &probe.property_tags);
     let default_folder_entry_id_storage_mode = if default_folder_identification_values_stripped {
-        "accepted_canonical_projection_not_persisted"
+        "accepted_canonical_projection_stripped"
     } else if probe.default_folder_entry_id_values.is_empty() {
         "not_default_folder_entry_ids"
+    } else if matches!(
+        object,
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        })
+    ) {
+        "accepted_session_projection_not_persisted"
     } else {
         "normal_property_validation"
     };
@@ -1359,15 +1366,32 @@ fn folder_set_property_problems(
                 };
             }
             if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
+                if *folder_id != INBOX_FOLDER_ID {
+                    return Some((index, *tag, 0x8004_0102));
+                }
                 return match value {
                     MapiValue::MultiBinary(values) if !values.is_empty() => None,
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
-            if *folder_id != ROOT_FOLDER_ID {
+            if storage_tag == PID_TAG_FREE_BUSY_ENTRY_IDS {
+                if !matches!(*folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
+                    return Some((index, *tag, 0x8004_0102));
+                }
+                let MapiValue::MultiBinary(values) = value else {
+                    return Some((index, *tag, 0x8004_0102));
+                };
+                return match values.get(3).and_then(|bytes| {
+                    crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes)
+                }) {
+                    Some(folder_id) if folder_id == FREEBUSY_DATA_FOLDER_ID => None,
+                    _ => Some((index, *tag, 0x8004_0102)),
+                };
+            }
+            if !matches!(*folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
                 return Some((index, *tag, 0x8004_0102));
             }
-            if !is_default_folder_identification_property_tag(storage_tag) {
+            if !is_scalar_default_folder_entry_id_property_tag(storage_tag) {
                 return Some((index, *tag, 0x8004_0102));
             }
             let Some(expected_folder_id) = default_folder_entry_id_expected_folder_id(storage_tag)
@@ -1386,19 +1410,113 @@ fn folder_set_property_problems(
 }
 
 fn default_folder_identification_safe_property_values(
+    principal: &AccountPrincipal,
     object: Option<&MapiObject>,
     values: Vec<(u32, MapiValue)>,
 ) -> Vec<(u32, MapiValue)> {
-    if !strips_default_folder_identification_values(object) {
+    if !strips_any_default_folder_identification_values(object) {
         return values;
     }
     values
         .into_iter()
-        .filter(|(tag, _)| !is_default_folder_identification_property_tag(*tag))
+        .filter_map(|(tag, value)| {
+            default_folder_identification_safe_property_value(principal, object, tag, value)
+        })
         .collect()
 }
 
-fn strips_default_folder_identification_values(object: Option<&MapiObject>) -> bool {
+fn default_folder_identification_safe_property_value(
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    tag: u32,
+    value: MapiValue,
+) -> Option<(u32, MapiValue)> {
+    if !strips_default_folder_identification_value(object, tag) {
+        return Some((tag, value));
+    }
+    match canonical_property_storage_tag(tag) {
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS => {
+            if !matches!(
+                object,
+                Some(MapiObject::Folder {
+                    folder_id: INBOX_FOLDER_ID,
+                    ..
+                })
+            ) {
+                return None;
+            }
+            merge_indexed_special_folder_entry_ids(principal, tag, value)
+                .map(|value| (canonical_property_storage_tag(tag), value))
+        }
+        PID_TAG_FREE_BUSY_ENTRY_IDS => {
+            merge_indexed_special_folder_entry_ids(principal, tag, value)
+                .map(|value| (canonical_property_storage_tag(tag), value))
+        }
+        _ => None,
+    }
+}
+
+fn merge_indexed_special_folder_entry_ids(
+    principal: &AccountPrincipal,
+    tag: u32,
+    value: MapiValue,
+) -> Option<MapiValue> {
+    let MapiValue::MultiBinary(client_values) = value else {
+        return None;
+    };
+    let Some(MapiValue::MultiBinary(mut canonical_values)) =
+        special_folder_identification_property_value(principal.account_id, tag)
+    else {
+        return None;
+    };
+    let canonical_len = canonical_values.len();
+    if client_values.len() > canonical_len {
+        canonical_values.extend(client_values.into_iter().skip(canonical_len));
+    }
+    Some(MapiValue::MultiBinary(canonical_values))
+}
+
+fn default_folder_identification_values_stripped_by_safe_values(
+    object: Option<&MapiObject>,
+    property_tags: &[u32],
+) -> bool {
+    property_tags
+        .iter()
+        .any(|tag| strips_default_folder_identification_value(object, *tag))
+}
+
+fn strips_default_folder_identification_value(object: Option<&MapiObject>, tag: u32) -> bool {
+    if !is_default_folder_identification_property_tag(tag) {
+        return false;
+    }
+    match object {
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        }) => {
+            matches!(
+                canonical_property_storage_tag(tag),
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                    | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
+                    | PID_TAG_FREE_BUSY_ENTRY_IDS
+            )
+        }
+        Some(MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            ..
+        }) => {
+            matches!(
+                canonical_property_storage_tag(tag),
+                PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                    | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
+                    | PID_TAG_FREE_BUSY_ENTRY_IDS
+            )
+        }
+        _ => false,
+    }
+}
+
+fn strips_any_default_folder_identification_values(object: Option<&MapiObject>) -> bool {
     matches!(
         object,
         Some(MapiObject::Folder {
@@ -4057,6 +4175,7 @@ where
                             continue;
                         }
                         let values = default_folder_identification_safe_property_values(
+                            principal,
                             object.as_ref(),
                             values,
                         );
@@ -9621,11 +9740,19 @@ mod tests {
             properties: std::collections::HashMap::new(),
         };
         let retained = default_folder_identification_safe_property_values(
+            &test_principal(),
             Some(&inbox),
             vec![
                 (
                     PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
-                    MapiValue::MultiBinary(vec![Vec::new()]),
+                    MapiValue::MultiBinary(vec![
+                        vec![0xAA],
+                        vec![0xBB],
+                        vec![0xCC],
+                        vec![0xDD],
+                        vec![0xEE],
+                        vec![0xFA, 0xCE],
+                    ]),
                 ),
                 (
                     PID_TAG_DISPLAY_NAME_W,
@@ -9634,12 +9761,91 @@ mod tests {
             ],
         );
 
+        assert_eq!(retained.len(), 2);
+        let Some(MapiValue::MultiBinary(values)) = retained
+            .iter()
+            .find(|(tag, _)| *tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS)
+            .map(|(_, value)| value)
+        else {
+            panic!("expected AdditionalRenEntryIds");
+        };
+        assert_eq!(values.len(), 6);
+        assert_ne!(values[0], vec![0xAA]);
+        assert_eq!(values[5], vec![0xFA, 0xCE]);
+        assert_eq!(
+            retained
+                .iter()
+                .find(|(tag, _)| *tag == PID_TAG_DISPLAY_NAME_W),
+            Some(&(
+                PID_TAG_DISPLAY_NAME_W,
+                MapiValue::String("Inbox".to_string())
+            ))
+        );
+    }
+
+    #[test]
+    fn root_scalar_default_folder_entry_ids_are_retained_for_session_writeback() {
+        let root = MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            test_principal().account_id,
+            CALENDAR_FOLDER_ID,
+        )
+        .unwrap();
+
+        let retained = default_folder_identification_safe_property_values(
+            &test_principal(),
+            Some(&root),
+            vec![
+                (
+                    PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+                    MapiValue::Binary(calendar_entry_id.clone()),
+                ),
+                (
+                    PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+                    MapiValue::MultiBinary(vec![Vec::new()]),
+                ),
+            ],
+        );
+
         assert_eq!(
             retained,
             vec![(
-                PID_TAG_DISPLAY_NAME_W,
-                MapiValue::String("Inbox".to_string())
+                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+                MapiValue::Binary(calendar_entry_id)
             )]
+        );
+    }
+
+    #[test]
+    fn root_scalar_default_folder_entry_id_write_is_retained_as_session_state() {
+        let mut root = MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            test_principal().account_id,
+            CALENDAR_FOLDER_ID,
+        )
+        .unwrap();
+
+        apply_mapi_property_values(
+            Some(&mut root),
+            vec![(
+                PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+                MapiValue::Binary(calendar_entry_id.clone()),
+            )],
+        )
+        .unwrap();
+
+        let MapiObject::Folder { properties, .. } = root else {
+            panic!("expected folder object");
+        };
+        assert_eq!(
+            properties.get(&PID_TAG_IPM_APPOINTMENT_ENTRY_ID),
+            Some(&MapiValue::Binary(calendar_entry_id))
         );
     }
 

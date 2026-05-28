@@ -638,6 +638,16 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
 }
 
 pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_tag: u32) -> bool {
+    is_scalar_default_folder_entry_id_property_tag(property_tag)
+        || matches!(
+            canonical_property_storage_tag(property_tag),
+            PID_TAG_ADDITIONAL_REN_ENTRY_IDS
+                | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
+                | PID_TAG_FREE_BUSY_ENTRY_IDS
+        )
+}
+
+pub(in crate::mapi) fn is_scalar_default_folder_entry_id_property_tag(property_tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(property_tag),
         PID_TAG_IPM_APPOINTMENT_ENTRY_ID
@@ -646,9 +656,6 @@ pub(in crate::mapi) fn is_default_folder_identification_property_tag(property_ta
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
             | PID_TAG_REM_ONLINE_ENTRY_ID
-            | PID_TAG_ADDITIONAL_REN_ENTRY_IDS
-            | PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX
-            | PID_TAG_FREE_BUSY_ENTRY_IDS
     )
 }
 
@@ -4080,8 +4087,9 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             properties,
         }) => {
             properties.extend(values.into_iter().filter(|(tag, _)| {
-                !(*folder_id == ROOT_FOLDER_ID
-                    && is_default_folder_identification_property_tag(*tag))
+                *folder_id != ROOT_FOLDER_ID
+                    || !is_default_folder_identification_property_tag(*tag)
+                    || is_scalar_default_folder_entry_id_property_tag(*tag)
             }));
             Ok(())
         }
