@@ -1544,7 +1544,7 @@ impl Storage {
                     ELSE to_char(m.sent_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
                 END AS sent_at,
                 q.queue_status,
-                q.latest_trace_id,
+                COALESCE(q.latest_trace_id, inbound.latest_trace_id) AS latest_trace_id,
                 q.remote_message_ref,
                 q.last_attempt_at,
                 q.next_attempt_at,
@@ -1596,6 +1596,15 @@ impl Storage {
                 ORDER BY q.created_at DESC
                 LIMIT 1
             ) q ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT h.header_value AS latest_trace_id
+                FROM message_headers h
+                WHERE h.tenant_id = m.tenant_id
+                  AND h.message_id = m.id
+                  AND lower(h.header_name) = 'x-lpe-ct-trace-id'
+                ORDER BY h.ordinal DESC
+                LIMIT 1
+            ) inbound ON TRUE
             WHERE m.tenant_id = $1
               AND (
                 lower(COALESCE(fr.address, '')) LIKE $2
@@ -1603,13 +1612,17 @@ impl Storage {
                 OR lower(COALESCE(m.internet_message_id, '')) LIKE $2
                 OR lower(a.primary_email) LIKE $2
                 OR lower(COALESCE(q.latest_trace_id, '')) LIKE $2
+                OR lower(COALESCE(inbound.latest_trace_id, '')) LIKE $2
                 OR lower(COALESCE(q.remote_message_ref, '')) LIKE $2
                 OR EXISTS (
                     SELECT 1
                     FROM attachments at
+                    JOIN attachment_texts att
+                      ON att.tenant_id = at.tenant_id
+                     AND att.blob_id = at.blob_id
                     WHERE at.tenant_id = m.tenant_id
                       AND at.message_id = m.id
-                      AND lower(COALESCE(at.extracted_text, '')) LIKE $2
+                      AND lower(att.extracted_text) LIKE $2
                 )
               )
             ORDER BY m.received_at DESC

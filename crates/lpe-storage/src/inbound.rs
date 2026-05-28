@@ -243,30 +243,12 @@ impl Storage {
             }
         }
 
-        let mut delivered_mailboxes = accepted;
-        delivered_mailboxes.extend(
-            rejected
-                .into_iter()
-                .map(|recipient| format!("rejected:{recipient}")),
-        );
-        delivered_mailboxes.extend(
-            stored_messages
-                .into_iter()
-                .map(|(_, id)| format!("message:{id}")),
-        );
-
-        Ok(InboundDeliveryResponse {
-            accepted: !delivered_mailboxes.is_empty(),
-            delivered_mailboxes,
-            detail: if followup_errors.is_empty() {
-                None
-            } else {
-                Some(format!(
-                    "post-delivery errors: {}",
-                    followup_errors.join(" | ")
-                ))
-            },
-        })
+        Ok(inbound_delivery_response(
+            accepted,
+            rejected,
+            stored_messages,
+            followup_errors,
+        ))
     }
 
     async fn evaluate_inbound_sieve(
@@ -731,6 +713,39 @@ fn duplicate_inbound_delivery_response(
     }
 }
 
+fn inbound_delivery_response(
+    accepted: Vec<String>,
+    rejected: Vec<String>,
+    stored_messages: Vec<(Uuid, Uuid)>,
+    followup_errors: Vec<String>,
+) -> InboundDeliveryResponse {
+    let accepted_by_core = !accepted.is_empty();
+    let mut delivered_mailboxes = accepted;
+    delivered_mailboxes.extend(
+        rejected
+            .into_iter()
+            .map(|recipient| format!("rejected:{recipient}")),
+    );
+    delivered_mailboxes.extend(
+        stored_messages
+            .into_iter()
+            .map(|(_, id)| format!("message:{id}")),
+    );
+
+    InboundDeliveryResponse {
+        accepted: accepted_by_core,
+        delivered_mailboxes,
+        detail: if followup_errors.is_empty() {
+            None
+        } else {
+            Some(format!(
+                "post-delivery errors: {}",
+                followup_errors.join(" | ")
+            ))
+        },
+    }
+}
+
 fn inbound_trace_advisory_lock_keys(trace_id: &str) -> (i32, i32) {
     let mut hasher = Sha256::new();
     hasher.update(b"lpe-inbound-trace-v1\0");
@@ -797,5 +812,42 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("duplicate inbound delivery trace replay suppressed"));
+    }
+
+    #[test]
+    fn inbound_response_rejects_when_no_recipient_was_accepted() {
+        let response = inbound_delivery_response(
+            Vec::new(),
+            vec!["missing@example.test".to_string()],
+            Vec::new(),
+            Vec::new(),
+        );
+
+        assert!(!response.accepted);
+        assert_eq!(
+            response.delivered_mailboxes,
+            vec!["rejected:missing@example.test".to_string()]
+        );
+    }
+
+    #[test]
+    fn inbound_response_accepts_when_at_least_one_recipient_was_accepted() {
+        let response = inbound_delivery_response(
+            vec!["user@example.test".to_string()],
+            vec!["missing@example.test".to_string()],
+            vec![(Uuid::nil(), Uuid::nil())],
+            Vec::new(),
+        );
+
+        assert!(response.accepted);
+        assert!(response
+            .delivered_mailboxes
+            .contains(&"user@example.test".to_string()));
+        assert!(response
+            .delivered_mailboxes
+            .contains(&"rejected:missing@example.test".to_string()));
+        assert!(response
+            .delivered_mailboxes
+            .contains(&format!("message:{}", Uuid::nil())));
     }
 }
