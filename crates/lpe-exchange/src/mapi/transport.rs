@@ -257,6 +257,7 @@ where
                 Ok(active_request) => Some(active_request),
                 Err(response) => {
                     let response = finalize_mapi_response(response, headers);
+                    log_session_cookie_lookup(endpoint, &principal, headers, &request_type_label);
                     log_mapi_connection(
                         endpoint,
                         &principal,
@@ -1527,6 +1528,15 @@ pub(in crate::mapi) fn log_mapi_connection(
     let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
     let host = safe_header(headers, "host").unwrap_or_default();
     let set_cookie_names = response_set_cookie_names(response);
+    let response_content_type = response_header(response, "content-type").unwrap_or_default();
+    let response_www_authenticate =
+        response_header(response, "www-authenticate").unwrap_or_default();
+    let response_x_request_type = response_header(response, "x-requesttype").unwrap_or_default();
+    let response_x_request_id = response_header(response, "x-requestid").unwrap_or_default();
+    let response_x_expiration_info =
+        response_header(response, "x-expirationinfo").unwrap_or_default();
+    let response_x_pending_period =
+        response_header(response, "x-pendingperiod").unwrap_or_default();
     let message = "rca debug mapi connection";
 
     if response_code == "0" {
@@ -1549,6 +1559,12 @@ pub(in crate::mapi) fn log_mapi_connection(
             mapi_response_code = %response_code,
             request_body_bytes,
             response_payload_bytes = payload_bytes,
+            response_content_type = %response_content_type,
+            response_www_authenticate = %response_www_authenticate,
+            response_x_request_type = %response_x_request_type,
+            response_x_request_id = %response_x_request_id,
+            response_x_expiration_info = %response_x_expiration_info,
+            response_x_pending_period = %response_x_pending_period,
             set_cookie_names = %set_cookie_names,
             "{message}"
         );
@@ -1572,6 +1588,12 @@ pub(in crate::mapi) fn log_mapi_connection(
             mapi_response_code = %response_code,
             request_body_bytes,
             response_payload_bytes = payload_bytes,
+            response_content_type = %response_content_type,
+            response_www_authenticate = %response_www_authenticate,
+            response_x_request_type = %response_x_request_type,
+            response_x_request_id = %response_x_request_id,
+            response_x_expiration_info = %response_x_expiration_info,
+            response_x_pending_period = %response_x_pending_period,
             set_cookie_names = %set_cookie_names,
             "{message}"
         );
@@ -1738,6 +1760,40 @@ struct SessionCookieLookupDebug {
     selected_session_principal_matches: bool,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct RequestCookieTransportDebug {
+    pub(crate) cookie_header_count: usize,
+    pub(crate) context_candidate_count: usize,
+    pub(crate) sequence_candidate_count: usize,
+    pub(crate) selected_context_suffix: String,
+    pub(crate) selected_context_hash: String,
+    pub(crate) selected_sequence_suffix: String,
+    pub(crate) selected_sequence_hash: String,
+}
+
+pub(crate) fn request_cookie_transport_debug(
+    endpoint: MapiEndpoint,
+    headers: &HeaderMap,
+) -> RequestCookieTransportDebug {
+    let context_candidates = request_named_cookie_candidates(cookie_name(endpoint), headers);
+    let sequence_candidates =
+        request_named_cookie_candidates(sequence_cookie_name(endpoint), headers);
+    let selected_context = context_candidates.last().cloned();
+    let selected_sequence = sequence_candidates.last().cloned();
+    let selected_context = cookie_value_debug(selected_context.as_deref());
+    let selected_sequence = cookie_value_debug(selected_sequence.as_deref());
+
+    RequestCookieTransportDebug {
+        cookie_header_count: headers.get_all("cookie").iter().count(),
+        context_candidate_count: context_candidates.len(),
+        sequence_candidate_count: sequence_candidates.len(),
+        selected_context_suffix: selected_context.suffix,
+        selected_context_hash: selected_context.hash,
+        selected_sequence_suffix: selected_sequence.suffix,
+        selected_sequence_hash: selected_sequence.hash,
+    }
+}
+
 fn session_cookie_lookup_debug(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
@@ -1793,9 +1849,6 @@ pub(in crate::mapi) fn log_session_cookie_lookup(
     headers: &HeaderMap,
     request_type: &str,
 ) {
-    if endpoint != MapiEndpoint::Emsmdb {
-        return;
-    }
     let summary = session_cookie_lookup_debug(endpoint, principal, headers);
     let endpoint = match endpoint {
         MapiEndpoint::Emsmdb => "emsmdb",

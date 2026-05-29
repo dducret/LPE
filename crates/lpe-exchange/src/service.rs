@@ -510,8 +510,27 @@ fn log_mapi_transport_connection(
         .unwrap_or_default();
     let mailbox_id = query_parameter(uri.query().unwrap_or_default(), "mailboxId");
     let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let request_content_type = mapi::safe_header(headers, "content-type").unwrap_or_default();
+    let request_host = mapi::safe_header(headers, "host").unwrap_or_default();
     let response_payload_bytes = mapi::mapi_response_payload_bytes(response).unwrap_or(0);
     let request_body_bytes = request_body.len();
+    let response_content_type = response_header(response, "content-type").unwrap_or_default();
+    let response_www_authenticate =
+        response_header(response, "www-authenticate").unwrap_or_default();
+    let response_x_request_type = response_header(response, "x-requesttype").unwrap_or_default();
+    let response_x_request_id = response_header(response, "x-requestid").unwrap_or_default();
+    let response_x_expiration_info =
+        response_header(response, "x-expirationinfo").unwrap_or_default();
+    let response_x_pending_period =
+        response_header(response, "x-pendingperiod").unwrap_or_default();
+    let response_set_cookie_names = response_set_cookie_names(response);
+    let cookie_debug = mapi::request_cookie_transport_debug(
+        match endpoint {
+            "emsmdb" => MapiEndpoint::Emsmdb,
+            _ => MapiEndpoint::Nspi,
+        },
+        headers,
+    );
     let message = "rca debug mapi transport connection";
 
     if status < 400 && mapi_response_code == "0" {
@@ -525,10 +544,26 @@ fn log_mapi_transport_connection(
             request_type = %request_type,
             mapi_request_id = %mapi_request_id,
             client_request_id = %client_request_id,
+            request_content_type = %request_content_type,
+            request_host = %request_host,
             http_status = status,
             mapi_response_code = %mapi_response_code,
             request_body_bytes,
             response_payload_bytes,
+            response_content_type = %response_content_type,
+            response_www_authenticate = %response_www_authenticate,
+            response_x_request_type = %response_x_request_type,
+            response_x_request_id = %response_x_request_id,
+            response_x_expiration_info = %response_x_expiration_info,
+            response_x_pending_period = %response_x_pending_period,
+            response_set_cookie_names = %response_set_cookie_names,
+            cookie_header_count = cookie_debug.cookie_header_count,
+            mapi_context_candidate_count = cookie_debug.context_candidate_count,
+            mapi_sequence_candidate_count = cookie_debug.sequence_candidate_count,
+            selected_context_suffix = %cookie_debug.selected_context_suffix,
+            selected_context_hash = %cookie_debug.selected_context_hash,
+            selected_sequence_suffix = %cookie_debug.selected_sequence_suffix,
+            selected_sequence_hash = %cookie_debug.selected_sequence_hash,
             duration_ms,
             "{message}"
         );
@@ -543,10 +578,26 @@ fn log_mapi_transport_connection(
             request_type = %request_type,
             mapi_request_id = %mapi_request_id,
             client_request_id = %client_request_id,
+            request_content_type = %request_content_type,
+            request_host = %request_host,
             http_status = status,
             mapi_response_code = %mapi_response_code,
             request_body_bytes,
             response_payload_bytes,
+            response_content_type = %response_content_type,
+            response_www_authenticate = %response_www_authenticate,
+            response_x_request_type = %response_x_request_type,
+            response_x_request_id = %response_x_request_id,
+            response_x_expiration_info = %response_x_expiration_info,
+            response_x_pending_period = %response_x_pending_period,
+            response_set_cookie_names = %response_set_cookie_names,
+            cookie_header_count = cookie_debug.cookie_header_count,
+            mapi_context_candidate_count = cookie_debug.context_candidate_count,
+            mapi_sequence_candidate_count = cookie_debug.sequence_candidate_count,
+            selected_context_suffix = %cookie_debug.selected_context_suffix,
+            selected_context_hash = %cookie_debug.selected_context_hash,
+            selected_sequence_suffix = %cookie_debug.selected_sequence_suffix,
+            selected_sequence_hash = %cookie_debug.selected_sequence_hash,
             duration_ms,
             error = %error.unwrap_or_default(),
             "{message}"
@@ -626,6 +677,22 @@ fn response_header(response: &Response, name: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+fn response_set_cookie_names(response: &Response) -> String {
+    response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| {
+            value
+                .split_once('=')
+                .map(|(name, _)| name.trim().to_string())
+        })
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn query_parameter(query: &str, name: &str) -> Option<String> {
