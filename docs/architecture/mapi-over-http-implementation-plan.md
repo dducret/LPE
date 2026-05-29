@@ -179,10 +179,11 @@ non-canonical LPE state.
   Outlook's FAI-only Calendar sync has a stable source key/change key even
   before the first appointment exists. That bootstrap row is a minimal
   MS-OXOCFG calendar-options configuration message: it carries
-  `PidTagRoamingDatatypes` with the dictionary-stream bit and an empty
-  `PidTagRoamingDictionary` XML document, allowing Outlook to fall back to the
-  documented default calendar options without receiving a malformed pseudo
-  appointment.
+  `PidTagRoamingDatatypes` with the dictionary-stream bit and a
+  `PidTagRoamingDictionary` XML document containing the documented Outlook
+  Calendar Options defaults that LPE supports (`OLPrefsVersion`,
+  `piRemindDefault`, `piAutoProcess`, `AutomateProcessing`, and
+  `piAutoDeleteReceipts`) without receiving a malformed pseudo appointment.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the

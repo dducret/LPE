@@ -22,8 +22,8 @@ pub(in crate::mapi) use super::identity::{
 pub(in crate::mapi) const CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID: Uuid =
     Uuid::from_u128(0x6d617069_6361_6c46_8000_000000000001);
 
-const PID_TAG_ROAMING_DATATYPES: u32 = 0x7C06_0003;
-const PID_TAG_ROAMING_DICTIONARY: u32 = 0x7C07_0102;
+pub(in crate::mapi) const PID_TAG_ROAMING_DATATYPES: u32 = 0x7C06_0003;
+pub(in crate::mapi) const PID_TAG_ROAMING_DICTIONARY: u32 = 0x7C07_0102;
 
 pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     ROOT_FOLDER_ID,
@@ -754,7 +754,7 @@ pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
 }
 
 fn calendar_options_dictionary_stream() -> Vec<u8> {
-    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration><Info version="LPE.1"/><Data/></UserConfiguration>"#.to_vec()
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-1"/><e k="18-piRemindDefault" v="9-15"/><e k="18-piAutoProcess" v="3-True"/><e k="18-AutomateProcessing" v="9-1"/><e k="18-piAutoDeleteReceipts" v="3-False"/></Data></UserConfiguration>"#.to_vec()
 }
 
 fn journal_sync_object(

@@ -533,6 +533,16 @@ pub(in crate::mapi) fn default_message_property_tags() -> Vec<u32> {
     ]
 }
 
+fn default_calendar_configuration_property_tags() -> Vec<u32> {
+    let mut tags = default_message_property_tags();
+    tags.extend([
+        PID_TAG_ASSOCIATED,
+        PID_TAG_ROAMING_DATATYPES,
+        PID_TAG_ROAMING_DICTIONARY,
+    ]);
+    tags
+}
+
 pub(in crate::mapi) fn default_contact_property_tags() -> Vec<u32> {
     vec![
         PID_TAG_MID,
@@ -750,7 +760,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .collaboration_folder_for_id(*folder_id)
                         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
                 {
-                    default_message_property_tags()
+                    default_calendar_configuration_property_tags()
                 } else {
                     default_contents_columns()
                 }
@@ -1053,7 +1063,7 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
                     .collaboration_folder_for_id(*folder_id)
                     .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
             {
-                default_message_property_tags()
+                default_calendar_configuration_property_tags()
             } else {
                 match snapshot
                     .collaboration_folder_for_id(*folder_id)

@@ -17596,18 +17596,75 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
     let message = &stream.message_changes[0];
     assert!(message.associated);
     assert_eq!(message.subject, "Calendar");
-    assert_eq!(message.header_message_size, Some(107));
+    assert_eq!(message.header_message_size, Some(301));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Configuration.Calendar")
     ));
     assert!(contains_bytes(&response_rops, b"<UserConfiguration>"));
+    assert!(contains_bytes(&response_rops, b"18-OLPrefsVersion"));
+    assert!(contains_bytes(&response_rops, b"18-piRemindDefault"));
+    assert!(contains_bytes(&response_rops, b"18-piAutoProcess"));
+    assert!(contains_bytes(&response_rops, b"18-AutomateProcessing"));
+    assert!(contains_bytes(&response_rops, b"18-piAutoDeleteReceipts"));
     for property_tag in [0x7C06_0003u32, 0x7C07_0102] {
         assert!(
             message.body_tags.contains(&property_tag),
             "missing bootstrap calendar configuration property 0x{property_tag:08x}"
         );
     }
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_associated_contents_columns_include_configuration_properties() {
+    let account = FakeStore::account();
+    let calendar = FakeStore::collection("default", "calendar", "Calendar");
+    let store = FakeStore {
+        session: Some(account),
+        calendar_collections: Arc::new(Mutex::new(vec![calendar])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x02, // RopGetContentsTable, associated contents
+        0x37, 0x00, 0x02, // RopQueryColumnsAll
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    let query_columns_offset = 18;
+    assert_eq!(response_rops[query_columns_offset], 0x37);
+    assert!(contains_bytes(
+        &response_rops,
+        &0x67AA_000Bu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x7C06_0003u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x7C07_0102u32.to_le_bytes()
+    ));
 }
 
 #[tokio::test]
