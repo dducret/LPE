@@ -1351,6 +1351,7 @@ pub(in crate::mapi) fn default_wlink_group_guid() -> [u8; 16] {
     ]
 }
 
+#[cfg(test)]
 pub(crate) fn default_wlink_group_uuid() -> Uuid {
     Uuid::from_bytes(default_wlink_group_guid())
 }

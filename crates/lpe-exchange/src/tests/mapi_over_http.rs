@@ -11142,7 +11142,7 @@ async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_only() {
+async fn mapi_over_http_common_views_fresh_profile_content_sync_is_empty() {
     let account = FakeStore::account();
     let definition_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
     let store = FakeStore {
@@ -11214,47 +11214,120 @@ async fn mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_o
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 2);
+    assert!(stream.message_changes.is_empty());
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.SFInfo")
     ));
     assert!(!contains_bytes(&response_rops, b"exchange_reminders"));
     assert!(!contains_bytes(&response_rops, b"occurrenceDismissals"));
-    let group = stream
-        .message_changes
-        .iter()
-        .find(|message| message.subject == "Mail")
-        .expect("Mail group header FAI row");
-    assert!(group.associated);
-    assert!(group.body_tags.contains(&PID_TAG_WLINK_GROUP_HEADER_ID));
-    assert!(group.body_tags.contains(&PID_TAG_WLINK_TYPE));
-    assert!(!group.body_tags.contains(&PID_TAG_WLINK_ENTRY_ID));
-    let shortcut = stream
-        .message_changes
-        .iter()
-        .find(|message| message.subject == "Inbox")
-        .expect("Inbox navigation shortcut FAI row");
-    assert!(shortcut.associated);
-    assert_eq!(
-        shortcut.parent_source_key,
-        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
-    );
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_TYPE));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_ORDINAL));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_ENTRY_ID));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_RECORD_KEY));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_STORE_ENTRY_ID));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_FOLDER_TYPE));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_CLSID));
-    assert!(shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_NAME_W));
-    assert!(!shortcut.body_tags.contains(&PID_TAG_WLINK_GROUP_HEADER_ID));
-    assert!(!stream.cnset_seen_fai.is_empty());
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.Link")
     ));
     assert!(!contains_bytes(&response_rops, &utf16z("Shortcuts")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_no_synthetic_items() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 26,
+        current_modseq: 26,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x39, 0xA1, // content sync, observed Outlook flags 0xa139
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x09, 0x00, // PropertyTagCount
+    ]);
+    for tag in [
+        0x1000_001F,
+        0x1006_0003,
+        0x1007_0003,
+        0x1008_001F,
+        0x1010_0003,
+        0x1011_0003,
+        0x3FF8_001F,
+        0x3FF9_0102,
+        0x300F_0102,
+    ] {
+        rops.extend_from_slice(&u32::to_le_bytes(tag));
+    }
+    for state_tag in [0x4017_0102, 0x6796_0102, 0x67DA_0102, 0x67D2_0102] {
+        rops.extend_from_slice(&[0x75, 0x00, 0x02]); // RopSynchronizationUploadStateStreamBegin
+        rops.extend_from_slice(&u32::to_le_bytes(state_tag));
+        rops.extend_from_slice(&0u32.to_le_bytes());
+        rops.extend_from_slice(&[0x77, 0x00, 0x02]); // RopSynchronizationUploadStateStreamEnd
+    }
+    rops.extend_from_slice(&[0x4E, 0x00, 0x02]); // RopFastTransferSourceGetBuffer
+    rops.extend_from_slice(&31680u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.WunderBar.Link")
+    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("Shortcuts")));
+
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(
+                    crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+                )
+                .unwrap()
+                .id,
+            ),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .expect("Common Views content checkpoint");
+    assert_eq!(checkpoint.last_change_sequence, 26);
+    assert_eq!(checkpoint.last_modseq, 26);
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("syncRootFolderId")
+            .and_then(|id| id.as_u64()),
+        Some(crate::mapi::identity::COMMON_VIEWS_FOLDER_ID)
+    );
 }
 
 #[tokio::test]

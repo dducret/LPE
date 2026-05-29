@@ -1460,13 +1460,33 @@ mod tests {
     #[test]
     fn common_views_shortcut_sync_uses_account_bound_entry_ids() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
-        let snapshot = MapiMailStoreSnapshot::empty();
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 101,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 0,
+                ordinal: 0x81,
+                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            },
+        ]);
 
         let objects = special_sync_objects_for(COMMON_VIEWS_FOLDER_ID, 0x01, &snapshot, account_id);
         let inbox_shortcut = objects
             .iter()
             .find(|object| object.subject == "Inbox")
-            .expect("default Inbox navigation shortcut");
+            .expect("persisted Inbox navigation shortcut");
 
         let property = |tag| {
             inbox_shortcut

@@ -3085,7 +3085,7 @@ mod tests {
     }
 
     #[test]
-    fn common_views_associated_contents_project_navigation_shortcuts_only() {
+    fn common_views_associated_contents_do_not_project_synthetic_navigation_shortcuts() {
         let definition_id = Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             definition_id,
@@ -3139,17 +3139,17 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            2
+            0
         );
         let response = rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
 
         assert_eq!(response[0], 0x15);
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
         }
-        assert!(response
+        assert!(!response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
         assert!(!response

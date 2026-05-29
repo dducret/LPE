@@ -864,40 +864,7 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
-        let mut messages = vec![
-            MapiNavigationShortcutMessage {
-                id: crate::mapi::identity::mapi_store_id(
-                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 100,
-                ),
-                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
-                subject: "Mail".to_string(),
-                target_folder_id: None,
-                shortcut_type: 4,
-                flags: 0,
-                section: 0,
-                ordinal: 0x80,
-                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-                group_name: "Mail".to_string(),
-            },
-            MapiNavigationShortcutMessage {
-                id: crate::mapi::identity::mapi_store_id(
-                    crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 101,
-                ),
-                folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002),
-                subject: "Inbox".to_string(),
-                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
-                shortcut_type: 0,
-                flags: 0,
-                section: 0,
-                ordinal: 0x81,
-                group_header_id: Some(crate::mapi::properties::default_wlink_group_uuid()),
-                group_name: "Mail".to_string(),
-            },
-        ];
-        messages.extend(self.navigation_shortcuts.iter().cloned());
-        messages
+        self.navigation_shortcuts.clone()
     }
 
     pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage> {

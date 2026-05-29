@@ -213,14 +213,16 @@ non-canonical LPE state.
   Outlook-created or imported Common Views shortcut messages. The bounded
   supported property surface is the visible shortcut subject, target folder
   EntryID, type, flags, section, ordinal, group header GUID, and group display
-  name. LPE also seeds a minimal Mail group header plus Inbox shortcut row for
-  cached-mode bootstrap. Outlook-created `WunderBar` group headers are persisted
-  as Common Views FAI rows with `PidTagWlinkType = 4` and linked shortcuts retain
-  the matching `PidTagWlinkGroupClsid`. This scope covers cached-mode profile
-  creation and reopen; full Exchange navigation-pane presentation parity,
-  shared-folder shortcut semantics, public-folder shortcut flags, and
-  read-only group-type extensions remain deferred until real Outlook traces
-  require them.
+  name. LPE does not synthesize default `WunderBar` rows for fresh profiles:
+  `[MS-OXOCFG]` defines navigation shortcuts as Common Views FAI messages that
+  clients create, store, and later read, so fresh-profile Common Views content
+  ICS can legitimately be empty. Outlook-created `WunderBar` group headers are
+  persisted as Common Views FAI rows with `PidTagWlinkType = 4` and linked
+  shortcuts retain the matching `PidTagWlinkGroupClsid`. This scope covers
+  cached-mode profile creation and reopen; full Exchange navigation-pane
+  presentation parity, shared-folder shortcut semantics, public-folder shortcut
+  flags, and read-only group-type extensions remain deferred until real Outlook
+  traces require them.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store.
 - Delegate and free/busy objects are canonical projections over
