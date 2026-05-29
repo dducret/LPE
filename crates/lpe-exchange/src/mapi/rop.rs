@@ -1213,6 +1213,98 @@ fn log_get_properties_specific_debug(
         outlook_bootstrap_property_details = %outlook_bootstrap_property_details,
         message = message,
     );
+    log_calendar_default_folder_lookup_debug(
+        object,
+        principal,
+        columns,
+        mailboxes,
+        emails,
+        snapshot,
+        &unsupported_tags,
+    );
+}
+
+fn log_calendar_default_folder_lookup_debug(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+    unsupported_tags: &[u32],
+) {
+    if !columns
+        .iter()
+        .any(|tag| canonical_property_storage_tag(*tag) == PID_TAG_IPM_APPOINTMENT_ENTRY_ID)
+    {
+        return;
+    }
+    let (object_kind, folder_id, _item_id) = mapi_object_debug_fields(object);
+    let lookup_location = match object {
+        Some(MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            ..
+        }) => "inbox_primary",
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID,
+            ..
+        }) => "root_fallback",
+        Some(MapiObject::Logon) => "store_logon",
+        Some(MapiObject::Folder { .. }) => "other_folder",
+        _ => "other_object",
+    };
+    let unsupported = unsupported_tags
+        .iter()
+        .any(|tag| canonical_property_storage_tag(*tag) == PID_TAG_IPM_APPOINTMENT_ENTRY_ID);
+    let entry_id = special_folder_identification_property_value(
+        principal.account_id,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+    )
+    .and_then(|value| match value {
+        MapiValue::Binary(bytes) => Some(bytes),
+        _ => None,
+    })
+    .unwrap_or_default();
+    let decoded_folder_id = crate::mapi::identity::object_id_from_folder_entry_id(&entry_id);
+    let calendar_collection = snapshot.collaboration_folder_for_id(CALENDAR_FOLDER_ID);
+    let returned_value_shape = format_property_value_shapes_for_debug(
+        object,
+        principal,
+        &[PID_TAG_IPM_APPOINTMENT_ENTRY_ID],
+        mailboxes,
+        emails,
+        snapshot,
+        unsupported_tags,
+    );
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x07",
+        object_kind,
+        folder_id = %folder_id,
+        microsoft_documented_lookup_order = "GetReceiveFolder(Inbox), Inbox.GetProps(PR_IPM_APPOINTMENT_ENTRYID), root fallback",
+        lookup_location,
+        property_tag = "0x36d00102",
+        property_name = "PidTagIpmAppointmentEntryId",
+        property_returned = !unsupported,
+        entry_id_bytes = entry_id.len(),
+        entry_id_preview = %hex_preview_for_debug(&entry_id, 24),
+        decoded_folder_id = %decoded_folder_id
+            .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_default(),
+        decoded_folder_is_calendar = decoded_folder_id == Some(CALENDAR_FOLDER_ID),
+        expected_calendar_folder_id = "0x0000000000100001",
+        calendar_folder_projected = calendar_collection.is_some(),
+        calendar_collection_id =
+            calendar_collection.map(|folder| folder.collection.id.as_str()).unwrap_or(""),
+        calendar_collection_name =
+            calendar_collection.map(|folder| folder.collection.display_name.as_str()).unwrap_or(""),
+        returned_property_value_shape = %returned_value_shape,
+        message = "rca debug mapi calendar default folder lookup"
+    );
 }
 
 #[derive(Default)]

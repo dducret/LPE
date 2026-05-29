@@ -8737,10 +8737,42 @@ where
                     *principal.account_id.as_bytes(),
                     principal.account_id.to_bytes_le(),
                 ];
-                responses.extend_from_slice(&rop_id_from_long_term_id_response(
-                    &request,
-                    &replica_guid_aliases,
-                ))
+                let long_term_id = request.long_term_id();
+                let decoded_object_id = long_term_id
+                    .and_then(crate::mapi::identity::object_id_from_folder_identifier_bytes);
+                let decoded_object_scope =
+                    debug_object_scope_for_id(decoded_object_id, mailboxes, emails, snapshot);
+                let response = rop_id_from_long_term_id_response(&request, &replica_guid_aliases);
+                let response_status = if response.len() > 6 {
+                    "ok"
+                } else {
+                    "ecNotFound"
+                };
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x44",
+                    microsoft_special_folder_open_rule =
+                        "MS-OXOSFLD special-folder EntryIDs can be converted to FIDs by RopIdFromLongTermId before RopOpenFolder",
+                    long_term_id_bytes = long_term_id.map(|bytes| bytes.len()).unwrap_or_default(),
+                    long_term_id_preview = %long_term_id
+                        .map(|bytes| hex_preview(bytes, 24))
+                        .unwrap_or_default(),
+                    decoded_object_id = decoded_object_id
+                        .map(|object_id| format!("{object_id:#018x}"))
+                        .unwrap_or_default(),
+                    decoded_object_is_calendar = decoded_object_id == Some(CALENDAR_FOLDER_ID),
+                    decoded_advertised_special_folder = decoded_object_id
+                        .map(is_advertised_special_folder)
+                        .unwrap_or(false),
+                    decoded_object_scope,
+                    response_status,
+                    message = "rca debug mapi id from long term id",
+                );
+                responses.extend_from_slice(&response)
             }
             Some(RopId::PublicFolderIsGhosted) => {
                 responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request))

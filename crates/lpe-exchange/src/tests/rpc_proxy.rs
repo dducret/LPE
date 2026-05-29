@@ -1742,4 +1742,3 @@ async fn rpc_proxy_accepts_authenticated_rca_probe_without_405() {
     let body = response_text(response).await;
     assert!(body.contains("Use MAPI over HTTP for mailbox access"));
 }
-
