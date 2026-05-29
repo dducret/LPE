@@ -14710,6 +14710,160 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         ..Default::default()
     };
     let service = ExchangeService::new(store.clone());
+
+    let bootstrap_connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    assert_eq!(
+        bootstrap_connect.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+    let mut bootstrap_headers = mapi_headers("Execute");
+    bootstrap_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&bootstrap_connect)).unwrap(),
+    );
+    let mut bootstrap_rops = vec![
+        0xFE, 0x00, 0x00, 0x01, // RopLogon
+    ];
+    bootstrap_rops.extend_from_slice(&0u32.to_le_bytes());
+    bootstrap_rops.extend_from_slice(&0u32.to_le_bytes());
+    bootstrap_rops.extend_from_slice(&0u16.to_le_bytes());
+    let bootstrap_logon = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &bootstrap_headers,
+            &execute_body(&rop_buffer(&bootstrap_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bootstrap_logon.status(), StatusCode::OK);
+    assert_eq!(
+        bootstrap_logon.headers().get("x-responsecode").unwrap(),
+        "0"
+    );
+    let mut bootstrap_cookie = mapi_cookie_header(&bootstrap_logon);
+    let bootstrap_logon_rops = response_rops_from_execute_response(bootstrap_logon).await;
+    assert!(contains_bytes(
+        &bootstrap_logon_rops,
+        &[0xFE, 0x00, 0, 0, 0, 0]
+    ));
+
+    let mut bootstrap_headers = mapi_headers("Execute");
+    bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
+    let mut bootstrap_getprops = Vec::new();
+    append_rop_get_properties_specific(
+        &mut bootstrap_getprops,
+        0,
+        &[
+            0x6638_0102, // PidTagSerializedReplidGuidMap
+        ],
+    );
+    let bootstrap_getprops_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &bootstrap_headers,
+            &execute_body(&rop_buffer(&bootstrap_getprops, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bootstrap_getprops_response.status(), StatusCode::OK);
+    assert_eq!(
+        bootstrap_getprops_response
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+    bootstrap_cookie = mapi_cookie_header(&bootstrap_getprops_response);
+    let bootstrap_getprops_rops =
+        response_rops_from_execute_response(bootstrap_getprops_response).await;
+    assert!(contains_bytes(
+        &bootstrap_getprops_rops,
+        &[0x07, 0x00, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &bootstrap_getprops_rops,
+        &crate::mapi::identity::STORE_REPLICA_GUID[..4]
+    ));
+
+    let mut bootstrap_headers = mapi_headers("Execute");
+    bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
+    let mut bootstrap_named_props = vec![
+        0x56, 0x00, 0x00, 0x02, // RopGetPropertyIdsFromNames, enumerate on Logon
+        0x00,
+    ];
+    bootstrap_named_props.extend_from_slice(&0u16.to_le_bytes());
+    let bootstrap_named_props_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &bootstrap_headers,
+            &execute_body(&rop_buffer(&bootstrap_named_props, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bootstrap_named_props_response.status(), StatusCode::OK);
+    assert_eq!(
+        bootstrap_named_props_response
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+    bootstrap_cookie = mapi_cookie_header(&bootstrap_named_props_response);
+    let bootstrap_named_props_rops =
+        response_rops_from_execute_response(bootstrap_named_props_response).await;
+    assert!(contains_bytes(
+        &bootstrap_named_props_rops,
+        &[0x56, 0x00, 0, 0, 0, 0]
+    ));
+
+    let mut bootstrap_headers = mapi_headers("Execute");
+    bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
+    let bootstrap_address_types = vec![
+        0x49, 0x00, 0x00, // RopGetAddressTypes
+    ];
+    let bootstrap_address_types_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &bootstrap_headers,
+            &execute_body(&rop_buffer(&bootstrap_address_types, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bootstrap_address_types_response.status(), StatusCode::OK);
+    assert_eq!(
+        bootstrap_address_types_response
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+    bootstrap_cookie = mapi_cookie_header(&bootstrap_address_types_response);
+    let bootstrap_address_types_rops =
+        response_rops_from_execute_response(bootstrap_address_types_response).await;
+    assert!(contains_bytes(
+        &bootstrap_address_types_rops,
+        &[0x49, 0x00, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&bootstrap_address_types_rops, b"EX\0SMTP\0"));
+    let mut bootstrap_disconnect_headers = mapi_headers("Disconnect");
+    bootstrap_disconnect_headers
+        .insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
+    let bootstrap_disconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &bootstrap_disconnect_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(bootstrap_disconnect.status(), StatusCode::OK);
+    assert_eq!(
+        bootstrap_disconnect
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await

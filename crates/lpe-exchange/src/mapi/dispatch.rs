@@ -2400,6 +2400,28 @@ fn format_debug_property_tags(tags: &[u32]) -> String {
         .join(",")
 }
 
+fn format_debug_property_ids(property_ids: &[u16]) -> String {
+    property_ids
+        .iter()
+        .map(|property_id| format!("{property_id:#06x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_debug_named_properties(properties: &[MapiNamedProperty]) -> String {
+    properties
+        .iter()
+        .map(|property| {
+            let kind = match &property.kind {
+                MapiNamedPropertyKind::Lid(lid) => format!("lid={lid:#010x}"),
+                MapiNamedPropertyKind::Name(name) => format!("name={name}"),
+            };
+            format!("guid={};{kind}", hex_preview(&property.guid, 16))
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn upload_state_property_name(tag: u32) -> &'static str {
     match tag {
         0x4017_0003 | 0x4017_0102 => "MetaTagIdsetGiven",
@@ -9152,6 +9174,24 @@ where
             }
             Some(RopId::GetAddressTypes) => {
                 echo_input_handle_table = true;
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x49",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    response_handle_index = request.response_handle_index(),
+                    object_kind = mapi_object_debug_kind(input_object(
+                        session,
+                        &handle_slots,
+                        &request,
+                    )),
+                    address_type_count = 2,
+                    address_types = "EX,SMTP",
+                    message = "rca debug mapi get address types",
+                );
                 responses.extend_from_slice(&rop_get_address_types_response(&request));
             }
             Some(RopId::GetNamesFromPropertyIds) => {
@@ -9210,15 +9250,35 @@ where
                         .into_iter()
                         .map(|(property_id, _property)| property_id)
                         .collect::<Vec<_>>();
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x56",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        response_handle_index = request.response_handle_index(),
+                        object_kind = "logon",
+                        create_missing = request.named_property_create(),
+                        requested_named_property_count = 0,
+                        requested_named_properties = "",
+                        missing_named_property_count = 0,
+                        missing_named_properties = "",
+                        returned_property_id_count = property_ids.len(),
+                        returned_property_ids = %format_debug_property_ids(&property_ids),
+                        message = "rca debug mapi get property ids from names",
+                    );
                     responses.extend_from_slice(&rop_get_property_ids_from_names_response(
                         &request,
                         &property_ids,
                     ));
                     continue;
                 }
+                let requested_named_properties = format_debug_named_properties(&properties);
                 let mut property_ids = Vec::with_capacity(properties.len());
                 let mut missing = Vec::new();
-                for (index, property) in properties.into_iter().enumerate() {
+                for (index, property) in properties.iter().cloned().enumerate() {
                     match session.property_id_for_name(property.clone(), false) {
                         Some(property_id) => property_ids.push(property_id),
                         None => {
@@ -9227,11 +9287,11 @@ where
                         }
                     }
                 }
+                let missing_properties = missing
+                    .iter()
+                    .map(|(_index, property)| property.clone())
+                    .collect::<Vec<_>>();
                 if !missing.is_empty() {
-                    let missing_properties = missing
-                        .iter()
-                        .map(|(_index, property)| property.clone())
-                        .collect::<Vec<_>>();
                     match store
                         .fetch_or_allocate_mapi_named_property_ids(
                             principal.account_id,
@@ -9273,6 +9333,29 @@ where
                         Err(_) => {}
                     }
                 }
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x56",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    response_handle_index = request.response_handle_index(),
+                    object_kind = mapi_object_debug_kind(input_object(
+                        session,
+                        &handle_slots,
+                        &request,
+                    )),
+                    create_missing = request.named_property_create(),
+                    requested_named_property_count = properties.len(),
+                    requested_named_properties = %requested_named_properties,
+                    missing_named_property_count = missing_properties.len(),
+                    missing_named_properties = %format_debug_named_properties(&missing_properties),
+                    returned_property_id_count = property_ids.len(),
+                    returned_property_ids = %format_debug_property_ids(&property_ids),
+                    message = "rca debug mapi get property ids from names",
+                );
                 responses.extend_from_slice(&rop_get_property_ids_from_names_response(
                     &request,
                     &property_ids,
@@ -9418,7 +9501,7 @@ where
                     mailbox_guid: principal.account_id.to_string(),
                     replid: STORE_REPLICA_ID.to_string(),
                     replica_guid: bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
-                    response_flags: "0x00".to_string(),
+                    response_flags: "0x07".to_string(),
                     special_folder_ids,
                 });
                 responses.extend_from_slice(&rop_logon_response_body(principal, &request));
