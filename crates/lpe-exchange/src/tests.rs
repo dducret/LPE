@@ -24536,6 +24536,71 @@ async fn mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids()
 }
 
 #[tokio::test]
+async fn mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_cache_write() {
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let root_folder_id = test_mapi_folder_id(1);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let conflicts = test_mapi_folder_id(0x1b).to_le_bytes();
+    let sync_issues = test_mapi_folder_id(0x1a).to_le_bytes();
+    let local_failures = test_mapi_folder_id(0x1c).to_le_bytes();
+    let server_failures = test_mapi_folder_id(0x1d).to_le_bytes();
+    let mut property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut property_values,
+        0x36D8_1102,
+        &[&conflicts, &sync_issues, &local_failures, &server_failures],
+    );
+
+    let mut rops = vec![
+        0x02, 0x00, 0x00, 0x01, // RopOpenFolder
+    ];
+    append_mapi_wire_id(&mut rops, root_folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x0A, 0x00, 0x01, // RopSetProperties on opened folder
+    ]);
+    rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state() {
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let folder_id = test_mapi_folder_id(5);

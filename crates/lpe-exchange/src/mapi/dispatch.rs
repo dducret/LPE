@@ -1376,7 +1376,7 @@ fn folder_set_property_problems(
                 };
             }
             if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
-                if *folder_id != INBOX_FOLDER_ID {
+                if !matches!(*folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
                     return Some((index, *tag, 0x8004_0102));
                 }
                 return match value {

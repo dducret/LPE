@@ -150,6 +150,11 @@ non-canonical LPE state.
   46-byte folder EntryIDs written back by Outlook remain accepted, normalized,
   and retained on the live root-folder handle for cached-mode bootstrap, while
   canonical projection still wins after reconnect.
+- `PidTagAdditionalRenEntryIds` is canonically an Inbox special-folder
+  identification property under `[MS-OXOSFLD]` section 2.2.4. Outlook 2016/2019
+  cached-mode startup can still write the same indexed values to the Root
+  handle after hierarchy sync; LPE accepts that Root write as a transient cache
+  write and strips it instead of persisting or advertising Root ownership.
 - `RopIdFromLongTermId` advertises the canonical store replica GUID in
   `PidTagSerializedReplidGuidMap`, but it also accepts the authenticated
   mailbox account GUID byte layouts as legacy replica aliases so stale Outlook
