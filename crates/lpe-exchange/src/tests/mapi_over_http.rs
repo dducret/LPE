@@ -18766,8 +18766,12 @@ async fn mapi_over_http_save_message_falls_back_when_import_source_key_is_alread
 }
 
 #[tokio::test]
-async fn mapi_over_http_save_message_ignores_out_of_range_import_source_key() {
+async fn mapi_over_http_save_message_preserves_out_of_range_import_source_key() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let imported_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1,
+        ));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -18778,7 +18782,9 @@ async fn mapi_over_http_save_message_ignores_out_of_range_import_source_key() {
         ..Default::default()
     };
     let imported_emails = store.imported_emails.clone();
+    let emails = store.emails.clone();
     let mapi_identities = store.mapi_identities.clone();
+    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -18792,13 +18798,10 @@ async fn mapi_over_http_save_message_ignores_out_of_range_import_source_key() {
         0x0037_001F,
         "ICS out of range source key",
     );
-    let out_of_range_object_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1,
-    );
     append_mapi_binary_property(
         &mut property_values,
         PID_TAG_SOURCE_KEY,
-        &crate::mapi::identity::source_key_for_object_id(out_of_range_object_id),
+        &imported_source_key,
     );
 
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
@@ -18833,9 +18836,18 @@ async fn mapi_over_http_save_message_ignores_out_of_range_import_source_key() {
     ));
     assert_eq!(imported_emails.lock().unwrap().len(), 1);
     let allocated = mapi_identities.lock().unwrap();
+    let source_keys = mapi_identity_source_keys.lock().unwrap();
+    let saved_id = emails.lock().unwrap().last().unwrap().id;
     assert!(!allocated
         .values()
-        .any(|object_id| *object_id == out_of_range_object_id));
+        .any(
+            |object_id| crate::mapi::identity::source_key_for_object_id(*object_id)
+                == imported_source_key
+        ));
+    assert_eq!(
+        source_keys.get(&saved_id).map(Vec::as_slice),
+        Some(imported_source_key.as_slice())
+    );
 }
 
 #[tokio::test]
@@ -18919,6 +18931,10 @@ async fn mapi_over_http_save_message_skips_sync_metadata_only_import() {
 #[tokio::test]
 async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let imported_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1,
+        ));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -18929,7 +18945,9 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
         ..Default::default()
     };
     let imported_emails = store.imported_emails.clone();
+    let emails = store.emails.clone();
     let mapi_identities = store.mapi_identities.clone();
+    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -18937,14 +18955,11 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
         .unwrap();
     let cookie = mapi_cookie_header(&connect);
 
-    let out_of_range_object_id = crate::mapi::identity::mapi_store_id(
-        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1,
-    );
     let mut property_values = Vec::new();
     append_mapi_binary_property(
         &mut property_values,
         PID_TAG_SOURCE_KEY,
-        &crate::mapi::identity::source_key_for_object_id(out_of_range_object_id),
+        &imported_source_key,
     );
     append_mapi_binary_property(&mut property_values, PID_TAG_CHANGE_KEY, b"change");
     append_mapi_utf16_property(&mut property_values, 0x001A_001F, "IPM.Note");
@@ -18985,18 +19000,124 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
     assert!(!contains_bytes(
         &response_rops,
-        &mapi_wire_id_bytes(out_of_range_object_id)
+        &imported_source_key[16..22]
     ));
     assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
     let recorded = imported_emails.lock().unwrap();
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].mailbox_id, trash_id);
     assert_eq!(recorded[0].subject, "Client trash upload");
-    assert!(!mapi_identities
-        .lock()
-        .unwrap()
-        .values()
-        .any(|object_id| *object_id == out_of_range_object_id));
+    assert_eq!(
+        mapi_identity_source_keys
+            .lock()
+            .unwrap()
+            .get(&emails.lock().unwrap().last().unwrap().id)
+            .map(Vec::as_slice),
+        Some(imported_source_key.as_slice())
+    );
+    assert!(!mapi_identities.lock().unwrap().values().any(|object_id| {
+        crate::mapi::identity::source_key_for_object_id(*object_id) == imported_source_key
+    }));
+}
+
+#[tokio::test]
+async fn mapi_over_http_replays_outlook_trash_collector_import_then_save() {
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let imported_source_key =
+        crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 1,
+        ));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let emails = store.emails.clone();
+    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+
+    let mut import_values = Vec::new();
+    append_mapi_binary_property(&mut import_values, PID_TAG_SOURCE_KEY, &imported_source_key);
+    append_mapi_i64_property(&mut import_values, PID_TAG_LAST_MODIFICATION_TIME, 0);
+    append_mapi_binary_property(&mut import_values, PID_TAG_CHANGE_KEY, b"outlook-change");
+    append_mapi_binary_property(
+        &mut import_values,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        b"outlook-pcl",
+    );
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+    ]);
+    for state_tag in [
+        META_TAG_IDSET_GIVEN,
+        META_TAG_CNSET_SEEN,
+        META_TAG_CNSET_SEEN_FAI,
+    ] {
+        rops.extend_from_slice(&[0x75, 0x00, 0x02]);
+        rops.extend_from_slice(&state_tag.to_le_bytes());
+        rops.extend_from_slice(&0u32.to_le_bytes());
+        rops.extend_from_slice(&[0x77, 0x00, 0x02]);
+    }
+    rops.extend_from_slice(&[0x72, 0x00, 0x02, 0x03]);
+    rops.push(0);
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    rops.extend_from_slice(&import_values);
+    let mut first_set_values = Vec::new();
+    append_mapi_utf16_property(&mut first_set_values, 0x001A_001F, "IPM.Note");
+    append_mapi_utf16_property(&mut first_set_values, 0x0037_001F, "Outlook trash upload");
+    let mut second_set_values = Vec::new();
+    append_mapi_utf16_property(&mut second_set_values, PID_TAG_BODY_W, "Saved after import");
+    append_rop_set_properties(&mut rops, 3, 2, &first_set_values);
+    append_rop_modify_recipients(&mut rops, 3, &[]);
+    append_rop_set_properties(&mut rops, 3, 1, &second_set_values);
+    append_rop_save_changes_message(&mut rops, 3, 3);
+    rops.extend_from_slice(&[
+        0x07, 0x00, 0x00, // RopGetPropertiesSpecific
+    ]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&PID_TAG_SOURCE_KEY.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x7E, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x00, 0, 0, 0, 0]));
+
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].mailbox_id, trash_id);
+    assert_eq!(recorded[0].subject, "Outlook trash upload");
+    assert_eq!(
+        mapi_identity_source_keys
+            .lock()
+            .unwrap()
+            .get(&emails.lock().unwrap().last().unwrap().id)
+            .map(Vec::as_slice),
+        Some(imported_source_key.as_slice())
+    );
 }
 
 #[tokio::test]

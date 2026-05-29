@@ -150,6 +150,9 @@ pub(crate) fn canonical_message_change_number_with_attachments(
 }
 
 pub(crate) fn source_key_for_uuid(id: &Uuid) -> Vec<u8> {
+    if let Some(source_key) = crate::mapi::identity::mapped_mapi_source_key(id) {
+        return source_key;
+    }
     let object_id =
         crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI identity mapping missing");
     crate::mapi::identity::source_key_for_object_id(object_id)

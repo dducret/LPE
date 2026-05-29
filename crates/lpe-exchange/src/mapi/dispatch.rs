@@ -4613,6 +4613,7 @@ where
                                     MapiIdentityObjectKind::Contact,
                                     contact.id,
                                     None,
+                                    None,
                                 )
                                 .await
                                 {
@@ -4692,6 +4693,7 @@ where
                                     MapiIdentityObjectKind::CalendarEvent,
                                     event.id,
                                     None,
+                                    None,
                                 )
                                 .await
                                 {
@@ -4758,6 +4760,7 @@ where
                                     MapiIdentityObjectKind::Task,
                                     task.id,
                                     None,
+                                    None,
                                 )
                                 .await
                                 {
@@ -4807,6 +4810,7 @@ where
                                     principal,
                                     MapiIdentityObjectKind::Note,
                                     note.id,
+                                    None,
                                     None,
                                 )
                                 .await
@@ -4865,6 +4869,7 @@ where
                                     principal,
                                     MapiIdentityObjectKind::JournalEntry,
                                     entry.id,
+                                    None,
                                     None,
                                 )
                                 .await
@@ -4947,6 +4952,7 @@ where
                                     MapiIdentityObjectKind::ConversationAction,
                                     saved.id,
                                     None,
+                                    None,
                                 )
                                 .await
                                 {
@@ -5025,6 +5031,7 @@ where
                                     principal,
                                     MapiIdentityObjectKind::NavigationShortcut,
                                     saved.id,
+                                    None,
                                     None,
                                 )
                                 .await
@@ -5149,8 +5156,10 @@ where
                 }
                 let input =
                     jmap_import_from_pending_message(principal, mailbox, &properties, &recipients);
-                let reserved_global_counter =
-                    imported_source_key_reserved_global_counter(&properties);
+                let imported_source_key = imported_message_source_key(&properties);
+                let imported_source_key_global_counter = imported_source_key
+                    .as_deref()
+                    .and_then(source_key_global_counter);
                 match store
                     .import_jmap_email(
                         input,
@@ -5181,7 +5190,7 @@ where
                                 store,
                                 principal,
                                 email.id,
-                                reserved_global_counter,
+                                imported_source_key.clone(),
                             )
                             .await
                             {
@@ -5199,8 +5208,12 @@ where
                                         object_kind = "message",
                                         folder_id = %format!("{folder_id:#018x}"),
                                         folder_role = role_for_folder_id(folder_id).unwrap_or(""),
-                                        reserved_global_counter = reserved_global_counter
+                                        imported_source_key_global_counter = imported_source_key_global_counter
                                             .map(|counter| counter.to_string())
+                                            .unwrap_or_default(),
+                                        imported_source_key = %imported_source_key
+                                            .as_deref()
+                                            .map(bytes_to_hex)
                                             .unwrap_or_default(),
                                         identity_error = %error,
                                         "rca debug mapi save changes message identity"
@@ -5250,8 +5263,12 @@ where
                             folder_id = %format!("{folder_id:#018x}"),
                             folder_role = role_for_folder_id(folder_id).unwrap_or(""),
                             item_id = %format!("{message_id:#018x}"),
-                            reserved_global_counter = reserved_global_counter
+                            imported_source_key_global_counter = imported_source_key_global_counter
                                 .map(|counter| counter.to_string())
+                                .unwrap_or_default(),
+                            imported_source_key = %imported_source_key
+                                .as_deref()
+                                .map(bytes_to_hex)
                                 .unwrap_or_default(),
                             preserved_import_source_key,
                             identity_fallback_reason = %identity_fallback_reason,
@@ -5679,6 +5696,7 @@ where
                             principal,
                             MapiIdentityObjectKind::Mailbox,
                             mailbox.id,
+                            None,
                             None,
                         )
                         .await
@@ -6642,6 +6660,7 @@ where
                             MapiIdentityObjectKind::Message,
                             submitted.message_id,
                             None,
+                            None,
                         )
                         .await
                         {
@@ -6738,6 +6757,7 @@ where
                                             MapiIdentityObjectKind::Note,
                                             copied.id,
                                             None,
+                                            None,
                                         )
                                         .await
                                         .is_err()
@@ -6783,6 +6803,7 @@ where
                                         principal,
                                         MapiIdentityObjectKind::JournalEntry,
                                         copied.id,
+                                        None,
                                         None,
                                     )
                                     .await
@@ -8399,6 +8420,7 @@ where
                                 MapiIdentityObjectKind::NavigationShortcut,
                                 saved.id,
                                 None,
+                                None,
                             )
                             .await
                             {
@@ -8672,6 +8694,7 @@ where
                             MapiIdentityObjectKind::Mailbox,
                             mailbox.id,
                             None,
+                            None,
                         )
                         .await
                         {
@@ -8878,6 +8901,7 @@ where
                             principal,
                             MapiIdentityObjectKind::Message,
                             moved.id,
+                            None,
                             None,
                         )
                         .await
@@ -9527,13 +9551,18 @@ where
             object_kind,
             canonical_id: *object_id,
             reserved_global_counter: None,
+            source_key: None,
         })
         .collect::<Vec<_>>();
     let identities = store
         .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
         .await?;
     for identity in &identities {
-        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key.clone()),
+        );
     }
     Ok(identities
         .into_iter()
@@ -9638,6 +9667,7 @@ async fn remember_created_mapi_identity<S>(
     object_kind: MapiIdentityObjectKind,
     canonical_id: Uuid,
     reserved_global_counter: Option<u64>,
+    source_key: Option<Vec<u8>>,
 ) -> Result<u64>
 where
     S: ExchangeStore,
@@ -9646,6 +9676,7 @@ where
         object_kind,
         canonical_id,
         reserved_global_counter,
+        source_key,
     }];
     let records = store
         .fetch_or_allocate_mapi_identities(principal.account_id, &requests)
@@ -9654,7 +9685,15 @@ where
         .first()
         .map(|record| record.object_id)
         .ok_or_else(|| anyhow::anyhow!("MAPI identity allocator returned no record"))?;
-    crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
+    let source_key = records
+        .first()
+        .map(|record| record.source_key.clone())
+        .unwrap_or_default();
+    crate::mapi::identity::remember_mapi_identity_with_source_key(
+        canonical_id,
+        object_id,
+        Some(source_key),
+    );
     Ok(object_id)
 }
 
@@ -9662,21 +9701,26 @@ async fn remember_created_message_mapi_identity<S>(
     store: &S,
     principal: &AccountPrincipal,
     canonical_id: Uuid,
-    reserved_global_counter: Option<u64>,
+    source_key: Option<Vec<u8>>,
 ) -> Result<(u64, bool, String)>
 where
     S: ExchangeStore,
 {
+    let reserved_global_counter = source_key
+        .as_deref()
+        .and_then(persistable_import_source_key_global_counter);
     if reserved_global_counter.is_none() {
+        let preserved_source_key = source_key.is_some();
         let object_id = remember_created_mapi_identity(
             store,
             principal,
             MapiIdentityObjectKind::Message,
             canonical_id,
             None,
+            source_key,
         )
         .await?;
-        return Ok((object_id, false, String::new()));
+        return Ok((object_id, preserved_source_key, String::new()));
     }
 
     match remember_created_mapi_identity(
@@ -9685,6 +9729,7 @@ where
         MapiIdentityObjectKind::Message,
         canonical_id,
         reserved_global_counter,
+        source_key.clone(),
     )
     .await
     {
@@ -9696,6 +9741,7 @@ where
                 MapiIdentityObjectKind::Message,
                 canonical_id,
                 None,
+                source_key,
             )
             .await?;
             Ok((object_id, false, error.to_string()))
@@ -9703,14 +9749,13 @@ where
     }
 }
 
-fn imported_source_key_reserved_global_counter(
-    properties: &HashMap<u32, MapiValue>,
-) -> Option<u64> {
+fn imported_message_source_key(properties: &HashMap<u32, MapiValue>) -> Option<Vec<u8>> {
     let source_key = match properties.get(&PID_TAG_SOURCE_KEY)? {
         MapiValue::Binary(bytes) => bytes,
         _ => return None,
     };
-    persistable_import_source_key_global_counter(source_key)
+    (source_key.len() == 22 && source_key[..16] == crate::mapi::identity::STORE_REPLICA_GUID)
+        .then(|| source_key.clone())
 }
 
 fn pending_message_is_sync_metadata_only(

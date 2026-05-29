@@ -185,7 +185,11 @@ where
         .await
         .context("allocate MAPI mailbox identities")?
     {
-        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key.clone()),
+        );
     }
 
     log_mapi_store_load_step(
@@ -200,7 +204,11 @@ where
         .context("fetch MAPI requested object identities")?;
     log_mapi_requested_identity_resolution(account_id, plan, &identities);
     for identity in &identities {
-        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key.clone()),
+        );
     }
 
     let requested_mailbox_ids = identities
@@ -275,6 +283,7 @@ where
             object_kind: MapiIdentityObjectKind::Message,
             canonical_id: *message_id,
             reserved_global_counter: None,
+            source_key: None,
         })
         .collect::<Vec<_>>();
     log_mapi_store_load_step(
@@ -288,7 +297,11 @@ where
         .await
         .context("allocate MAPI message identities")?
     {
-        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key),
+        );
     }
     log_mapi_store_load_step(
         account_id,
@@ -534,11 +547,13 @@ where
             object_kind: MapiIdentityObjectKind::Contact,
             canonical_id: contact.id,
             reserved_global_counter: None,
+            source_key: None,
         })
         .chain(events.iter().map(|event| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::CalendarEvent,
             canonical_id: event.id,
             reserved_global_counter: None,
+            source_key: None,
         }))
         .chain(crate::mapi_store::default_calendar_folder_identity_request(
             &calendar_collections,
@@ -547,16 +562,19 @@ where
             object_kind: MapiIdentityObjectKind::Task,
             canonical_id: task.id,
             reserved_global_counter: None,
+            source_key: None,
         }))
         .chain(notes.iter().map(|note| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::Note,
             canonical_id: note.id,
             reserved_global_counter: None,
+            source_key: None,
         }))
         .chain(journal_entries.iter().map(|entry| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::JournalEntry,
             canonical_id: entry.id,
             reserved_global_counter: None,
+            source_key: None,
         }))
         .chain(
             search_folder_definitions
@@ -565,6 +583,7 @@ where
                     object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
                     canonical_id: definition.id,
                     reserved_global_counter: None,
+                    source_key: None,
                 }),
         )
         .chain(
@@ -574,6 +593,7 @@ where
                     object_kind: MapiIdentityObjectKind::ConversationAction,
                     canonical_id: action.id,
                     reserved_global_counter: None,
+                    source_key: None,
                 }),
         )
         .chain(
@@ -583,6 +603,7 @@ where
                     object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
                     canonical_id: message.id,
                     reserved_global_counter: None,
+                    source_key: None,
                 }),
         )
         .collect::<Vec<_>>();
@@ -597,7 +618,11 @@ where
         .await
         .context("allocate MAPI non-message identities")?
     {
-        crate::mapi::identity::remember_mapi_identity(identity.canonical_id, identity.object_id);
+        crate::mapi::identity::remember_mapi_identity_with_source_key(
+            identity.canonical_id,
+            identity.object_id,
+            Some(identity.source_key),
+        );
     }
     let mailbox_ids = mailboxes
         .iter()
@@ -1383,6 +1408,7 @@ fn mapi_identity_requests_for_mailboxes(mailboxes: &[JmapMailbox]) -> Vec<MapiId
             object_kind: MapiIdentityObjectKind::Mailbox,
             canonical_id: mailbox.id,
             reserved_global_counter: mapi_store::reserved_folder_counter_for_role(&mailbox.role),
+            source_key: None,
         })
         .collect()
 }

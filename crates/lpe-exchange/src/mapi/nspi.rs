@@ -1364,6 +1364,7 @@ fn nspi_identity_request(entry: &ExchangeAddressBookEntry) -> MapiIdentityReques
         },
         canonical_id: entry.id,
         reserved_global_counter: None,
+        source_key: None,
     }
 }
 

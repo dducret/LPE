@@ -1100,9 +1100,10 @@ impl<T: ExchangeStore> MapiStore for T {
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
                 .await?
             {
-                crate::mapi::identity::remember_mapi_identity(
+                crate::mapi::identity::remember_mapi_identity_with_source_key(
                     identity.canonical_id,
                     identity.object_id,
+                    Some(identity.source_key),
                 );
             }
             let mailbox_ids = mailboxes
@@ -1155,11 +1156,13 @@ fn mapi_identity_requests(
         object_kind: MapiIdentityObjectKind::Mailbox,
         canonical_id: mailbox.id,
         reserved_global_counter: reserved_folder_counter_for_role(&mailbox.role),
+        source_key: None,
     }));
     requests.extend(emails.iter().map(|email| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::Message,
         canonical_id: email.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     if let Some(request) = default_calendar_folder_identity_request(calendar_collections) {
         requests.push(request);
@@ -1168,26 +1171,31 @@ fn mapi_identity_requests(
         object_kind: MapiIdentityObjectKind::Contact,
         canonical_id: contact.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     requests.extend(events.iter().map(|event| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::CalendarEvent,
         canonical_id: event.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     requests.extend(tasks.iter().map(|task| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::Task,
         canonical_id: task.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     requests.extend(notes.iter().map(|note| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::Note,
         canonical_id: note.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     requests.extend(journal_entries.iter().map(|entry| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::JournalEntry,
         canonical_id: entry.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     requests.extend(
         search_folder_definitions
@@ -1196,12 +1204,14 @@ fn mapi_identity_requests(
                 object_kind: MapiIdentityObjectKind::SearchFolderDefinition,
                 canonical_id: definition.id,
                 reserved_global_counter: None,
+                source_key: None,
             }),
     );
     requests.extend(rules.iter().map(|rule| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::Rule,
         canonical_id: rule.id,
         reserved_global_counter: None,
+        source_key: None,
     }));
     requests.extend(
         conversation_actions
@@ -1210,6 +1220,7 @@ fn mapi_identity_requests(
                 object_kind: MapiIdentityObjectKind::ConversationAction,
                 canonical_id: action.id,
                 reserved_global_counter: None,
+                source_key: None,
             }),
     );
     requests.extend(
@@ -1219,6 +1230,7 @@ fn mapi_identity_requests(
                 object_kind: MapiIdentityObjectKind::NavigationShortcut,
                 canonical_id: shortcut.id,
                 reserved_global_counter: None,
+                source_key: None,
             }),
     );
     requests.extend(
@@ -1228,6 +1240,7 @@ fn mapi_identity_requests(
                 object_kind: MapiIdentityObjectKind::DelegateFreeBusyMessage,
                 canonical_id: message.id,
                 reserved_global_counter: None,
+                source_key: None,
             }),
     );
     requests
@@ -1249,6 +1262,7 @@ pub(crate) fn default_calendar_folder_identity_request(
             object_kind: MapiIdentityObjectKind::Mailbox,
             canonical_id: mailbox.id,
             reserved_global_counter: Some(crate::mapi::identity::CALENDAR_FOLDER_COUNTER),
+            source_key: None,
         })
 }
 

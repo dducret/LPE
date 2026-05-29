@@ -90,12 +90,14 @@ pub(crate) struct MapiIdentityRequest {
     pub(crate) object_kind: MapiIdentityObjectKind,
     pub(crate) canonical_id: Uuid,
     pub(crate) reserved_global_counter: Option<u64>,
+    pub(crate) source_key: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiIdentityRecord {
     pub(crate) canonical_id: Uuid,
     pub(crate) object_id: u64,
+    pub(crate) source_key: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -926,7 +928,7 @@ impl ExchangeStore for Storage {
                 let kind = request.object_kind.as_str();
                 let existing = sqlx::query(
                     r#"
-                    SELECT mapi_object_id
+                    SELECT mapi_object_id, source_key
                     FROM mapi_object_identities
                     WHERE tenant_id = $1
                       AND account_id = $2
@@ -943,16 +945,20 @@ impl ExchangeStore for Storage {
                 .fetch_optional(&mut *tx)
                 .await?;
 
-                let object_id = if let Some(row) = existing {
-                    row.get::<i64, _>("mapi_object_id") as u64
+                let (object_id, source_key) = if let Some(row) = existing {
+                    (
+                        row.get::<i64, _>("mapi_object_id") as u64,
+                        row.get("source_key"),
+                    )
                 } else {
                     let global_counter = if let Some(counter) = request.reserved_global_counter {
                         counter
                     } else {
                         allocate_next_mapi_global_counter(&mut tx, tenant_id, account_id).await?
                     };
-                    let (object_id, source_key, change_key, instance_key) =
+                    let (object_id, default_source_key, change_key, instance_key) =
                         crate::mapi::identity::persisted_identity_material(global_counter);
+                    let source_key = request.source_key.clone().unwrap_or(default_source_key);
                     let row = sqlx::query(
                         r#"
                         INSERT INTO mapi_object_identities (
@@ -975,7 +981,7 @@ impl ExchangeStore for Storage {
                                 THEN mapi_object_identities.updated_at
                                 ELSE NOW()
                             END
-                        RETURNING mapi_object_id
+                        RETURNING mapi_object_id, source_key
                         "#,
                     )
                     .bind(tenant_id)
@@ -989,11 +995,15 @@ impl ExchangeStore for Storage {
                     .bind(instance_key)
                     .fetch_one(&mut *tx)
                     .await?;
-                    row.get::<i64, _>("mapi_object_id") as u64
+                    (
+                        row.get::<i64, _>("mapi_object_id") as u64,
+                        row.get("source_key"),
+                    )
                 };
                 records.push(MapiIdentityRecord {
                     canonical_id: request.canonical_id,
                     object_id,
+                    source_key,
                 });
             }
             tx.commit().await?;

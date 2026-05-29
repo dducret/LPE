@@ -6,7 +6,13 @@ pub(crate) const STORE_REPLICA_GUID: [u8; 16] = [
     0x74, 0x1f, 0x6f, 0xd3, 0x8e, 0x1a, 0x65, 0x4f, 0x9d, 0x42, 0x2d, 0xfb, 0x45, 0x1c, 0x8f, 0x10,
 ];
 
-static MAPI_OBJECT_IDS: OnceLock<Mutex<HashMap<Uuid, u64>>> = OnceLock::new();
+static MAPI_OBJECT_IDS: OnceLock<Mutex<HashMap<Uuid, MapiIdentityMaterial>>> = OnceLock::new();
+
+#[derive(Debug, Clone)]
+struct MapiIdentityMaterial {
+    object_id: u64,
+    source_key: Option<Vec<u8>>,
+}
 
 pub(crate) const ROOT_FOLDER_COUNTER: u64 = 1;
 pub(crate) const DEFERRED_ACTION_FOLDER_COUNTER: u64 = 2;
@@ -145,12 +151,27 @@ pub(crate) fn wire_id_bytes_from_object_id(object_id: u64) -> Option<[u8; 8]> {
     Some(bytes)
 }
 
+#[allow(dead_code)]
 pub(crate) fn remember_mapi_identity(canonical_id: Uuid, object_id: u64) {
+    remember_mapi_identity_with_source_key(canonical_id, object_id, None);
+}
+
+pub(crate) fn remember_mapi_identity_with_source_key(
+    canonical_id: Uuid,
+    object_id: u64,
+    source_key: Option<Vec<u8>>,
+) {
     let mut ids = MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    ids.insert(canonical_id, object_id);
+    ids.insert(
+        canonical_id,
+        MapiIdentityMaterial {
+            object_id,
+            source_key,
+        },
+    );
 }
 
 pub(crate) fn mapped_mapi_object_id(canonical_id: &Uuid) -> Option<u64> {
@@ -159,7 +180,16 @@ pub(crate) fn mapped_mapi_object_id(canonical_id: &Uuid) -> Option<u64> {
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(canonical_id)
-        .copied()
+        .map(|identity| identity.object_id)
+}
+
+pub(crate) fn mapped_mapi_source_key(canonical_id: &Uuid) -> Option<Vec<u8>> {
+    MAPI_OBJECT_IDS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(canonical_id)
+        .and_then(|identity| identity.source_key.clone())
 }
 
 pub(crate) fn long_term_id_from_object_id(object_id: u64) -> Option<[u8; 24]> {

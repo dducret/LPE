@@ -296,6 +296,7 @@ async fn mapi_identity_source_key_lookup_and_checkpoints_round_trip() {
                 object_kind: MapiIdentityObjectKind::Mailbox,
                 canonical_id: mailbox.id,
                 reserved_global_counter: None,
+                source_key: None,
             }],
         )
         .await
@@ -367,6 +368,7 @@ struct FakeStore {
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
+    mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
     mapi_custom_property_values: Arc<Mutex<HashMap<FakeMapiCustomPropertyKey, Vec<u8>>>>,
     mapi_checkpoints: Arc<Mutex<HashMap<(Option<Uuid>, MapiCheckpointKind), MapiSyncCheckpoint>>>,
@@ -650,6 +652,7 @@ impl FakeStore {
         object_id: u64,
     ) -> Option<MapiIdentityLookupRecord> {
         let identities = self.mapi_identities.lock().unwrap().clone();
+        let source_keys = self.mapi_identity_source_keys.lock().unwrap().clone();
         let mailbox_match = self
             .mailboxes
             .lock()
@@ -724,7 +727,10 @@ impl FakeStore {
             object_kind,
             canonical_id,
             object_id,
-            source_key: crate::mapi::identity::source_key_for_object_id(object_id),
+            source_key: source_keys
+                .get(&canonical_id)
+                .cloned()
+                .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id)),
         })
     }
 
@@ -796,6 +802,7 @@ impl ExchangeStore for FakeStore {
     ) -> StoreFuture<'a, Vec<MapiIdentityRecord>> {
         Box::pin(async move {
             let mut identities = self.mapi_identities.lock().unwrap();
+            let mut source_keys = self.mapi_identity_source_keys.lock().unwrap();
             let mut next_counter = self.next_mapi_global_counter.lock().unwrap();
             if *next_counter < crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER {
                 *next_counter = crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER;
@@ -839,11 +846,20 @@ impl ExchangeStore for FakeStore {
                         ));
                     }
                     identities.insert(request.canonical_id, object_id);
+                    if let Some(source_key) = request.source_key.clone() {
+                        source_keys.insert(request.canonical_id, source_key);
+                    }
                     object_id
                 };
+                let source_key = request
+                    .source_key
+                    .clone()
+                    .or_else(|| source_keys.get(&request.canonical_id).cloned())
+                    .unwrap_or_else(|| crate::mapi::identity::source_key_for_object_id(object_id));
                 records.push(MapiIdentityRecord {
                     canonical_id: request.canonical_id,
                     object_id,
+                    source_key,
                 });
             }
             Ok(records)
@@ -867,10 +883,16 @@ impl ExchangeStore for FakeStore {
         _account_id: Uuid,
         source_keys: &'a [Vec<u8>],
     ) -> StoreFuture<'a, Vec<MapiIdentityLookupRecord>> {
+        let stored_source_keys = self.mapi_identity_source_keys.lock().unwrap().clone();
+        let stored_identities = self.mapi_identities.lock().unwrap().clone();
         let records = source_keys
             .iter()
             .filter_map(|source_key| {
-                crate::mapi::identity::object_id_from_source_key(source_key)
+                stored_source_keys
+                    .iter()
+                    .find(|(_, stored_source_key)| stored_source_key.as_slice() == source_key)
+                    .and_then(|(canonical_id, _)| stored_identities.get(canonical_id).copied())
+                    .or_else(|| crate::mapi::identity::object_id_from_source_key(source_key))
                     .and_then(|object_id| self.fake_mapi_identity_lookup_for_object_id(object_id))
             })
             .collect::<Vec<_>>();
