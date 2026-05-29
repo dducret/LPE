@@ -1348,12 +1348,26 @@ fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u
         PID_TAG_USER_GUID,
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE,
     ];
+    const REQUIRED_OUTLOOK_BOOTSTRAP_LOGON_PROPS: [u32; 8] = [
+        PID_TAG_MAILBOX_OWNER_NAME_W,
+        PID_TAG_MAILBOX_OWNER_ENTRY_ID,
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+        PID_TAG_SERVER_CONNECTED_ICON,
+        PID_TAG_SERVER_ACCOUNT_ICON,
+        PID_TAG_PRIVATE,
+        PID_TAG_OUTLOOK_STORE_STATE,
+        PID_TAG_USER_GUID,
+    ];
 
     matches!(object, Some(MapiObject::Logon))
-        && columns.len() == OUTLOOK_BOOTSTRAP_LOGON_PROPS.len()
-        && OUTLOOK_BOOTSTRAP_LOGON_PROPS
+        && columns.len() >= REQUIRED_OUTLOOK_BOOTSTRAP_LOGON_PROPS.len()
+        && columns.len() <= OUTLOOK_BOOTSTRAP_LOGON_PROPS.len()
+        && REQUIRED_OUTLOOK_BOOTSTRAP_LOGON_PROPS
             .iter()
             .all(|expected| columns.contains(expected))
+        && columns
+            .iter()
+            .all(|tag| OUTLOOK_BOOTSTRAP_LOGON_PROPS.contains(tag))
 }
 
 fn format_outlook_logon_bootstrap_property_details(

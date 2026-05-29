@@ -14791,10 +14791,17 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     let mut bootstrap_headers = mapi_headers("Execute");
     bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
     let mut bootstrap_named_props = vec![
-        0x56, 0x00, 0x00, 0x02, // RopGetPropertyIdsFromNames, enumerate on Logon
-        0x00,
+        0x56, 0x00, 0x00, 0x02, // RopGetPropertyIdsFromNames, create missing on Logon
     ];
-    bootstrap_named_props.extend_from_slice(&0u16.to_le_bytes());
+    bootstrap_named_props.extend_from_slice(&2u16.to_le_bytes());
+    for lid in [0x8580u32, 0x8581u32] {
+        bootstrap_named_props.push(0x00);
+        bootstrap_named_props.extend_from_slice(&[
+            0x08, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x46,
+        ]);
+        bootstrap_named_props.extend_from_slice(&lid.to_le_bytes());
+    }
     let bootstrap_named_props_response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -14817,6 +14824,10 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     assert!(contains_bytes(
         &bootstrap_named_props_rops,
         &[0x56, 0x00, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &bootstrap_named_props_rops,
+        &[0x02, 0x00, 0x03, 0x80, 0x04, 0x80]
     ));
 
     let mut bootstrap_headers = mapi_headers("Execute");
@@ -14848,28 +14859,51 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         &[0x49, 0x00, 0, 0, 0, 0]
     ));
     assert!(contains_bytes(&bootstrap_address_types_rops, b"EX\0SMTP\0"));
-    let mut bootstrap_disconnect_headers = mapi_headers("Disconnect");
-    bootstrap_disconnect_headers
-        .insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
-    let bootstrap_disconnect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &bootstrap_disconnect_headers, b"")
+
+    let mut bootstrap_headers = mapi_headers("Execute");
+    bootstrap_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
+    let mut bootstrap_store_props = Vec::new();
+    append_rop_get_properties_specific(
+        &mut bootstrap_store_props,
+        0,
+        &[
+            0x661C_001F, // PidTagMailboxOwnerName
+            0x661B_0102, // PidTagMailboxOwnerEntryId
+            0x341D_001F, // PidTagServerTypeDisplayName
+            0x341E_0102, // PidTagServerConnectedIcon
+            0x341F_0102, // PidTagServerAccountIcon
+            0x0E5C_000B, // PidTagPrivate
+            0x346F_0003, // PidTagOutlookStoreState
+            0x6707_0102, // PidTagUserGuid
+        ],
+    );
+    let bootstrap_store_props_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &bootstrap_headers,
+            &execute_body(&rop_buffer(&bootstrap_store_props, &[1])),
+        )
         .await
         .unwrap();
-    assert_eq!(bootstrap_disconnect.status(), StatusCode::OK);
+    assert_eq!(bootstrap_store_props_response.status(), StatusCode::OK);
     assert_eq!(
-        bootstrap_disconnect
+        bootstrap_store_props_response
             .headers()
             .get("x-responsecode")
             .unwrap(),
         "0"
     );
+    bootstrap_cookie = mapi_cookie_header(&bootstrap_store_props_response);
+    let bootstrap_store_props_rops =
+        response_rops_from_execute_response(bootstrap_store_props_response).await;
+    assert!(contains_bytes(
+        &bootstrap_store_props_rops,
+        &[0x07, 0x00, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("Alice")));
+    assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
 
-    let connect = service
-        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
-        .await
-        .unwrap();
-    assert_eq!(connect.headers().get("x-responsecode").unwrap(), "0");
-    let mut cookie = mapi_cookie_header(&connect);
+    let mut cookie = bootstrap_cookie;
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
