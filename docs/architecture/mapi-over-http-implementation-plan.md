@@ -399,11 +399,12 @@ not by itself authorize broad client publication.
 - Content sync honors Outlook's extra flag contract for `Eid`, message size,
   and change number; when Outlook requests message size in the change header,
   LPE emits a non-zero value for projected normal and associated messages.
-- Bounded skipped sync-upload saves, such as metadata-only imports or
-  client-local Deleted Items sync reports that must not become canonical mailbox
-  state, still return the MID implied by the imported source key instead of a
-  null MID so Outlook can complete its current sync transaction without an
-  immediate local `ItemNotFound`.
+- Bounded skipped sync-upload saves are limited to metadata-only imports that
+  carry only sync identity/state properties and no user-visible message data.
+  They return the MID implied by the imported source key instead of a null MID
+  so Outlook can complete its current sync transaction without an immediate
+  local `ItemNotFound`. Deleted Items uploads that include user-visible message
+  data are canonical message imports, not metadata-only reports.
 - Hierarchy sync emits changed descendant folders of the configured
   synchronization root; it does not emit the synchronization root itself.
   Hierarchy final state scopes `MetaTagIdsetGiven` and `MetaTagCnsetSeen` to
@@ -423,6 +424,11 @@ not by itself authorize broad client publication.
   that Outlook must persist for the upload transaction. Successful delete and
   source-move uploads still produce an explicit server checkpoint so the
   transfer-state path does not fall back to a stale pre-upload folder snapshot.
+- `RopSaveChangesMessage` for an Outlook-uploaded message with a foreign
+  client `PidTagSourceKey`, including uploads into Deleted Items, persists the
+  message through canonical mail storage and returns a server-assigned Message
+  ID/change number. LPE must not acknowledge a non-metadata ICS upload as saved
+  while keeping it only as an unbacked client object.
 - `mapi_sync_checkpoints` stores durable server cursor state: checkpoint kind,
   optional mailbox id, MAPI replica GUID, last canonical change sequence, last
   mail modseq, and a small JSON cursor.

@@ -18491,7 +18491,7 @@ async fn mapi_over_http_save_message_skips_sync_metadata_only_import() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_save_message_skips_unbacked_trash_sync_upload() {
+async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -18556,14 +18556,16 @@ async fn mapi_over_http_save_message_skips_unbacked_trash_sync_upload() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
-    let mut save_response = vec![0x0C, 0x01, 0, 0, 0, 0, 0x03];
-    save_response.extend_from_slice(&mapi_wire_id_bytes(out_of_range_object_id));
-    assert!(
-        contains_bytes(&response_rops, &save_response),
-        "response={response_rops:02x?} expected={save_response:02x?}"
-    );
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(!contains_bytes(
+        &response_rops,
+        &mapi_wire_id_bytes(out_of_range_object_id)
+    ));
     assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
-    assert_eq!(imported_emails.lock().unwrap().len(), 0);
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].mailbox_id, trash_id);
+    assert_eq!(recorded[0].subject, "Client trash upload");
     assert!(!mapi_identities
         .lock()
         .unwrap()
