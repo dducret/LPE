@@ -1,5 +1,21 @@
 use super::*;
 
+fn exchange_reminder_excluded_folder_roles() -> Vec<String> {
+    [
+        "trash",
+        "junk",
+        "drafts",
+        "outbox",
+        "conflicts",
+        "local_failures",
+        "server_failures",
+        "sync_issues",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
 #[tokio::test]
 async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let store = FakeStore {
@@ -2834,7 +2850,7 @@ async fn mapi_over_http_execute_returns_logon_owner_and_status_properties() {
                 "recurrenceHorizonDays": 90,
                 "occurrenceDismissals": true
             }),
-            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            excluded_folder_roles: exchange_reminder_excluded_folder_roles(),
             is_builtin: true,
         }])),
         ..Default::default()
@@ -10311,7 +10327,7 @@ async fn mapi_over_http_set_properties_updates_canonical_event_and_task_reminder
                 "recurrenceHorizonDays": 90,
                 "occurrenceDismissals": true
             }),
-            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            excluded_folder_roles: exchange_reminder_excluded_folder_roles(),
             is_builtin: true,
         }])),
         reminders: reminders.clone(),
@@ -11126,7 +11142,7 @@ async fn mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_o
                 "recurrenceHorizonDays": 90,
                 "occurrenceDismissals": true
             }),
-            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            excluded_folder_roles: exchange_reminder_excluded_folder_roles(),
             is_builtin: true,
         }])),
         ..Default::default()
@@ -20058,7 +20074,7 @@ async fn mapi_over_http_reminders_table_projects_canonical_mixed_rows() {
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
-            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            excluded_folder_roles: exchange_reminder_excluded_folder_roles(),
             is_builtin: true,
         }])),
         reminders: Arc::new(Mutex::new(vec![

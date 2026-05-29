@@ -766,12 +766,9 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn reminder_messages(&self) -> Vec<&MapiMessage> {
-        if self
-            .search_folder_definition_for_role("reminders")
-            .is_none()
-        {
+        let Some(definition) = self.search_folder_definition_for_role("reminders") else {
             return Vec::new();
-        }
+        };
         self.reminders
             .iter()
             .filter(|reminder| reminder.source_type == "mail")
@@ -779,6 +776,12 @@ impl MapiMailStoreSnapshot {
                 self.messages
                     .iter()
                     .find(|message| message.canonical_id == reminder.source_id)
+            })
+            .filter(|message| {
+                !definition
+                    .excluded_folder_roles
+                    .iter()
+                    .any(|role| role == &message.email.mailbox_role)
             })
             .collect()
     }
@@ -1393,6 +1396,22 @@ mod tests {
         JmapEmailMailboxState,
     };
 
+    fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
+        [
+            "trash",
+            "junk",
+            "drafts",
+            "outbox",
+            "conflicts",
+            "local_failures",
+            "server_failures",
+            "sync_issues",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
     #[test]
     fn advertised_special_mailbox_roles_have_reserved_mapi_counters() {
         let cases = [
@@ -1749,7 +1768,7 @@ mod tests {
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
-            excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         };
         let snapshot = MapiMailStoreSnapshot::new(
@@ -1771,9 +1790,10 @@ mod tests {
             .expect("persisted reminders definition");
         assert_eq!(reminders.definition_kind, "exchange_builtin");
         assert_eq!(reminders.result_object_kind, "mixed");
-        assert!(reminders
-            .excluded_folder_roles
-            .contains(&"trash".to_string()));
+        assert_eq!(
+            reminders.excluded_folder_roles,
+            exchange_builtin_excluded_folder_roles()
+        );
         assert!(snapshot
             .search_folder_definition_for_role("todo_search")
             .is_none());
@@ -1887,7 +1907,7 @@ mod tests {
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_todo"}),
-            excluded_folder_roles: vec!["trash".to_string()],
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         }]);
 
@@ -2016,7 +2036,7 @@ mod tests {
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_todo"}),
-            excluded_folder_roles: vec!["trash".to_string()],
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         }]);
 
@@ -2142,7 +2162,7 @@ mod tests {
             result_object_kind: "message".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_tracked_mail_processing"}),
-            excluded_folder_roles: vec!["trash".to_string()],
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         }]);
 
@@ -2157,12 +2177,17 @@ mod tests {
         let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
         let mailbox_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
         let message_id = Uuid::parse_str("11112222-3333-4444-8555-666677778888").unwrap();
+        let excluded_message_id = Uuid::parse_str("11112222-3333-4444-8555-666677778889").unwrap();
         let event_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
         let task_id = Uuid::parse_str("33333333-3333-4333-8333-333333333333").unwrap();
         let search_definition_id = Uuid::parse_str("44444444-4444-4444-8444-444444444444").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             message_id,
             crate::mapi::identity::mapi_store_id(97),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            excluded_message_id,
+            crate::mapi::identity::mapi_store_id(101),
         );
         crate::mapi::identity::remember_mapi_identity(
             event_id,
@@ -2304,9 +2329,15 @@ mod tests {
             mime_blob_ref: None,
             delivery_status: "stored".to_string(),
         };
+        let mut excluded_email = email.clone();
+        excluded_email.id = excluded_message_id;
+        excluded_email.mailbox_role = "drafts".to_string();
+        excluded_email.mailbox_name = "Drafts".to_string();
+        excluded_email.mailbox_states[0].role = "drafts".to_string();
+        excluded_email.mailbox_states[0].name = "Drafts".to_string();
         let snapshot = MapiMailStoreSnapshot::new(
             vec![mailbox],
-            vec![email],
+            vec![email, excluded_email],
             Vec::new(),
             Vec::new(),
             vec![CollaborationCollection {
@@ -2343,10 +2374,21 @@ mod tests {
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
-            excluded_folder_roles: vec!["trash".to_string()],
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         }])
         .with_reminders(vec![
+            ClientReminder {
+                source_type: "mail".to_string(),
+                source_id: excluded_message_id,
+                occurrence_start_at: None,
+                title: "Draft reminder".to_string(),
+                due_at: Some("2026-05-21T17:00:00Z".to_string()),
+                reminder_at: "2026-05-21T16:45:00Z".to_string(),
+                dismissed_at: None,
+                completed_at: None,
+                status: "pending".to_string(),
+            },
             ClientReminder {
                 source_type: "mail".to_string(),
                 source_id: message_id,
@@ -2385,6 +2427,9 @@ mod tests {
         assert_eq!(snapshot.reminder_events().len(), 1);
         assert_eq!(snapshot.reminder_tasks().len(), 1);
         assert_eq!(snapshot.reminder_messages().len(), 1);
+        assert!(snapshot
+            .reminder_message_for_id(crate::mapi::identity::mapi_store_id(101))
+            .is_none());
         assert!(snapshot
             .event_for_id(
                 crate::mapi::identity::REMINDERS_FOLDER_ID,

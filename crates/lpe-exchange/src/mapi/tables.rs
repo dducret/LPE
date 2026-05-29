@@ -2782,6 +2782,22 @@ mod tests {
     use super::*;
     use lpe_storage::{MailboxRule, SearchFolderDefinition};
 
+    fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
+        [
+            "trash",
+            "junk",
+            "drafts",
+            "outbox",
+            "conflicts",
+            "local_failures",
+            "server_failures",
+            "sync_issues",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    }
+
     #[test]
     fn default_hierarchy_columns_cover_table_projection_contract() {
         let columns = default_hierarchy_columns();
@@ -3096,7 +3112,7 @@ mod tests {
             result_object_kind: "mixed".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
             restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
-            excluded_folder_roles: vec!["trash".to_string()],
+            excluded_folder_roles: exchange_builtin_excluded_folder_roles(),
             is_builtin: true,
         }]);
         let mut table = MapiObject::ContentsTable {
