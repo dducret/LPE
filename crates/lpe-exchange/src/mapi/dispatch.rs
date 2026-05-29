@@ -2429,6 +2429,111 @@ fn uploaded_state_marker_summary(marker_mask: u8) -> String {
     markers.join(",")
 }
 
+fn record_sync_upload_content_change(
+    session: &mut MapiSession,
+    folder_id: u64,
+    object_id: u64,
+    change_number: u64,
+    associated: bool,
+    read_state_changed: bool,
+) {
+    for object in session.handles.values_mut() {
+        let MapiObject::SynchronizationCollector {
+            folder_id: collector_folder_id,
+            sync_type,
+            state,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        if *collector_folder_id != folder_id || *sync_type != 0x01 {
+            continue;
+        }
+        if !uploaded_object_ids.contains(&object_id) {
+            uploaded_object_ids.push(object_id);
+        }
+        if associated {
+            if !uploaded_fai_change_numbers.contains(&change_number) {
+                uploaded_fai_change_numbers.push(change_number);
+            }
+        } else if !uploaded_normal_change_numbers.contains(&change_number) {
+            uploaded_normal_change_numbers.push(change_number);
+        }
+        if read_state_changed && !uploaded_read_change_numbers.contains(&change_number) {
+            uploaded_read_change_numbers.push(change_number);
+        }
+        *state = mapi_mailstore::content_sync_state_stream_from_sets(
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+        );
+    }
+}
+
+fn record_sync_upload_content_checkpoint(session: &mut MapiSession, folder_id: u64) {
+    for object in session.handles.values_mut() {
+        let MapiObject::SynchronizationCollector {
+            folder_id: collector_folder_id,
+            sync_type,
+            state,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        if *collector_folder_id != folder_id || *sync_type != 0x01 {
+            continue;
+        }
+        *state = mapi_mailstore::content_sync_state_stream_from_sets(
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            uploaded_fai_change_numbers,
+            uploaded_read_change_numbers,
+        );
+    }
+}
+
+fn record_sync_upload_hierarchy_change(session: &mut MapiSession, folder_id: u64, object_id: u64) {
+    for object in session.handles.values_mut() {
+        let MapiObject::SynchronizationCollector {
+            folder_id: collector_folder_id,
+            sync_type,
+            state,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+            ..
+        } = object
+        else {
+            continue;
+        };
+        if *collector_folder_id != folder_id || *sync_type != 0x02 {
+            continue;
+        }
+        if !uploaded_object_ids.contains(&object_id) {
+            uploaded_object_ids.push(object_id);
+        }
+        let change_number = mapi_mailstore::change_number_for_store_id(object_id);
+        if !uploaded_normal_change_numbers.contains(&change_number) {
+            uploaded_normal_change_numbers.push(change_number);
+        }
+        *state = mapi_mailstore::final_sync_state_stream(
+            0x02,
+            uploaded_object_ids,
+            uploaded_normal_change_numbers,
+        );
+    }
+}
+
 fn sync_checkpoint_scope(
     folder_id: u64,
     checkpoint_mailbox_id: Option<Uuid>,
@@ -4637,6 +4742,14 @@ where
                                 session
                                     .handles
                                     .insert(handle, MapiObject::Note { folder_id, note_id });
+                                record_sync_upload_content_change(
+                                    session,
+                                    folder_id,
+                                    note_id,
+                                    mapi_mailstore::change_number_for_store_id(note_id),
+                                    false,
+                                    true,
+                                );
                                 session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
                                     Some(note_id),
@@ -4690,6 +4803,14 @@ where
                                         folder_id,
                                         journal_entry_id,
                                     },
+                                );
+                                record_sync_upload_content_change(
+                                    session,
+                                    folder_id,
+                                    journal_entry_id,
+                                    mapi_mailstore::change_number_for_store_id(journal_entry_id),
+                                    false,
+                                    true,
                                 );
                                 session.record_notification(MapiNotificationEvent::content(
                                     folder_id,
@@ -5047,6 +5168,18 @@ where
                                 folder_id,
                                 message_id,
                             },
+                        );
+                        let associated = matches!(
+                            properties.get(&PID_TAG_ASSOCIATED),
+                            Some(MapiValue::Bool(true))
+                        );
+                        record_sync_upload_content_change(
+                            session,
+                            folder_id,
+                            message_id,
+                            mapi_mailstore::canonical_message_change_number(&email),
+                            associated,
+                            !associated,
                         );
                         created_emails.push(email);
                         session.record_notification(MapiNotificationEvent::content(
@@ -5668,6 +5801,8 @@ where
                             .is_err()
                         {
                             partial_completion = true;
+                        } else {
+                            record_sync_upload_content_checkpoint(session, folder_id);
                         }
                         continue;
                     }
@@ -5678,6 +5813,8 @@ where
                             .is_err()
                         {
                             partial_completion = true;
+                        } else {
+                            record_sync_upload_content_checkpoint(session, folder_id);
                         }
                         continue;
                     }
@@ -5747,6 +5884,8 @@ where
                     };
                     if result.is_err() {
                         partial_completion = true;
+                    } else {
+                        record_sync_upload_content_checkpoint(session, folder_id);
                     }
                 }
                 if !partial_completion {
@@ -7711,12 +7850,17 @@ where
                         folder_id,
                         mailbox_id,
                         checkpoint_kind,
+                        sync_type,
+                        state_upload_property_tag,
                         state_upload_buffer,
+                        client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
                         ..
                     }) => {
                         let property_tag = request.upload_state_property_tag().unwrap_or_default();
                         let declared_bytes =
                             request.upload_state_transfer_size().unwrap_or_default();
+                        *state_upload_property_tag = Some(property_tag);
                         state_upload_buffer.clear();
                         tracing::info!(
                             rca_debug = true,
@@ -7729,6 +7873,7 @@ where
                             folder_id = format_args!("0x{:016x}", *folder_id),
                             folder_role = debug_role_for_folder_id(*folder_id),
                             folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
                             checkpoint_kind = checkpoint_kind.as_str(),
                             checkpoint_mailbox_id = (*mailbox_id)
                                 .map(|id| id.to_string())
@@ -7737,6 +7882,9 @@ where
                             upload_state_property_name = upload_state_property_name(property_tag),
                             upload_state_declared_bytes = declared_bytes,
                             upload_state_empty_declared = declared_bytes == 0,
+                            upload_state_client_bytes = *client_state_uploaded_bytes,
+                            upload_state_marker_mask =
+                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
                             "rca debug mapi sync upload state begin"
                         );
                         responses.extend_from_slice(&rop_upload_state_success_response(&request));
@@ -7787,7 +7935,10 @@ where
                         folder_id,
                         mailbox_id,
                         checkpoint_kind,
+                        sync_type,
                         state_upload_buffer,
+                        client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
                         ..
                     }) => {
                         let stream_data = request.stream_data();
@@ -7803,6 +7954,7 @@ where
                             folder_id = format_args!("0x{:016x}", *folder_id),
                             folder_role = debug_role_for_folder_id(*folder_id),
                             folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
                             checkpoint_kind = checkpoint_kind.as_str(),
                             checkpoint_mailbox_id = (*mailbox_id)
                                 .map(|id| id.to_string())
@@ -7810,6 +7962,9 @@ where
                             upload_state_chunk_bytes = stream_data.len(),
                             upload_state_chunk_preview = %hex_preview(stream_data, 16),
                             upload_state_buffer_bytes = state_upload_buffer.len(),
+                            upload_state_client_bytes = *client_state_uploaded_bytes,
+                            upload_state_marker_mask =
+                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
                             "rca debug mapi sync upload state continue"
                         );
                         responses.extend_from_slice(&rop_upload_state_success_response(&request));
@@ -7908,11 +8063,24 @@ where
                         mailbox_id,
                         checkpoint_kind,
                         state,
+                        state_upload_property_tag,
                         state_upload_buffer,
+                        client_state_uploaded_bytes,
+                        client_state_uploaded_marker_mask,
+                        sync_type,
                         ..
                     }) => {
                         let uploaded_bytes = state_upload_buffer.len();
-                        commit_uploaded_sync_state(state, state_upload_buffer);
+                        let property_tag = state_upload_property_tag.take().unwrap_or_default();
+                        if uploaded_bytes > 0 {
+                            mark_uploaded_state_stream(
+                                client_state_uploaded_marker_mask,
+                                property_tag,
+                            );
+                        }
+                        state_upload_buffer.clear();
+                        *client_state_uploaded_bytes =
+                            (*client_state_uploaded_bytes).saturating_add(uploaded_bytes);
                         tracing::info!(
                             rca_debug = true,
                             adapter = "mapi",
@@ -7924,6 +8092,7 @@ where
                             folder_id = format_args!("0x{:016x}", *folder_id),
                             folder_role = debug_role_for_folder_id(*folder_id),
                             folder_container_class = debug_container_class_for_folder_id(*folder_id),
+                            sync_type = format_args!("0x{:02x}", *sync_type),
                             checkpoint_kind = checkpoint_kind.as_str(),
                             checkpoint_mailbox_id = (*mailbox_id)
                                 .map(|id| id.to_string())
@@ -7931,6 +8100,14 @@ where
                             upload_state_total_bytes = state.len(),
                             upload_state_stream_bytes = uploaded_bytes,
                             upload_state_empty_stream = uploaded_bytes == 0,
+                            upload_state_property_tag = format_args!("0x{property_tag:08x}"),
+                            upload_state_property_name = upload_state_property_name(property_tag),
+                            upload_state_client_bytes = *client_state_uploaded_bytes,
+                            upload_state_marker_mask =
+                                format_args!("0x{:02x}", *client_state_uploaded_marker_mask),
+                            upload_state_markers =
+                                %uploaded_state_marker_summary(*client_state_uploaded_marker_mask),
+                            upload_state_server_state_preserved = true,
                             "rca debug mapi sync upload state end"
                         );
                         responses.extend_from_slice(&rop_upload_state_success_response(&request));
@@ -7957,10 +8134,22 @@ where
                     request.output_handle_index,
                     MapiObject::SynchronizationCollector {
                         folder_id,
-                        mailbox_id: sync_checkpoint_mailbox_id(folder_id, 0x01, mailboxes),
-                        checkpoint_kind: MapiCheckpointKind::Content,
+                        mailbox_id: sync_checkpoint_mailbox_id(
+                            folder_id,
+                            request.sync_type(),
+                            mailboxes,
+                        ),
+                        checkpoint_kind: sync_checkpoint_kind(request.sync_type()),
+                        sync_type: request.sync_type(),
                         state: Vec::new(),
+                        state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
+                        client_state_uploaded_bytes: 0,
+                        client_state_uploaded_marker_mask: 0,
+                        uploaded_object_ids: Vec::new(),
+                        uploaded_normal_change_numbers: Vec::new(),
+                        uploaded_fai_change_numbers: Vec::new(),
+                        uploaded_read_change_numbers: Vec::new(),
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -8185,6 +8374,17 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    let change_number = message_for_id(folder_id, message_id, mailboxes, emails)
+                        .map(mapi_mailstore::canonical_message_change_number)
+                        .unwrap_or_else(|| mapi_mailstore::change_number_for_store_id(message_id));
+                    record_sync_upload_content_change(
+                        session,
+                        folder_id,
+                        message_id,
+                        change_number,
+                        import_flag & 0x10 != 0,
+                        import_flag & 0x10 == 0,
+                    );
                     responses.extend_from_slice(
                         &rop_synchronization_import_message_change_response(&request),
                     );
@@ -8216,6 +8416,14 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    record_sync_upload_content_change(
+                        session,
+                        folder_id,
+                        message_id,
+                        mapi_mailstore::change_number_for_store_id(message_id),
+                        false,
+                        true,
+                    );
                     responses.extend_from_slice(
                         &rop_synchronization_import_message_change_response(&request),
                     );
@@ -8251,6 +8459,14 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    record_sync_upload_content_change(
+                        session,
+                        folder_id,
+                        message_id,
+                        mapi_mailstore::change_number_for_store_id(message_id),
+                        false,
+                        true,
+                    );
                     responses.extend_from_slice(
                         &rop_synchronization_import_message_change_response(&request),
                     );
@@ -8325,6 +8541,11 @@ where
                     if existing.role == "custom"
                         && existing.name.eq_ignore_ascii_case(&display_name)
                     {
+                        record_sync_upload_hierarchy_change(
+                            session,
+                            _folder_id,
+                            mapi_folder_id(existing),
+                        );
                         responses.extend_from_slice(
                             &rop_synchronization_import_hierarchy_change_response(&request),
                         );
@@ -8375,6 +8596,11 @@ where
                                 continue;
                             }
                         };
+                        record_sync_upload_hierarchy_change(
+                            session,
+                            _folder_id,
+                            mapi_folder_id(&mailbox),
+                        );
                         responses.extend_from_slice(
                             &rop_synchronization_import_hierarchy_change_response(&request),
                         );
@@ -8495,6 +8721,7 @@ where
                     .unwrap_or(INBOX_FOLDER_ID);
                 if snapshot.note_for_id(source_folder_id, message_id).is_some() {
                     if target_folder_id == NOTES_FOLDER_ID {
+                        record_sync_upload_content_checkpoint(session, source_folder_id);
                         responses.extend_from_slice(
                             &rop_synchronization_import_message_move_response(&request),
                         );
@@ -8512,6 +8739,7 @@ where
                     .is_some()
                 {
                     if target_folder_id == JOURNAL_FOLDER_ID {
+                        record_sync_upload_content_checkpoint(session, source_folder_id);
                         responses.extend_from_slice(
                             &rop_synchronization_import_message_move_response(&request),
                         );
@@ -8575,6 +8803,15 @@ where
                                 continue;
                             }
                         };
+                        record_sync_upload_content_checkpoint(session, source_folder_id);
+                        record_sync_upload_content_change(
+                            session,
+                            target_folder_id,
+                            crate::mapi::identity::mapped_mapi_object_id(&moved.id).unwrap_or(0),
+                            mapi_mailstore::canonical_message_change_number(&moved),
+                            false,
+                            false,
+                        );
                         responses.extend_from_slice(
                             &rop_synchronization_import_message_move_response(&request),
                         );
@@ -8613,6 +8850,15 @@ where
                         .is_err()
                     {
                         partial_completion = true;
+                    } else {
+                        record_sync_upload_content_change(
+                            session,
+                            folder_id,
+                            message_id,
+                            mapi_mailstore::canonical_message_change_number(email),
+                            false,
+                            true,
+                        );
                     }
                 }
                 responses.extend_from_slice(&rop_partial_completion_response(

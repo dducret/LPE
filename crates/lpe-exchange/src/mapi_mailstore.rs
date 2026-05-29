@@ -3149,6 +3149,20 @@ fn final_content_sync_state_stream(
     )
 }
 
+pub(crate) fn content_sync_state_stream_from_sets(
+    object_ids: &[u64],
+    normal_change_numbers: &[u64],
+    fai_change_numbers: &[u64],
+    read_change_numbers: &[u64],
+) -> Vec<u8> {
+    final_content_sync_state_stream(
+        object_ids,
+        normal_change_numbers,
+        fai_change_numbers,
+        read_change_numbers,
+    )
+}
+
 fn final_sync_state_stream_with_cnsets(
     sync_type: u8,
     object_ids: &[u64],

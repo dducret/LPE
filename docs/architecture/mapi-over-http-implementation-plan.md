@@ -416,6 +416,13 @@ not by itself authorize broad client publication.
   parseable and compatible with the requested mailbox, folder, and sync scope.
 - Uploaded client ICS state is input only. It must not be appended to, copied
   into, or substituted for server-generated final/checkpoint state.
+- `RopSynchronizationGetTransferState` on an ICS upload collector returns
+  server-generated checkpoint state. After successful imported message,
+  note, journal, read-state, move, delete, or hierarchy changes, the collector
+  state is advanced with the server-assigned object IDs and change numbers
+  that Outlook must persist for the upload transaction. Successful delete and
+  source-move uploads still produce an explicit server checkpoint so the
+  transfer-state path does not fall back to a stale pre-upload folder snapshot.
 - `mapi_sync_checkpoints` stores durable server cursor state: checkpoint kind,
   optional mailbox id, MAPI replica GUID, last canonical change sequence, last
   mail modseq, and a small JSON cursor.

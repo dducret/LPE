@@ -17695,7 +17695,7 @@ async fn mapi_over_http_partial_scope_content_sync_does_not_advance_checkpoint()
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_upload_state_round_trips_as_transfer_state() {
+async fn mapi_over_http_sync_upload_state_returns_server_transfer_state() {
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -17771,7 +17771,8 @@ async fn mapi_over_http_sync_upload_state_round_trips_as_transfer_state() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x7E, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x82, 0x03, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, state));
+    assert!(!contains_bytes(&response_rops, state));
+    assert_content_final_state_includes(&response_rops, &[], &[]);
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -17820,7 +17821,13 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
     );
 
     let state = b"collector-upload-state";
+    let imported_message_id = test_mapi_message_id("42424242-4242-4242-8242-424242424242");
     let mut values = Vec::new();
+    append_mapi_binary_property(
+        &mut values,
+        PID_TAG_SOURCE_KEY,
+        &mapi_mailstore::source_key_for_store_id(imported_message_id),
+    );
     append_mapi_utf16_property(&mut values, 0x0037_001F, "Collector import message");
     append_mapi_utf16_property(&mut values, PID_TAG_BODY_W, "Collector body");
     let mut rops = Vec::new();
@@ -17841,7 +17848,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
         0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
     ]);
     rops.push(0);
-    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&3u16.to_le_bytes());
     rops.extend_from_slice(&values);
     rops.extend_from_slice(&[
         0x0C, 0x00, 0x01, 0x03, 0x00, // RopSaveChangesMessage
@@ -17867,8 +17874,16 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
     assert!(contains_bytes(&response_rops, &[0x7E, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x82, 0x04, 0, 0, 0, 0]));
-    assert!(contains_bytes(&response_rops, state));
+    assert!(!contains_bytes(&response_rops, state));
     assert_eq!(store.imported_emails.lock().unwrap().len(), 1);
+    let imported_email = store.emails.lock().unwrap().last().unwrap().clone();
+    assert_content_final_state_includes(
+        &response_rops,
+        &[imported_email.id],
+        &[mapi_mailstore::canonical_message_change_number(
+            &imported_email,
+        )],
+    );
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
@@ -17884,7 +17899,7 @@ async fn mapi_over_http_upload_import_collector_handles_never_advance_download_c
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_upload_state_accumulates_multiple_streams() {
+async fn mapi_over_http_sync_upload_state_does_not_echo_multiple_streams() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -17956,17 +17971,9 @@ async fn mapi_over_http_sync_upload_state_accumulates_multiple_streams() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, first_state));
-    assert!(contains_bytes(&response_rops, second_state));
-    let first_offset = response_rops
-        .windows(first_state.len())
-        .position(|window| window == first_state)
-        .unwrap();
-    let second_offset = response_rops
-        .windows(second_state.len())
-        .position(|window| window == second_state)
-        .unwrap();
-    assert!(first_offset < second_offset);
+    assert!(!contains_bytes(&response_rops, first_state));
+    assert!(!contains_bytes(&response_rops, second_state));
+    assert_content_final_state_includes(&response_rops, &[], &[]);
 }
 
 #[tokio::test]
@@ -18626,10 +18633,15 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
     append_mapi_wire_id(&mut rops, test_mapi_message_id(delete_message_id));
+    rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -18639,6 +18651,11 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x80, 0x02, 0, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 0]));
+    assert_content_final_state_includes(
+        &response_rops,
+        &[Uuid::parse_str(read_message_id).unwrap()],
+        &[41],
+    );
     assert!(!emails.lock().unwrap()[0].unread);
     assert_eq!(
         deleted_emails.lock().unwrap().as_slice(),
@@ -18754,10 +18771,15 @@ async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
     ]);
     rops.extend_from_slice(&1u16.to_le_bytes());
     append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -18766,6 +18788,7 @@ async fn mapi_over_http_sync_import_soft_delete_moves_to_trash() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 0]));
+    assert_content_final_state_includes(&response_rops, &[], &[]);
     assert_eq!(
         moved_emails.lock().unwrap().as_slice(),
         &[(Uuid::parse_str(message_id).unwrap(), trash_id)]
@@ -18816,10 +18839,15 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
     ]);
     append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
     append_mapi_wire_id(&mut rops, crate::mapi::identity::ARCHIVE_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
-    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX]));
+    let request = execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]));
     let response = service
         .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
         .await
@@ -18828,6 +18856,7 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x78, 0x02, 0, 0, 0, 0]));
+    assert_content_final_state_includes(&response_rops, &[], &[]);
     assert_eq!(
         moved_emails.lock().unwrap().as_slice(),
         &[(

@@ -5328,7 +5328,6 @@ fn utf16z_string_bytes(value: &[u8]) -> Vec<u8> {
         .into_bytes()
 }
 
-
 fn hex_bytes(input: &str) -> Vec<u8> {
     let compact: String = input.chars().filter(|ch| !ch.is_whitespace()).collect();
     assert_eq!(compact.len() % 2, 0);
@@ -5352,6 +5351,6 @@ fn hex_nibble(byte: u8) -> u8 {
     }
 }
 
+mod ews;
 mod mapi_over_http;
 mod rpc_proxy;
-mod ews;

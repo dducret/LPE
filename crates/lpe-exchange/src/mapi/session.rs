@@ -268,8 +268,16 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         mailbox_id: Option<Uuid>,
         checkpoint_kind: MapiCheckpointKind,
+        sync_type: u8,
         state: Vec<u8>,
+        state_upload_property_tag: Option<u32>,
         state_upload_buffer: Vec<u8>,
+        client_state_uploaded_bytes: usize,
+        client_state_uploaded_marker_mask: u8,
+        uploaded_object_ids: Vec<u64>,
+        uploaded_normal_change_numbers: Vec<u64>,
+        uploaded_fai_change_numbers: Vec<u64>,
+        uploaded_read_change_numbers: Vec<u64>,
     },
 }
 
@@ -977,6 +985,7 @@ pub(in crate::mapi) fn synchronization_context_state(
             folder_id,
             mailbox_id,
             checkpoint_kind,
+            sync_type,
             state,
             ..
         }) => Some((
@@ -987,7 +996,7 @@ pub(in crate::mapi) fn synchronization_context_state(
             1,
             true,
             "",
-            0,
+            *sync_type,
             state.clone(),
         )),
         _ => None,
