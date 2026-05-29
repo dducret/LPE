@@ -453,6 +453,7 @@ where
     let rop_buffer = execute_rops(
         store,
         principal,
+        "rpc-http",
         &mut session,
         &mailboxes,
         &emails,

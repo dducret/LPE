@@ -8,7 +8,7 @@ use super::identity::{
     REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID, SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID,
     SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
     SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
-    TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 use super::notifications::*;
 use super::nspi::*;
@@ -1006,7 +1006,7 @@ fn special_folder_contract_summary(session: &MapiSession) -> String {
         ("journal", JOURNAL_FOLDER_ID, "default_ipm"),
         ("notes", NOTES_FOLDER_ID, "default_ipm"),
         ("tasks", TASKS_FOLDER_ID, "default_ipm"),
-        ("reminders", REMINDERS_FOLDER_ID, "default_ipm"),
+        ("reminders", REMINDERS_FOLDER_ID, "search"),
         (
             "suggested_contacts",
             SUGGESTED_CONTACTS_FOLDER_ID,
@@ -1023,6 +1023,11 @@ fn special_folder_contract_summary(session: &MapiSession) -> String {
         ),
         ("junk", JUNK_FOLDER_ID, "additional_ren"),
         ("rss_feeds", RSS_FEEDS_FOLDER_ID, "additional_ren"),
+        (
+            "tracked_mail_processing",
+            TRACKED_MAIL_PROCESSING_FOLDER_ID,
+            "search",
+        ),
         ("todo_search", TODO_SEARCH_FOLDER_ID, "search"),
         (
             "conversation_actions",

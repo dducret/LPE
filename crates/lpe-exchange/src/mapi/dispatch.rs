@@ -232,6 +232,7 @@ where
         let rop_buffer = execute_rops(
             store,
             principal,
+            request_id,
             &mut session,
             &mailboxes,
             &emails,
@@ -354,6 +355,7 @@ where
     let rop_buffer = execute_rops(
         store,
         principal,
+        request_id,
         &mut session,
         &mailboxes,
         &emails,
@@ -459,6 +461,7 @@ const MAX_ROP_DEBUG_ENTRIES: usize = 32;
 struct RopRequestDebugSummary {
     ids: Vec<u8>,
     ids_csv: String,
+    names_csv: String,
     handle_count: usize,
     handle_table_summary: String,
     request_payload_bytes: usize,
@@ -472,6 +475,7 @@ struct RopRequestDebugSummary {
 #[derive(Debug, Default)]
 struct RopResponseDebugSummary {
     ids_csv: String,
+    names_csv: String,
     results_csv: String,
     count: usize,
     handle_count: usize,
@@ -530,12 +534,14 @@ fn log_execute_rop_debug(
         request_type = "Execute",
         mapi_request_id = request_id,
         request_rop_ids = %request.ids_csv,
+        request_rop_names = %request.names_csv,
         request_rop_count = request.ids.len(),
         request_handle_count = request.handle_count,
         input_handle_table_summary = %request.handle_table_summary,
         request_extended_rop_buffer = request.extended,
         request_rop_parse_error = %request.parse_error,
         response_rop_ids = %response.ids_csv,
+        response_rop_names = %response.names_csv,
         response_rop_results_best_effort = %response.results_csv,
         response_rop_count = response.count,
         response_handle_count = response.handle_count,
@@ -589,6 +595,7 @@ fn log_execute_rop_debug(
             request_type = "Execute",
             mapi_request_id = request_id,
             request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
             request_rop_parse_error = %request.parse_error,
             request_rop_payload_bytes = request.request_payload_bytes,
             request_handle_table_bytes = request.handle_table_bytes,
@@ -614,7 +621,9 @@ fn log_execute_rop_debug(
             mapi_request_id = request_id,
             response_framing_context = response_framing_context,
             request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
             response_rop_ids = %response.ids_csv,
+            response_rop_names = %response.names_csv,
             response_rop_results_best_effort = %response.results_csv,
             response_rop_buffer_layout = %response.buffer_layout,
             response_rop_buffer_size_word = %response.buffer_size_word,
@@ -652,6 +661,7 @@ fn log_execute_rop_debug(
             first_post_hierarchy_set_properties_probe =
                 post_hierarchy_observation.first_set_properties_probe,
             request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
             response_rop_results_best_effort = %response.results_csv,
             open_folder_request_count = probe.open_folder_request_count,
             open_folder_requests = %probe.open_folder_requests,
@@ -686,6 +696,7 @@ fn log_execute_rop_debug(
                     %post_hierarchy.last_completed_hierarchy_sync_root,
                 post_hierarchy_execute_count = post_hierarchy.execute_count,
                 request_rop_ids = %request.ids_csv,
+                request_rop_names = %request.names_csv,
                 response_rop_results_best_effort = %response.results_csv,
                 get_properties_specific_request_count = probe.get_properties_specific_request_count,
                 get_properties_specific_requests = %probe.get_properties_specific_requests,
@@ -726,6 +737,7 @@ fn log_execute_request_start_debug(
         body_bytes = request_body_bytes,
         request_rop_buffer_bytes = request_rop_buffer.len(),
         rop_ids = %request.ids_csv,
+        rop_names = %request.names_csv,
         rop_count = request.ids.len(),
         handle_count = request.handle_count,
         handle_table = %request.handle_table_summary,
@@ -2689,6 +2701,7 @@ fn summarize_request_rop_buffer(rop_buffer: &[u8]) -> RopRequestDebugSummary {
         }
     }
     summary.ids_csv = rop_ids_csv(&summary.ids);
+    summary.names_csv = rop_names_csv(&summary.ids);
     let raw = summarize_request_rop_raw_frames(requests);
     summary.raw_frame_count = raw.0;
     summary.raw_frames = raw.1;
@@ -2808,6 +2821,7 @@ fn summarize_response_rop_buffer(
 
     summary.count = ids.len();
     summary.ids_csv = rop_ids_csv(&ids);
+    summary.names_csv = rop_names_csv(&ids);
     summary.results_csv = results.join(",");
     summary.frames = frames.join("|");
     summary
@@ -2815,6 +2829,21 @@ fn summarize_response_rop_buffer(
 
 fn rop_has_no_response(rop_id: u8) -> bool {
     matches!(rop_id, 0x01)
+}
+
+fn rop_names_csv(rop_ids: &[u8]) -> String {
+    rop_ids
+        .iter()
+        .map(|rop_id| rop_name(*rop_id))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn rop_name(rop_id: u8) -> String {
+    match RopId::from_u8(rop_id) {
+        Some(id) => format!("{id:?}"),
+        None => format!("Unknown0x{rop_id:02x}"),
+    }
 }
 
 fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static str> {
@@ -3803,6 +3832,7 @@ fn pending_recipient_row_ids_summary(changes: &[PendingRecipientChange]) -> Stri
 pub(in crate::mapi) async fn execute_rops<S, V>(
     store: &S,
     principal: &AccountPrincipal,
+    request_id: &str,
     session: &mut MapiSession,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
@@ -7287,6 +7317,7 @@ where
                     endpoint = "emsmdb",
                     mailbox = %principal.email,
                     request_type = "Execute",
+                    mapi_request_id = request_id,
                     request_rop_id = "0x70",
                     folder_id = format_args!("0x{folder_id:016x}"),
                     folder_role,
@@ -7565,6 +7596,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x4e",
                             folder_id = format_args!("0x{:016x}", *folder_id),
                             folder_role = debug_role_for_folder_id(*folder_id),
@@ -7661,6 +7693,7 @@ where
                                     endpoint = "emsmdb",
                                     mailbox = %principal.email,
                                     request_type = "Execute",
+                                    mapi_request_id = request_id,
                                     request_rop_id = "0x4e",
                                     folder_id = format_args!("0x{:016x}", *folder_id),
                                     folder_role = debug_role_for_folder_id(*folder_id),
@@ -7697,6 +7730,7 @@ where
                                     endpoint = "emsmdb",
                                     mailbox = %principal.email,
                                     request_type = "Execute",
+                                    mapi_request_id = request_id,
                                     request_rop_id = "0x4e",
                                     folder_id = format_args!("0x{:016x}", *folder_id),
                                     folder_role = debug_role_for_folder_id(*folder_id),
@@ -7747,6 +7781,7 @@ where
                                             endpoint = "emsmdb",
                                             mailbox = %principal.email,
                                             request_type = "Execute",
+                                            mapi_request_id = request_id,
                                             request_rop_id = "0x4e",
                                             folder_id = format_args!("0x{:016x}", *folder_id),
                                             folder_role = debug_role_for_folder_id(*folder_id),
@@ -7788,6 +7823,7 @@ where
                                             endpoint = "emsmdb",
                                             mailbox = %principal.email,
                                             request_type = "Execute",
+                                            mapi_request_id = request_id,
                                             request_rop_id = "0x4e",
                                             folder_id = format_args!("0x{:016x}", *folder_id),
                                             folder_role = debug_role_for_folder_id(*folder_id),
@@ -7865,6 +7901,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x75",
                             sync_context_kind = "source",
                             folder_id = format_args!("0x{:016x}", *folder_id),
@@ -7905,6 +7942,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x75",
                             sync_context_kind = "collector",
                             folder_id = format_args!("0x{:016x}", *folder_id),
@@ -7951,6 +7989,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x76",
                             sync_context_kind = "source",
                             folder_id = format_args!("0x{:016x}", *folder_id),
@@ -7986,6 +8025,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x76",
                             sync_context_kind = "collector",
                             folder_id = format_args!("0x{:016x}", *folder_id),
@@ -8073,6 +8113,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x77",
                             sync_context_kind = "source",
                             folder_id = format_args!("0x{:016x}", *folder_id),
@@ -8133,6 +8174,7 @@ where
                             endpoint = "emsmdb",
                             mailbox = %principal.email,
                             request_type = "Execute",
+                            mapi_request_id = request_id,
                             request_rop_id = "0x77",
                             sync_context_kind = "collector",
                             folder_id = format_args!("0x{:016x}", *folder_id),
@@ -9938,6 +9980,7 @@ mod tests {
 
         assert_eq!(request_summary.ids, vec![0x02]);
         assert_eq!(request_summary.ids_csv, "0x02");
+        assert_eq!(request_summary.names_csv, "OpenFolder");
         assert_eq!(request_summary.handle_count, 1);
         assert!(request_summary.parse_error.is_empty());
 
@@ -9952,6 +9995,7 @@ mod tests {
             summarize_response_rop_buffer(&response_buffer, &request_summary.ids);
 
         assert_eq!(response_summary.ids_csv, "0x02");
+        assert_eq!(response_summary.names_csv, "OpenFolder");
         assert_eq!(response_summary.results_csv, "0x02:0x00000000");
         assert_eq!(response_summary.count, 1);
         assert_eq!(response_summary.handle_count, 1);
