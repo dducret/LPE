@@ -296,9 +296,9 @@ not by itself authorize broad client publication.
 - Hierarchy synchronization emits canonical folder identities, source keys,
   change keys, predecessor lists, special-folder fields, content counts, unread
   counts, `PidTagLocalCommitTimeMax`, `PidTagDeletedCountTotal`, and final state.
-  Folder-change rows always include `PidTagFolderId` so Outlook can bind
-  default folders such as Calendar even when it does not request the `Eid`
-  synchronization extra flag.
+  Folder-change rows include `PidTagFolderId` when the client requests the `Eid`
+  synchronization extra flag; Outlook's cached-mode hierarchy request does so,
+  which lets it bind default folders such as Calendar.
   `MetaTagIdsetGiven` is sent as property tag `0x40170003` while its payload is
   serialized as binary, matching the Microsoft ICS state compatibility rule.
 - Contents synchronization emits canonical message-change rows, folder-associated
@@ -397,9 +397,10 @@ not by itself authorize broad client publication.
   state, still return the MID implied by the imported source key instead of a
   null MID so Outlook can complete its current sync transaction without an
   immediate local `ItemNotFound`.
-- Hierarchy final state scopes `MetaTagIdsetGiven` to emitted folder IDs, and
-  `MetaTagCnsetSeen` covers emitted folder changes plus the sync root change
-  counter.
+- Hierarchy sync emits changed descendant folders of the configured
+  synchronization root; it does not emit the synchronization root itself.
+  Hierarchy final state scopes `MetaTagIdsetGiven` and `MetaTagCnsetSeen` to
+  the emitted descendant folder changes.
 
 ### Checkpoint Selection and Advancement
 

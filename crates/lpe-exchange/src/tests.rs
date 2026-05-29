@@ -3333,7 +3333,7 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
-const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 24;
+const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 23;
 const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 23;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 13;
 const META_TAG_IDSET_GIVEN: u32 = 0x4017_0003;
@@ -17200,7 +17200,7 @@ async fn mapi_over_http_sync_configure_separates_content_and_hierarchy_manifests
         .unwrap();
     let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((36, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&hierarchy_rops), Some((35, 0)));
     assert!(!contains_bytes(&hierarchy_rops, b"Inbox scoped sync"));
     assert!(!contains_bytes(&hierarchy_rops, b"Sent scoped sync"));
 }
@@ -19026,14 +19026,14 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
             .folder_changes
             .first()
             .map(|folder| folder.display_name.as_str()),
-        Some("Top of Information Store")
+        Some("Inbox")
     );
     assert_eq!(
         decoded
             .folder_changes
             .first()
             .and_then(|folder| folder.folder_id),
-        Some(test_mapi_folder_id(4))
+        Some(test_mapi_folder_id(5))
     );
     assert!(decoded
         .folder_changes
@@ -19041,7 +19041,6 @@ async fn mapi_over_http_outlook_hierarchy_sync_manifest_includes_folders() {
         .all(|folder| folder.folder_id.is_some()));
     assert!(decoded.folder_changes.iter().all(|folder| {
         let expected_parent = match folder.display_name.as_str() {
-            "Top of Information Store" => test_mapi_folder_id(1),
             "Conflicts" | "Local Failures" | "Server Failures" => test_mapi_folder_id(26),
             _ => test_mapi_folder_id(4),
         };
@@ -19206,10 +19205,6 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
     assert!(!contains_bytes(&response_rops, &utf16z("Outlook.Reminder")));
-    assert!(contains_bytes(
-        &response_rops,
-        &utf16z("Top of Information Store")
-    ));
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::OUTBOX_FOLDER_ID)
@@ -20119,15 +20114,13 @@ async fn mapi_over_http_hierarchy_sync_preserves_nested_folder_parent_keys() {
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((2, 0)));
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((1, 0)));
     assert!(contains_bytes(&response_rops, &utf16z("Archive")));
-    assert!(contains_bytes(&response_rops, &utf16z("Projects")));
     let decoded =
         strict_hierarchy_sync_transfer_from_response(&response_rops).expect("strict hierarchy ICS");
-    assert_eq!(decoded.folder_changes.len(), 2);
-    assert_eq!(decoded.folder_changes[0].display_name, "Projects");
-    assert_eq!(decoded.folder_changes[1].display_name, "Archive");
-    assert!(decoded.folder_changes[1].parent_source_key.is_empty());
+    assert_eq!(decoded.folder_changes.len(), 1);
+    assert_eq!(decoded.folder_changes[0].display_name, "Archive");
+    assert!(decoded.folder_changes[0].parent_source_key.is_empty());
 }
 
 #[tokio::test]
@@ -20290,9 +20283,10 @@ async fn mapi_over_http_hierarchy_sync_includes_content_activity_properties() {
         .iter()
         .find(|folder| folder.display_name.eq_ignore_ascii_case("inbox"))
         .expect("Inbox folderChange");
+    assert_eq!(inbox.folder_id, None);
     assert_eq!(
-        inbox.folder_id,
-        Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        inbox.parent_folder_id,
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
     );
     assert_eq!(inbox.content_count, None);
     assert_eq!(inbox.content_unread_count, None);
