@@ -255,6 +255,7 @@ pub(in crate::mapi) enum MapiObject {
         checkpoint_store_allowed: bool,
         checkpoint_skip_reason: &'static str,
         sync_type: u8,
+        initial_state: Vec<u8>,
         state: Vec<u8>,
         state_upload_property_tag: Option<u32>,
         state_upload_buffer: Vec<u8>,
@@ -968,19 +969,29 @@ pub(in crate::mapi) fn synchronization_context_state(
             checkpoint_store_allowed,
             checkpoint_skip_reason,
             sync_type,
+            initial_state,
             state,
+            transfer_buffer,
+            transfer_position,
             ..
-        }) => Some((
-            *folder_id,
-            *mailbox_id,
-            *checkpoint_kind,
-            *checkpoint_change_sequence,
-            *checkpoint_modseq,
-            *checkpoint_store_allowed,
-            *checkpoint_skip_reason,
-            *sync_type,
-            state.clone(),
-        )),
+        }) => {
+            let transfer_state = if *transfer_position >= transfer_buffer.len() {
+                state.clone()
+            } else {
+                initial_state.clone()
+            };
+            Some((
+                *folder_id,
+                *mailbox_id,
+                *checkpoint_kind,
+                *checkpoint_change_sequence,
+                *checkpoint_modseq,
+                *checkpoint_store_allowed,
+                *checkpoint_skip_reason,
+                *sync_type,
+                transfer_state,
+            ))
+        }
         Some(MapiObject::SynchronizationCollector {
             folder_id,
             mailbox_id,

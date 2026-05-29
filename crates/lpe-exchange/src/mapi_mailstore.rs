@@ -3160,6 +3160,61 @@ pub(crate) fn final_sync_state_stream(
     final_sync_state_stream_with_cnsets(sync_type, object_ids, change_numbers, &[], &[])
 }
 
+pub(crate) fn initial_sync_state_stream(sync_type: u8) -> Vec<u8> {
+    final_sync_state_stream(sync_type, &[], &[])
+}
+
+pub(crate) fn sync_state_stream_with_uploaded_property(
+    sync_type: u8,
+    current_state: &[u8],
+    property_tag: u32,
+    value: &[u8],
+) -> Vec<u8> {
+    if !value.is_empty() && replguid_globset_counters(value).is_err() {
+        return current_state.to_vec();
+    }
+    let normalized_property_tag = match property_tag {
+        META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => META_TAG_IDSET_GIVEN,
+        tag => tag,
+    };
+    let idset_given = if normalized_property_tag == META_TAG_IDSET_GIVEN {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_IDSET_GIVEN).unwrap_or_default()
+    };
+    let cnset_seen = if normalized_property_tag == META_TAG_CNSET_SEEN {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_CNSET_SEEN).unwrap_or_default()
+    };
+    if sync_type != SYNC_TYPE_CONTENTS {
+        return sync_state_stream_from_raw_properties(
+            sync_type,
+            &idset_given,
+            &cnset_seen,
+            &[],
+            &[],
+        );
+    }
+    let cnset_seen_fai = if normalized_property_tag == META_TAG_CNSET_SEEN_FAI {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_CNSET_SEEN_FAI).unwrap_or_default()
+    };
+    let cnset_read = if normalized_property_tag == META_TAG_CNSET_READ {
+        value.to_vec()
+    } else {
+        sync_state_property_value(current_state, META_TAG_CNSET_READ).unwrap_or_default()
+    };
+    sync_state_stream_from_raw_properties(
+        sync_type,
+        &idset_given,
+        &cnset_seen,
+        &cnset_seen_fai,
+        &cnset_read,
+    )
+}
+
 fn final_content_sync_state_stream(
     object_ids: &[u64],
     normal_change_numbers: &[u64],
@@ -3189,6 +3244,25 @@ pub(crate) fn content_sync_state_stream_from_sets(
     )
 }
 
+fn sync_state_stream_from_raw_properties(
+    sync_type: u8,
+    idset_given: &[u8],
+    cnset_seen: &[u8],
+    cnset_seen_fai: &[u8],
+    cnset_read: &[u8],
+) -> Vec<u8> {
+    let mut token = Vec::new();
+    write_u32(&mut token, INCR_SYNC_STATE_BEGIN);
+    write_binary_property(&mut token, META_TAG_IDSET_GIVEN, idset_given);
+    write_binary_property(&mut token, META_TAG_CNSET_SEEN, cnset_seen);
+    if sync_type == SYNC_TYPE_CONTENTS {
+        write_binary_property(&mut token, META_TAG_CNSET_SEEN_FAI, cnset_seen_fai);
+        write_binary_property(&mut token, META_TAG_CNSET_READ, cnset_read);
+    }
+    write_u32(&mut token, INCR_SYNC_STATE_END);
+    token
+}
+
 fn final_sync_state_stream_with_cnsets(
     sync_type: u8,
     object_ids: &[u64],
@@ -3216,6 +3290,40 @@ fn final_sync_state_stream_with_cnsets(
     }
     write_u32(&mut token, INCR_SYNC_STATE_END);
     token
+}
+
+fn sync_state_property_value(state: &[u8], property_tag: u32) -> Option<Vec<u8>> {
+    let mut offset = 0usize;
+    if read_sync_state_u32(state, &mut offset)? != INCR_SYNC_STATE_BEGIN {
+        return None;
+    }
+    while offset + 4 <= state.len() {
+        let tag = read_sync_state_u32(state, &mut offset)?;
+        if tag == INCR_SYNC_STATE_END {
+            return None;
+        }
+        let len = read_sync_state_u32(state, &mut offset)? as usize;
+        let end = offset.checked_add(len)?;
+        if end > state.len() {
+            return None;
+        }
+        let normalized_tag = match tag {
+            META_TAG_IDSET_GIVEN | META_TAG_IDSET_GIVEN_BINARY => META_TAG_IDSET_GIVEN,
+            tag => tag,
+        };
+        if normalized_tag == property_tag {
+            return Some(state[offset..end].to_vec());
+        }
+        offset = end;
+    }
+    None
+}
+
+fn read_sync_state_u32(bytes: &[u8], offset: &mut usize) -> Option<u32> {
+    let end = offset.checked_add(4)?;
+    let value = u32::from_le_bytes(bytes.get(*offset..end)?.try_into().ok()?);
+    *offset = end;
+    Some(value)
 }
 
 pub(crate) fn fast_transfer_manifest_buffer_with_attachments(

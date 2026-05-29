@@ -2328,6 +2328,7 @@ pub(in crate::mapi) fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'sta
         SCHEDULE_FOLDER_ID => "schedule",
         SEARCH_FOLDER_ID => "search",
         VIEWS_FOLDER_ID => "personal_views",
+        SHORTCUTS_FOLDER_ID => "shortcuts",
         CALENDAR_FOLDER_ID => "calendar",
         CONTACTS_FOLDER_ID => "contacts",
         JOURNAL_FOLDER_ID => "journal",
@@ -7164,6 +7165,7 @@ where
                     &state_attachment_facts,
                     &all_special_sync_objects,
                 );
+                let initial_state = mapi_mailstore::initial_sync_state_stream(sync_type);
                 let transfer_buffer =
                     mapi_mailstore::sync_manifest_buffer_with_special_objects_and_final_state(
                         principal.account_id,
@@ -7265,6 +7267,12 @@ where
                 } else {
                     "partial_content_scope_suppressed_objects"
                 };
+                let empty_content_sync_state_only = sync_type == 0x01
+                    && wire_sync_email_count == 0
+                    && wire_sync_special_object_count == 0
+                    && checkpoint_deleted_message_count == 0
+                    && incremental_transfer_buffer_bytes == transfer_buffer.len()
+                    && transfer_buffer.len() == state.len().saturating_add(4);
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -7312,6 +7320,8 @@ where
                     fai_scope_requested,
                     wire_sync_email_count,
                     wire_sync_special_object_count,
+                    empty_content_sync_state_only,
+                    outlook_no_current_item_candidate = empty_content_sync_state_only,
                     suppressed_normal_sync_object_count,
                     suppressed_fai_sync_object_count,
                     checkpoint_store_allowed,
@@ -7346,6 +7356,7 @@ where
                         checkpoint_store_allowed,
                         checkpoint_skip_reason,
                         sync_type,
+                        initial_state,
                         state,
                         state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
@@ -7399,6 +7410,7 @@ where
                         checkpoint_store_allowed: true,
                         checkpoint_skip_reason: "",
                         sync_type: 0,
+                        initial_state: Vec::new(),
                         state: Vec::new(),
                         state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
@@ -7458,6 +7470,7 @@ where
                         checkpoint_store_allowed: true,
                         checkpoint_skip_reason: "",
                         sync_type: 0,
+                        initial_state: Vec::new(),
                         state: Vec::new(),
                         state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
@@ -7494,6 +7507,8 @@ where
                     }) => {
                         let requested_buffer_bytes = request.fast_transfer_buffer_size();
                         let previous_transfer_position = *transfer_position;
+                        let empty_content_sync_state_only = *sync_type == 0x01
+                            && transfer_buffer.len() == state.len().saturating_add(4);
                         let response = rop_fast_transfer_source_get_buffer_response(
                             &request,
                             transfer_buffer,
@@ -7573,6 +7588,8 @@ where
                             transfer_position_before = previous_transfer_position,
                             transfer_position_after = *transfer_position,
                             transfer_buffer_bytes = transfer_buffer.len(),
+                            empty_content_sync_state_only,
+                            outlook_no_current_item_candidate = empty_content_sync_state_only,
                             transfer_chunk_bytes =
                                 (*transfer_position).saturating_sub(previous_transfer_position),
                             transfer_completed = completed,
@@ -7995,6 +8012,7 @@ where
                         mailbox_id,
                         checkpoint_kind,
                         sync_type,
+                        initial_state,
                         state,
                         state_upload_property_tag,
                         state_upload_buffer,
@@ -8019,6 +8037,14 @@ where
                                 client_state_uploaded_marker_mask,
                                 property_tag,
                             );
+                            let updated_initial_state =
+                                mapi_mailstore::sync_state_stream_with_uploaded_property(
+                                    *sync_type,
+                                    initial_state,
+                                    property_tag,
+                                    state_upload_buffer,
+                                );
+                            *initial_state = updated_initial_state;
                         }
                         state_upload_buffer.clear();
                         *client_state_uploaded_bytes =
@@ -8214,6 +8240,7 @@ where
                         checkpoint_store_allowed,
                         checkpoint_skip_reason,
                         sync_type,
+                        initial_state: transfer_buffer.clone(),
                         state: transfer_buffer.clone(),
                         state_upload_property_tag: None,
                         state_upload_buffer: Vec::new(),
@@ -8881,8 +8908,16 @@ where
             }
             Some(RopId::SetLocalReplicaMidsetDeleted) => {
                 match input_object_mut(session, &handle_slots, &request) {
-                    Some(MapiObject::SynchronizationSource { state, .. })
-                    | Some(MapiObject::SynchronizationCollector { state, .. }) => {
+                    Some(MapiObject::SynchronizationSource {
+                        initial_state,
+                        state,
+                        ..
+                    }) => {
+                        initial_state.extend_from_slice(request.local_replica_midset_deleted());
+                        state.extend_from_slice(request.local_replica_midset_deleted());
+                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                    }
+                    Some(MapiObject::SynchronizationCollector { state, .. }) => {
                         state.extend_from_slice(request.local_replica_midset_deleted());
                         responses.extend_from_slice(&rop_simple_success_response(&request));
                     }

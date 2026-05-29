@@ -17536,7 +17536,10 @@ async fn mapi_over_http_sync_source_transfer_state_does_not_echo_uploaded_client
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x82, 0x03, 0, 0, 0, 0]));
     assert!(!contains_bytes(&response_rops, client_state));
-    assert_content_final_state_includes(&response_rops, &[message_id], &[41]);
+    assert!(!contains_bytes(
+        &response_rops,
+        &globcnt_bytes(mapi_message_global_counter(&message_id))
+    ));
     let checkpoint = store
         .fetch_mapi_sync_checkpoint(
             FakeStore::account().account_id,
