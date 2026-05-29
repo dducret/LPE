@@ -288,7 +288,15 @@ fn hierarchy_rows<'a>(
         )
         .collect::<Vec<_>>();
     let mut folder_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
-    if folder_id == IPM_SUBTREE_FOLDER_ID {
+    if folder_id == ROOT_FOLDER_ID {
+        for special_folder_id in ROOT_HIERARCHY_FOLDER_IDS {
+            if folder_ids.insert(*special_folder_id)
+                && special_hierarchy_row_matches(*special_folder_id, restriction)
+            {
+                rows.push(HierarchyRow::Special(*special_folder_id));
+            }
+        }
+    } else if folder_id == IPM_SUBTREE_FOLDER_ID {
         for special_folder_id in IPM_SUBTREE_HIERARCHY_FOLDER_IDS {
             if folder_ids.insert(*special_folder_id)
                 && special_hierarchy_row_matches(*special_folder_id, restriction)
@@ -300,6 +308,22 @@ fn hierarchy_rows<'a>(
     sort_hierarchy_rows(&mut rows, sort_orders);
     rows
 }
+
+const ROOT_HIERARCHY_FOLDER_IDS: &[u64] = &[
+    DEFERRED_ACTION_FOLDER_ID,
+    SEARCH_FOLDER_ID,
+    REMINDERS_FOLDER_ID,
+    TRACKED_MAIL_PROCESSING_FOLDER_ID,
+    TODO_SEARCH_FOLDER_ID,
+    COMMON_VIEWS_FOLDER_ID,
+    SCHEDULE_FOLDER_ID,
+    VIEWS_FOLDER_ID,
+    SHORTCUTS_FOLDER_ID,
+    IPM_SUBTREE_FOLDER_ID,
+    SPOOLER_QUEUE_FOLDER_ID,
+    FREEBUSY_DATA_FOLDER_ID,
+    DOCUMENT_LIBRARIES_FOLDER_ID,
+];
 
 const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     INBOX_FOLDER_ID,
@@ -316,16 +340,12 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     JOURNAL_FOLDER_ID,
     NOTES_FOLDER_ID,
     TASKS_FOLDER_ID,
-    REMINDERS_FOLDER_ID,
-    DOCUMENT_LIBRARIES_FOLDER_ID,
     SYNC_ISSUES_FOLDER_ID,
     CONFLICTS_FOLDER_ID,
     LOCAL_FAILURES_FOLDER_ID,
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    TRACKED_MAIL_PROCESSING_FOLDER_ID,
-    TODO_SEARCH_FOLDER_ID,
     CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
@@ -2569,7 +2589,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
         ),
         DOCUMENT_LIBRARIES_FOLDER_ID => (
             "Document Libraries",
-            IPM_SUBTREE_FOLDER_ID,
+            ROOT_FOLDER_ID,
             "IPF.ShortcutFolder",
             false,
         ),
@@ -2584,13 +2604,10 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             "IPF.Note.OutlookHomepage",
             false,
         ),
-        TRACKED_MAIL_PROCESSING_FOLDER_ID => (
-            "Tracked Mail Processing",
-            IPM_SUBTREE_FOLDER_ID,
-            "IPF.Note",
-            false,
-        ),
-        TODO_SEARCH_FOLDER_ID => ("To-Do", IPM_SUBTREE_FOLDER_ID, "IPF.Task", false),
+        TRACKED_MAIL_PROCESSING_FOLDER_ID => {
+            ("Tracked Mail Processing", ROOT_FOLDER_ID, "IPF.Note", false)
+        }
+        TODO_SEARCH_FOLDER_ID => ("To-Do", ROOT_FOLDER_ID, "IPF.Task", false),
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => (
             "Conversation Action Settings",
             IPM_SUBTREE_FOLDER_ID,
@@ -2605,12 +2622,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             "IPF.Note",
             false,
         ),
-        REMINDERS_FOLDER_ID => (
-            "Reminders",
-            IPM_SUBTREE_FOLDER_ID,
-            "Outlook.Reminder",
-            false,
-        ),
+        REMINDERS_FOLDER_ID => ("Reminders", ROOT_FOLDER_ID, "Outlook.Reminder", false),
         _ => ("Root", 0, "", true),
     }
 }

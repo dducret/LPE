@@ -2841,7 +2841,7 @@ fn virtual_special_folder_metadata(
             "reminders",
             "Reminders",
             61,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            crate::mapi::identity::ROOT_FOLDER_ID,
             "Outlook.Reminder",
         )),
         crate::mapi::identity::SUGGESTED_CONTACTS_FOLDER_ID => Some((
@@ -2876,7 +2876,7 @@ fn virtual_special_folder_metadata(
             "document_libraries",
             "Document Libraries",
             66,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.ShortcutFolder",
         )),
         crate::mapi::identity::SYNC_ISSUES_FOLDER_ID => Some((
@@ -2960,14 +2960,14 @@ fn virtual_special_folder_metadata(
             "tracked_mail_processing",
             "Tracked Mail Processing",
             150,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Note",
         )),
         crate::mapi::identity::TODO_SEARCH_FOLDER_ID => Some((
             "todo_search",
             "To-Do",
             160,
-            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            crate::mapi::identity::ROOT_FOLDER_ID,
             "IPF.Task",
         )),
         crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID => Some((

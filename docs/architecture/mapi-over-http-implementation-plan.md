@@ -185,10 +185,13 @@ non-canonical LPE state.
   cached-mode sync.
 - Private-mailbox `RopLogon` responses expose the Microsoft fixed folder-id
   slots before `ResponseFlags` and `MailboxGuid`, including the `Shortcuts`
-  slot required by current Outlook clients. The `Shortcuts` FID is a bounded
+  slot required by current Outlook clients. The corresponding Root hierarchy
+  table also exposes these documented Root children, including Schedule, Search,
+  Common Views, Personal Views, and Shortcuts. The `Shortcuts` FID is a bounded
   openable Root child for Outlook startup compatibility; it does not create a
   canonical LPE shortcut store.
-- Common Views and Personal Views are Root children outside the IPM subtree.
+- Common Views, Schedule, Search, Personal Views, and Shortcuts are Root
+  children outside the IPM subtree.
   Navigation shortcuts are projected as folder-associated information messages
   in Common Views, not as durable contents in the Shortcuts folder. This follows
   `[MS-OXOSFLD]` sections 2.2.2 and 3.1.1.1 for special-folder behavior and
@@ -268,11 +271,10 @@ not by itself authorize broad client publication.
   current session so Outlook bootstrap can continue, and installation checks
   must report the missing canonical schema state.
 - `RopGetReceiveFolder` and `RopGetReceiveFolderTable` use the same primed
-  receive-folder table: `IPM.Note` resolves to Inbox and `IPM.Appointment`
-  resolves to the canonical Calendar folder. Empty message-class probes return
-  the default Inbox receive-folder entry with explicit class `IPM.Note`, matching
-  Outlook's `IMsgStore::GetReceiveFolder` default receive-folder contract. Other
-  unmatched message classes still return Inbox with an empty explicit class.
+  receive-folder table: `IPM` and `IPM.Note` resolve to Inbox and
+  `IPM.Appointment` resolves to the canonical Calendar folder. Empty or
+  unmatched message-class probes return Inbox with an empty explicit class,
+  matching the documented `RopGetReceiveFolder` longest-prefix fallback.
 - Calendar RCA diagnostics log the `PR_IPM_APPOINTMENT_ENTRYID` folder EntryID,
   decoded Calendar FID, `IPF.Appointment` folder contract, default calendar
   collection presence, projected event count, and effective access state when

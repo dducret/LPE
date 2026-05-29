@@ -38,8 +38,16 @@ pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     SHORTCUTS_FOLDER_ID,
 ];
 
-const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 28] = [
+const ROOT_VIRTUAL_FOLDER_IDS: [u64; 37] = [
+    ROOT_FOLDER_ID,
+    DEFERRED_ACTION_FOLDER_ID,
+    SPOOLER_QUEUE_FOLDER_ID,
     IPM_SUBTREE_FOLDER_ID,
+    COMMON_VIEWS_FOLDER_ID,
+    SCHEDULE_FOLDER_ID,
+    SEARCH_FOLDER_ID,
+    VIEWS_FOLDER_ID,
+    SHORTCUTS_FOLDER_ID,
     INBOX_FOLDER_ID,
     DRAFTS_FOLDER_ID,
     OUTBOX_FOLDER_ID,
@@ -64,6 +72,34 @@ const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 28] = [
     RSS_FEEDS_FOLDER_ID,
     TRACKED_MAIL_PROCESSING_FOLDER_ID,
     TODO_SEARCH_FOLDER_ID,
+    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    ARCHIVE_FOLDER_ID,
+    FREEBUSY_DATA_FOLDER_ID,
+    CONVERSATION_HISTORY_FOLDER_ID,
+];
+
+const IPM_SUBTREE_VIRTUAL_FOLDER_IDS: [u64; 24] = [
+    IPM_SUBTREE_FOLDER_ID,
+    INBOX_FOLDER_ID,
+    DRAFTS_FOLDER_ID,
+    OUTBOX_FOLDER_ID,
+    SENT_FOLDER_ID,
+    TRASH_FOLDER_ID,
+    CONTACTS_FOLDER_ID,
+    SUGGESTED_CONTACTS_FOLDER_ID,
+    QUICK_CONTACTS_FOLDER_ID,
+    IM_CONTACT_LIST_FOLDER_ID,
+    CONTACTS_SEARCH_FOLDER_ID,
+    CALENDAR_FOLDER_ID,
+    JOURNAL_FOLDER_ID,
+    NOTES_FOLDER_ID,
+    TASKS_FOLDER_ID,
+    SYNC_ISSUES_FOLDER_ID,
+    CONFLICTS_FOLDER_ID,
+    LOCAL_FAILURES_FOLDER_ID,
+    SERVER_FAILURES_FOLDER_ID,
+    JUNK_FOLDER_ID,
+    RSS_FEEDS_FOLDER_ID,
     CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
@@ -234,10 +270,10 @@ pub(in crate::mapi) fn sync_state_mailboxes_for(
 }
 
 fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> Vec<u64> {
-    if sync_root_folder_id == IPM_SUBTREE_FOLDER_ID {
-        IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec()
-    } else {
-        PRIVATE_LOGON_SPECIAL_FOLDER_IDS.to_vec()
+    match sync_root_folder_id {
+        ROOT_FOLDER_ID => ROOT_VIRTUAL_FOLDER_IDS.to_vec(),
+        IPM_SUBTREE_FOLDER_ID => IPM_SUBTREE_VIRTUAL_FOLDER_IDS.to_vec(),
+        _ => PRIVATE_LOGON_SPECIAL_FOLDER_IDS.to_vec(),
     }
 }
 
@@ -287,6 +323,10 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | SEARCH_FOLDER_ID
         | VIEWS_FOLDER_ID
         | SHORTCUTS_FOLDER_ID
+        | REMINDERS_FOLDER_ID
+        | DOCUMENT_LIBRARIES_FOLDER_ID
+        | TRACKED_MAIL_PROCESSING_FOLDER_ID
+        | TODO_SEARCH_FOLDER_ID
         | FREEBUSY_DATA_FOLDER_ID => Some(ROOT_FOLDER_ID),
         INBOX_FOLDER_ID
         | DRAFTS_FOLDER_ID
@@ -302,13 +342,9 @@ fn parent_folder_id_for_folder_id(folder_id: u64, mailboxes: &[JmapMailbox]) -> 
         | JOURNAL_FOLDER_ID
         | NOTES_FOLDER_ID
         | TASKS_FOLDER_ID
-        | REMINDERS_FOLDER_ID
-        | DOCUMENT_LIBRARIES_FOLDER_ID
         | SYNC_ISSUES_FOLDER_ID
         | JUNK_FOLDER_ID
         | RSS_FEEDS_FOLDER_ID
-        | TRACKED_MAIL_PROCESSING_FOLDER_ID
-        | TODO_SEARCH_FOLDER_ID
         | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
         | ARCHIVE_FOLDER_ID
         | CONVERSATION_HISTORY_FOLDER_ID => Some(IPM_SUBTREE_FOLDER_ID),
@@ -343,16 +379,12 @@ fn special_folder_is_in_sync_scope(special_folder_id: u64, sync_root_folder_id: 
                 | JOURNAL_FOLDER_ID
                 | NOTES_FOLDER_ID
                 | TASKS_FOLDER_ID
-                | REMINDERS_FOLDER_ID
-                | DOCUMENT_LIBRARIES_FOLDER_ID
                 | SYNC_ISSUES_FOLDER_ID
                 | CONFLICTS_FOLDER_ID
                 | LOCAL_FAILURES_FOLDER_ID
                 | SERVER_FAILURES_FOLDER_ID
                 | JUNK_FOLDER_ID
                 | RSS_FEEDS_FOLDER_ID
-                | TRACKED_MAIL_PROCESSING_FOLDER_ID
-                | TODO_SEARCH_FOLDER_ID
                 | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
                 | ARCHIVE_FOLDER_ID
                 | CONVERSATION_HISTORY_FOLDER_ID
@@ -1357,16 +1389,17 @@ mod tests {
     }
 
     #[test]
-    fn ipm_hierarchy_emits_virtual_reminders_folder_row() {
+    fn hierarchy_scope_places_reminders_under_root_not_ipm_subtree() {
         let mailboxes = vec![mailbox(
             0x44444444444444444444444444444444,
             "reminders",
             "Reminders",
         )];
 
-        assert!(hierarchy_virtual_folder_ids(IPM_SUBTREE_FOLDER_ID).contains(&REMINDERS_FOLDER_ID));
+        assert!(hierarchy_virtual_folder_ids(ROOT_FOLDER_ID).contains(&REMINDERS_FOLDER_ID));
+        assert!(!hierarchy_virtual_folder_ids(IPM_SUBTREE_FOLDER_ID).contains(&REMINDERS_FOLDER_ID));
         assert_eq!(
-            sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
+            sync_mailboxes_for(ROOT_FOLDER_ID, 0x02, &mailboxes)
                 .iter()
                 .filter(|mailbox| mapi_folder_id(mailbox) == REMINDERS_FOLDER_ID)
                 .count(),
