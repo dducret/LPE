@@ -14900,7 +14900,10 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         &bootstrap_store_props_rops,
         &[0x07, 0x00, 0, 0, 0, 0]
     ));
-    assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("Alice")));
+    assert!(contains_bytes(
+        &bootstrap_store_props_rops,
+        &utf16z("Alice")
+    ));
     assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
 
     let mut cookie = bootstrap_cookie;
@@ -14949,6 +14952,27 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         .unwrap();
     assert_eq!(hierarchy_checkpoint.last_change_sequence, 89);
     assert_eq!(hierarchy_checkpoint.last_modseq, 45);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut max_submit_rops = Vec::new();
+    append_rop_get_properties_specific(
+        &mut max_submit_rops,
+        0,
+        &[0x666D_0003], // PidTagMaxSubmitMessageSize
+    );
+    let max_submit_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&max_submit_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&max_submit_response);
+    let max_submit_rops = response_rops_from_execute_response(max_submit_response).await;
+    assert!(contains_bytes(&max_submit_rops, &[0x07, 0x00, 0, 0, 0, 0]));
+    assert!(contains_bytes(&max_submit_rops, &35840u32.to_le_bytes()));
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
