@@ -1470,6 +1470,7 @@ mod tests {
             completed_execute_requests: HashMap::new(),
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
+            logon_identity: None,
         }
     }
 

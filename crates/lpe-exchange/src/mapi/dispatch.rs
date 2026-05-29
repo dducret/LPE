@@ -562,6 +562,9 @@ fn log_execute_rop_debug(
     );
 
     if logon.present {
+        let response_store_identity_matches_session = logon.mailbox_guid
+            == principal.account_id.to_string()
+            && logon.replica_guid == bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID);
         tracing::info!(
             rca_debug = true,
             adapter = "mapi",
@@ -577,8 +580,11 @@ fn log_execute_rop_debug(
             response_flags = %logon.response_flags,
             special_folder_ids = %logon.special_folder_ids,
             mailbox_guid = %logon.mailbox_guid,
+            expected_mailbox_guid = %principal.account_id,
             replid = %logon.replid,
             replica_guid = %logon.replica_guid,
+            expected_replica_guid = %bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
+            response_store_identity_matches_session,
             parse_error = %logon.parse_error,
             message = "rca debug mapi logon response",
         );
@@ -9403,6 +9409,18 @@ where
                 let handle =
                     session.allocate_output_handle(request.output_handle_index, MapiObject::Logon);
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                let special_folder_ids = PRIVATE_LOGON_SPECIAL_FOLDER_IDS
+                    .iter()
+                    .map(|folder_id| format!("{folder_id:#018x}"))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                session.record_logon_identity(MapiLogonIdentityDebug {
+                    mailbox_guid: principal.account_id.to_string(),
+                    replid: STORE_REPLICA_ID.to_string(),
+                    replica_guid: bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
+                    response_flags: "0x00".to_string(),
+                    special_folder_ids,
+                });
                 responses.extend_from_slice(&rop_logon_response_body(principal, &request));
                 output_handles.push(handle);
             }

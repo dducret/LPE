@@ -14743,6 +14743,7 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         .iter()
         .find(|folder| folder.display_name == "Calendar")
         .expect("Calendar hierarchy row");
+    let calendar_source_key = calendar.source_key.clone();
     assert_eq!(
         calendar.parent_folder_id,
         Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
@@ -14943,6 +14944,268 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         .unwrap();
     assert_eq!(disconnect.status(), StatusCode::OK);
     assert_eq!(disconnect.headers().get("x-responsecode").unwrap(), "0");
+
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    assert_eq!(reconnect.status(), StatusCode::OK);
+    assert_eq!(reconnect.headers().get("x-responsecode").unwrap(), "0");
+    cookie = mapi_cookie_header(&reconnect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut reconnect_hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reconnect_hierarchy_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(
+        &mut reconnect_hierarchy_rops,
+        1,
+        2,
+        4096,
+    );
+    let reconnect_hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reconnect_hierarchy_rops,
+                &[1, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&reconnect_hierarchy_response);
+    let reconnect_hierarchy_rops =
+        response_rops_from_execute_response(reconnect_hierarchy_response).await;
+    let reconnect_hierarchy =
+        strict_hierarchy_sync_transfer_from_response(&reconnect_hierarchy_rops).unwrap();
+    let reconnect_calendar = reconnect_hierarchy
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name == "Calendar")
+        .expect("reconnected Calendar hierarchy row");
+    assert_eq!(reconnect_calendar.source_key, calendar_source_key);
+    assert_eq!(
+        reconnect_calendar.parent_folder_id,
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
+    assert_eq!(
+        reconnect_calendar.container_class.as_deref(),
+        Some("IPF.Appointment")
+    );
+
+    let reconnect_hierarchy_checkpoint = store
+        .fetch_mapi_sync_checkpoint(account.account_id, None, MapiCheckpointKind::Hierarchy)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reconnect_hierarchy_checkpoint.last_change_sequence, 89);
+    assert_eq!(reconnect_hierarchy_checkpoint.last_modseq, 45);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut reconnect_default_probe_rops = vec![0xFE, 0x00, 0x00, 0x01];
+    reconnect_default_probe_rops.extend_from_slice(&0u32.to_le_bytes());
+    reconnect_default_probe_rops.extend_from_slice(&0u32.to_le_bytes());
+    reconnect_default_probe_rops.extend_from_slice(&0u16.to_le_bytes());
+    append_rop_get_properties_specific(&mut reconnect_default_probe_rops, 0, &[0x36D0_0102]);
+    append_rop_open_folder(
+        &mut reconnect_default_probe_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    append_rop_get_properties_specific(
+        &mut reconnect_default_probe_rops,
+        1,
+        &[0x3001_001F, 0x3613_001F],
+    );
+    let reconnect_default_probe = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reconnect_default_probe_rops,
+                &[u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&reconnect_default_probe);
+    let reconnect_default_probe_rops =
+        response_rops_from_execute_response(reconnect_default_probe).await;
+    assert!(contains_bytes(
+        &reconnect_default_probe_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &reconnect_default_probe_rops,
+        &utf16z("Calendar")
+    ));
+    assert!(contains_bytes(
+        &reconnect_default_probe_rops,
+        &utf16z("IPF.Appointment")
+    ));
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut reconnect_calendar_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reconnect_calendar_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    reconnect_calendar_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, 0x01, 0x00, 0x10, 0x00, 0x00, 0x00, 0x0d, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x75, 0x00, 0x02,
+    ]);
+    reconnect_calendar_rops.extend_from_slice(&0x4017_0102u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&0u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&[0x77, 0x00, 0x02, 0x75, 0x00, 0x02]);
+    reconnect_calendar_rops.extend_from_slice(&0x6796_0102u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&0u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&[0x77, 0x00, 0x02, 0x75, 0x00, 0x02]);
+    reconnect_calendar_rops.extend_from_slice(&0x67DA_0102u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&0u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&[0x77, 0x00, 0x02, 0x75, 0x00, 0x02]);
+    reconnect_calendar_rops.extend_from_slice(&0x67D2_0102u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&0u32.to_le_bytes());
+    reconnect_calendar_rops.extend_from_slice(&[0x77, 0x00, 0x02, 0x4E, 0x00, 0x02]);
+    reconnect_calendar_rops.extend_from_slice(&4096u16.to_le_bytes());
+    let reconnect_calendar_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reconnect_calendar_rops,
+                &[1, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&reconnect_calendar_response);
+    let reconnect_calendar_rops =
+        response_rops_from_execute_response(reconnect_calendar_response).await;
+    let reconnect_calendar_stream =
+        strict_content_sync_transfer_from_response(&reconnect_calendar_rops).unwrap();
+    assert_eq!(reconnect_calendar_stream.message_changes.len(), 3);
+    assert!(reconnect_calendar_stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+    assert!(contains_bytes(
+        &reconnect_calendar_rops,
+        &utf16z("IPM.Configuration.Calendar")
+    ));
+    let reconnected_calendar_checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(calendar_checkpoint_id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reconnected_calendar_checkpoint.last_change_sequence, 89);
+    assert_eq!(reconnected_calendar_checkpoint.last_modseq, 45);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut reconnect_trash_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reconnect_trash_rops,
+        0,
+        1,
+        crate::mapi::identity::TRASH_FOLDER_ID,
+    );
+    reconnect_trash_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, 0x01, 0x00, 0x10, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x82, 0x00, 0x02, 0x03, 0x4E, 0x00, 0x03,
+    ]);
+    reconnect_trash_rops.extend_from_slice(&4096u16.to_le_bytes());
+    let reconnect_trash_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &reconnect_trash_rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX],
+            )),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&reconnect_trash_response);
+    let reconnect_trash_rops = response_rops_from_execute_response(reconnect_trash_response).await;
+    assert!(!contains_bytes(
+        &reconnect_trash_rops,
+        &utf16z("Observed startup trash message")
+    ));
+    let reconnect_trash_checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(trash_id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(reconnect_trash_checkpoint.last_change_sequence, 88);
+    assert_eq!(reconnect_trash_checkpoint.last_modseq, 44);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut reconnect_root_rops = Vec::new();
+    append_rop_open_folder(
+        &mut reconnect_root_rops,
+        0,
+        1,
+        crate::mapi::identity::ROOT_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut reconnect_root_rops, 1, 2, 20000);
+    let reconnect_root_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&reconnect_root_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&reconnect_root_response);
+    let reconnect_root_rops = response_rops_from_execute_response(reconnect_root_response).await;
+    let reconnect_root_hierarchy =
+        strict_hierarchy_sync_transfer_from_response(&reconnect_root_rops).unwrap();
+    for name in ["Reminders", "Tracked Mail Processing", "To-Do"] {
+        let folder = reconnect_root_hierarchy
+            .folder_changes
+            .iter()
+            .find(|folder| folder.display_name == name)
+            .unwrap_or_else(|| panic!("reconnected {name} hierarchy row"));
+        assert_eq!(
+            folder.parent_folder_id,
+            Some(crate::mapi::identity::ROOT_FOLDER_ID)
+        );
+    }
+
+    let mut reconnect_disconnect_headers = mapi_headers("Disconnect");
+    reconnect_disconnect_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let reconnect_disconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &reconnect_disconnect_headers, b"")
+        .await
+        .unwrap();
+    assert_eq!(reconnect_disconnect.status(), StatusCode::OK);
+    assert_eq!(
+        reconnect_disconnect
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
 }
 
 #[tokio::test]

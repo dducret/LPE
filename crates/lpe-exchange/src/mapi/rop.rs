@@ -5559,6 +5559,7 @@ mod tests {
             completed_execute_requests: HashMap::new(),
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
+            logon_identity: None,
         };
         let stale = MapiSession {
             last_seen_at: now - Duration::from_secs(u64::from(MAPI_SESSION_MAX_AGE_SECONDS) + 1),

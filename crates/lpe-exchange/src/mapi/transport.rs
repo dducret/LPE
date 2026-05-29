@@ -7,8 +7,8 @@ use super::identity::{
     JUNK_FOLDER_ID, LOCAL_FAILURES_FOLDER_ID, NOTES_FOLDER_ID, OUTBOX_FOLDER_ID,
     REMINDERS_FOLDER_ID, ROOT_FOLDER_ID, RSS_FEEDS_FOLDER_ID, SCHEDULE_FOLDER_ID, SEARCH_FOLDER_ID,
     SENT_FOLDER_ID, SERVER_FAILURES_FOLDER_ID, SHORTCUTS_FOLDER_ID, SPOOLER_QUEUE_FOLDER_ID,
-    SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID, TODO_SEARCH_FOLDER_ID,
-    TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
+    STORE_REPLICA_GUID, SUGGESTED_CONTACTS_FOLDER_ID, SYNC_ISSUES_FOLDER_ID, TASKS_FOLDER_ID,
+    TODO_SEARCH_FOLDER_ID, TRACKED_MAIL_PROCESSING_FOLDER_ID, TRASH_FOLDER_ID, VIEWS_FOLDER_ID,
 };
 use super::notifications::*;
 use super::nspi::*;
@@ -476,6 +476,8 @@ pub(in crate::mapi) fn log_mapi_session_establish(
     let host = safe_header(headers, "host").unwrap_or_default();
     let content_type = safe_header(headers, "content-type").unwrap_or_default();
     let content_length = safe_header(headers, "content-length").unwrap_or_default();
+    let store_replica_guid = Uuid::from_bytes(STORE_REPLICA_GUID);
+    let store_replica_guid_hex = hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len());
 
     tracing::info!(
         rca_debug = true,
@@ -489,6 +491,10 @@ pub(in crate::mapi) fn log_mapi_session_establish(
         session_reconnected = reconnected,
         session_id_suffix = %session_cookie_debug.suffix,
         session_id_hash = %session_cookie_debug.hash,
+        mailbox_guid = %principal.account_id,
+        store_replica_guid = %store_replica_guid,
+        store_replica_guid_hex = %store_replica_guid_hex,
+        mapping_signature_source = "store_replica_guid",
         client_application = %client_application,
         client_request_id = %client_request_id,
         client_info = %client_info,
@@ -746,6 +752,7 @@ fn log_mapi_session_disconnect(
         .post_hierarchy_actions
         .completed_sync_checkpoint_summaries
         .join("|");
+    let logon_identity = session.logon_identity.clone().unwrap_or_default();
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
     let special_folder_contract_summary = special_folder_contract_summary(session);
     let all_sync_sources_completed = sync_source_count == completed_sync_source_count;
@@ -772,6 +779,17 @@ fn log_mapi_session_disconnect(
         session_first_request_id = %session.first_request_id,
         session_last_request_type = %session.last_request_type,
         session_last_request_id = %session.last_request_id,
+        logon_mailbox_guid = %logon_identity.mailbox_guid,
+        logon_replid = %logon_identity.replid,
+        logon_replica_guid = %logon_identity.replica_guid,
+        logon_response_flags = %logon_identity.response_flags,
+        logon_special_folder_ids = %logon_identity.special_folder_ids,
+        expected_mailbox_guid = %principal.account_id,
+        expected_replica_guid = %hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
+        logon_identity_matches_session =
+            logon_identity.mailbox_guid == principal.account_id.to_string()
+                && logon_identity.replica_guid
+                    == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
         client_request_id = %client_request_id,
         client_application = %client_application,
         client_info = %client_info,
@@ -827,6 +845,12 @@ fn log_mapi_session_disconnect(
         mapi_request_id = %request_id,
         session_id_suffix = %session_cookie_debug.suffix,
         session_id_hash = %session_cookie_debug.hash,
+        logon_mailbox_guid = %logon_identity.mailbox_guid,
+        logon_replica_guid = %logon_identity.replica_guid,
+        logon_identity_matches_session =
+            logon_identity.mailbox_guid == principal.account_id.to_string()
+                && logon_identity.replica_guid
+                    == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
         client_application = %client_application,
         trace_id = %trace_id,
         client_request_id = %client_request_id,
@@ -877,6 +901,13 @@ fn log_mapi_session_disconnect(
         mapi_request_id = %request_id,
         session_id_suffix = %session_cookie_debug.suffix,
         session_id_hash = %session_cookie_debug.hash,
+        logon_mailbox_guid = %logon_identity.mailbox_guid,
+        logon_replica_guid = %logon_identity.replica_guid,
+        logon_special_folder_ids = %logon_identity.special_folder_ids,
+        logon_identity_matches_session =
+            logon_identity.mailbox_guid == principal.account_id.to_string()
+                && logon_identity.replica_guid
+                    == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
         transport_contract_ok = true,
         response_body_contract_ok = true,
         cookies_invalidated = true,
@@ -1988,6 +2019,7 @@ mod tests {
             completed_execute_requests: HashMap::new(),
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
+            logon_identity: None,
         }
     }
 

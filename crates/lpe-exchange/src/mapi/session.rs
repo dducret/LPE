@@ -35,6 +35,16 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
     pub(in crate::mapi) post_hierarchy_actions: PostHierarchyActionState,
+    pub(in crate::mapi) logon_identity: Option<MapiLogonIdentityDebug>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::mapi) struct MapiLogonIdentityDebug {
+    pub(in crate::mapi) mailbox_guid: String,
+    pub(in crate::mapi) replid: String,
+    pub(in crate::mapi) replica_guid: String,
+    pub(in crate::mapi) response_flags: String,
+    pub(in crate::mapi) special_folder_ids: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -398,6 +408,7 @@ pub(in crate::mapi) fn create_session(
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),
+        logon_identity: None,
     };
     session.record_transport_request(request_type, request_id);
     let mut guard = sessions()
@@ -625,6 +636,10 @@ pub(in crate::mapi) fn mapi_payload_fingerprint(bytes: &[u8]) -> u64 {
 }
 
 impl MapiSession {
+    pub(in crate::mapi) fn record_logon_identity(&mut self, identity: MapiLogonIdentityDebug) {
+        self.logon_identity = Some(identity);
+    }
+
     pub(in crate::mapi) fn record_transport_request(
         &mut self,
         request_type: &str,
