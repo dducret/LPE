@@ -16,6 +16,28 @@ fn exchange_reminder_excluded_folder_roles() -> Vec<String> {
     .collect()
 }
 
+fn test_account_legacy_dn(email: &str) -> String {
+    test_legacy_dn(email)
+}
+
+fn test_contact_legacy_dn(email: &str, id: &str) -> String {
+    test_legacy_dn(&format!("{email}-{id}"))
+}
+
+fn test_legacy_dn(source: &str) -> String {
+    let legacy_cn = source
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_cn}")
+}
+
 #[tokio::test]
 async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let store = FakeStore {
@@ -14711,6 +14733,84 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     };
     let service = ExchangeService::new(store.clone());
 
+    let nspi_headers = nspi_bound_headers(&service, "DNToMId").await;
+    let nspi_dn_to_mid = service
+        .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, b"alice@example.test\0")
+        .await
+        .unwrap();
+    assert_eq!(nspi_dn_to_mid.headers().get("x-responsecode").unwrap(), "0");
+    let nspi_dn_to_mid_body = response_bytes(nspi_dn_to_mid).await;
+    let principal_mid = u32::from_le_bytes(nspi_dn_to_mid_body[13..17].try_into().unwrap());
+    assert_ne!(principal_mid, 0);
+
+    let mut nspi_get_props_request = Vec::new();
+    nspi_get_props_request.extend_from_slice(&principal_mid.to_le_bytes());
+    nspi_get_props_request.extend_from_slice(&0x8C6D_0102u32.to_le_bytes());
+    let nspi_headers = nspi_bound_headers(&service, "GetProps").await;
+    let nspi_guid = service
+        .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, &nspi_get_props_request)
+        .await
+        .unwrap();
+    let nspi_guid_body = response_bytes(nspi_guid).await;
+    assert!(contains_bytes(
+        &nspi_guid_body,
+        account.account_id.to_bytes_le().as_slice()
+    ));
+
+    let mut nspi_smtp_request = Vec::new();
+    nspi_smtp_request.extend_from_slice(&principal_mid.to_le_bytes());
+    nspi_smtp_request.extend_from_slice(&0x39FE_001Fu32.to_le_bytes());
+    let nspi_smtp = service
+        .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, &nspi_smtp_request)
+        .await
+        .unwrap();
+    let nspi_smtp_body = response_bytes(nspi_smtp).await;
+    assert!(contains_bytes(
+        &nspi_smtp_body,
+        &utf16z("alice@example.test")
+    ));
+
+    let mut nspi_email_request = Vec::new();
+    nspi_email_request.extend_from_slice(&principal_mid.to_le_bytes());
+    nspi_email_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
+    let nspi_email = service
+        .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, &nspi_email_request)
+        .await
+        .unwrap();
+    let nspi_email_body = response_bytes(nspi_email).await;
+    assert!(contains_bytes(
+        &nspi_email_body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
+    assert!(!contains_bytes(
+        &nspi_email_body,
+        &utf16z("alice@example.test")
+    ));
+
+    let mut nspi_query_rows_request = hex_bytes(
+        "00000000ff000000000000000000000000000000000000000000000000e40400000904000009080000\
+         010000002600008001000000ff0b0000000201ff0f1f0001300300fe0f030000391f00203a\
+         1f0003301f0002300b00403a1f00ff391f00",
+    );
+    nspi_query_rows_request[49..53].copy_from_slice(&principal_mid.to_le_bytes());
+    let nspi_headers = nspi_bound_headers(&service, "QueryRows").await;
+    let nspi_query_rows = service
+        .handle_mapi(MapiEndpoint::Nspi, &nspi_headers, &nspi_query_rows_request)
+        .await
+        .unwrap();
+    let nspi_query_rows_body = response_bytes(nspi_query_rows).await;
+    assert!(contains_bytes(
+        &nspi_query_rows_body,
+        &utf16z("alice@example.test")
+    ));
+    assert!(contains_bytes(
+        &nspi_query_rows_body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
+    assert!(contains_bytes(&nspi_query_rows_body, &utf16z("alice")));
+    assert!(contains_bytes(&nspi_query_rows_body, &utf16z("EX")));
+    assert!(!contains_bytes(&nspi_query_rows_body, &utf16z("SMTP")));
+
     let bootstrap_connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
@@ -22384,7 +22484,7 @@ async fn mapi_over_http_resolve_names_resolves_authenticated_mailbox() {
     assert_eq!(body[62], 0);
     assert!(contains_bytes(&body, &utf16z("alice@example.test")));
     assert!(contains_bytes(&body, &utf16z("Alice")));
-    assert!(contains_bytes(&body, &utf16z("SMTP")));
+    assert!(contains_bytes(&body, &utf16z("EX")));
 }
 
 #[tokio::test]
@@ -22423,7 +22523,10 @@ async fn mapi_over_http_resolve_names_honors_requested_rca_columns() {
     );
     assert_eq!(u32::from_le_bytes(body[34..38].try_into().unwrap()), 1);
     assert_eq!(body[38], 0);
-    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
     assert!(contains_bytes(&body, &utf16z("Alice")));
     assert!(!contains_bytes(&body, &utf16z("SMTP")));
     assert!(body.ends_with(&[0, 0, 0, 0]));
@@ -22450,7 +22553,10 @@ async fn mapi_over_http_resolve_names_falls_back_to_authenticated_mailbox_for_rc
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
     assert_eq!(body[21], 1);
-    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
     assert!(contains_bytes(&body, &utf16z("Alice")));
 }
 
@@ -22481,7 +22587,13 @@ async fn mapi_over_http_resolve_names_resolves_canonical_contact() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
-    assert!(contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_contact_legacy_dn(
+            "bob@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ))
+    ));
     assert!(contains_bytes(&body, &utf16z("Bob Contact")));
 }
 
@@ -22539,7 +22651,13 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     assert_eq!(body[9], 1);
     let visible_mid = u32::from_le_bytes(body[14..18].try_into().unwrap());
     assert_ne!(visible_mid, 0);
-    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_contact_legacy_dn(
+            "bob.contact@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ))
+    ));
     assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
 
     let resolve_request =
@@ -22551,7 +22669,13 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
-    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_contact_legacy_dn(
+            "bob.contact@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ))
+    ));
     assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
 
     let dn_to_mid_headers = nspi_bound_headers(&service, "DNToMId").await;
@@ -22576,7 +22700,13 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert!(contains_bytes(&body, &utf16z("bob.contact@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_contact_legacy_dn(
+            "bob.contact@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ))
+    ));
     assert!(contains_bytes(&body, &utf16z("Bob Contact")));
     assert!(!contains_bytes(&body, &utf16z("carol.hidden@example.test")));
 
@@ -22674,7 +22804,13 @@ async fn mapi_over_http_resolve_names_ranks_exact_contact_before_partial_account
 
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
-    assert!(contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_contact_legacy_dn(
+            "bob@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        ))
+    ));
     assert!(contains_bytes(&body, &utf16z("Bob Contact")));
     assert!(!contains_bytes(&body, &utf16z("bob.alias@example.test")));
 }
@@ -22712,7 +22848,10 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 2);
-    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
 
     let partial_request = resolve_names_request("alice", &[0x3003_001F, 0x3001_001F]);
     let response = service
@@ -22745,7 +22884,10 @@ async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
-    assert!(contains_bytes(&body, &utf16z("alice@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &utf16z(&test_account_legacy_dn("alice@example.test"))
+    ));
     assert!(contains_bytes(&body, &utf16z("Alice")));
 
     let outlook_stat_props_request = hex_bytes(
@@ -22946,9 +23088,16 @@ async fn mapi_over_http_nspi_requested_string8_columns_stay_tenant_scoped() {
         .unwrap();
     let body = response_bytes(response).await;
     assert!(contains_bytes(&body, &0x3003_001Eu32.to_le_bytes()));
-    assert!(contains_bytes(&body, b"alice@example.test\0"));
-    assert!(contains_bytes(&body, b"bob@example.test\0"));
-    assert!(contains_bytes(&body, b"SMTP\0"));
+    assert!(contains_bytes(
+        &body,
+        format!("{}\0", test_account_legacy_dn("alice@example.test")).as_bytes()
+    ));
+    assert!(contains_bytes(
+        &body,
+        format!("{}\0", test_account_legacy_dn("bob@example.test")).as_bytes()
+    ));
+    assert!(contains_bytes(&body, b"EX\0"));
+    assert!(!contains_bytes(&body, b"SMTP\0"));
     assert!(!contains_bytes(&body, &utf16z("bob@example.test")));
     assert!(!contains_bytes(&body, b"mallory@other.test"));
 
@@ -22960,7 +23109,10 @@ async fn mapi_over_http_nspi_requested_string8_columns_stay_tenant_scoped() {
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert!(contains_bytes(&body, &0x3001_001Eu32.to_le_bytes()));
-    assert!(contains_bytes(&body, b"alice@example.test\0"));
+    assert!(contains_bytes(
+        &body,
+        format!("{}\0", test_account_legacy_dn("alice@example.test")).as_bytes()
+    ));
     assert!(contains_bytes(&body, b"Alice\0"));
     assert!(!contains_bytes(&body, &utf16z("Alice")));
     assert!(!contains_bytes(&body, b"mallory@other.test"));
@@ -23189,6 +23341,90 @@ async fn mapi_over_http_nspi_bootstrap_requests_return_success() {
             "GetSpecialTable" => {
                 assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1200);
                 assert!(contains_bytes(&body, &utf16z("Global Address List")));
+                let mut offset = 22usize;
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    6,
+                    "{request_type}"
+                );
+                offset += 4;
+
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0x0FFF_0102,
+                    "{request_type}"
+                );
+                offset += 8;
+                let entry_id_len =
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()) as usize;
+                offset += 4;
+                assert!(entry_id_len > 28, "{request_type}");
+                assert_eq!(
+                    &body[offset + 24..offset + 28],
+                    &0x0000_0100u32.to_le_bytes(),
+                    "{request_type}"
+                );
+                assert!(
+                    body[offset..offset + entry_id_len].ends_with(b"\0"),
+                    "{request_type}"
+                );
+                offset += entry_id_len;
+
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0x3600_0003,
+                    "{request_type}"
+                );
+                offset += 8;
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0x0000_0009,
+                    "{request_type}"
+                );
+                offset += 4;
+
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0x3005_0003,
+                    "{request_type}"
+                );
+                offset += 8;
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0,
+                    "{request_type}"
+                );
+                offset += 4;
+
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0xFFFD_0003,
+                    "{request_type}"
+                );
+                offset += 8;
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0,
+                    "{request_type}"
+                );
+                offset += 4;
+
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0x3001_001F,
+                    "{request_type}"
+                );
+                offset += 8;
+                assert_eq!(body[offset], 0xFF, "{request_type}");
+                offset += 1 + utf16z("Global Address List").len();
+
+                assert_eq!(
+                    u32::from_le_bytes(body[offset..offset + 4].try_into().unwrap()),
+                    0xFFFB_000B,
+                    "{request_type}"
+                );
+                offset += 8;
+                assert_eq!(body[offset], 0, "{request_type}");
             }
             "DNToMId" => {
                 assert_eq!(body[8], 1, "{request_type}");

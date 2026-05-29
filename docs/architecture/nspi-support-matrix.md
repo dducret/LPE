@@ -7,8 +7,8 @@ creation and address resolution. It projects canonical `LPE` tenant directory
 accounts and readable canonical contacts. It does not own directory state and
 does not mutate address-book data.
 
-The Microsoft `MS-NSPI` reference checked for this matrix on 2026-05-14 was the
-published `16.0` version dated 2024-04-23.
+The Microsoft `MS-NSPI` reference checked for this matrix on 2026-05-29 was the
+published version available from Microsoft Learn on that date.
 
 ## Implementation/Usage
 
@@ -24,6 +24,11 @@ published `16.0` version dated 2024-04-23.
   account.
 - Hidden authenticated accounts are not browsed, but can resolve themselves for
   Outlook profile bootstrap.
+- Address-book rows use Exchange address-book identity semantics: `PidTagAddressType`
+  is `EX`, `PidTagEmailAddress` and
+  `PidTagAddressBookObjectDistinguishedName` carry the legacy DN, `PidTagSmtpAddress`
+  carries the SMTP address, and EntryID/TemplateID/RecordKey/SearchKey are derived
+  from the same legacy DN identity.
 - `GetMailboxUrl` and `GetAddressBookUrl` return the real public MAPI/HTTP
   endpoint URLs derived from request host/proxy headers.
 
@@ -40,7 +45,7 @@ published `16.0` version dated 2024-04-23.
 | `DNToMId` | Maps tenant-visible legacy DNs and SMTP values to minimal IDs. | Canonical account/contact row projection. | Supported |
 | `GetPropList` / `QueryColumns` | Returns the bounded bootstrap property set used by Outlook profile/address-book probes. | No storage mutation. | Supported |
 | `SeekEntries` | Returns matching row data over the tenant-visible projection. | Canonical accounts and readable contacts. | Supported |
-| `GetSpecialTable` | Returns the bounded Global Address List hierarchy row. | Static compatibility projection. | Supported |
+| `GetSpecialTable` | Returns the bounded Global Address List hierarchy row with the documented address-book hierarchy properties: entry ID, container flags, depth, container ID, display name, and master flag. | Static compatibility projection. | Supported |
 | `GetTemplateInfo` | Returns bounded principal properties for compatibility probes. | Authenticated principal projection. | Bounded |
 | `GetAddressBookUrl` | Returns `/mapi/nspi/` public URL. | Request headers only. | Supported |
 | `GetMailboxUrl` | Returns `/mapi/emsmdb/` public URL. | Request headers only. | Supported |

@@ -149,7 +149,21 @@ pub(in crate::mapi) const NSPI_BOOTSTRAP_PROPERTY_TAGS: &[u32] = &[
     0x3002_001F, // PidTagAddressType / legacy bootstrap metadata
 ];
 
+const NSPI_GAL_CONTAINER_DN: &str = "/guid=741f6fd3-8e1a-654f-9d42-2dfb451c8f10";
+const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
+const PID_TAG_CONTAINER_FLAGS: u32 = 0x3600_0003;
+const PID_TAG_DEPTH: u32 = 0x3005_0003;
+const PID_TAG_ADDRESS_BOOK_CONTAINER_ID: u32 = 0xFFFD_0003;
+const PID_TAG_ADDRESS_BOOK_IS_MASTER: u32 = 0xFFFB_000B;
+const AB_RECIPIENTS: u32 = 0x0000_0001;
+const AB_UNMODIFIABLE: u32 = 0x0000_0008;
+const DT_CONTAINER: u32 = 0x0000_0100;
+
 const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
+    0x0FF8_0102, // PidTagMappingSignature
+    0x3902_0102, // PidTagTemplateid
+    0x39FF_001E, // PidTag7BitDisplayName string8
+    0x39FF_001F, // PidTag7BitDisplayName
     0x3001_001E, // PidTagDisplayName string8
     0x39FE_001E, // PidTagSmtpAddress string8
     0x3003_001E, // PidTagEmailAddress string8
@@ -158,10 +172,16 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x3002_001E, // PidTagAddressType string8
     0x3005_001E, // PidTagAddressBookDisplayNamePrintable / legacy DN string8
     0x3005_001F, // PidTagAddressBookDisplayNamePrintable / legacy DN
+    0x3A20_001E, // PidTagTransmittableDisplayName string8
+    0x3A20_001F, // PidTagTransmittableDisplayName
+    0x3F08_0003, // PidTagInitialDetailsPane
     0x3900_0003, // PidTagDisplayType
+    0x803C_001E, // PidTagAddressBookObjectDistinguishedName string8
+    0x803C_001F, // PidTagAddressBookObjectDistinguishedName
     0x800F_101E, // PidTagAddressBookProxyAddresses string8
     0x800F_101F, // PidTagAddressBookProxyAddresses
     0x8C6D_0102, // PidTagAddressBookObjectGuid
+    0xFFFD_0003, // PidTagAddressBookContainerId
 ];
 
 #[allow(dead_code)]
@@ -188,10 +208,6 @@ const NSPI_SUPPORTED_REQUEST_TYPES: &[MapiRequestType] = &[
 ];
 
 const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
-    (0x0FF8_0102, "PidTagMappingSignature"),
-    (0x3902_0102, "PidTagTemplateid"),
-    (0x39FF_001E, "PidTag7BitDisplayName"),
-    (0x39FF_001F, "PidTag7BitDisplayName"),
     (0x3A06_001E, "PidTagGivenName"),
     (0x3A06_001F, "PidTagGivenName"),
     (0x3A08_001E, "PidTagBusinessTelephoneNumber"),
@@ -216,8 +232,6 @@ const NSPI_KNOWN_UNSUPPORTED_PROPERTY_TAGS: &[(u32, &str)] = &[
     (0x3A1B_101F, "PidTagBusiness2TelephoneNumbers"),
     (0x3A1C_001E, "PidTagMobileTelephoneNumber"),
     (0x3A1C_001F, "PidTagMobileTelephoneNumber"),
-    (0x3A20_001E, "PidTagTransmittableDisplayName"),
-    (0x3A20_001F, "PidTagTransmittableDisplayName"),
     (0x3A26_001E, "PidTagCountry"),
     (0x3A26_001F, "PidTagCountry"),
     (0x3A27_001E, "PidTagLocality"),
@@ -1159,20 +1173,32 @@ where
 
 pub(in crate::mapi) fn nspi_special_table_response(request_id: &str) -> Response {
     let mut table_row = Vec::new();
-    write_u32(&mut table_row, 4);
+    write_u32(&mut table_row, 6);
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_ENTRY_ID,
+        &NspiValue::OwnedBinary(nspi_gal_container_entry_id()),
+    );
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_CONTAINER_FLAGS,
+        &NspiValue::U32(AB_RECIPIENTS | AB_UNMODIFIABLE),
+    );
+    write_address_book_tagged_property_value(&mut table_row, PID_TAG_DEPTH, &NspiValue::U32(0));
+    write_address_book_tagged_property_value(
+        &mut table_row,
+        PID_TAG_ADDRESS_BOOK_CONTAINER_ID,
+        &NspiValue::U32(0),
+    );
     write_address_book_tagged_property_value(
         &mut table_row,
         0x3001_001F,
         &NspiValue::String("Global Address List"),
     );
-    write_address_book_tagged_property_value(&mut table_row, 0x0FFE_0003, &NspiValue::U32(2));
-    write_address_book_tagged_property_value(&mut table_row, 0x3000_0003, &NspiValue::U32(1));
     write_address_book_tagged_property_value(
         &mut table_row,
-        0x3002_001F,
-        &NspiValue::String(
-            "/o=LPE/ou=Exchange Administrative Group/cn=Configuration/cn=Address Lists/cn=Global Address List",
-        ),
+        PID_TAG_ADDRESS_BOOK_IS_MASTER,
+        &NspiValue::Bool(false),
     );
 
     let mut body = Vec::new();
@@ -1186,6 +1212,17 @@ pub(in crate::mapi) fn nspi_special_table_response(request_id: &str) -> Response
     body.extend_from_slice(&table_row);
     write_u32(&mut body, 0);
     mapi_response("GetSpecialTable", request_id, 0, body, None)
+}
+
+fn nspi_gal_container_entry_id() -> Vec<u8> {
+    let mut value = Vec::with_capacity(28 + NSPI_GAL_CONTAINER_DN.len() + 1);
+    value.extend_from_slice(&[0, 0, 0, 0]);
+    value.extend_from_slice(&NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID);
+    value.extend_from_slice(&1u32.to_le_bytes());
+    value.extend_from_slice(&DT_CONTAINER.to_le_bytes());
+    value.extend_from_slice(NSPI_GAL_CONTAINER_DN.as_bytes());
+    value.push(0);
+    value
 }
 
 pub(in crate::mapi) async fn nspi_template_info_response<S>(
@@ -1270,6 +1307,7 @@ pub(in crate::mapi) enum NspiValue<'a> {
     MultiString(Vec<String>),
     OwnedBinary(Vec<u8>),
     U32(u32),
+    Bool(bool),
 }
 
 pub(in crate::mapi) fn nspi_entry_value(
@@ -1278,10 +1316,13 @@ pub(in crate::mapi) fn nspi_entry_value(
     property_tag: u32,
 ) -> NspiValue<'_> {
     match property_tag {
+        0x0FF8_0102 => NspiValue::OwnedBinary(mapi_mailstore::STORE_REPLICA_GUID.to_vec()),
+        0x3902_0102 => NspiValue::OwnedBinary(nspi_entry_permanent_entry_id(entry)),
+        0x39FF_001F | 0x39FF_001E => NspiValue::String(&entry.display_name),
         0x3001_001F | 0x3001_001E => NspiValue::String(&entry.display_name),
         0x39FE_001F | 0x39FE_001E => NspiValue::String(&entry.email),
-        0x3003_001F | 0x3003_001E => NspiValue::String(&entry.email),
-        0x3A00_001F | 0x3A00_001E => NspiValue::String(&entry.display_name),
+        0x3003_001F | 0x3003_001E => NspiValue::OwnedString(nspi_entry_unprefixed_legacy_dn(entry)),
+        0x3A00_001F | 0x3A00_001E => NspiValue::OwnedString(nspi_entry_alias(entry)),
         0x0FFE_0003 => NspiValue::U32(MAPI_MAILUSER_OBJECT_TYPE),
         0x3900_0003 => NspiValue::U32(nspi_entry_display_type(entry)),
         0x3000_0003 => NspiValue::U32(nspi_entry_id(account_id, entry)),
@@ -1290,10 +1331,14 @@ pub(in crate::mapi) fn nspi_entry_value(
         0x0FFF_0102 => NspiValue::OwnedBinary(nspi_entry_permanent_entry_id(entry)),
         0x300B_0102 => NspiValue::OwnedBinary(nspi_entry_search_key(entry)),
         0x3004_001F | 0x3004_001E => NspiValue::String(&entry.email),
-        0x3002_001F | 0x3002_001E => NspiValue::String("SMTP"),
+        0x3002_001F | 0x3002_001E => NspiValue::String("EX"),
         0x3005_001F | 0x3005_001E => NspiValue::OwnedString(nspi_entry_legacy_dn(entry)),
+        0x3A20_001F | 0x3A20_001E => NspiValue::String(&entry.display_name),
+        0x3F08_0003 => NspiValue::U32(0),
+        0x803C_001F | 0x803C_001E => NspiValue::OwnedString(nspi_entry_unprefixed_legacy_dn(entry)),
         0x800F_101F | 0x800F_101E => NspiValue::MultiString(vec![format!("SMTP:{}", entry.email)]),
         0x8C6D_0102 => NspiValue::OwnedBinary(entry.id.to_bytes_le().to_vec()),
+        0xFFFD_0003 => NspiValue::U32(0),
         _ => match property_tag & 0xFFFF {
             0x001F | 0x001E => NspiValue::String(""),
             0x0003 => NspiValue::U32(0),
@@ -1505,8 +1550,11 @@ pub(in crate::mapi) fn write_address_book_property_value(
         (0x0102, NspiValue::OwnedBinary(value)) => write_nspi_binary(body, value),
         (0x0003, NspiValue::U32(value)) => write_u32(body, *value),
         (0x0003, _) => write_u32(body, 0),
+        (0x000B, NspiValue::Bool(value)) => body.push(u8::from(*value)),
+        (0x000B, _) => body.push(0),
         (0x101E | 0x101F, _) => write_u32(body, 0),
         (_, NspiValue::U32(value)) => write_u32(body, *value),
+        (_, NspiValue::Bool(value)) => body.push(u8::from(*value)),
         (_, NspiValue::OwnedBinary(value)) => write_nspi_binary(body, value),
         (_, NspiValue::MultiString(values)) => write_multi_string(body, values),
         (_, NspiValue::String(value)) => {
@@ -1534,7 +1582,7 @@ fn nspi_entry_instance_key(account_id: Uuid, entry: &ExchangeAddressBookEntry) -
 }
 
 fn nspi_entry_record_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
-    entry.id.as_bytes().to_vec()
+    nspi_entry_permanent_entry_id(entry)
 }
 
 fn nspi_entry_permanent_entry_id(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
@@ -1550,8 +1598,10 @@ fn nspi_entry_permanent_entry_id(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
 }
 
 fn nspi_entry_search_key(entry: &ExchangeAddressBookEntry) -> Vec<u8> {
-    let legacy_dn = nspi_entry_legacy_dn(entry).to_ascii_uppercase();
-    format!("EX:{}", legacy_dn).into_bytes()
+    let legacy_dn = nspi_entry_unprefixed_legacy_dn(entry).to_ascii_uppercase();
+    let mut value = format!("EX:{legacy_dn}").into_bytes();
+    value.push(0);
+    value
 }
 
 pub(in crate::mapi) fn nspi_entry_legacy_dn(entry: &ExchangeAddressBookEntry) -> String {
@@ -1596,6 +1646,16 @@ pub(in crate::mapi) fn nspi_entry_legacy_dn_with_prefix(
         legacy_user
     };
     format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_cn}")
+}
+
+fn nspi_entry_alias(entry: &ExchangeAddressBookEntry) -> String {
+    entry
+        .email
+        .split_once('@')
+        .map(|(local_part, _)| local_part)
+        .filter(|local_part| !local_part.trim().is_empty())
+        .unwrap_or(entry.display_name.as_str())
+        .to_string()
 }
 
 pub(in crate::mapi) fn nspi_entry_is_principal(
@@ -1993,17 +2053,73 @@ mod tests {
             nspi_known_unsupported_property_tag_name(0x3A06_001F),
             Some("PidTagGivenName")
         );
-        assert_eq!(
-            nspi_known_unsupported_property_tag_name(0x0FF8_0102),
-            Some("PidTagMappingSignature")
-        );
-        assert_eq!(
-            nspi_known_unsupported_property_tag_name(0x3A20_001F),
-            Some("PidTagTransmittableDisplayName")
-        );
+        assert_eq!(nspi_known_unsupported_property_tag_name(0x0FF8_0102), None);
+        assert_eq!(nspi_known_unsupported_property_tag_name(0x3A20_001F), None);
         assert_eq!(
             nspi_known_unsupported_property_tag_name(0x3A1B_101F),
             Some("PidTagBusiness2TelephoneNumbers")
+        );
+    }
+
+    #[test]
+    fn nspi_entry_required_address_book_properties_match_exchange_identity_contract() {
+        let account_id = Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap();
+        let entry = ExchangeAddressBookEntry {
+            id: Uuid::parse_str("26b8ebbd-63a5-4741-b8d6-d7eda9c31c3d").unwrap(),
+            display_name: "Bob Contact".to_string(),
+            email: "bob.contact@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        };
+        let legacy_dn = nspi_entry_unprefixed_legacy_dn(&entry);
+        let permanent_entry_id = nspi_entry_permanent_entry_id(&entry);
+
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3002_001F)),
+            "EX"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3003_001F)),
+            legacy_dn
+        );
+        assert_eq!(
+            nspi_binary_value(nspi_entry_value(account_id, &entry, 0x0FFF_0102)),
+            permanent_entry_id
+        );
+        assert_eq!(
+            nspi_binary_value(nspi_entry_value(account_id, &entry, 0x3902_0102)),
+            permanent_entry_id
+        );
+        assert_eq!(
+            nspi_binary_value(nspi_entry_value(account_id, &entry, 0x0FF9_0102)),
+            permanent_entry_id
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x803C_001F)),
+            legacy_dn
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x3A20_001F)),
+            "Bob Contact"
+        );
+        assert_eq!(
+            nspi_string_value(nspi_entry_value(account_id, &entry, 0x39FF_001F)),
+            "Bob Contact"
+        );
+        assert_eq!(
+            nspi_u32_value(nspi_entry_value(account_id, &entry, 0x3F08_0003)),
+            0
+        );
+        assert_eq!(
+            nspi_u32_value(nspi_entry_value(account_id, &entry, 0xFFFD_0003)),
+            0
+        );
+        assert_eq!(
+            nspi_binary_value(nspi_entry_value(account_id, &entry, 0x300B_0102)),
+            format!("EX:{}", legacy_dn.to_ascii_uppercase())
+                .bytes()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>()
         );
     }
 
