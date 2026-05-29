@@ -11142,7 +11142,7 @@ async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_fresh_profile_content_sync_is_empty() {
+async fn mapi_over_http_common_views_sync_projects_persisted_search_definition_fai() {
     let account = FakeStore::account();
     let definition_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
     let store = FakeStore {
@@ -11214,13 +11214,30 @@ async fn mapi_over_http_common_views_fresh_profile_content_sync_is_empty() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert!(stream.message_changes.is_empty());
-    assert!(!contains_bytes(
+    assert_eq!(stream.message_changes.len(), 1);
+    assert!(stream.message_changes[0].associated);
+    assert_eq!(stream.message_changes[0].subject, "Reminders");
+    assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.SFInfo")
     ));
-    assert!(!contains_bytes(&response_rops, b"exchange_reminders"));
-    assert!(!contains_bytes(&response_rops, b"occurrenceDismissals"));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_BODY_W));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_SEARCH_FOLDER_TEMPLATE_ID));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_SEARCH_FOLDER_ID));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_SEARCH_FOLDER_DEFINITION));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_SEARCH_FOLDER_STORAGE_TYPE));
+    assert!(!contains_bytes(&response_rops, b"definitionKind"));
+    assert!(!contains_bytes(&response_rops, b"restriction"));
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.Link")

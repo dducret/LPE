@@ -838,7 +838,88 @@ fn common_views_sync_object(
         crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
             navigation_shortcut_sync_object(&message, account_id)
         }
+        crate::mapi_store::MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            search_folder_definition_sync_object(&message)
+        }
     }
+}
+
+fn search_folder_definition_sync_object(
+    message: &crate::mapi_store::MapiSearchFolderDefinitionMessage,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let message_size = message
+        .definition
+        .display_name
+        .len()
+        .saturating_add(search_folder_definition_blob(&message.definition).len())
+        .min(i64::MAX as usize) as i64;
+    let named_properties = vec![
+        (
+            PID_TAG_SEARCH_FOLDER_TEMPLATE_ID,
+            mapi_mailstore::SpecialMessagePropertyValue::U32(search_folder_template_id(
+                &message.definition,
+            )),
+        ),
+        (
+            PID_TAG_SEARCH_FOLDER_ID,
+            mapi_mailstore::SpecialMessagePropertyValue::Binary(
+                message.definition.id.as_bytes().to_vec(),
+            ),
+        ),
+        (
+            PID_TAG_SEARCH_FOLDER_DEFINITION,
+            mapi_mailstore::SpecialMessagePropertyValue::Binary(search_folder_definition_blob(
+                &message.definition,
+            )),
+        ),
+        (
+            PID_TAG_SEARCH_FOLDER_STORAGE_TYPE,
+            mapi_mailstore::SpecialMessagePropertyValue::U32(search_folder_storage_type(
+                &message.definition,
+            )),
+        ),
+        (
+            PID_TAG_SEARCH_FOLDER_EFP_FLAGS,
+            mapi_mailstore::SpecialMessagePropertyValue::U32(0),
+        ),
+    ];
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: message.definition.display_name.clone(),
+        body_text: String::new(),
+        message_class: "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size,
+        named_properties,
+    }
+}
+
+fn search_folder_template_id(_definition: &lpe_storage::SearchFolderDefinition) -> u32 {
+    0
+}
+
+fn search_folder_storage_type(_definition: &lpe_storage::SearchFolderDefinition) -> u32 {
+    0
+}
+
+fn search_folder_definition_blob(definition: &lpe_storage::SearchFolderDefinition) -> Vec<u8> {
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0x0410_0000u32.to_be_bytes());
+    blob.extend_from_slice(&search_folder_storage_type(definition).to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.push(0);
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.push(0);
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob
 }
 
 fn conversation_action_sync_object(

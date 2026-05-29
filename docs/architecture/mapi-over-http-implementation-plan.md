@@ -166,6 +166,14 @@ non-canonical LPE state.
 - Search folders are canonical persisted definitions plus folder-associated
   information rows. Built-in definitions cover the Outlook bootstrap surfaces
   such as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
+  `[MS-OXOSRCH]` requires each persisted search folder definition to have a
+  Common Views FAI definition message, so LPE projects rows from
+  `search_folders`; it must not create Common Views search-definition rows
+  unless a persisted definition exists, and it must expose the documented
+  search-folder properties instead of an LPE-private JSON body. Until LPE has
+  a complete `[MS-OXOSRCH]` criteria serializer for its canonical search JSON,
+  the MAPI definition payload must stay neutral rather than inventing
+  role-specific template IDs or private criteria encodings.
   User-saved definitions project as MAPI `FOLDER_SEARCH` hierarchy rows with
   stable canonical identities and container classes derived from their canonical
   result object kind.

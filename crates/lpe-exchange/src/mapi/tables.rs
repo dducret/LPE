@@ -67,7 +67,7 @@ pub(in crate::mapi) fn associated_folder_message_count(
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
     {
-        1
+        0
     } else {
         0
     }
@@ -3136,22 +3136,26 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            0
+            1
         );
         let response = rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
 
         assert_eq!(response[0], 0x15);
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
         }
+        let mut search_class = Vec::new();
+        for code_unit in "IPM.Microsoft.WunderBar.SFInfo".encode_utf16() {
+            search_class.extend_from_slice(&code_unit.to_le_bytes());
+        }
         assert!(!response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
-        assert!(!response
-            .windows(14)
-            .any(|window| window == b"exchange_reminders"));
+        assert!(response
+            .windows(search_class.len())
+            .any(|window| window == search_class.as_slice()));
     }
 
     #[test]
@@ -3491,7 +3495,104 @@ fn serialize_common_views_row(
         MapiCommonViewsMessage::NavigationShortcut(message) => {
             serialize_navigation_shortcut_row(&message, principal, columns)
         }
+        MapiCommonViewsMessage::SearchFolderDefinition(message) => {
+            serialize_search_folder_definition_row(&message, columns)
+        }
     }
+}
+
+fn serialize_search_folder_definition_row(
+    message: &crate::mapi_store::MapiSearchFolderDefinitionMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match search_folder_definition_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+fn search_folder_definition_property_value(
+    message: &crate::mapi_store::MapiSearchFolderDefinitionMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let definition_blob = search_folder_definition_blob(&message.definition);
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(message.id),
+        )),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            Some(MapiValue::String(message.definition.display_name.clone()))
+        }
+        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
+            "IPM.Microsoft.WunderBar.SFInfo".to_string(),
+        )),
+        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
+            message
+                .definition
+                .display_name
+                .len()
+                .saturating_add(definition_blob.len())
+                .min(i64::MAX as usize) as i64,
+        )),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(message.folder_id),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_SEARCH_FOLDER_TEMPLATE_ID => Some(MapiValue::U32(search_folder_template_id(
+            &message.definition,
+        ))),
+        PID_TAG_SEARCH_FOLDER_ID => {
+            Some(MapiValue::Binary(message.definition.id.as_bytes().to_vec()))
+        }
+        PID_TAG_SEARCH_FOLDER_DEFINITION => Some(MapiValue::Binary(definition_blob)),
+        PID_TAG_SEARCH_FOLDER_STORAGE_TYPE => Some(MapiValue::U32(search_folder_storage_type(
+            &message.definition,
+        ))),
+        PID_TAG_SEARCH_FOLDER_EFP_FLAGS => Some(MapiValue::U32(0)),
+        _ => None,
+    }
+}
+
+fn search_folder_template_id(_definition: &lpe_storage::SearchFolderDefinition) -> u32 {
+    0
+}
+
+fn search_folder_storage_type(_definition: &lpe_storage::SearchFolderDefinition) -> u32 {
+    0
+}
+
+fn search_folder_definition_blob(definition: &lpe_storage::SearchFolderDefinition) -> Vec<u8> {
+    let mut blob = Vec::new();
+    blob.extend_from_slice(&0x0410_0000u32.to_be_bytes());
+    blob.extend_from_slice(&search_folder_storage_type(definition).to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.push(0);
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.push(0);
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob.extend_from_slice(&0u32.to_be_bytes());
+    blob
 }
 
 pub(in crate::mapi) fn serialize_conversation_action_row(
