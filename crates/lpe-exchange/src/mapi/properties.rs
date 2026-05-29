@@ -1099,6 +1099,22 @@ fn mailbox_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> b
 }
 
 fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
+    match mapi_folder_id(mailbox) {
+        IPM_SUBTREE_FOLDER_ID
+        | DEFERRED_ACTION_FOLDER_ID
+        | SPOOLER_QUEUE_FOLDER_ID
+        | COMMON_VIEWS_FOLDER_ID
+        | SCHEDULE_FOLDER_ID
+        | SEARCH_FOLDER_ID
+        | VIEWS_FOLDER_ID
+        | SHORTCUTS_FOLDER_ID
+        | REMINDERS_FOLDER_ID
+        | DOCUMENT_LIBRARIES_FOLDER_ID
+        | TRACKED_MAIL_PROCESSING_FOLDER_ID
+        | TODO_SEARCH_FOLDER_ID
+        | FREEBUSY_DATA_FOLDER_ID => return ROOT_FOLDER_ID,
+        _ => {}
+    }
     match mailbox.role.as_str() {
         "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
         _ => mailbox
@@ -4641,6 +4657,29 @@ mod tests {
                 IPM_SUBTREE_FOLDER_ID
             )))
         );
+    }
+
+    #[test]
+    fn mailbox_parent_source_key_keeps_root_level_search_specials_under_root() {
+        for (role, expected_folder_id) in [
+            ("reminders", REMINDERS_FOLDER_ID),
+            ("todo_search", TODO_SEARCH_FOLDER_ID),
+            ("tracked_mail_processing", TRACKED_MAIL_PROCESSING_FOLDER_ID),
+        ] {
+            let mailbox = mailbox("55555555-5555-4555-9555-555555555555", None, role, role);
+
+            assert_eq!(mapi_folder_id(&mailbox), expected_folder_id);
+            assert_eq!(
+                mailbox_property_value_with_context(
+                    &mailbox,
+                    std::slice::from_ref(&mailbox),
+                    PID_TAG_PARENT_SOURCE_KEY
+                ),
+                Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                    ROOT_FOLDER_ID
+                )))
+            );
+        }
     }
 
     #[test]

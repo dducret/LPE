@@ -2544,6 +2544,12 @@ fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
 }
 
 fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
+    if let Some((_, _, _, parent_folder_id, _)) =
+        virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
+    {
+        return parent_folder_id;
+    }
+
     match mailbox.role.as_str() {
         "__mapi_ipm_subtree"
         | "__mapi_deferred_action"
@@ -2557,7 +2563,6 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
         "journal"
         | "notes"
         | "tasks"
-        | "reminders"
         | "suggested_contacts"
         | "quick_contacts"
         | "im_contact_list"

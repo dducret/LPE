@@ -3170,7 +3170,8 @@ fn log_special_folder_contract(
         .map(|folder_id| format!("0x{folder_id:016x}"))
         .unwrap_or_default();
     let source_key = mapi_mailstore::source_key_for_store_id(folder_id);
-    let parent_source_key = mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID);
+    let expected_parent_folder_id = expected_special_folder_parent_id(folder_id);
+    let parent_source_key = mapi_mailstore::source_key_for_store_id(expected_parent_folder_id);
     let collaboration_folder = snapshot.collaboration_folder_for_id(folder_id);
     let canonical_collection_kind = collaboration_folder
         .map(|folder| format!("{:?}", folder.kind))
@@ -3185,7 +3186,7 @@ fn log_special_folder_contract(
         request_rop_id = "0x02",
         folder_id = %format!("0x{folder_id:016x}"),
         folder_role = role_for_folder_id(folder_id).unwrap_or(""),
-        expected_parent_folder_id = "0x0000000000040001",
+        expected_parent_folder_id = %format!("0x{expected_parent_folder_id:016x}"),
         expected_container_class = expected_special_folder_container_class(folder_id),
         expected_item_message_class = expected_special_folder_item_message_class(folder_id),
         default_entry_id_bytes = entry_id.len(),
@@ -3577,6 +3578,13 @@ fn expected_special_folder_container_class(folder_id: u64) -> &'static str {
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPF.Configuration",
         _ => "",
+    }
+}
+
+fn expected_special_folder_parent_id(folder_id: u64) -> u64 {
+    match folder_id {
+        REMINDERS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => ROOT_FOLDER_ID,
+        _ => IPM_SUBTREE_FOLDER_ID,
     }
 }
 

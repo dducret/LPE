@@ -13997,6 +13997,10 @@ fn mapi_hierarchy_sync_keeps_direct_reminders_projection_out_of_normal_hierarchy
         decoded.folder_changes[0].parent_source_key,
         Vec::<u8>::new()
     );
+    assert_eq!(
+        decoded.folder_changes[0].parent_folder_id,
+        Some(crate::mapi::identity::ROOT_FOLDER_ID)
+    );
     assert!(contains_bytes(&buffer, &utf16z("Outlook.Reminder")));
 }
 
@@ -17733,6 +17737,93 @@ async fn mapi_over_http_partial_scope_content_sync_does_not_advance_checkpoint()
     assert_eq!(checkpoint.last_change_sequence, 88);
     assert_eq!(checkpoint.last_modseq, 44);
     assert_eq!(checkpoint.cursor_json["source"], "full-content-sync");
+}
+
+#[tokio::test]
+async fn mapi_over_http_partial_trash_content_scope_does_not_advance_checkpoint() {
+    let trash_id = Uuid::parse_str("77777777-7777-4777-8777-777777777701").unwrap();
+    let message_id = Uuid::parse_str("46464646-4646-4646-8646-464646464602").unwrap();
+    let mut trash = FakeStore::mailbox(&trash_id.to_string(), "trash", "Deleted Items");
+    trash.total_emails = 1;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![trash])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            &message_id.to_string(),
+            &trash_id.to_string(),
+            "trash",
+            "Partial trash scope checkpoint",
+        )])),
+        ..Default::default()
+    };
+    store
+        .store_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(trash_id),
+            MapiCheckpointKind::Content,
+            88,
+            44,
+            serde_json::json!({"source": "full-trash-content-sync"}),
+        )
+        .await
+        .unwrap();
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 89,
+        current_modseq: 45,
+        changed_message_ids: vec![message_id],
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x10, 0x00, // content sync, FAI only
+        0x00, 0x00, // RestrictionDataSize
+        0x05, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN
+        0x00, 0x00, // PropertyTagCount
+        0x82, 0x00, 0x02, 0x03, // RopSynchronizationGetTransferState
+        0x4E, 0x00, 0x03, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x82, 0x03, 0, 0, 0, 0]));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("Partial trash scope checkpoint")
+    ));
+
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            FakeStore::account().account_id,
+            Some(trash_id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 88);
+    assert_eq!(checkpoint.last_modseq, 44);
+    assert_eq!(checkpoint.cursor_json["source"], "full-trash-content-sync");
 }
 
 #[tokio::test]
