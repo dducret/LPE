@@ -4076,7 +4076,6 @@ struct StrictContentMessageChange {
     body_tags: Vec<u32>,
     mid: Option<u64>,
     change_number: Option<u64>,
-    header_message_size: Option<i32>,
     associated: bool,
     subject: String,
 }
@@ -4091,7 +4090,6 @@ struct StrictContentMessageBuilder {
     predecessor_change_list: Option<Vec<u8>>,
     mid: Option<u64>,
     change_number: Option<u64>,
-    header_message_size: Option<i32>,
     associated: Option<bool>,
     subject: Option<String>,
 }
@@ -4380,7 +4378,7 @@ fn strict_record_content_header_property(
             message.change_number = Some(strict_decode_change_number_property(&property)?)
         }
         PID_TAG_MESSAGE_SIZE => {
-            message.header_message_size = Some(strict_decode_i32_property(&property)?)
+            let _ = strict_decode_i32_property(&property)?;
         }
         PID_TAG_ASSOCIATED => {
             if property.value.len() != 2 {
@@ -4468,7 +4466,6 @@ fn strict_finish_content_message(
         body_tags: message.body_tags,
         mid: message.mid,
         change_number: message.change_number,
-        header_message_size: message.header_message_size,
         associated,
         subject,
     });

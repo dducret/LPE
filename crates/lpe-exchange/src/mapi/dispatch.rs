@@ -5156,7 +5156,6 @@ where
                     continue;
                 };
                 if pending_message_is_sync_metadata_only(&properties, &recipients) {
-                    let response_message_id = pending_source_key_message_id(&properties);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -5173,12 +5172,13 @@ where
                         property_tags = %format_debug_property_tags(
                             &properties.keys().copied().collect::<Vec<_>>()
                         ),
-                        save_skipped_reason = "sync_metadata_only",
+                        save_rejected_reason = "sync_metadata_only",
                         "rca debug mapi save changes message"
                     );
-                    responses.extend_from_slice(&rop_save_changes_message_response(
-                        &request,
-                        response_message_id,
+                    responses.extend_from_slice(&rop_error_response(
+                        0x0C,
+                        request.response_handle_index(),
+                        0x8004_0102,
                     ));
                     continue;
                 }
@@ -7341,11 +7341,7 @@ where
                             .count();
                 let suppressed_fai_sync_object_count = all_special_sync_objects
                     .iter()
-                    .filter(|object| {
-                        object.associated
-                            && !fai_scope_requested
-                            && !is_calendar_bootstrap_fai_id(object.canonical_id)
-                    })
+                    .filter(|object| object.associated && !fai_scope_requested)
                     .count();
                 let checkpoint_store_allowed = suppressed_normal_sync_object_count == 0
                     && suppressed_fai_sync_object_count == 0;
@@ -9874,19 +9870,6 @@ fn pending_message_is_sync_metadata_only(
                     | PID_TAG_PREDECESSOR_CHANGE_LIST
             )
         })
-}
-
-fn pending_source_key_global_counter(properties: &HashMap<u32, MapiValue>) -> Option<u64> {
-    match properties.get(&PID_TAG_SOURCE_KEY)? {
-        MapiValue::Binary(bytes) => source_key_global_counter(bytes.as_slice()),
-        _ => None,
-    }
-}
-
-fn pending_source_key_message_id(properties: &HashMap<u32, MapiValue>) -> u64 {
-    pending_source_key_global_counter(properties)
-        .map(crate::mapi::identity::mapi_store_id)
-        .unwrap_or(0)
 }
 
 fn imported_property_source_key_global_counter(properties: &[(u32, MapiValue)]) -> Option<u64> {

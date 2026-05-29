@@ -174,21 +174,14 @@ non-canonical LPE state.
   identity is persisted with the reserved Calendar MAPI counter. Outlook may
   write back or cache the Calendar default-folder EntryID during profile
   bootstrap, so the advertised folder must have durable backing even when the
-  calendar has no events yet. The empty Calendar folder also projects
-  deterministic MS-OXOCFG associated-content bootstrap rows for
-  `IPM.Configuration.Calendar`, `IPM.Configuration.CategoryList`, and
-  `IPM.Configuration.WorkHours` so Outlook's FAI-only Calendar sync has stable
-  source keys/change keys for documented Calendar configuration data before the
-  first appointment exists. The Calendar options row carries
-  `PidTagRoamingDatatypes` with the dictionary-stream bit and a
-  `PidTagRoamingDictionary` XML document containing the documented Outlook
-  Calendar Options defaults that LPE supports (`OLPrefsVersion`,
-  `piRemindDefault`, `piAutoProcess`, `AutomateProcessing`, and
-  `piAutoDeleteReceipts`). The Category List and Working Hours rows carry
-  `PidTagRoamingDatatypes` with the XML-stream bit plus
-  `PidTagRoamingXmlStream` XML documents. These bootstrap rows avoid publishing
-  a malformed pseudo appointment while still satisfying the documented Calendar
-  configuration lookup path.
+  calendar has no events yet. LPE does not synthesize Calendar configuration FAI
+  rows during first sync. `[MS-OXOCFG]` defines how `IPM.Configuration.Calendar`,
+  `IPM.Configuration.CategoryList`, and `IPM.Configuration.WorkHours` messages
+  are stored when configuration data exists, but partially fabricated bootstrap
+  configuration rows are not canonical calendar state and are unsafe for
+  Outlook's initial Calendar FAI parser. Fresh-profile Calendar FAI content sync
+  is therefore allowed to be state-only until Outlook creates real associated
+  configuration messages that LPE can persist and replay.
 - Content synchronization emits long-term `PidTagEntryId` values for message
   and FAI rows using the documented private mailbox Message EntryID shape:
   mailbox account GUID as provider UID, canonical store replica GUIDs, and the
@@ -406,12 +399,10 @@ not by itself authorize broad client publication.
 - Content sync honors Outlook's extra flag contract for `Eid`, message size,
   and change number; when Outlook requests message size in the change header,
   LPE emits a non-zero value for projected normal and associated messages.
-- Bounded skipped sync-upload saves are limited to metadata-only imports that
-  carry only sync identity/state properties and no user-visible message data.
-  They return the MID implied by the imported source key instead of a null MID
-  so Outlook can complete its current sync transaction without an immediate
-  local `ItemNotFound`. Deleted Items uploads that include user-visible message
-  data are canonical message imports, not metadata-only reports.
+- Sync-upload saves that carry only sync identity/state properties and no
+  user-visible message data are rejected instead of being acknowledged as an
+  Outlook-visible message. Deleted Items uploads that include user-visible
+  message data are canonical message imports, not metadata-only reports.
 - Hierarchy sync emits changed descendant folders of the configured
   synchronization root; it does not emit the synchronization root itself.
   Hierarchy final state scopes `MetaTagIdsetGiven` and `MetaTagCnsetSeen` to
@@ -551,9 +542,10 @@ load canonical calendar events for the Calendar folder and emit them as normal
 `IPM.Appointment` message changes with appointment timing/location properties,
 `PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day, busy status,
 state flags, and stable `PidLidGlobalObjectId` / `PidLidCleanGlobalObjectId`
-values; an advertised Calendar folder with state-only or generic-message-only
-content sync is not a valid Outlook interoperability result. Low-LID Calendar named
-properties such as `PidLidGlobalObjectId` must be exposed through
+values when canonical events exist; a fresh Calendar folder with no events can
+return state-only content sync, while a non-empty Calendar folder must not fall
+back to generic-message-only projection. Low-LID Calendar named properties such
+as `PidLidGlobalObjectId` must be exposed through
 `RopGetPropertyIdsFromNames` with assigned named-property IDs in the
 named-property range; the LID itself is the property name, not the wire property
 ID. Outlook's MAPI Calendar property model also requires appointment start time

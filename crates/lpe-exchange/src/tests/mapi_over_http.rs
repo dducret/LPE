@@ -12219,7 +12219,7 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_message() {
+async fn mapi_over_http_calendar_fai_only_sync_does_not_project_synthetic_configuration() {
     let account = FakeStore::account();
     let calendar = FakeStore::collection("default", "calendar", "Calendar");
     let store = FakeStore {
@@ -12307,45 +12307,23 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
     let response_rops = response_rops_from_execute_response(response).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 3);
-    let message = &stream.message_changes[0];
-    assert!(message.associated);
-    assert_eq!(message.subject, "Calendar");
-    assert_eq!(message.header_message_size, Some(301));
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Configuration.Calendar")
     ));
-    assert!(contains_bytes(&response_rops, b"<UserConfiguration>"));
-    assert!(contains_bytes(&response_rops, b"18-OLPrefsVersion"));
-    assert!(contains_bytes(&response_rops, b"18-piRemindDefault"));
-    assert!(contains_bytes(&response_rops, b"18-piAutoProcess"));
-    assert!(contains_bytes(&response_rops, b"18-AutomateProcessing"));
-    assert!(contains_bytes(&response_rops, b"18-piAutoDeleteReceipts"));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(&response_rops, b"<UserConfiguration>"));
+    assert!(!contains_bytes(&response_rops, b"18-OLPrefsVersion"));
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Configuration.CategoryList")
     ));
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Configuration.WorkHours")
     ));
-    assert!(contains_bytes(&response_rops, b"CategoryList.xsd"));
-    assert!(contains_bytes(&response_rops, b"WorkingHours.xsd"));
-    for property_tag in [0x7C06_0003u32, 0x7C07_0102] {
-        assert!(
-            message.body_tags.contains(&property_tag),
-            "missing bootstrap calendar configuration property 0x{property_tag:08x}"
-        );
-    }
-    assert!(
-        stream
-            .message_changes
-            .iter()
-            .filter(|message| message.body_tags.contains(&0x7C08_0102))
-            .count()
-            >= 2
-    );
+    assert!(!contains_bytes(&response_rops, b"CategoryList.xsd"));
+    assert!(!contains_bytes(&response_rops, b"WorkingHours.xsd"));
 }
 
 #[tokio::test]
@@ -15234,12 +15212,8 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     cookie = mapi_cookie_header(&calendar_response);
     let calendar_rops = response_rops_from_execute_response(calendar_response).await;
     let calendar_stream = strict_content_sync_transfer_from_response(&calendar_rops).unwrap();
-    assert_eq!(calendar_stream.message_changes.len(), 3);
-    assert!(calendar_stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(contains_bytes(
+    assert!(calendar_stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &calendar_rops,
         &utf16z("IPM.Configuration.Calendar")
     ));
@@ -15479,12 +15453,8 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         response_rops_from_execute_response(reconnect_calendar_response).await;
     let reconnect_calendar_stream =
         strict_content_sync_transfer_from_response(&reconnect_calendar_rops).unwrap();
-    assert_eq!(reconnect_calendar_stream.message_changes.len(), 3);
-    assert!(reconnect_calendar_stream
-        .message_changes
-        .iter()
-        .all(|message| message.associated));
-    assert!(contains_bytes(
+    assert!(reconnect_calendar_stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &reconnect_calendar_rops,
         &utf16z("IPM.Configuration.Calendar")
     ));
@@ -19499,7 +19469,7 @@ async fn mapi_over_http_save_message_preserves_out_of_range_import_source_key() 
 }
 
 #[tokio::test]
-async fn mapi_over_http_save_message_skips_sync_metadata_only_import() {
+async fn mapi_over_http_save_message_rejects_sync_metadata_only_import() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -19562,12 +19532,14 @@ async fn mapi_over_http_save_message_skips_sync_metadata_only_import() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
-    let mut save_response = vec![0x0C, 0x01, 0, 0, 0, 0, 0x03];
-    save_response.extend_from_slice(&mapi_wire_id_bytes(out_of_range_object_id));
-    assert!(
-        contains_bytes(&response_rops, &save_response),
-        "response={response_rops:02x?} expected={save_response:02x?}"
-    );
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0C, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &mapi_wire_id_bytes(out_of_range_object_id)
+    ));
     assert_eq!(imported_emails.lock().unwrap().len(), 0);
     assert!(!mapi_identities
         .lock()

@@ -790,10 +790,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .collaboration_folder_for_id(*folder_id)
                     .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
                 {
-                    calendar_bootstrap_fai_sync_object(*folder_id)
-                        .iter()
-                        .map(|object| serialize_special_sync_object_row(object, &columns))
-                        .collect()
+                    Vec::new()
                 } else {
                     Vec::new()
                 }
@@ -3523,91 +3520,6 @@ pub(in crate::mapi) fn serialize_delegate_freebusy_row(
         }
     }
     row
-}
-
-fn serialize_special_sync_object_row(
-    object: &mapi_mailstore::SpecialMessageSyncFact,
-    columns: &[u32],
-) -> Vec<u8> {
-    let mut row = Vec::new();
-    for column in columns {
-        match special_sync_object_property_value(object, *column) {
-            Some(value) => write_mapi_value(&mut row, *column, &value),
-            None => write_property_default(&mut row, *column),
-        }
-    }
-    row
-}
-
-fn special_sync_object_property_value(
-    object: &mapi_mailstore::SpecialMessageSyncFact,
-    property_tag: u32,
-) -> Option<MapiValue> {
-    let change_number = mapi_mailstore::change_number_for_store_id(object.item_id);
-    match canonical_property_storage_tag(property_tag) {
-        PID_TAG_MID => Some(MapiValue::U64(object.item_id)),
-        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
-            crate::mapi::identity::instance_key_for_object_id(object.item_id),
-        )),
-        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
-            Some(MapiValue::String(object.subject.clone()))
-        }
-        PID_TAG_BODY_W => Some(MapiValue::String(object.body_text.clone())),
-        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(object.message_class.clone())),
-        PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
-        PID_TAG_ASSOCIATED => Some(MapiValue::Bool(object.associated)),
-        PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(object.message_size)),
-        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(object.folder_id)),
-        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
-            object.item_id,
-        ))),
-        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::source_key_for_store_id(object.folder_id),
-        )),
-        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
-            mapi_mailstore::change_key_for_change_number(change_number),
-        )),
-        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
-            mapi_mailstore::predecessor_change_list(change_number),
-        )),
-        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
-        PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => {
-            Some(MapiValue::I64(object.last_modified_filetime as i64))
-        }
-        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
-        _ => special_sync_object_named_property_value(object, property_tag),
-    }
-}
-
-fn special_sync_object_named_property_value(
-    object: &mapi_mailstore::SpecialMessageSyncFact,
-    property_tag: u32,
-) -> Option<MapiValue> {
-    let property_tag = canonical_property_storage_tag(property_tag);
-    object
-        .named_properties
-        .iter()
-        .find(|(tag, _)| canonical_property_storage_tag(*tag) == property_tag)
-        .map(|(_, value)| match value {
-            mapi_mailstore::SpecialMessagePropertyValue::Binary(value) => {
-                MapiValue::Binary(value.clone())
-            }
-            mapi_mailstore::SpecialMessagePropertyValue::Bool(value) => MapiValue::Bool(*value),
-            mapi_mailstore::SpecialMessagePropertyValue::Guid(value) => MapiValue::Guid(*value),
-            mapi_mailstore::SpecialMessagePropertyValue::I32(value) => MapiValue::I32(*value),
-            mapi_mailstore::SpecialMessagePropertyValue::I64(value) => MapiValue::I64(*value),
-            mapi_mailstore::SpecialMessagePropertyValue::U32(value) => MapiValue::U32(*value),
-            mapi_mailstore::SpecialMessagePropertyValue::U64(value) => MapiValue::U64(*value),
-            mapi_mailstore::SpecialMessagePropertyValue::String(value) => {
-                MapiValue::String(value.clone())
-            }
-            mapi_mailstore::SpecialMessagePropertyValue::MultiString(values) => {
-                MapiValue::MultiString(values.clone())
-            }
-            mapi_mailstore::SpecialMessagePropertyValue::Time(value) => {
-                MapiValue::I64(mapi_mailstore::filetime_from_rfc3339_utc(value) as i64)
-            }
-        })
 }
 
 pub(in crate::mapi) fn delegate_freebusy_property_value(
