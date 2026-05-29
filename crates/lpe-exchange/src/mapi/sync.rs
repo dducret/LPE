@@ -22,6 +22,9 @@ pub(in crate::mapi) use super::identity::{
 pub(in crate::mapi) const CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID: Uuid =
     Uuid::from_u128(0x6d617069_6361_6c46_8000_000000000001);
 
+const PID_TAG_ROAMING_DATATYPES: u32 = 0x7C06_0003;
+const PID_TAG_ROAMING_DICTIONARY: u32 = 0x7C07_0102;
+
 pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     ROOT_FOLDER_ID,
     DEFERRED_ACTION_FOLDER_ID,
@@ -726,29 +729,7 @@ pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
         crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 102,
     );
     let change_number = mapi_mailstore::change_number_for_store_id(item_id);
-    let event = calendar_bootstrap_fai_event();
-    let mut named_properties = Vec::new();
-    for property_tag in [
-        PID_TAG_START_DATE,
-        PID_TAG_END_DATE,
-        PID_LID_BUSY_STATUS_TAG,
-        PID_LID_LOCATION_W_TAG,
-        PID_LID_APPOINTMENT_START_WHOLE_TAG,
-        PID_LID_APPOINTMENT_END_WHOLE_TAG,
-        PID_LID_APPOINTMENT_DURATION_TAG,
-        PID_LID_TIME_ZONE_STRUCT_TAG,
-        PID_LID_TIME_ZONE_DESCRIPTION_W_TAG,
-        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG,
-        PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG,
-        PID_LID_GLOBAL_OBJECT_ID_TAG,
-        PID_LID_CLEAN_GLOBAL_OBJECT_ID_TAG,
-    ] {
-        if let Some(value) = event_property_value(&event, item_id, folder_id, property_tag)
-            .and_then(special_message_property_value)
-        {
-            named_properties.push((property_tag, value));
-        }
-    }
+    let dictionary = calendar_options_dictionary_stream();
     mapi_mailstore::SpecialMessageSyncFact {
         folder_id,
         item_id,
@@ -758,43 +739,22 @@ pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
         body_text: String::new(),
         message_class: "IPM.Configuration.Calendar".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
-        message_size: event_size(&event),
-        named_properties,
+        message_size: dictionary.len() as i64,
+        named_properties: vec![
+            (
+                PID_TAG_ROAMING_DATATYPES,
+                mapi_mailstore::SpecialMessagePropertyValue::U32(0x0000_0004),
+            ),
+            (
+                PID_TAG_ROAMING_DICTIONARY,
+                mapi_mailstore::SpecialMessagePropertyValue::Binary(dictionary),
+            ),
+        ],
     }
 }
 
-fn calendar_bootstrap_fai_event() -> lpe_storage::AccessibleEvent {
-    lpe_storage::AccessibleEvent {
-        id: CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID,
-        uid: "lpe-calendar-bootstrap".to_string(),
-        collection_id: "default".to_string(),
-        owner_account_id: Uuid::nil(),
-        owner_email: String::new(),
-        owner_display_name: String::new(),
-        rights: lpe_storage::CollaborationRights {
-            may_read: true,
-            may_write: false,
-            may_delete: false,
-            may_share: false,
-        },
-        date: "2000-01-01".to_string(),
-        time: "00:00".to_string(),
-        time_zone: "UTC".to_string(),
-        duration_minutes: 30,
-        all_day: false,
-        status: "confirmed".to_string(),
-        sequence: 0,
-        recurrence_rule: String::new(),
-        recurrence_json: String::new(),
-        recurrence_exceptions_json: String::new(),
-        title: "Calendar".to_string(),
-        location: String::new(),
-        organizer_json: String::new(),
-        attendees: String::new(),
-        attendees_json: String::new(),
-        notes: String::new(),
-        body_html: String::new(),
-    }
+fn calendar_options_dictionary_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration><Info version="LPE.1"/><Data/></UserConfiguration>"#.to_vec()
 }
 
 fn journal_sync_object(

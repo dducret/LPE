@@ -17596,29 +17596,16 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
     let message = &stream.message_changes[0];
     assert!(message.associated);
     assert_eq!(message.subject, "Calendar");
-    assert_eq!(message.header_message_size, Some(8));
+    assert_eq!(message.header_message_size, Some(107));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("IPM.Configuration.Calendar")
     ));
-    for property_tag in [
-        0x0060_0040u32,
-        0x0061_0040,
-        0x8205_0003,
-        0x8208_001F,
-        0x820D_0040,
-        0x820E_0040,
-        0x8213_0003,
-        0x8233_0102,
-        0x8234_001F,
-        0x825E_0102,
-        0x825F_0102,
-        0x8001_0102,
-        0x8002_0102,
-    ] {
+    assert!(contains_bytes(&response_rops, b"<UserConfiguration>"));
+    for property_tag in [0x7C06_0003u32, 0x7C07_0102] {
         assert!(
             message.body_tags.contains(&property_tag),
-            "missing bootstrap calendar property 0x{property_tag:08x}"
+            "missing bootstrap calendar configuration property 0x{property_tag:08x}"
         );
     }
 }
