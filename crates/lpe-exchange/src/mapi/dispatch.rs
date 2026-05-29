@@ -3284,11 +3284,26 @@ fn log_calendar_special_sync_objects(
         .iter()
         .filter(|object| is_calendar_configuration_object(object))
         .collect::<Vec<_>>();
+    let dictionary_configuration_objects = configuration_objects
+        .iter()
+        .filter(|object| {
+            object.message_class == "IPM.Configuration.Calendar"
+                && special_binary_property_len(object, PID_TAG_ROAMING_DICTIONARY).is_some()
+        })
+        .count();
+    let xml_configuration_objects = configuration_objects
+        .iter()
+        .filter(|object| special_binary_property_len(object, PID_TAG_ROAMING_XML_STREAM).is_some())
+        .count();
     let appointment_objects = objects
         .iter()
         .filter(|object| object.message_class == "IPM.Appointment")
         .collect::<Vec<_>>();
-    let configuration_required_tags = [PID_TAG_ROAMING_DATATYPES, PID_TAG_ROAMING_DICTIONARY];
+    let configuration_required_tags = [
+        PID_TAG_ROAMING_DATATYPES,
+        PID_TAG_ROAMING_DICTIONARY,
+        PID_TAG_ROAMING_XML_STREAM,
+    ];
     let appointment_required_tags = [
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
@@ -3311,11 +3326,27 @@ fn log_calendar_special_sync_objects(
             .iter()
             .copied()
             .filter(|tag| {
-                !configuration_objects.iter().any(|object| {
-                    object
+                !configuration_objects.iter().any(|object| match *tag {
+                    PID_TAG_ROAMING_DICTIONARY => {
+                        object.message_class == "IPM.Configuration.Calendar"
+                            && object
+                                .named_properties
+                                .iter()
+                                .any(|(present, _)| present == tag)
+                    }
+                    PID_TAG_ROAMING_XML_STREAM => {
+                        matches!(
+                            object.message_class.as_str(),
+                            "IPM.Configuration.CategoryList" | "IPM.Configuration.WorkHours"
+                        ) && object
+                            .named_properties
+                            .iter()
+                            .any(|(present, _)| present == tag)
+                    }
+                    _ => object
                         .named_properties
                         .iter()
-                        .any(|(present, _)| present == tag)
+                        .any(|(present, _)| present == tag),
                 })
             })
             .map(|tag| format!("0x{tag:08x}"))
@@ -3390,6 +3421,8 @@ fn log_calendar_special_sync_objects(
         calendar_property_tags = %property_tags,
         calendar_property_shapes = %property_shapes,
         calendar_configuration_object_count = configuration_objects.len(),
+        calendar_dictionary_configuration_object_count = dictionary_configuration_objects,
+        calendar_xml_configuration_object_count = xml_configuration_objects,
         calendar_appointment_object_count = appointment_objects.len(),
         calendar_required_property_tags =
             %format_calendar_required_property_tags(
@@ -3576,7 +3609,13 @@ fn calendar_sync_object_start_end_order_ok(
 }
 
 fn is_calendar_configuration_object(object: &mapi_mailstore::SpecialMessageSyncFact) -> bool {
-    object.associated && object.message_class == "IPM.Configuration.Calendar"
+    object.associated
+        && matches!(
+            object.message_class.as_str(),
+            "IPM.Configuration.Calendar"
+                | "IPM.Configuration.CategoryList"
+                | "IPM.Configuration.WorkHours"
+        )
 }
 
 fn format_calendar_required_property_tags(
@@ -3585,7 +3624,11 @@ fn format_calendar_required_property_tags(
 ) -> String {
     let mut tags = Vec::new();
     if has_configuration_objects {
-        tags.extend([PID_TAG_ROAMING_DATATYPES, PID_TAG_ROAMING_DICTIONARY]);
+        tags.extend([
+            PID_TAG_ROAMING_DATATYPES,
+            PID_TAG_ROAMING_DICTIONARY,
+            PID_TAG_ROAMING_XML_STREAM,
+        ]);
     }
     if has_appointment_objects {
         tags.extend([
@@ -7212,7 +7255,7 @@ where
                     .filter(|object| {
                         object.associated
                             && !fai_scope_requested
-                            && object.canonical_id != CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID
+                            && !is_calendar_bootstrap_fai_id(object.canonical_id)
                     })
                     .count();
                 let checkpoint_store_allowed = suppressed_normal_sync_object_count == 0
@@ -9835,6 +9878,7 @@ mod tests {
 
         assert!(required_tags.contains("0x7c060003"));
         assert!(required_tags.contains("0x7c070102"));
+        assert!(required_tags.contains("0x7c080102"));
         assert!(!required_tags.contains("0x00600040"));
         assert!(!required_tags.contains("0x820d0102"));
     }

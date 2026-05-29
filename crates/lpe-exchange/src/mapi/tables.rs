@@ -539,6 +539,7 @@ fn default_calendar_configuration_property_tags() -> Vec<u32> {
         PID_TAG_ASSOCIATED,
         PID_TAG_ROAMING_DATATYPES,
         PID_TAG_ROAMING_DICTIONARY,
+        PID_TAG_ROAMING_XML_STREAM,
     ]);
     tags
 }
@@ -789,10 +790,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .collaboration_folder_for_id(*folder_id)
                     .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
                 {
-                    vec![serialize_special_sync_object_row(
-                        &calendar_bootstrap_fai_sync_object(*folder_id),
-                        &columns,
-                    )]
+                    calendar_bootstrap_fai_sync_object(*folder_id)
+                        .iter()
+                        .map(|object| serialize_special_sync_object_row(object, &columns))
+                        .collect()
                 } else {
                     Vec::new()
                 }

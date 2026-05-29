@@ -12196,7 +12196,7 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
     let response_rops = response_rops_from_execute_response(response).await;
 
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(stream.message_changes.len(), 3);
     let message = &stream.message_changes[0];
     assert!(message.associated);
     assert_eq!(message.subject, "Calendar");
@@ -12211,12 +12211,30 @@ async fn mapi_over_http_calendar_fai_only_sync_projects_bootstrap_associated_mes
     assert!(contains_bytes(&response_rops, b"18-piAutoProcess"));
     assert!(contains_bytes(&response_rops, b"18-AutomateProcessing"));
     assert!(contains_bytes(&response_rops, b"18-piAutoDeleteReceipts"));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Configuration.CategoryList")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Configuration.WorkHours")
+    ));
+    assert!(contains_bytes(&response_rops, b"CategoryList.xsd"));
+    assert!(contains_bytes(&response_rops, b"WorkingHours.xsd"));
     for property_tag in [0x7C06_0003u32, 0x7C07_0102] {
         assert!(
             message.body_tags.contains(&property_tag),
             "missing bootstrap calendar configuration property 0x{property_tag:08x}"
         );
     }
+    assert!(
+        stream
+            .message_changes
+            .iter()
+            .filter(|message| message.body_tags.contains(&0x7C08_0102))
+            .count()
+            >= 2
+    );
 }
 
 #[tokio::test]
@@ -12268,6 +12286,10 @@ async fn mapi_over_http_calendar_associated_contents_columns_include_configurati
     assert!(contains_bytes(
         &response_rops,
         &0x7C07_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x7C08_0102u32.to_le_bytes()
     ));
 }
 

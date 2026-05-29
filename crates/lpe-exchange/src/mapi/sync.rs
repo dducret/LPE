@@ -21,9 +21,14 @@ pub(in crate::mapi) use super::identity::{
 
 pub(in crate::mapi) const CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID: Uuid =
     Uuid::from_u128(0x6d617069_6361_6c46_8000_000000000001);
+pub(in crate::mapi) const CALENDAR_CATEGORY_LIST_FAI_CANONICAL_ID: Uuid =
+    Uuid::from_u128(0x6d617069_6361_6c46_8000_000000000002);
+pub(in crate::mapi) const CALENDAR_WORK_HOURS_FAI_CANONICAL_ID: Uuid =
+    Uuid::from_u128(0x6d617069_6361_6c46_8000_000000000003);
 
 pub(in crate::mapi) const PID_TAG_ROAMING_DATATYPES: u32 = 0x7C06_0003;
 pub(in crate::mapi) const PID_TAG_ROAMING_DICTIONARY: u32 = 0x7C07_0102;
+pub(in crate::mapi) const PID_TAG_ROAMING_XML_STREAM: u32 = 0x7C08_0102;
 
 pub(in crate::mapi) const PRIVATE_LOGON_SPECIAL_FOLDER_IDS: [u64; 13] = [
     ROOT_FOLDER_ID,
@@ -474,7 +479,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 )
             })
             .collect::<Vec<_>>();
-        objects.push(calendar_bootstrap_fai_sync_object(folder_id));
+        objects.extend(calendar_bootstrap_fai_sync_object(folder_id));
         return objects;
     }
     if snapshot
@@ -696,51 +701,125 @@ pub(in crate::mapi) fn changed_special_sync_objects(
     if changed_ids.is_empty() {
         return objects
             .into_iter()
-            .filter(|object| object.canonical_id == CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID)
+            .filter(|object| is_calendar_bootstrap_fai_id(object.canonical_id))
             .collect();
     }
     objects
         .into_iter()
         .filter(|object| {
             changed_ids.contains(&object.canonical_id)
-                || object.canonical_id == CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID
+                || is_calendar_bootstrap_fai_id(object.canonical_id)
         })
         .collect()
 }
 
+pub(in crate::mapi) fn is_calendar_bootstrap_fai_id(canonical_id: Uuid) -> bool {
+    matches!(
+        canonical_id,
+        CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID
+            | CALENDAR_CATEGORY_LIST_FAI_CANONICAL_ID
+            | CALENDAR_WORK_HOURS_FAI_CANONICAL_ID
+    )
+}
+
 pub(in crate::mapi) fn calendar_bootstrap_fai_sync_object(
     folder_id: u64,
-) -> mapi_mailstore::SpecialMessageSyncFact {
-    let item_id = crate::mapi::identity::mapi_store_id(
+) -> Vec<mapi_mailstore::SpecialMessageSyncFact> {
+    let calendar_options_item_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 102,
     );
-    let change_number = mapi_mailstore::change_number_for_store_id(item_id);
+    let category_list_item_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 103,
+    );
+    let work_hours_item_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 104,
+    );
     let dictionary = calendar_options_dictionary_stream();
-    mapi_mailstore::SpecialMessageSyncFact {
-        folder_id,
-        item_id,
-        canonical_id: CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID,
-        associated: true,
-        subject: "Calendar".to_string(),
-        body_text: String::new(),
-        message_class: "IPM.Configuration.Calendar".to_string(),
-        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
-        message_size: dictionary.len() as i64,
-        named_properties: vec![
-            (
-                PID_TAG_ROAMING_DATATYPES,
-                mapi_mailstore::SpecialMessagePropertyValue::U32(0x0000_0004),
+    let category_list = category_list_xml_stream();
+    let work_hours = working_hours_xml_stream();
+    vec![
+        mapi_mailstore::SpecialMessageSyncFact {
+            folder_id,
+            item_id: calendar_options_item_id,
+            canonical_id: CALENDAR_BOOTSTRAP_FAI_CANONICAL_ID,
+            associated: true,
+            subject: "Calendar".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Configuration.Calendar".to_string(),
+            last_modified_filetime: mapi_mailstore::filetime_from_change_number(
+                mapi_mailstore::change_number_for_store_id(calendar_options_item_id),
             ),
-            (
-                PID_TAG_ROAMING_DICTIONARY,
-                mapi_mailstore::SpecialMessagePropertyValue::Binary(dictionary),
+            message_size: dictionary.len() as i64,
+            named_properties: vec![
+                (
+                    PID_TAG_ROAMING_DATATYPES,
+                    mapi_mailstore::SpecialMessagePropertyValue::U32(0x0000_0004),
+                ),
+                (
+                    PID_TAG_ROAMING_DICTIONARY,
+                    mapi_mailstore::SpecialMessagePropertyValue::Binary(dictionary),
+                ),
+            ],
+        },
+        mapi_mailstore::SpecialMessageSyncFact {
+            folder_id,
+            item_id: category_list_item_id,
+            canonical_id: CALENDAR_CATEGORY_LIST_FAI_CANONICAL_ID,
+            associated: true,
+            subject: "CategoryList".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Configuration.CategoryList".to_string(),
+            last_modified_filetime: mapi_mailstore::filetime_from_change_number(
+                mapi_mailstore::change_number_for_store_id(category_list_item_id),
             ),
-        ],
-    }
+            message_size: category_list.len() as i64,
+            named_properties: vec![
+                (
+                    PID_TAG_ROAMING_DATATYPES,
+                    mapi_mailstore::SpecialMessagePropertyValue::U32(0x0000_0002),
+                ),
+                (
+                    PID_TAG_ROAMING_XML_STREAM,
+                    mapi_mailstore::SpecialMessagePropertyValue::Binary(category_list),
+                ),
+            ],
+        },
+        mapi_mailstore::SpecialMessageSyncFact {
+            folder_id,
+            item_id: work_hours_item_id,
+            canonical_id: CALENDAR_WORK_HOURS_FAI_CANONICAL_ID,
+            associated: true,
+            subject: "WorkHours".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Configuration.WorkHours".to_string(),
+            last_modified_filetime: mapi_mailstore::filetime_from_change_number(
+                mapi_mailstore::change_number_for_store_id(work_hours_item_id),
+            ),
+            message_size: work_hours.len() as i64,
+            named_properties: vec![
+                (
+                    PID_TAG_ROAMING_DATATYPES,
+                    mapi_mailstore::SpecialMessagePropertyValue::U32(0x0000_0002),
+                ),
+                (
+                    PID_TAG_ROAMING_XML_STREAM,
+                    mapi_mailstore::SpecialMessagePropertyValue::Binary(work_hours),
+                ),
+            ],
+        },
+    ]
 }
 
 fn calendar_options_dictionary_stream() -> Vec<u8> {
     br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration><Info version="LPE.1"/><Data><e k="18-OLPrefsVersion" v="9-1"/><e k="18-piRemindDefault" v="9-15"/><e k="18-piAutoProcess" v="3-True"/><e k="18-AutomateProcessing" v="9-1"/><e k="18-piAutoDeleteReceipts" v="3-False"/></Data></UserConfiguration>"#.to_vec()
+}
+
+fn category_list_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><categories xmlns="CategoryList.xsd" default=""></categories>"#.to_vec()
+}
+
+fn working_hours_xml_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><Root xmlns="WorkingHours.xsd"><WorkHoursVersion1><TimeZone><Bias>0</Bias><Standard><Bias>0</Bias><ChangeDate><Time>00:00:00</Time><Date>0000/00/00</Date><DayOfWeek>0</DayOfWeek></ChangeDate></Standard><DaylightSavings><Bias>0</Bias><ChangeDate><Time>00:00:00</Time><Date>0000/00/00</Date><DayOfWeek>0</DayOfWeek></ChangeDate></DaylightSavings><Name>UTC</Name></TimeZone><TimeSlot><Start>09:00:00</Start><End>17:00:00</End></TimeSlot><WorkDays>Monday Tuesday Wednesday Thursday Friday</WorkDays></WorkHoursVersion1></Root>"#.to_vec()
 }
 
 fn journal_sync_object(
