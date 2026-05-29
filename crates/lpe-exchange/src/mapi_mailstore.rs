@@ -1657,6 +1657,8 @@ struct HierarchyTransferDebugSummary {
     final_state_cnset_seen_len: usize,
     final_state_idset_given_summary: Option<String>,
     final_state_cnset_seen_summary: Option<String>,
+    final_state_cnset_seen_fai_summary: Option<String>,
+    final_state_cnset_read_summary: Option<String>,
     final_state_idset_given_counters: Vec<u64>,
     final_state_cnset_seen_counters: Vec<u64>,
     final_state_expected_property_order_ok: bool,
@@ -1878,13 +1880,29 @@ fn collect_final_state_debug_property(
             summary.final_state_cnset_seen_counters =
                 replguid_globset_counters(&property.value).unwrap_or_default();
         }
+        META_TAG_CNSET_SEEN_FAI => {
+            summary.final_state_cnset_seen_fai_summary =
+                Some(format_replguid_globset_debug(&property.value));
+        }
+        META_TAG_CNSET_READ => {
+            summary.final_state_cnset_read_summary =
+                Some(format_replguid_globset_debug(&property.value));
+        }
         _ => {}
     }
 }
 
 fn finalize_hierarchy_debug_summary(summary: &mut HierarchyTransferDebugSummary) {
-    summary.final_state_expected_property_order_ok = summary.final_state_property_tags.as_slice()
-        == [META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN].as_slice();
+    summary.final_state_expected_property_order_ok = matches!(
+        summary.final_state_property_tags.as_slice(),
+        [META_TAG_IDSET_GIVEN, META_TAG_CNSET_SEEN]
+            | [
+                META_TAG_IDSET_GIVEN,
+                META_TAG_CNSET_SEEN,
+                META_TAG_CNSET_SEEN_FAI,
+                META_TAG_CNSET_READ
+            ]
+    );
     let source_counters = summary
         .rows
         .iter()
@@ -2256,7 +2274,7 @@ pub(crate) fn replguid_globset_debug_summary(value: &[u8]) -> String {
 pub(crate) fn final_sync_state_debug_summary(value: &[u8]) -> String {
     match decode_hierarchy_transfer_debug_summary(value) {
         Ok(summary) => format!(
-            "bytes={};property_tags={};expected_order={};idset={};cnset={}",
+            "bytes={};property_tags={};expected_order={};idset={};cnset={};cnset_fai={};cnset_read={}",
             value.len(),
             format_property_tags(&summary.final_state_property_tags),
             summary.final_state_expected_property_order_ok,
@@ -2267,7 +2285,15 @@ pub(crate) fn final_sync_state_debug_summary(value: &[u8]) -> String {
             summary
                 .final_state_cnset_seen_summary
                 .as_deref()
-                .unwrap_or("missing")
+                .unwrap_or("missing"),
+            summary
+                .final_state_cnset_seen_fai_summary
+                .as_deref()
+                .unwrap_or("not_applicable"),
+            summary
+                .final_state_cnset_read_summary
+                .as_deref()
+                .unwrap_or("not_applicable")
         ),
         Err(error) => format!(
             "bytes={};preview={};parse_error={error}",
