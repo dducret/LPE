@@ -19401,7 +19401,7 @@ async fn mapi_over_http_save_message_falls_back_when_import_source_key_is_alread
 }
 
 #[tokio::test]
-async fn mapi_over_http_save_message_preserves_out_of_range_import_source_key() {
+async fn mapi_over_http_save_message_replaces_out_of_range_import_source_key() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let imported_source_key =
         crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::mapi_store_id(
@@ -19471,7 +19471,6 @@ async fn mapi_over_http_save_message_preserves_out_of_range_import_source_key() 
     ));
     assert_eq!(imported_emails.lock().unwrap().len(), 1);
     let allocated = mapi_identities.lock().unwrap();
-    let source_keys = mapi_identity_source_keys.lock().unwrap();
     let saved_id = emails.lock().unwrap().last().unwrap().id;
     assert!(!allocated
         .values()
@@ -19479,10 +19478,10 @@ async fn mapi_over_http_save_message_preserves_out_of_range_import_source_key() 
             |object_id| crate::mapi::identity::source_key_for_object_id(*object_id)
                 == imported_source_key
         ));
-    assert_eq!(
-        source_keys.get(&saved_id).map(Vec::as_slice),
-        Some(imported_source_key.as_slice())
-    );
+    assert!(!mapi_identity_source_keys
+        .lock()
+        .unwrap()
+        .contains_key(&saved_id));
 }
 
 #[tokio::test]
@@ -19584,7 +19583,6 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     let imported_emails = store.imported_emails.clone();
     let emails = store.emails.clone();
     let mapi_identities = store.mapi_identities.clone();
-    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -19644,13 +19642,16 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].mailbox_id, trash_id);
     assert_eq!(recorded[0].subject, "Client trash upload");
-    assert_eq!(
-        mapi_identity_source_keys
-            .lock()
-            .unwrap()
-            .get(&emails.lock().unwrap().last().unwrap().id)
-            .map(Vec::as_slice),
-        Some(imported_source_key.as_slice())
+    let saved_id = emails.lock().unwrap().last().unwrap().id;
+    let saved_object_id = mapi_identities
+        .lock()
+        .unwrap()
+        .get(&saved_id)
+        .copied()
+        .unwrap();
+    assert_ne!(
+        crate::mapi::identity::source_key_for_object_id(saved_object_id),
+        imported_source_key
     );
     assert!(!mapi_identities.lock().unwrap().values().any(|object_id| {
         crate::mapi::identity::source_key_for_object_id(*object_id) == imported_source_key
@@ -19675,7 +19676,7 @@ async fn mapi_over_http_replays_outlook_trash_collector_import_then_save() {
     };
     let imported_emails = store.imported_emails.clone();
     let emails = store.emails.clone();
-    let mapi_identity_source_keys = store.mapi_identity_source_keys.clone();
+    let mapi_identities = store.mapi_identities.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -19747,13 +19748,16 @@ async fn mapi_over_http_replays_outlook_trash_collector_import_then_save() {
     assert_eq!(recorded.len(), 1);
     assert_eq!(recorded[0].mailbox_id, trash_id);
     assert_eq!(recorded[0].subject, "Outlook trash upload");
-    assert_eq!(
-        mapi_identity_source_keys
-            .lock()
-            .unwrap()
-            .get(&emails.lock().unwrap().last().unwrap().id)
-            .map(Vec::as_slice),
-        Some(imported_source_key.as_slice())
+    let saved_id = emails.lock().unwrap().last().unwrap().id;
+    let saved_object_id = mapi_identities
+        .lock()
+        .unwrap()
+        .get(&saved_id)
+        .copied()
+        .unwrap();
+    assert_ne!(
+        crate::mapi::identity::source_key_for_object_id(saved_object_id),
+        imported_source_key
     );
 }
 

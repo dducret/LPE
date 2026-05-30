@@ -430,14 +430,16 @@ not by itself authorize broad client publication.
   that Outlook must persist for the upload transaction. Successful delete and
   source-move uploads still produce an explicit server checkpoint so the
   transfer-state path does not fall back to a stale pre-upload folder snapshot.
-- `RopSaveChangesMessage` for an Outlook-uploaded message with a foreign
-  client `PidTagSourceKey`, including uploads into Deleted Items, persists the
-  message through canonical mail storage and returns a server-assigned Message
-  ID/change number. The imported source key remains durable identity material
-  for later lookup and projection, even when its GLOBCNT cannot be represented
-  as LPE's signed internal MAPI object id. LPE must not acknowledge a
-  non-metadata ICS upload as saved while keeping it only as an unbacked client
-  object or silently replacing the uploaded source key with a generated one.
+- `RopSaveChangesMessage` for an Outlook-uploaded message with an imported
+  `PidTagSourceKey`, including uploads into Deleted Items, persists the message
+  through canonical mail storage and returns a server-assigned Message ID/change
+  number. If the imported source key is a representable LPE replica GID in the
+  persisted dynamic range, LPE reserves that identity. If it is system-reserved,
+  already allocated, or outside LPE's representable persisted range, LPE assigns
+  a new server identity and exposes the source key derived from that identity.
+  LPE must not acknowledge a non-metadata ICS upload as saved while keeping it
+  only as an unbacked client object, and it must not persist an Outlook-visible
+  source key that conflicts with the assigned server Message ID.
 - `mapi_sync_checkpoints` stores durable server cursor state: checkpoint kind,
   optional mailbox id, MAPI replica GUID, last canonical change sequence, last
   mail modseq, and a small JSON cursor.

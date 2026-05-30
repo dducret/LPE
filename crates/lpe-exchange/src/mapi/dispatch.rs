@@ -9807,17 +9807,22 @@ where
         .as_deref()
         .and_then(persistable_import_source_key_global_counter);
     if reserved_global_counter.is_none() {
-        let preserved_source_key = source_key.is_some();
+        let identity_fallback_reason = source_key
+            .as_deref()
+            .and_then(source_key_global_counter)
+            .map(import_source_key_identity_scope)
+            .filter(|scope| *scope != "persistable_dynamic")
+            .unwrap_or("");
         let object_id = remember_created_mapi_identity(
             store,
             principal,
             MapiIdentityObjectKind::Message,
             canonical_id,
             None,
-            source_key,
+            None,
         )
         .await?;
-        return Ok((object_id, preserved_source_key, String::new()));
+        return Ok((object_id, false, identity_fallback_reason.to_string()));
     }
 
     match remember_created_mapi_identity(
@@ -9838,7 +9843,7 @@ where
                 MapiIdentityObjectKind::Message,
                 canonical_id,
                 None,
-                source_key,
+                None,
             )
             .await?;
             Ok((object_id, false, error.to_string()))
