@@ -117,6 +117,28 @@ mapi_shortcut_target_nullable="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "S
   || fail "MAPI navigation shortcut target_folder_id is still NOT NULL. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "MAPI navigation shortcut target folder column supports group headers"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');" | grep -qx 'recoverable_items' \
+  || fail "Table public.recoverable_items is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Found table public.recoverable_items"
+
+recoverable_account_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name IN ('recoverable_items_retention_days', 'litigation_hold_enabled', 'litigation_hold_started_at');")" \
+  || fail "Unable to inspect recoverable-item account columns"
+[[ "$recoverable_account_column_count" == "3" ]] \
+  || fail "Recoverable-item account retention/hold columns are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Recoverable-item account retention/hold columns are present"
+
+recoverable_mailbox_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'recoverable_items_retention_days';")" \
+  || fail "Unable to inspect recoverable-item mailbox columns"
+[[ "$recoverable_mailbox_column_count" == "1" ]] \
+  || fail "Recoverable-item mailbox retention override column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Recoverable-item mailbox retention override column is present"
+
+recoverable_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%recoverable_item%';")" \
+  || fail "Unable to inspect recoverable-item change-log constraints"
+[[ "$recoverable_change_constraint_count" -ge "4" ]] \
+  || fail "Recoverable-item change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Recoverable-item change-log constraints are present"
+
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 expected_schema_version="$(

@@ -82,6 +82,9 @@ CREATE TABLE accounts (
     quota_used_octets BIGINT NOT NULL DEFAULT 0 CHECK (quota_used_octets >= 0),
     gal_visibility TEXT NOT NULL DEFAULT 'tenant' CHECK (gal_visibility IN ('tenant', 'hidden')),
     directory_kind TEXT NOT NULL DEFAULT 'person' CHECK (directory_kind IN ('person', 'room', 'equipment')),
+    recoverable_items_retention_days INTEGER NOT NULL DEFAULT 14 CHECK (recoverable_items_retention_days >= 0),
+    litigation_hold_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    litigation_hold_started_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (tenant_id, id),
@@ -501,6 +504,7 @@ CREATE TABLE mailboxes (
     normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
     sort_order INTEGER NOT NULL DEFAULT 0,
     retention_days INTEGER NOT NULL DEFAULT 365 CHECK (retention_days >= 0),
+    recoverable_items_retention_days INTEGER CHECK (recoverable_items_retention_days IS NULL OR recoverable_items_retention_days >= 0),
     hierarchy_path TEXT NOT NULL DEFAULT '/' CHECK (left(hierarchy_path, 1) = '/'),
     hierarchy_depth INTEGER NOT NULL DEFAULT 0 CHECK (hierarchy_depth >= 0),
     uid_validity BIGINT NOT NULL CHECK (uid_validity > 0),
@@ -1118,6 +1122,69 @@ CREATE INDEX mailbox_messages_deleted_idx
     ON mailbox_messages (tenant_id, account_id, mailbox_id, imap_uid)
     WHERE is_deleted = TRUE;
 
+CREATE TABLE recoverable_items (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    message_id UUID NOT NULL,
+    source_mailbox_message_id UUID NOT NULL,
+    source_mailbox_id UUID NOT NULL,
+    source_imap_uid BIGINT NOT NULL CHECK (source_imap_uid > 0),
+    source_thread_id UUID,
+    recoverable_folder TEXT NOT NULL CHECK (recoverable_folder IN ('deletions', 'versions', 'purges')),
+    delete_kind TEXT NOT NULL CHECK (delete_kind IN (
+        'hard_delete',
+        'expunge',
+        'retention_expire',
+        'copy_on_write_version',
+        'admin_purge'
+    )),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'restored', 'purged')),
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    retained_until TIMESTAMPTZ,
+    legal_hold BOOLEAN NOT NULL DEFAULT FALSE,
+    restored_at TIMESTAMPTZ,
+    restored_mailbox_message_id UUID,
+    purged_at TIMESTAMPTZ,
+    created_by_protocol TEXT NOT NULL CHECK (created_by_protocol IN (
+        'jmap',
+        'imap',
+        'ews',
+        'mapi',
+        'api',
+        'retention_worker'
+    )),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, account_id, source_mailbox_message_id),
+    CHECK (retained_until IS NULL OR retained_until >= deleted_at),
+    CHECK ((status = 'restored' AND restored_at IS NOT NULL) OR status <> 'restored'),
+    CHECK ((status = 'purged' AND purged_at IS NOT NULL) OR status <> 'purged'),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, message_id) REFERENCES messages (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, account_id, source_mailbox_id)
+        REFERENCES mailboxes (tenant_id, account_id, id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, account_id, source_mailbox_message_id, message_id)
+        REFERENCES mailbox_messages (tenant_id, account_id, id, message_id)
+        ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, account_id, restored_mailbox_message_id)
+        REFERENCES mailbox_messages (tenant_id, account_id, id)
+        ON DELETE SET NULL
+);
+
+CREATE INDEX recoverable_items_active_folder_idx
+    ON recoverable_items (tenant_id, account_id, recoverable_folder, deleted_at DESC)
+    WHERE status = 'active';
+
+CREATE INDEX recoverable_items_cleanup_idx
+    ON recoverable_items (tenant_id, retained_until, deleted_at)
+    WHERE status = 'active' AND legal_hold = FALSE;
+
+CREATE INDEX recoverable_items_message_idx
+    ON recoverable_items (tenant_id, message_id);
+
 CREATE TABLE mailbox_pst_jobs (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -1295,7 +1362,8 @@ CREATE TABLE mail_change_log (
         'sender_right',
         'search_folder_definition',
         'sieve_script',
-        'conversation_action'
+        'conversation_action',
+        'recoverable_item'
     )),
     object_id UUID NOT NULL,
     object_uid TEXT,
@@ -1343,6 +1411,17 @@ CREATE TABLE mail_change_log (
             AND collection_id IS NULL
             AND summary_json ? 'messageId'
             AND summary_json ? 'attachmentId'
+        )
+        OR (
+            object_kind = 'recoverable_item'
+            AND account_id IS NOT NULL
+            AND mailbox_id IS NULL
+            AND collection_id IS NULL
+            AND summary_json ? 'messageId'
+            AND summary_json ? 'sourceMailboxMessageId'
+            AND summary_json ? 'recoverableFolder'
+            AND (summary_json ->> 'messageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            AND (summary_json ->> 'sourceMailboxMessageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
         )
         OR (
             object_kind = 'submission'
@@ -1411,6 +1490,10 @@ CREATE INDEX mail_change_log_collaboration_idx
         'sieve_script'
     );
 
+CREATE INDEX mail_change_log_recoverable_item_idx
+    ON mail_change_log (tenant_id, account_id, object_kind, cursor)
+    WHERE object_kind = 'recoverable_item';
+
 CREATE INDEX mail_change_log_principals_gin_idx
     ON mail_change_log USING GIN (affected_principal_ids);
 
@@ -1456,7 +1539,8 @@ CREATE TABLE tombstones (
         'mailbox_delegation_grant',
         'sender_right',
         'search_folder_definition',
-        'sieve_script'
+        'sieve_script',
+        'recoverable_item'
     )),
     object_id UUID NOT NULL,
     object_uid TEXT,
@@ -1497,6 +1581,14 @@ CREATE TABLE tombstones (
             AND mailbox_message_id IS NOT NULL
             AND message_id IS NOT NULL
             AND imap_uid IS NOT NULL
+        )
+        OR (
+            object_kind = 'recoverable_item'
+            AND account_id IS NOT NULL
+            AND mailbox_id IS NULL
+            AND message_id IS NOT NULL
+            AND mailbox_message_id IS NULL
+            AND imap_uid IS NULL
         )
         OR (
             object_kind IN (

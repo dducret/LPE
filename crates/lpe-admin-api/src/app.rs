@@ -59,10 +59,11 @@ use crate::{
         client_workspace, delete_client_contact, delete_client_event, delete_client_note,
         delete_client_task, delete_draft_message, delete_journal_entry, delete_search_folder,
         get_client_note, get_client_task, get_journal_entry, get_search_folder, list_client_notes,
-        list_client_task_lists, list_client_tasks, list_journal_entries, list_search_folders,
-        outlook_profile_state, query_client_reminders, save_draft_message, submit_message,
-        update_message_flag, upsert_client_contact, upsert_client_event, upsert_client_note,
-        upsert_client_task, upsert_journal_entry, upsert_search_folder,
+        list_client_task_lists, list_client_tasks, list_journal_entries, list_recoverable_items,
+        list_search_folders, outlook_profile_state, purge_recoverable_item, query_client_reminders,
+        restore_recoverable_item, save_draft_message, submit_message, update_message_flag,
+        upsert_client_contact, upsert_client_event, upsert_client_note, upsert_client_task,
+        upsert_journal_entry, upsert_search_folder,
     },
 };
 
@@ -173,6 +174,15 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/messages/submit", post(submit_message))
         .route("/mail/messages/draft", post(save_draft_message))
         .route("/mail/messages/{message_id}/flag", put(update_message_flag))
+        .route("/mail/recoverable-items", get(list_recoverable_items))
+        .route(
+            "/mail/recoverable-items/{recoverable_item_id}/restore",
+            post(restore_recoverable_item),
+        )
+        .route(
+            "/mail/recoverable-items/{recoverable_item_id}/purge",
+            post(purge_recoverable_item),
+        )
         .route(
             "/internal/lpe-ct/inbound-deliveries",
             post(deliver_inbound_message),

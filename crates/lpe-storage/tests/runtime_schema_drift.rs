@@ -3315,6 +3315,34 @@ async fn exercise_mapi_delete_cross_protocol_path(
         "MAPI delete tombstone must preserve source UID and delete reason"
     );
 
+    let recoverable = sqlx::query(
+        r#"
+        SELECT source_imap_uid, recoverable_folder, delete_kind, status, legal_hold, created_by_protocol
+        FROM recoverable_items
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND source_mailbox_message_id = $4
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .bind(source_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load recoverable item after scoped delete")?;
+    anyhow::ensure!(
+        recoverable.try_get::<i64, _>("source_imap_uid")? == source_uid
+            && recoverable.try_get::<String, _>("recoverable_folder")? == "deletions"
+            && recoverable.try_get::<String, _>("delete_kind")? == "hard_delete"
+            && recoverable.try_get::<String, _>("status")? == "active"
+            && !recoverable.try_get::<bool, _>("legal_hold")?
+            && recoverable.try_get::<String, _>("created_by_protocol")? == "mapi",
+        "MAPI hard delete must create canonical active recoverable item state"
+    );
+
     let email_changes = storage
         .replay_jmap_mail_object_changes(fixture.account_id, "Email", before_cursor, 20)
         .await
@@ -3355,6 +3383,72 @@ async fn exercise_mapi_delete_cross_protocol_path(
     anyhow::ensure!(
         mapi_delete_replay_rows == 1,
         "MAPI content sync must be able to export the JMAP-visible delete from canonical tombstones"
+    );
+
+    let recoverable_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM recoverable_items
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND source_mailbox_message_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.message_id)
+    .bind(source_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load recoverable item id before restore")?;
+    let listed_recoverable = storage
+        .list_recoverable_items(fixture.account_id, Some("deletions"))
+        .await
+        .context("list active recoverable items")?;
+    anyhow::ensure!(
+        listed_recoverable
+            .iter()
+            .any(|item| item.id == recoverable_id),
+        "recoverable item browse API must list active deleted items"
+    );
+    let restored = storage
+        .restore_recoverable_item(
+            fixture.account_id,
+            recoverable_id,
+            Some(submitted.sent_mailbox_id),
+            audit(
+                "alice@example.test",
+                "restore-recoverable-message",
+                "runtime drift restore recoverable item",
+            ),
+        )
+        .await
+        .context("restore recoverable item")?;
+    anyhow::ensure!(
+        restored.id == submitted.message_id
+            && restored
+                .mailbox_states
+                .iter()
+                .any(|state| state.mailbox_id == submitted.sent_mailbox_id),
+        "recoverable restore must recreate normal mailbox visibility in the target mailbox"
+    );
+    let recoverable_status = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT status
+        FROM recoverable_items
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(recoverable_id)
+    .fetch_one(pool)
+    .await
+    .context("load recoverable item status after restore")?;
+    anyhow::ensure!(
+        recoverable_status == "restored",
+        "recoverable restore must mark the source recoverable item restored"
     );
 
     Ok(())
@@ -3604,7 +3698,7 @@ async fn exercise_mapi_trash_purge_retention_guard(
     .await
     .context("mark Trash message retained and under legal hold")?;
 
-    let result = storage
+    storage
         .delete_jmap_email_from_mailbox(
             fixture.account_id,
             trash_id,
@@ -3615,11 +3709,8 @@ async fn exercise_mapi_trash_purge_retention_guard(
                 "runtime retained trash purge",
             ),
         )
-        .await;
-    anyhow::ensure!(
-        result.is_err(),
-        "MAPI Trash purge must reject retained or legal-hold messages"
-    );
+        .await
+        .context("hard-delete retained Trash membership into recoverable items")?;
     let visibility = sqlx::query_scalar::<_, String>(
         r#"
         SELECT visibility
@@ -3633,8 +3724,8 @@ async fn exercise_mapi_trash_purge_retention_guard(
     .await
     .context("load retained Trash membership visibility")?;
     anyhow::ensure!(
-        visibility == "visible",
-        "retained Trash membership must remain visible after rejected purge"
+        visibility == "expunged",
+        "retained Trash membership must leave normal folder visibility after hard delete"
     );
     let tombstone_count = sqlx::query_scalar::<_, i64>(
         r#"
@@ -3656,8 +3747,111 @@ async fn exercise_mapi_trash_purge_retention_guard(
     .await
     .context("count retained Trash purge tombstones")?;
     anyhow::ensure!(
-        tombstone_count == 0,
-        "rejected retained Trash purge must not write a delete tombstone"
+        tombstone_count == 1,
+        "retained Trash hard delete must still write the normal-folder delete tombstone"
+    );
+    let recoverable = sqlx::query(
+        r#"
+        SELECT status, recoverable_folder, legal_hold, retained_until::text AS retained_until
+        FROM recoverable_items
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND source_mailbox_message_id = $4
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(imported.id)
+    .bind(membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load retained recoverable item")?;
+    anyhow::ensure!(
+        recoverable.try_get::<String, _>("status")? == "active"
+            && recoverable.try_get::<String, _>("recoverable_folder")? == "deletions"
+            && recoverable.try_get::<bool, _>("legal_hold")?
+            && recoverable
+                .try_get::<Option<String>, _>("retained_until")?
+                .is_some(),
+        "retained legal-hold hard delete must preserve active recoverable item state"
+    );
+    let recoverable_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM recoverable_items
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND source_mailbox_message_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(imported.id)
+    .bind(membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load retained recoverable item id")?;
+    let blocked_purge = storage
+        .purge_recoverable_item(
+            fixture.account_id,
+            recoverable_id,
+            audit(
+                "alice@example.test",
+                "purge-recoverable-message",
+                "runtime retained recoverable purge",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        blocked_purge.is_err(),
+        "recoverable purge must reject active legal hold"
+    );
+    sqlx::query(
+        r#"
+        UPDATE recoverable_items
+        SET legal_hold = FALSE,
+            deleted_at = NOW() - INTERVAL '2 seconds',
+            retained_until = NOW() - INTERVAL '1 second'
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(recoverable_id)
+    .execute(pool)
+    .await
+    .context("expire retained recoverable item for purge")?;
+    storage
+        .purge_recoverable_item(
+            fixture.account_id,
+            recoverable_id,
+            audit(
+                "alice@example.test",
+                "purge-recoverable-message",
+                "runtime expired recoverable purge",
+            ),
+        )
+        .await
+        .context("purge expired recoverable item")?;
+    let purged_status = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT status
+        FROM recoverable_items
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(recoverable_id)
+    .fetch_one(pool)
+    .await
+    .context("load recoverable status after purge")?;
+    anyhow::ensure!(
+        purged_status == "purged",
+        "expired unheld recoverable purge must mark the item purged"
     );
 
     Ok(())

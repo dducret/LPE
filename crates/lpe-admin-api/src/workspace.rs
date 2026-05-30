@@ -7,9 +7,10 @@ use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
     ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JmapEmail,
     JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, OutlookProfileState,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    UpsertSearchFolderInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -18,7 +19,8 @@ use crate::{
     http::{bad_request_error, internal_error},
     observability, require_account,
     types::{
-        ApiResult, ReminderQueryRequest, SubmitMessageRequest, SubmitRecipientRequest,
+        ApiResult, RecoverableItemsQueryRequest, ReminderQueryRequest,
+        RestoreRecoverableItemRequest, SubmitMessageRequest, SubmitRecipientRequest,
         UpdateMessageFlagRequest, UpsertClientContactRequest, UpsertClientEventRequest,
         UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
         UpsertSearchFolderRequest,
@@ -444,6 +446,68 @@ pub(crate) async fn delete_draft_message(
         .await
         .map_err(bad_request_error)?;
 
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn list_recoverable_items(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Query(request): Query<RecoverableItemsQueryRequest>,
+) -> ApiResult<Vec<RecoverableItem>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .list_recoverable_items(account.account_id, request.folder.as_deref())
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn restore_recoverable_item(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(recoverable_item_id): AxumPath<Uuid>,
+    Json(request): Json<RestoreRecoverableItemRequest>,
+) -> ApiResult<JmapEmail> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .restore_recoverable_item(
+                account.account_id,
+                recoverable_item_id,
+                request.target_mailbox_id,
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "restore-recoverable-message".to_string(),
+                    subject: recoverable_item_id.to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn purge_recoverable_item(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(recoverable_item_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .purge_recoverable_item(
+            account.account_id,
+            recoverable_item_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "purge-recoverable-message".to_string(),
+                subject: recoverable_item_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
     Ok(Json(HealthResponse {
         service: "lpe-admin-api",
         status: "ok",

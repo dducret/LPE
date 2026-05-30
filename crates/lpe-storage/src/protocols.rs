@@ -547,6 +547,9 @@ impl Storage {
             let mailbox_id: Option<Uuid> = row.try_get("mailbox_id")?;
             let change_kind: String = row.try_get("change_kind")?;
             let summary_json: Value = row.try_get("summary_json")?;
+            if object_kind == "recoverable_item" {
+                continue;
+            }
             match data_type {
                 "Email" => {
                     if object_kind != "mailbox_message" {
@@ -3684,16 +3687,24 @@ impl Storage {
         audit: AuditEntryInput,
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let recoverable_created_by_protocol = recoverable_created_by_protocol(&audit.action);
         let mut tx = self.pool.begin().await?;
         let rows = sqlx::query(
             r#"
             SELECT mm.id, mm.mailbox_id, mm.thread_id, mm.imap_uid, mm.is_seen,
-                   m.retained_until IS NOT NULL AND m.retained_until > NOW() AS retention_active,
-                   m.legal_hold AS legal_hold_active
+                   COALESCE(mb.recoverable_items_retention_days, a.recoverable_items_retention_days) AS recoverable_retention_days,
+                   (m.legal_hold OR a.litigation_hold_enabled) AS recoverable_legal_hold
             FROM mailbox_messages mm
             JOIN messages m
               ON m.tenant_id = mm.tenant_id
              AND m.id = mm.message_id
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            JOIN accounts a
+              ON a.tenant_id = mm.tenant_id
+             AND a.id = mm.account_id
             WHERE mm.tenant_id = $1
               AND mm.account_id = $2
               AND mm.message_id = $3
@@ -3712,20 +3723,6 @@ impl Storage {
             bail!("message not found");
         }
 
-        if rows
-            .iter()
-            .any(|row| row.try_get::<bool, _>("retention_active").unwrap_or(false))
-        {
-            bail!("message retention is active");
-        }
-
-        if rows
-            .iter()
-            .any(|row| row.try_get::<bool, _>("legal_hold_active").unwrap_or(false))
-        {
-            bail!("message legal hold is active");
-        }
-
         let modseq = self
             .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
             .await?;
@@ -3735,6 +3732,7 @@ impl Storage {
             let membership_id: Uuid = row.try_get("id")?;
             let mailbox_id: Uuid = row.try_get("mailbox_id")?;
             let imap_uid: i64 = row.try_get("imap_uid")?;
+            let thread_id: Uuid = row.try_get("thread_id")?;
             let cursor = Self::insert_mail_change_log_in_tx(
                 &mut tx,
                 &tenant_id,
@@ -3747,7 +3745,7 @@ impl Storage {
                 &principals,
                 serde_json::json!({
                     "messageId": message_id,
-                    "threadId": row.try_get::<Uuid, _>("thread_id")?,
+                    "threadId": thread_id,
                     "imapUid": imap_uid
                 }),
             )
@@ -3772,6 +3770,62 @@ impl Storage {
             .bind(modseq)
             .bind(cursor)
             .execute(&mut *tx)
+            .await?;
+
+            let recoverable_item_id = Uuid::new_v4();
+            let recoverable_retention_days: i32 = row.try_get("recoverable_retention_days")?;
+            let recoverable_legal_hold: bool = row.try_get("recoverable_legal_hold")?;
+            sqlx::query(
+                r#"
+                INSERT INTO recoverable_items (
+                    id, tenant_id, account_id, message_id, source_mailbox_message_id,
+                    source_mailbox_id, source_imap_uid, source_thread_id,
+                    recoverable_folder, delete_kind, retained_until, legal_hold,
+                    created_by_protocol
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8,
+                    'deletions', 'hard_delete',
+                    CASE WHEN $9::integer = 0 THEN NOW() ELSE NOW() + ($9::integer * INTERVAL '1 day') END,
+                    $10,
+                    $11
+                )
+                ON CONFLICT (tenant_id, account_id, source_mailbox_message_id) DO NOTHING
+                "#,
+            )
+            .bind(recoverable_item_id)
+            .bind(&tenant_id)
+            .bind(account_id)
+            .bind(message_id)
+            .bind(membership_id)
+            .bind(mailbox_id)
+            .bind(imap_uid)
+            .bind(thread_id)
+            .bind(recoverable_retention_days)
+            .bind(recoverable_legal_hold)
+            .bind(recoverable_created_by_protocol)
+            .execute(&mut *tx)
+            .await?;
+
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(account_id),
+                None,
+                "recoverable_item",
+                recoverable_item_id,
+                "created",
+                modseq,
+                &principals,
+                serde_json::json!({
+                    "messageId": message_id,
+                    "sourceMailboxMessageId": membership_id,
+                    "recoverableFolder": "deletions",
+                    "sourceMailboxId": mailbox_id,
+                    "sourceImapUid": imap_uid
+                }),
+            )
             .await?;
         }
 
@@ -5272,6 +5326,16 @@ fn jmap_change_kind(change_kind: &str) -> String {
         _ => "updated",
     }
     .to_string()
+}
+
+fn recoverable_created_by_protocol(audit_action: &str) -> &'static str {
+    match audit_action {
+        action if action.starts_with("mapi-") => "mapi",
+        action if action.starts_with("ews-") => "ews",
+        action if action.starts_with("imap-") => "imap",
+        action if action.starts_with("jmap-") => "jmap",
+        _ => "api",
+    }
 }
 
 fn jmap_exact_object_kind(data_type: &str) -> Option<&'static str> {

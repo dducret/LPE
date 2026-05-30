@@ -103,6 +103,22 @@ for hierarchy sync and folder-list projections.
 - membership timestamps
 - soft-delete / expunge state while visible to sync logic
 
+Recoverable-items state is canonical core `LPE` lifecycle state, not a MAPI
+or Exchange-local mailbox store. Hard delete, IMAP expunge, and delete from
+canonical `Trash` expunge the addressed `mailbox_messages` row for normal
+protocol visibility, write the existing mailbox-message tombstone, and insert a
+`recoverable_items` row that preserves the source mailbox membership id,
+source mailbox id, source IMAP UID, message id, retention deadline, and
+legal-hold flag. Recoverable items are not normal `mailboxes` rows and are not
+listed by JMAP `Mailbox/*` or IMAP folder discovery. MAPI and EWS may project
+Recoverable Items Root, Deletions, Versions, and Purges as virtual
+compatibility folders only after their ROP/API behavior is wired to this
+canonical table.
+The canonical `/api/mail/recoverable-items` surface lists active recoverable
+items, restores an item by creating a fresh target mailbox membership with a
+new target UID, and purges only unheld items whose recoverable retention has
+expired.
+
 `domains` owns domain defaults that affect mailbox runtime behavior, including
 `default_sieve_script` for newly created or defaulted mailbox filtering and
 `jmap_push_journal_retention_days` for tenant-domain JMAP push replay cleanup.
@@ -237,6 +253,12 @@ shortcut type, flags, section, ordinal, group header GUID, and group display
 name. `target_folder_id` is populated only for non-header shortcuts; group
 headers carry their `WunderBar` group GUID/name without inventing a folder
 target.
+
+Recoverable item lifecycle events use `object_kind = 'recoverable_item'` change
+rows. These rows describe recovery state creation, restore, and purge for
+MAPI/EWS dumpster synchronization. They do not replace the normal
+`mailbox_message` tombstone that tells JMAP, IMAP QRESYNC, ActiveSync, and MAPI
+content sync that the source folder membership disappeared.
 
 Protocol adapters store only cursor rows:
 
@@ -621,6 +643,7 @@ collaboration, rights, or user-visible state.
 - `mailbox_subscriptions`
 - `search_folders`
 - `conversation_actions`
+- `recoverable_items`
 - `storage_pools`
 - `blobs`
 - `blob_placements`

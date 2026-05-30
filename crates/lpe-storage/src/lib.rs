@@ -15,6 +15,7 @@ pub mod notes_journal;
 mod outbound;
 pub mod protocols;
 pub mod pst;
+pub mod recoverable_items;
 mod shared;
 mod storage_backend;
 pub mod storage_policy;
@@ -68,6 +69,7 @@ pub use crate::protocols::{
     JmapThreadQuery, JmapUploadBlob, SearchFolderDefinition, UpsertSearchFolderInput,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
+pub use crate::recoverable_items::RecoverableItem;
 pub use crate::submission::{
     AttachmentUploadInput, MailboxAccountAccess, MailboxDelegationGrant,
     MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,

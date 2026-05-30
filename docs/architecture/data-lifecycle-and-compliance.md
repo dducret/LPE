@@ -17,6 +17,21 @@
   hashes, lifecycle fields, and policy references. Protocol adapters use the
   `BlobStore` boundary and remain backend-agnostic.
 - Retention and legal hold must apply before destructive deletion.
+- Recoverable-items retention is canonical mailbox lifecycle behavior in core
+  `LPE`. Hard delete and expunge remove normal mailbox visibility but preserve
+  a `recoverable_items` row until its retention deadline expires.
+- Legal hold keeps recoverable items active regardless of retention expiry.
+  User or protocol purge may mark only unheld, retention-expired recoverable
+  items as purged; physical message/blob cleanup remains blocked while any
+  active recoverable item, message retention flag, legal hold, live mailbox
+  membership, or placement guard still references the content.
+- Recoverable Items Root, Deletions, Versions, and Purges are compatibility
+  projections over canonical recoverable state. They are not normal JMAP/IMAP
+  mailboxes and must not become protocol-local Exchange storage.
+- `/api/mail/recoverable-items` is the canonical owner-facing recovery API for
+  active recoverable items. Restore creates a fresh mailbox membership and
+  purge is allowed only after recoverable retention expires and legal hold is
+  inactive.
 - Old placement cleanup is not canonical message/blob deletion. It applies only
   to non-active placement rows that have passed their rollback window and have
   passed live-reference, retention, and legal-hold guards.
@@ -57,6 +72,7 @@
 | quota accounting | canonical logical size, not placement count |
 | old placement cleanup | rollback-window, live-reference, retention, and legal-hold guarded |
 | canonical blob/message deletion | not performed by placement cleanup |
+| recoverable item retention | core `recoverable_items`, not protocol-local dumpster folders |
 | raw RFC 5322 message blobs | database-backed initially |
 | protected recipient metadata | `Bcc` |
 | attachment text index formats | `PDF`, `DOCX`, `ODT` |

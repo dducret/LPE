@@ -396,6 +396,18 @@ pub struct UpdateMessageFlagRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoverableItemsQueryRequest {
+    pub folder: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreRecoverableItemRequest {
+    pub target_mailbox_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SubmitRecipientRequest {
     pub address: String,
     pub display_name: Option<String>,

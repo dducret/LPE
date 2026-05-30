@@ -11,6 +11,7 @@ const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
 const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
 const PST_STORAGE: &str = include_str!("pst.rs");
+const RECOVERABLE_ITEMS_STORAGE: &str = include_str!("recoverable_items.rs");
 const SHARED_STORAGE: &str = include_str!("shared.rs");
 const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
 const TASKS_STORAGE: &str = include_str!("tasks.rs");
@@ -705,14 +706,13 @@ fn mapi_profile_settings_are_canonical_account_settings() {
 }
 
 #[test]
-fn update_script_does_not_apply_sql_schema_updates() {
+fn update_script_only_applies_documented_schema_compatibility_updates() {
     for forbidden in [
         "CREATE TABLE IF NOT EXISTS public.mapi_named_properties",
         "CREATE TABLE IF NOT EXISTS public.mapi_custom_property_values",
         "CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages",
         "CREATE TABLE IF NOT EXISTS public.calendar_event_attachments",
         "ALTER TABLE public.mailbox_messages",
-        "ALTER TABLE public.mailboxes",
         "ALTER TABLE public.mapi_object_identities",
         "repair-notes-journal-reminders-schema.sh",
         "repair-mapi-identity-keys.sh",
@@ -722,6 +722,19 @@ fn update_script_does_not_apply_sql_schema_updates() {
             "update-lpe.sh must not apply SQL update fragment: {forbidden}"
         );
     }
+
+    assert_source_contains_all(
+        "update-lpe.sh recoverable-items compatibility patch",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "CREATE TABLE IF NOT EXISTS public.recoverable_items",
+            "ADD COLUMN IF NOT EXISTS recoverable_items_retention_days",
+            "ADD COLUMN IF NOT EXISTS litigation_hold_enabled",
+            "ADD CONSTRAINT mail_change_log_object_shape_check",
+            "ADD CONSTRAINT tombstones_object_shape_check",
+            "CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx",
+        ],
+    );
 }
 
 #[test]
@@ -1605,6 +1618,52 @@ fn blob_and_message_lifecycle_metadata_support_cleanup_guards() {
         "WHERE retained_until IS NOT NULL OR legal_hold = TRUE",
         "CREATE INDEX messages_lifecycle_protection_idx",
     ]);
+}
+
+#[test]
+fn recoverable_items_are_canonical_lifecycle_state() {
+    let _recoverable_items = table_definition("recoverable_items");
+    for required in [
+        "source_mailbox_message_id UUID NOT NULL",
+        "source_mailbox_id UUID NOT NULL",
+        "source_imap_uid BIGINT NOT NULL CHECK (source_imap_uid > 0)",
+        "recoverable_folder TEXT NOT NULL CHECK (recoverable_folder IN ('deletions', 'versions', 'purges'))",
+        "delete_kind TEXT NOT NULL CHECK (delete_kind IN (",
+        "status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'restored', 'purged'))",
+        "retained_until TIMESTAMPTZ",
+        "legal_hold BOOLEAN NOT NULL DEFAULT FALSE",
+        "created_by_protocol TEXT NOT NULL CHECK (created_by_protocol IN (",
+        "UNIQUE (tenant_id, account_id, source_mailbox_message_id)",
+        "CREATE INDEX recoverable_items_active_folder_idx",
+        "CREATE INDEX recoverable_items_cleanup_idx",
+        "CREATE INDEX recoverable_items_message_idx",
+    ] {
+        assert!(
+            SCHEMA.contains(required),
+            "recoverable item lifecycle schema is missing required fragment: {required}"
+        );
+    }
+    assert!(
+        SCHEMA.contains("'recoverable_item'")
+            && SCHEMA.contains("summary_json ? 'sourceMailboxMessageId'")
+            && PROTOCOLS_STORAGE.contains("INSERT INTO recoverable_items")
+            && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn list_recoverable_items")
+            && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn restore_recoverable_item")
+            && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn purge_recoverable_item")
+            && PROTOCOLS_STORAGE.contains("\"recoverable_item\"")
+            && PROTOCOLS_STORAGE.contains("\"recoverableFolder\": \"deletions\""),
+        "hard delete must write canonical recoverable item state and replay rows"
+    );
+    for forbidden in [
+        "CREATE TABLE mapi_recoverable",
+        "CREATE TABLE mapi_dumpster",
+        "CREATE TABLE exchange_dumpster",
+    ] {
+        assert!(
+            !SCHEMA.contains(forbidden),
+            "recoverable items must not use protocol-local dumpster storage: {forbidden}"
+        );
+    }
 }
 
 #[test]
