@@ -8713,7 +8713,7 @@ where
                 let Some(folder_id) = session
                     .handles
                     .get(&target_handle)
-                    .and_then(MapiObject::folder_id)
+                    .and_then(fast_transfer_destination_target_folder_id)
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x53,
@@ -8748,7 +8748,7 @@ where
                 }
                 let upload_data = request.fast_transfer_upload_data().to_vec();
                 let Some((target_handle, full_buffer)) =
-                    append_fast_transfer_destination_buffer(session, &handle_slots, &request)
+                    staged_fast_transfer_destination_buffer(session, &handle_slots, &request)
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
@@ -8783,6 +8783,12 @@ where
                     ));
                     continue;
                 }
+                commit_fast_transfer_destination_buffer(
+                    session,
+                    &handle_slots,
+                    &request,
+                    full_buffer,
+                );
                 responses.extend_from_slice(&rop_fast_transfer_put_buffer_response(
                     &request,
                     upload_data.len(),
@@ -11107,21 +11113,49 @@ fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
     (marker & 0x4000_0000 != 0).then_some(marker)
 }
 
-fn append_fast_transfer_destination_buffer(
-    session: &mut MapiSession,
+fn fast_transfer_destination_target_folder_id(object: &MapiObject) -> Option<u64> {
+    match object {
+        MapiObject::PendingMessage { folder_id, .. }
+        | MapiObject::PendingContact { folder_id, .. }
+        | MapiObject::PendingEvent { folder_id, .. }
+        | MapiObject::PendingTask { folder_id, .. }
+        | MapiObject::PendingNote { folder_id, .. }
+        | MapiObject::PendingJournalEntry { folder_id, .. }
+        | MapiObject::PendingConversationAction { folder_id, .. }
+        | MapiObject::PendingNavigationShortcut { folder_id, .. } => Some(*folder_id),
+        _ => None,
+    }
+}
+
+fn staged_fast_transfer_destination_buffer(
+    session: &MapiSession,
     handle_slots: &[u32],
     request: &RopRequest,
 ) -> Option<(u32, Vec<u8>)> {
-    match input_object_mut(session, handle_slots, request)? {
+    match input_object(session, handle_slots, request)? {
         MapiObject::FastTransferDestination {
             target_handle,
             buffer,
             ..
         } => {
-            buffer.extend_from_slice(request.fast_transfer_upload_data());
-            Some((*target_handle, buffer.clone()))
+            let mut full_buffer = buffer.clone();
+            full_buffer.extend_from_slice(request.fast_transfer_upload_data());
+            Some((*target_handle, full_buffer))
         }
         _ => None,
+    }
+}
+
+fn commit_fast_transfer_destination_buffer(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+    full_buffer: Vec<u8>,
+) {
+    if let Some(MapiObject::FastTransferDestination { buffer, .. }) =
+        input_object_mut(session, handle_slots, request)
+    {
+        *buffer = full_buffer;
     }
 }
 

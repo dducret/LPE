@@ -17526,6 +17526,140 @@ async fn mapi_over_http_fast_transfer_destination_put_buffer_extended_is_parseab
 }
 
 #[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_rejects_marker_and_subobject_streams() {
+    for marker in [0x400C_0003u32, 0x4001_0003u32] {
+        let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+        append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+        rops.push(0);
+        rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
+        rops.extend_from_slice(&0u16.to_le_bytes());
+        append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+        rops.push(0);
+        rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x01, 0x00]);
+        rops.extend_from_slice(&[0x54, 0x00, 0x03]);
+        rops.extend_from_slice(&4u16.to_le_bytes());
+        rops.extend_from_slice(&marker.to_le_bytes());
+        rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // Must not execute.
+
+        let response_rops =
+            execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]).await;
+
+        assert!(contains_bytes(
+            &response_rops,
+            &[0x54, 0x03, 0x02, 0x01, 0x04, 0x80]
+        ));
+        assert!(!contains_bytes(
+            &response_rops,
+            &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
+        ));
+    }
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_rejects_unsupported_property_type() {
+    let mut transfer_data = Vec::new();
+    transfer_data.extend_from_slice(&0x0037_000Du32.to_le_bytes()); // PtypObject.
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x54, 0x00, 0x03]);
+    rops.extend_from_slice(&(transfer_data.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&transfer_data);
+    rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // Must not execute.
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x54, 0x03, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_rejects_partial_property_buffer() {
+    let mut transfer_data = Vec::new();
+    transfer_data.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    transfer_data.extend_from_slice(&12u32.to_le_bytes());
+    transfer_data.extend_from_slice(&[b'L', 0]);
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x54, 0x00, 0x03]);
+    rops.extend_from_slice(&(transfer_data.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&transfer_data);
+    append_rop_save_changes_message(&mut rops, 2, 2); // Must not execute.
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x54, 0x03, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(!contains_bytes(&response_rops, &[0x0C, 0x02, 0, 0, 0, 0]));
+    assert!(imported_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_rejects_wrong_target_handle() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x01, 0x02, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // The batch stays aligned after rejection.
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x53, 0x02, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_per_user_information_rops_return_rop_specific_protocol_errors() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
