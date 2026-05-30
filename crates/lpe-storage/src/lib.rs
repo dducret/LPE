@@ -70,8 +70,8 @@ pub use crate::protocols::{
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::submission::{
     AttachmentUploadInput, MailboxAccountAccess, MailboxDelegationGrant,
-    MailboxDelegationGrantInput, MailboxDelegationOverview, SavedDraftMessage,
-    SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
+    MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,
+    SavedDraftMessage, SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
     SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity, SubmitMessageInput,
     SubmittedMessage, SubmittedRecipientInput,
 };

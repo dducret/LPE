@@ -264,6 +264,37 @@ fn sender_delegation_storage_uses_canonical_sender_rights_table() {
 }
 
 #[test]
+fn mapi_permission_mutations_use_canonical_mailbox_delegation_grants() {
+    assert!(
+        SUBMISSION_STORAGE.contains("pub async fn set_mailbox_folder_delegation_grant")
+            && SUBMISSION_STORAGE.contains("INSERT INTO mailbox_delegation_grants")
+            && SUBMISSION_STORAGE.contains("DELETE FROM mailbox_delegation_grants")
+            && SUBMISSION_STORAGE.contains("\"mailbox_delegation_grant\"")
+            && SUBMISSION_STORAGE.contains("insert_mail_change_log_in_tx")
+            && SUBMISSION_STORAGE.contains("insert_audit"),
+        "MAPI folder permission writes must use canonical mailbox_delegation_grants with audit and change-log rows"
+    );
+    assert!(
+        EXCHANGE_STORE.contains("set_mailbox_folder_delegation_grant")
+            && EXCHANGE_STORE.contains("fetch_mapi_folder_permissions")
+            && EXCHANGE_TESTS
+                .contains("mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants"),
+        "MAPI permission ROPs must call the canonical mailbox delegation store path"
+    );
+    for forbidden in [
+        "CREATE TABLE mapi_acl",
+        "CREATE TABLE mapi_acls",
+        "CREATE TABLE mapi_folder_acl",
+        "CREATE TABLE mapi_folder_acls",
+    ] {
+        assert!(
+            !SCHEMA.contains(forbidden),
+            "schema.sql must not introduce MAPI-local ACL storage: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn collaboration_grant_storage_uses_concrete_grant_tables() {
     for source in [COLLABORATION_STORAGE, CHANGE_STORAGE] {
         assert!(

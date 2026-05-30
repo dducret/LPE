@@ -11,10 +11,13 @@ use super::transport::*;
 use super::wire::{FastTransferMarker, MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::store::{
-    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncChangeSet, MapiSyncCheckpoint,
-    UpsertMapiNavigationShortcutInput,
+    MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
+    MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiNavigationShortcutInput,
 };
-use lpe_storage::{AuditEntryInput, UpsertSearchFolderInput};
+use lpe_storage::{
+    AuditEntryInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    UpsertSearchFolderInput,
+};
 use serde_json::{json, Value};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
@@ -4255,6 +4258,14 @@ fn expected_special_folder_parent_id(folder_id: u64) -> u64 {
     }
 }
 
+fn mailbox_parent_folder_id_for_dispatch(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
+    mailbox
+        .parent_id
+        .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
+        .map(mapi_folder_id)
+        .unwrap_or(IPM_SUBTREE_FOLDER_ID)
+}
+
 fn expected_special_folder_item_message_class(folder_id: u64) -> &'static str {
     match folder_id {
         CONTACTS_FOLDER_ID
@@ -6532,6 +6543,169 @@ where
                 responses.extend_from_slice(&rop_partial_completion_response(
                     0x1D,
                     request.response_handle_index(),
+                    partial_completion,
+                ));
+            }
+            Some(RopId::MoveFolder | RopId::CopyFolder) => {
+                let rop_id = request.rop_id;
+                let response_handle_index = request.response_handle_index();
+                if input_object(session, &handle_slots, &request)
+                    .and_then(MapiObject::folder_id)
+                    .is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x0000_04B9,
+                    ));
+                    continue;
+                }
+                let target_parent_id = match request
+                    .move_copy_target_handle(&handle_slots)
+                    .and_then(|handle| {
+                        session
+                            .handles
+                            .get(&handle)
+                            .and_then(|object| object.folder_id())
+                    }) {
+                    Some(IPM_SUBTREE_FOLDER_ID) => None,
+                    Some(folder_id) => match folder_row_for_id(folder_id, mailboxes) {
+                        Some(mailbox) if mailbox.role == "custom" => Some(mailbox.id),
+                        _ => {
+                            responses.extend_from_slice(&rop_error_response(
+                                rop_id,
+                                response_handle_index,
+                                0x8007_0005,
+                            ));
+                            continue;
+                        }
+                    },
+                    None => {
+                        responses.extend_from_slice(&rop_error_response(
+                            rop_id,
+                            response_handle_index,
+                            0x8004_010F,
+                        ));
+                        continue;
+                    }
+                };
+                let Some(folder_id) = request.folder_move_copy_folder_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8004_0102,
+                    ));
+                    continue;
+                };
+                let Some(source_mailbox) = folder_row_for_id(folder_id, mailboxes) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                if source_mailbox.role != "custom" {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
+                let display_name = request.folder_move_copy_display_name();
+                let display_name = display_name.trim();
+                if display_name.is_empty() {
+                    responses.extend_from_slice(&rop_error_response(
+                        rop_id,
+                        response_handle_index,
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+
+                let result = if request.rop_id == RopId::CopyFolder.as_u8() {
+                    match store
+                        .create_jmap_mailbox(
+                            JmapMailboxCreateInput {
+                                account_id: principal.account_id,
+                                name: display_name.to_string(),
+                                parent_id: target_parent_id,
+                                sort_order: None,
+                                is_subscribed: source_mailbox.is_subscribed,
+                            },
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-copy-folder".to_string(),
+                                subject: format!("folder:{}->{}", source_mailbox.id, display_name),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(mailbox) => {
+                            match remember_created_mapi_identity(
+                                store,
+                                principal,
+                                MapiIdentityObjectKind::Mailbox,
+                                mailbox.id,
+                                None,
+                                None,
+                            )
+                            .await
+                            {
+                                Ok(copied_folder_id) => Ok((mailbox.id, copied_folder_id)),
+                                Err(error) => Err(error),
+                            }
+                        }
+                        Err(error) => Err(error),
+                    }
+                } else {
+                    store
+                        .update_jmap_mailbox(
+                            JmapMailboxUpdateInput {
+                                account_id: principal.account_id,
+                                mailbox_id: source_mailbox.id,
+                                name: Some(display_name.to_string()),
+                                parent_id: Some(target_parent_id),
+                                sort_order: None,
+                                is_subscribed: None,
+                            },
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-move-folder".to_string(),
+                                subject: format!("folder:{}", source_mailbox.id),
+                            },
+                        )
+                        .await
+                        .map(|mailbox| (mailbox.id, folder_id))
+                };
+
+                if let Ok((_changed_mailbox_id, changed_folder_id)) = result.as_ref() {
+                    let old_parent_folder_id =
+                        mailbox_parent_folder_id_for_dispatch(source_mailbox, mailboxes);
+                    let new_parent_folder_id = target_parent_id
+                        .and_then(|parent_id| {
+                            mailboxes
+                                .iter()
+                                .find(|mailbox| mailbox.id == parent_id)
+                                .map(mapi_folder_id)
+                        })
+                        .unwrap_or(IPM_SUBTREE_FOLDER_ID);
+                    if request.rop_id == RopId::MoveFolder.as_u8() {
+                        session.record_notification(MapiNotificationEvent::hierarchy(
+                            old_parent_folder_id,
+                            Some(*changed_folder_id),
+                        ));
+                    }
+                    session.record_notification(MapiNotificationEvent::hierarchy(
+                        new_parent_folder_id,
+                        Some(*changed_folder_id),
+                    ));
+                }
+                let partial_completion = result.is_err();
+                responses.extend_from_slice(&rop_partial_completion_response(
+                    rop_id,
+                    response_handle_index,
                     partial_completion,
                 ));
             }
@@ -10294,6 +10468,162 @@ where
                 output_handles.push(handle);
             }
             Some(RopId::ModifyPermissions) => {
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                };
+                let Some(folder) = folder_row_for_id(folder_id, mailboxes) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x40,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                let can_share = snapshot
+                    .permissions_for_folder(folder_id)
+                    .iter()
+                    .find(|permission| permission.member_account_id == Some(principal.account_id))
+                    .is_some_and(|permission| may_share_from_rights(permission.rights));
+                if !can_share {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x40,
+                        request.response_handle_index(),
+                        EC_SEARCH_ACCESS_DENIED,
+                    ));
+                    continue;
+                }
+
+                let rows = match request.modify_permissions_rows() {
+                    Ok(rows) => rows,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x40,
+                            request.response_handle_index(),
+                            EC_RULE_INVALID_PARAMETER,
+                        ));
+                        continue;
+                    }
+                };
+                let mut actions = Vec::new();
+                let mut failed = None;
+                for row in rows {
+                    let row_kind = row.flags & (ROW_ADD | ROW_MODIFY | ROW_REMOVE);
+                    if !matches!(row_kind, ROW_ADD | ROW_MODIFY | ROW_REMOVE) {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    }
+                    let Some(member_id) = row
+                        .properties
+                        .get(&PID_TAG_MEMBER_ID)
+                        .and_then(MapiValue::as_i64)
+                        .and_then(|value| u64::try_from(value).ok())
+                    else {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    };
+                    if member_id == MEMBER_ID_DEFAULT || member_id == MEMBER_ID_ANONYMOUS {
+                        continue;
+                    }
+                    let member_ids = [member_id];
+                    let identity = match store
+                        .fetch_mapi_identities_by_object_ids(principal.account_id, &member_ids)
+                        .await
+                    {
+                        Ok(mut identities) => identities.pop(),
+                        Err(_) => None,
+                    };
+                    let Some(identity) = identity
+                        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Account)
+                    else {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    };
+                    if identity.canonical_id == principal.account_id {
+                        continue;
+                    }
+                    let (may_read, may_write, may_delete, may_share) = if row_kind == ROW_REMOVE {
+                        (false, false, false, false)
+                    } else {
+                        let Some(rights) = row
+                            .properties
+                            .get(&PID_TAG_MEMBER_RIGHTS)
+                            .and_then(MapiValue::as_i64)
+                            .and_then(|value| u32::try_from(value).ok())
+                        else {
+                            failed = Some(EC_RULE_INVALID_PARAMETER);
+                            break;
+                        };
+                        let access = access_from_rights(rights);
+                        (
+                            access.may_read,
+                            access.may_write,
+                            access.may_delete,
+                            may_share_from_rights(rights),
+                        )
+                    };
+                    if !may_read && (may_write || may_delete || may_share) {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    }
+                    if may_delete && !may_write {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    }
+                    if may_share && !may_write {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    }
+                    actions.push((
+                        identity.canonical_id,
+                        may_read,
+                        may_write,
+                        may_delete,
+                        may_share,
+                    ));
+                }
+                if let Some(error_code) = failed {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x40,
+                        request.response_handle_index(),
+                        error_code,
+                    ));
+                    continue;
+                }
+                let mut failed = false;
+                for (grantee_account_id, may_read, may_write, may_delete, may_share) in actions {
+                    if store
+                        .set_mapi_folder_permission(
+                            principal.account_id,
+                            folder.id,
+                            grantee_account_id,
+                            may_read,
+                            may_write,
+                            may_delete,
+                            may_share,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-modify-permissions".to_string(),
+                                subject: format!("folder {} {}", folder.name, grantee_account_id),
+                            },
+                        )
+                        .await
+                        .is_err()
+                    {
+                        failed = true;
+                        break;
+                    }
+                }
+                if failed {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x40,
+                        request.response_handle_index(),
+                        EC_RULE_INVALID_PARAMETER,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_modify_permissions_response(&request))
             }
             Some(RopId::ModifyRules) => {

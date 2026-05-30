@@ -105,7 +105,7 @@ state. The supported projection surface is:
 | Hierarchy tables | Root/IPM subtree child folders, special folder identity, source keys, change keys, predecessor lists, display names, container class, content counts, unread counts, replica fields, and folder child counts. |
 | Contents tables | Folder membership rows with stable message identifiers, source/change keys, predecessor lists, subject, dates, sender, recipients where supported, flags, message class, read state, size, and attachment indicators. |
 | Attachment tables | Canonical attachment rows with stable attachment numbering and properties required by Outlook cached-mode reads. |
-| Permission tables | Read-only canonical permission projection. Permission mutation is deferred. |
+| Permission tables | Canonical permission projection plus bounded mutation through `mailbox_delegation_grants`; no MAPI-local ACL table is allowed. |
 | Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions plus hierarchy/content projections; no Common Views search-definition FAI rows are published until documented search-folder BLOB parity exists. |
 
 ### Specification Basis
@@ -356,9 +356,14 @@ not by itself authorize broad client publication.
   aligned with canonical API behavior.
 - Session-scoped notification support can mark content and hierarchy changes as
   pending, include bounded TableModified-style payloads with the changed folder
-  ID and, when known in the current session, the changed message/object ID, and
-  replay canonical change cursors. Full notification registration, all table row
-  values, and delivery parity remain deferred.
+  ID, changed message/object ID, canonical change cursor, modseq, folder counts,
+  object/change kind, display names, and message subject when those values are
+  available from canonical `mail_change_log` replay. Registrations and pending
+  event delivery remain session-local; after process restart or movement to a
+  different worker, the session must re-register and resume from canonical
+  sync/checkpoint behavior rather than relying on cross-process notification
+  delivery. Full notification registration, all table row values, and Exchange
+  delivery parity remain deferred.
 
 ## Deferred Surfaces
 
@@ -371,11 +376,11 @@ not by itself authorize broad client publication.
 | Protocol-local Sent/Outbox | Forbidden. Sent and submission state must be canonical. |
 | NSPI mutation | Deferred. Address-book writes and link-table mutation remain disabled. |
 | Raw FastTransfer destination upload streams | Deferred except for bounded import behavior that mutates canonical mailbox state through supported ROPs. |
-| Folder move/copy and non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
+| Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, and deferred-action messages remain unsupported; no MAPI-local rule store is allowed. |
-| Folder permission mutation | Deferred. Read-only permission table projection is supported. |
-| Full notification registration and delivery | Partially implemented through pending session events with bounded folder/message/table payloads and change-cursor replay; full parity remains deferred. |
+| Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants`, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
+| Full notification registration and delivery | Partially implemented through session-local pending events with bounded folder/message/table payloads and canonical change-cursor replay. Cross-process notification replay remains deferred; clients must re-register after reconnect or worker movement and use normal sync to converge. |
 | Outlook tolerance beyond the documented lab matrix | Unknown until captured through the release gates below. |
 
 ## Outlook Server-Side Profile Data Matrix
@@ -496,6 +501,16 @@ not by itself authorize broad client publication.
   rules, delegate templates, provider-specific predicates, and deferred-action
   messages return parseable ROP errors and must not create a MAPI-local rule
   store. `RopGetRulesTable` remains a projection from canonical rule state.
+- `RopModifyPermissions` is bounded to Outlook folder ACL rows that identify a
+  same-tenant account member through `PidTagMemberId` and supply rights through
+  `PidTagMemberRights`. Add and modify rows map read, write, delete, and share
+  bits to the canonical `mailbox_delegation_grants` row for the target mailbox;
+  remove rows delete that canonical grant. Successful mutations write canonical
+  audit and mail change-log rows and wake affected principals through the
+  existing rights journal. Owner, `Default`, and `Anonymous` rows are accepted
+  as non-mutating compatibility rows. Unsupported member identities, malformed
+  rights, virtual folders, and non-canonical ACL data return ROP-specific errors
+  without creating MAPI-local ACL state.
 
 ## Release Gates
 

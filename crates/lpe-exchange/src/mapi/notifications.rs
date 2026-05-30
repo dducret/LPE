@@ -17,7 +17,7 @@ pub(crate) enum MapiNotificationKind {
     Hierarchy,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) folder_id: u64,
     pub(in crate::mapi) message_id: Option<u64>,
@@ -28,6 +28,11 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) modseq: Option<u64>,
     pub(in crate::mapi) total_messages: Option<i32>,
     pub(in crate::mapi) unread_messages: Option<i32>,
+    pub(in crate::mapi) object_kind: Option<&'static str>,
+    pub(in crate::mapi) change_kind: Option<String>,
+    pub(in crate::mapi) display_name: Option<String>,
+    pub(in crate::mapi) parent_display_name: Option<String>,
+    pub(in crate::mapi) message_subject: Option<String>,
 }
 
 impl MapiNotificationEvent {
@@ -42,6 +47,11 @@ impl MapiNotificationEvent {
             modseq: None,
             total_messages: None,
             unread_messages: None,
+            object_kind: None,
+            change_kind: None,
+            display_name: None,
+            parent_display_name: None,
+            message_subject: None,
         }
     }
 
@@ -56,6 +66,11 @@ impl MapiNotificationEvent {
             modseq: None,
             total_messages: None,
             unread_messages: None,
+            object_kind: None,
+            change_kind: None,
+            display_name: None,
+            parent_display_name: None,
+            message_subject: None,
         }
     }
 
@@ -69,6 +84,10 @@ impl MapiNotificationEvent {
         modseq: u64,
         total_messages: Option<i32>,
         unread_messages: Option<i32>,
+        change_kind: String,
+        display_name: Option<String>,
+        parent_display_name: Option<String>,
+        message_subject: Option<String>,
     ) -> Self {
         Self {
             folder_id,
@@ -80,7 +99,23 @@ impl MapiNotificationEvent {
             modseq: Some(modseq),
             total_messages,
             unread_messages,
+            object_kind: Some(match kind {
+                MapiNotificationKind::Content => "mailbox_message",
+                MapiNotificationKind::Hierarchy => "mailbox",
+            }),
+            change_kind: Some(change_kind),
+            display_name,
+            parent_display_name,
+            message_subject,
         }
+    }
+
+    fn has_extended_details(&self) -> bool {
+        self.object_kind.is_some()
+            || self.change_kind.is_some()
+            || self.display_name.is_some()
+            || self.parent_display_name.is_some()
+            || self.message_subject.is_some()
     }
 }
 
@@ -109,7 +144,8 @@ pub(in crate::mapi) fn notification_wait_body_with_events(
             u8::from(event.message_id.is_some())
                 | (u8::from(event.old_folder_id.is_some()) << 1)
                 | (u8::from(event.total_messages.is_some() || event.unread_messages.is_some())
-                    << 2),
+                    << 2)
+                | (u8::from(event.has_extended_details()) << 3),
         );
         body.extend_from_slice(&wire_id_bytes_from_object_id(event.folder_id).unwrap_or([0; 8]));
         body.extend_from_slice(
@@ -128,13 +164,36 @@ pub(in crate::mapi) fn notification_wait_body_with_events(
         write_u64(&mut body, event.modseq.unwrap_or_default());
         write_u32(&mut body, event.total_messages.unwrap_or(-1) as u32);
         write_u32(&mut body, event.unread_messages.unwrap_or(-1) as u32);
+        if event.has_extended_details() {
+            write_u16_prefixed_bytes(&mut body, event.object_kind.unwrap_or("").as_bytes());
+            write_u16_prefixed_bytes(
+                &mut body,
+                event.change_kind.as_deref().unwrap_or("").as_bytes(),
+            );
+            write_u16_prefixed_bytes(
+                &mut body,
+                event.display_name.as_deref().unwrap_or("").as_bytes(),
+            );
+            write_u16_prefixed_bytes(
+                &mut body,
+                event
+                    .parent_display_name
+                    .as_deref()
+                    .unwrap_or("")
+                    .as_bytes(),
+            );
+            write_u16_prefixed_bytes(
+                &mut body,
+                event.message_subject.as_deref().unwrap_or("").as_bytes(),
+            );
+        }
     }
     body
 }
 
 pub(in crate::mapi) fn registration_matches_event(
     registration: &MapiNotificationRegistration,
-    event: MapiNotificationEvent,
+    event: &MapiNotificationEvent,
 ) -> bool {
     if let Some(folder_id) = registration.folder_id {
         if folder_id != event.folder_id {

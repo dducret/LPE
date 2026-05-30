@@ -87,6 +87,10 @@ pub(crate) fn access_from_rights(rights: u32) -> MapiFolderAccess {
     }
 }
 
+pub(crate) fn may_share_from_rights(rights: u32) -> bool {
+    rights & RIGHTS_OWNER != 0
+}
+
 pub(in crate::mapi) fn rop_get_permissions_table_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x3E, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -94,13 +98,9 @@ pub(in crate::mapi) fn rop_get_permissions_table_response(request: &RopRequest) 
 }
 
 pub(in crate::mapi) fn rop_modify_permissions_response(request: &RopRequest) -> Vec<u8> {
-    let permission_count = request.modify_permissions_count();
-    if permission_count == Some(0) {
-        let mut response = vec![0x40, request.response_handle_index()];
-        write_u32(&mut response, 0);
-        return response;
-    }
-    unsupported_rop_response(0x40, request.response_handle_index())
+    let mut response = vec![0x40, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response
 }
 
 pub(in crate::mapi) fn serialize_permission_row(

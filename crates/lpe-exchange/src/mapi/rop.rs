@@ -3019,6 +3019,26 @@ impl RopRequest {
         Ok(rows)
     }
 
+    pub(in crate::mapi) fn modify_permissions_rows(&self) -> Result<Vec<ModifyRulesRow>> {
+        if self.rop_id != 0x40 {
+            return Ok(Vec::new());
+        }
+        let count = self.modify_permissions_count().unwrap_or(0) as usize;
+        let mut cursor = Cursor::new(self.payload.get(3..).unwrap_or_default());
+        let mut rows = Vec::with_capacity(count);
+        for _ in 0..count {
+            let flags = cursor.read_u8()?;
+            let property_count = cursor.read_u16()? as usize;
+            let mut properties = HashMap::new();
+            for _ in 0..property_count {
+                let (property_tag, value) = parse_tagged_property(&mut cursor)?;
+                properties.insert(property_tag, value);
+            }
+            rows.push(ModifyRulesRow { flags, properties });
+        }
+        Ok(rows)
+    }
+
     pub(in crate::mapi) fn notification_types(&self) -> Option<u16> {
         if self.rop_id != 0x29 {
             return None;
@@ -3541,6 +3561,60 @@ impl RopRequest {
         self.payload
             .get(2 + count * 8 + 1)
             .is_some_and(|want_copy| *want_copy != 0)
+    }
+
+    pub(in crate::mapi) fn folder_move_copy_folder_id(&self) -> Option<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::MoveFolder | RopId::CopyFolder)
+        ) {
+            return None;
+        }
+        let offset = if matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyFolder)) {
+            3
+        } else {
+            2
+        };
+        let bytes = self.payload.get(offset..offset + 8)?;
+        crate::mapi::identity::object_id_from_wire_id(bytes)
+    }
+
+    pub(in crate::mapi) fn folder_move_copy_display_name(&self) -> String {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::MoveFolder | RopId::CopyFolder)
+        ) {
+            return String::new();
+        }
+        let unicode_offset = if matches!(RopId::from_u8(self.rop_id), Some(RopId::CopyFolder)) {
+            2
+        } else {
+            1
+        };
+        let Some(use_unicode) = self.payload.get(unicode_offset) else {
+            return String::new();
+        };
+        let name_offset = unicode_offset + 1 + 8;
+        let Some(name_bytes) = self.payload.get(name_offset..) else {
+            return String::new();
+        };
+        if *use_unicode == 0 {
+            let end = name_bytes
+                .iter()
+                .position(|byte| *byte == 0)
+                .unwrap_or(name_bytes.len());
+            String::from_utf8_lossy(&name_bytes[..end]).into_owned()
+        } else {
+            let mut units = Vec::new();
+            for bytes in name_bytes.chunks_exact(2) {
+                let unit = u16::from_le_bytes([bytes[0], bytes[1]]);
+                if unit == 0 {
+                    break;
+                }
+                units.push(unit);
+            }
+            String::from_utf16_lossy(&units)
+        }
     }
 
     pub(in crate::mapi) fn move_copy_target_handle(&self, input_handles: &[u32]) -> Option<u32> {

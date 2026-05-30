@@ -20,6 +20,7 @@
 - Mailbox delegation:
   - supports shared mailbox projection
   - supports delegated mailbox read/write where granted
+  - accepts bounded Outlook `RopModifyPermissions` folder ACL rows only when they map to same-tenant canonical mailbox delegation grants
   - supports `send-as` and `send-on-behalf` checks during canonical submission
   - does not create protocol-specific submitted-message logic
 - Delegate / free-busy object layer:

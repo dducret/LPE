@@ -733,7 +733,7 @@ impl MapiSession {
             matches!(
                 object,
                 MapiObject::NotificationSubscription { registration }
-                    if registration_matches_event(registration, event)
+                    if registration_matches_event(registration, &event)
             )
         }) {
             self.pending_notifications.push_back(event);
@@ -755,7 +755,7 @@ impl MapiSession {
                     matches!(
                         object,
                         MapiObject::NotificationSubscription { registration }
-                            if registration_matches_event(registration, *event)
+                            if registration_matches_event(registration, event)
                     )
                 })
             })

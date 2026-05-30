@@ -163,6 +163,17 @@ pub struct MailboxDelegationGrantInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct MailboxFolderDelegationGrantInput {
+    pub owner_account_id: Uuid,
+    pub mailbox_id: Uuid,
+    pub grantee_account_id: Uuid,
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_delete: bool,
+    pub may_share: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct SenderDelegationGrantInput {
     pub owner_account_id: Uuid,
     pub grantee_email: String,
@@ -629,6 +640,9 @@ impl Storage {
         if grantee_email.is_empty() {
             bail!("grantee email is required");
         }
+        let mailbox_id = self
+            .default_mailbox_delegation_mailbox_id(input.owner_account_id)
+            .await?;
 
         let mut tx = self.pool.begin().await?;
         let owner = self
@@ -645,18 +659,23 @@ impl Storage {
         let grant_id = sqlx::query_scalar::<_, Uuid>(
             r#"
             INSERT INTO mailbox_delegation_grants (
-                id, tenant_id, owner_account_id, grantee_account_id, may_write
+                id, tenant_id, mailbox_id, owner_account_id, grantee_account_id,
+                may_read, may_write, may_delete, may_share
             )
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (tenant_id, owner_account_id, grantee_account_id)
+            VALUES ($1, $2, $3, $4, $5, TRUE, $6, FALSE, FALSE)
+            ON CONFLICT (tenant_id, mailbox_id, grantee_account_id)
             DO UPDATE SET
+                may_read = TRUE,
                 may_write = EXCLUDED.may_write,
+                may_delete = FALSE,
+                may_share = FALSE,
                 updated_at = NOW()
             RETURNING id
             "#,
         )
         .bind(Uuid::new_v4())
         .bind(&tenant_id)
+        .bind(mailbox_id)
         .bind(owner.id)
         .bind(grantee.id)
         .bind(input.may_write)
@@ -677,6 +696,7 @@ impl Storage {
             modseq,
             &[owner.id, grantee.id],
             serde_json::json!({
+                "mailboxId": mailbox_id,
                 "granteeId": grantee.id,
                 "mayWrite": input.may_write
             }),
@@ -692,6 +712,152 @@ impl Storage {
             .ok_or_else(|| anyhow!("mailbox delegation grant not found after upsert"))
     }
 
+    pub async fn set_mailbox_folder_delegation_grant(
+        &self,
+        input: MailboxFolderDelegationGrantInput,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        validate_mailbox_delegation_rights(
+            input.may_read,
+            input.may_write,
+            input.may_delete,
+            input.may_share,
+        )?;
+        let tenant_id = self
+            .tenant_id_for_account_id(input.owner_account_id)
+            .await?;
+        let mut tx = self.pool.begin().await?;
+        let owner = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, input.owner_account_id)
+            .await?;
+        let grantee = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, input.grantee_account_id)
+            .await?;
+
+        if owner.id == grantee.id {
+            bail!("self-delegation is not supported");
+        }
+
+        let mailbox_exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM mailboxes
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND id = $3
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner.id)
+        .bind(input.mailbox_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !mailbox_exists {
+            bail!("mailbox not found for owner account");
+        }
+
+        if input.may_read {
+            let grant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                INSERT INTO mailbox_delegation_grants (
+                    id, tenant_id, mailbox_id, owner_account_id, grantee_account_id,
+                    may_read, may_write, may_delete, may_share
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (tenant_id, mailbox_id, grantee_account_id)
+                DO UPDATE SET
+                    may_read = EXCLUDED.may_read,
+                    may_write = EXCLUDED.may_write,
+                    may_delete = EXCLUDED.may_delete,
+                    may_share = EXCLUDED.may_share,
+                    updated_at = NOW()
+                RETURNING id
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(input.mailbox_id)
+            .bind(owner.id)
+            .bind(grantee.id)
+            .bind(input.may_read)
+            .bind(input.may_write)
+            .bind(input.may_delete)
+            .bind(input.may_share)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            let modseq = self
+                .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner.id)
+                .await?;
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(owner.id),
+                Some(input.mailbox_id),
+                "mailbox_delegation_grant",
+                grant_id,
+                "updated",
+                modseq,
+                &[owner.id, grantee.id],
+                serde_json::json!({
+                    "mailboxId": input.mailbox_id,
+                    "granteeId": grantee.id,
+                    "mayRead": input.may_read,
+                    "mayWrite": input.may_write,
+                    "mayDelete": input.may_delete,
+                    "mayShare": input.may_share
+                }),
+            )
+            .await?;
+        } else {
+            let grant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                DELETE FROM mailbox_delegation_grants
+                WHERE tenant_id = $1
+                  AND mailbox_id = $2
+                  AND owner_account_id = $3
+                  AND grantee_account_id = $4
+                RETURNING id
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(input.mailbox_id)
+            .bind(owner.id)
+            .bind(grantee.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+            if let Some(grant_id) = grant_id {
+                let modseq = self
+                    .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner.id)
+                    .await?;
+                Self::insert_mail_change_log_in_tx(
+                    &mut tx,
+                    &tenant_id,
+                    Some(owner.id),
+                    Some(input.mailbox_id),
+                    "mailbox_delegation_grant",
+                    grant_id,
+                    "destroyed",
+                    modseq,
+                    &[owner.id, grantee.id],
+                    serde_json::json!({
+                        "mailboxId": input.mailbox_id,
+                        "granteeId": grantee.id
+                    }),
+                )
+                .await?;
+            }
+        }
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_delegation_change(&mut tx, &tenant_id, owner.id, grantee.id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn delete_mailbox_delegation_grant(
         &self,
         owner_account_id: Uuid,
@@ -700,43 +866,48 @@ impl Storage {
     ) -> Result<()> {
         let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
         let mut tx = self.pool.begin().await?;
-        let grant_id = sqlx::query_scalar::<_, Uuid>(
+        let deleted_rows = sqlx::query(
             r#"
             DELETE FROM mailbox_delegation_grants
             WHERE tenant_id = $1
               AND owner_account_id = $2
               AND grantee_account_id = $3
-            RETURNING id
+            RETURNING id, mailbox_id
             "#,
         )
         .bind(&tenant_id)
         .bind(owner_account_id)
         .bind(grantee_account_id)
-        .fetch_optional(&mut *tx)
+        .fetch_all(&mut *tx)
         .await?;
 
-        let Some(grant_id) = grant_id else {
+        if deleted_rows.is_empty() {
             bail!("mailbox delegation grant not found");
-        };
+        }
 
-        let modseq = self
-            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id)
+        for row in deleted_rows {
+            let grant_id: Uuid = row.try_get("id")?;
+            let mailbox_id: Uuid = row.try_get("mailbox_id")?;
+            let modseq = self
+                .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, owner_account_id)
+                .await?;
+            Self::insert_mail_change_log_in_tx(
+                &mut tx,
+                &tenant_id,
+                Some(owner_account_id),
+                Some(mailbox_id),
+                "mailbox_delegation_grant",
+                grant_id,
+                "destroyed",
+                modseq,
+                &[owner_account_id, grantee_account_id],
+                serde_json::json!({
+                    "mailboxId": mailbox_id,
+                    "granteeId": grantee_account_id
+                }),
+            )
             .await?;
-        Self::insert_mail_change_log_in_tx(
-            &mut tx,
-            &tenant_id,
-            Some(owner_account_id),
-            None,
-            "mailbox_delegation_grant",
-            grant_id,
-            "destroyed",
-            modseq,
-            &[owner_account_id, grantee_account_id],
-            serde_json::json!({
-                "granteeId": grantee_account_id
-            }),
-        )
-        .await?;
+        }
 
         self.insert_audit(&mut tx, &tenant_id, audit).await?;
         Self::emit_mail_delegation_change(
@@ -748,6 +919,15 @@ impl Storage {
         .await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    async fn default_mailbox_delegation_mailbox_id(&self, owner_account_id: Uuid) -> Result<Uuid> {
+        self.ensure_imap_mailboxes(owner_account_id)
+            .await?
+            .into_iter()
+            .find(|mailbox| mailbox.role == "inbox")
+            .map(|mailbox| mailbox.id)
+            .ok_or_else(|| anyhow!("default mailbox not found"))
     }
 
     pub async fn fetch_mailbox_delegation_grant(
@@ -2089,6 +2269,24 @@ fn map_sender_delegation_grant(row: SenderDelegationGrantRow) -> SenderDelegatio
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
+}
+
+fn validate_mailbox_delegation_rights(
+    may_read: bool,
+    may_write: bool,
+    may_delete: bool,
+    may_share: bool,
+) -> Result<()> {
+    if !may_read && (may_write || may_delete || may_share) {
+        bail!("read access is required when granting write, delete, or share");
+    }
+    if may_delete && !may_write {
+        bail!("delete access requires write access");
+    }
+    if may_share && !may_write {
+        bail!("share access requires write access");
+    }
+    Ok(())
 }
 
 pub(crate) fn normalize_visible_recipients(

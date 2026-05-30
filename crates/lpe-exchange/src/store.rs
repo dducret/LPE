@@ -5,7 +5,8 @@ use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, ClientNote, ClientReminder,
     ClientTask, CollaborationCollection, ConversationAction, DelegateFreeBusyMessageObject,
     JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JournalEntry, MailboxRule, ReminderQuery, SavedDraftMessage,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JournalEntry,
+    MailboxFolderDelegationGrantInput, MailboxRule, ReminderQuery, SavedDraftMessage,
     SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
@@ -391,6 +392,18 @@ pub trait ExchangeStore: AccountAuthStore {
         mailbox_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<MapiFolderPermission>>;
 
+    fn set_mapi_folder_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        mailbox_id: Uuid,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
     fn fetch_mapi_notification_cursor<'a>(
         &'a self,
         account_id: Uuid,
@@ -723,6 +736,12 @@ pub trait ExchangeStore: AccountAuthStore {
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
+
+    fn update_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxUpdateInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox>;
 
@@ -1819,6 +1838,34 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn set_mapi_folder_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        mailbox_id: Uuid,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.set_mailbox_folder_delegation_grant(
+                MailboxFolderDelegationGrantInput {
+                    owner_account_id,
+                    mailbox_id,
+                    grantee_account_id,
+                    may_read,
+                    may_write,
+                    may_delete,
+                    may_share,
+                },
+                audit,
+            )
+            .await
+        })
+    }
+
     fn fetch_mapi_notification_cursor<'a>(
         &'a self,
         account_id: Uuid,
@@ -1872,14 +1919,19 @@ impl ExchangeStore for Storage {
                     log.change_kind,
                     log.modseq,
                     log.summary_json,
+                    scope_box.display_name AS scope_display_name,
                     scope_box.role AS scope_role,
                     scope_box.total_messages AS scope_total_messages,
                     scope_box.unread_messages AS scope_unread_messages,
+                    object_box.display_name AS object_display_name,
                     object_box.role AS object_role,
                     object_box.parent_mailbox_id AS object_parent_id,
                     object_box.total_messages AS object_total_messages,
                     object_box.unread_messages AS object_unread_messages,
+                    parent_box.display_name AS parent_display_name,
                     parent_box.role AS parent_role,
+                    source_box.display_name AS source_display_name,
+                    message.normalized_subject AS message_subject,
                     scope_identity.mapi_object_id AS scope_mapi_object_id,
                     object_identity.mapi_object_id AS object_mapi_object_id,
                     parent_identity.mapi_object_id AS parent_mapi_object_id,
@@ -1899,6 +1951,13 @@ impl ExchangeStore for Storage {
                   ON parent_box.tenant_id = object_box.tenant_id
                  AND parent_box.account_id = object_box.account_id
                  AND parent_box.id = object_box.parent_mailbox_id
+                LEFT JOIN mailboxes source_box
+                  ON source_box.tenant_id = log.tenant_id
+                 AND source_box.account_id = log.account_id
+                 AND source_box.id = (log.summary_json->>'sourceMailboxId')::uuid
+                LEFT JOIN messages message
+                  ON message.tenant_id = log.tenant_id
+                 AND message.id = (log.summary_json->>'messageId')::uuid
                 LEFT JOIN mapi_object_identities scope_identity
                   ON scope_identity.tenant_id = log.tenant_id
                  AND scope_identity.account_id = log.account_id
@@ -2597,6 +2656,14 @@ impl ExchangeStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         Box::pin(async move { self.create_jmap_mailbox(input, audit).await })
+    }
+
+    fn update_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxUpdateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move { self.update_jmap_mailbox(input, audit).await })
     }
 
     fn destroy_jmap_mailbox<'a>(
@@ -3674,6 +3741,10 @@ fn mapi_notification_event_from_change_row(
                 modseq,
                 row.try_get("object_total_messages").ok(),
                 row.try_get("object_unread_messages").ok(),
+                change_kind,
+                row.try_get("object_display_name").ok(),
+                row.try_get("parent_display_name").ok(),
+                None,
             ))
         }
         "mailbox_message" | "attachment" => {
@@ -3695,6 +3766,10 @@ fn mapi_notification_event_from_change_row(
                 modseq,
                 row.try_get("scope_total_messages").ok(),
                 row.try_get("scope_unread_messages").ok(),
+                change_kind,
+                row.try_get("scope_display_name").ok(),
+                row.try_get("source_display_name").ok(),
+                row.try_get("message_subject").ok(),
             ))
         }
         _ => None,

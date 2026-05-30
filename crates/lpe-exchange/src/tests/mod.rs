@@ -9,10 +9,10 @@ use lpe_storage::{
     CalendarEventAttachment, ClientNote, ClientReminder, ClientTask, CollaborationCollection,
     CollaborationRights, ConversationAction, DelegateFreeBusyMessageObject, JmapEmail,
     JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JournalEntry, MailboxRule, ReminderQuery, SavedDraftMessage,
-    SearchFolderDefinition, SieveScriptDocument, Storage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, JournalEntry, MailboxRule, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -368,6 +368,7 @@ struct FakeStore {
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     queried_jmap_email_ids: Arc<AtomicU64>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
+    updated_mailboxes: Arc<Mutex<Vec<JmapMailboxUpdateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
@@ -378,6 +379,7 @@ struct FakeStore {
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
+    mapi_folder_permission_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     mapi_ipm_subtree_ost_id: Arc<Mutex<Option<Vec<u8>>>>,
     fail_mapi_ipm_subtree_ost_id_store: bool,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
@@ -719,13 +721,21 @@ impl FakeStore {
                     || crate::mapi::identity::legacy_migration_object_id(&rule.id) == object_id
             })
             .map(|rule| (MapiIdentityObjectKind::Rule, rule.id));
+        let account_match = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| identities.get(&account.account_id).copied() == Some(object_id))
+            .map(|account| (MapiIdentityObjectKind::Account, account.account_id));
 
         let (object_kind, canonical_id) = mailbox_match
             .or(message_match)
             .or(contact_match)
             .or(event_match)
             .or(task_match)
-            .or(rule_match)?;
+            .or(rule_match)
+            .or(account_match)?;
         Some(MapiIdentityLookupRecord {
             object_kind,
             canonical_id,
@@ -1201,6 +1211,66 @@ impl ExchangeStore for FakeStore {
             }));
         }
         Box::pin(async move { Ok(permissions) })
+    }
+
+    fn set_mapi_folder_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        mailbox_id: Uuid,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let principal = self.session.clone().unwrap_or_else(FakeStore::account);
+        let grantee = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| account.account_id == grantee_account_id)
+            .cloned();
+        Box::pin(async move {
+            let Some(grantee) = grantee else {
+                anyhow::bail!("grantee account not found")
+            };
+            let mut permissions = self.mapi_folder_permissions.lock().unwrap();
+            permissions.retain(|permission| {
+                !(permission.mailbox_id == mailbox_id
+                    && permission.member_account_id == Some(grantee_account_id))
+            });
+            if may_read {
+                permissions.push(MapiFolderPermission {
+                    mailbox_id,
+                    member_account_id: Some(grantee_account_id),
+                    member_name: grantee.display_name,
+                    rights: crate::mapi::permissions::rights_from_grant(
+                        may_read, may_write, may_delete, may_share,
+                    ),
+                });
+            }
+            if !permissions.iter().any(|permission| {
+                permission.mailbox_id == mailbox_id
+                    && permission.member_account_id == Some(owner_account_id)
+            }) {
+                permissions.push(crate::mapi::permissions::owner_permission(
+                    mailbox_id,
+                    &AccountPrincipal {
+                        tenant_id: principal.tenant_id,
+                        account_id: owner_account_id,
+                        email: principal.email,
+                        display_name: principal.display_name,
+                    },
+                ));
+            }
+            self.mapi_folder_permission_audits
+                .lock()
+                .unwrap()
+                .push(audit);
+            Ok(())
+        })
     }
 
     fn fetch_mapi_notification_cursor<'a>(
@@ -2175,6 +2245,30 @@ impl ExchangeStore for FakeStore {
             is_subscribed: input.is_subscribed,
         };
         self.mailboxes.lock().unwrap().push(mailbox.clone());
+        Box::pin(async move { Ok(mailbox) })
+    }
+
+    fn update_jmap_mailbox<'a>(
+        &'a self,
+        input: JmapMailboxUpdateInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        self.updated_mailboxes.lock().unwrap().push(input.clone());
+        let mut mailboxes = self.mailboxes.lock().unwrap();
+        let Some(mailbox) = mailboxes
+            .iter_mut()
+            .find(|mailbox| mailbox.id == input.mailbox_id)
+        else {
+            return Box::pin(async move { Err(anyhow::anyhow!("mailbox not found")) });
+        };
+        if let Some(name) = input.name.clone() {
+            mailbox.name = name;
+        }
+        if let Some(parent_id) = input.parent_id {
+            mailbox.parent_id = parent_id;
+        }
+        mailbox.modseq += 1;
+        let mailbox = mailbox.clone();
         Box::pin(async move { Ok(mailbox) })
     }
 
@@ -3364,6 +3458,20 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
     haystack
         .windows(needle.len())
         .any(|window| window == needle)
+}
+
+fn notification_detail_strings(mut bytes: &[u8]) -> Vec<String> {
+    let mut values = Vec::new();
+    while bytes.len() >= 2 {
+        let size = u16::from_le_bytes(bytes[..2].try_into().unwrap()) as usize;
+        bytes = &bytes[2..];
+        if bytes.len() < size {
+            break;
+        }
+        values.push(String::from_utf8_lossy(&bytes[..size]).into_owned());
+        bytes = &bytes[size..];
+    }
+    values
 }
 
 fn mapi_sync_manifest_counts(bytes: &[u8]) -> Option<(u32, u32)> {
