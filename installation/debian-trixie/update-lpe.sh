@@ -144,6 +144,8 @@ fi
 
 echo "Applying LPE 0.4 schema compatibility updates..."
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
+SET client_min_messages = warning;
+
 ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN target_folder_id DROP NOT NULL,
   ADD COLUMN IF NOT EXISTS group_header_id UUID,
@@ -162,9 +164,18 @@ ALTER TABLE public.accounts
   ADD COLUMN IF NOT EXISTS litigation_hold_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS litigation_hold_started_at TIMESTAMPTZ;
 
-ALTER TABLE public.accounts
-  DROP CONSTRAINT IF EXISTS accounts_recoverable_items_retention_days_check,
-  ADD CONSTRAINT accounts_recoverable_items_retention_days_check CHECK (recoverable_items_retention_days >= 0) NOT VALID;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.accounts'::regclass
+          AND conname = 'accounts_recoverable_items_retention_days_check'
+    ) THEN
+        ALTER TABLE public.accounts
+            ADD CONSTRAINT accounts_recoverable_items_retention_days_check CHECK (recoverable_items_retention_days >= 0) NOT VALID;
+    END IF;
+END $$;
 
 ALTER TABLE public.accounts
   VALIDATE CONSTRAINT accounts_recoverable_items_retention_days_check;
@@ -172,9 +183,18 @@ ALTER TABLE public.accounts
 ALTER TABLE public.mailboxes
   ADD COLUMN IF NOT EXISTS recoverable_items_retention_days INTEGER;
 
-ALTER TABLE public.mailboxes
-  DROP CONSTRAINT IF EXISTS mailboxes_recoverable_items_retention_days_check,
-  ADD CONSTRAINT mailboxes_recoverable_items_retention_days_check CHECK (recoverable_items_retention_days IS NULL OR recoverable_items_retention_days >= 0) NOT VALID;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.mailboxes'::regclass
+          AND conname = 'mailboxes_recoverable_items_retention_days_check'
+    ) THEN
+        ALTER TABLE public.mailboxes
+            ADD CONSTRAINT mailboxes_recoverable_items_retention_days_check CHECK (recoverable_items_retention_days IS NULL OR recoverable_items_retention_days >= 0) NOT VALID;
+    END IF;
+END $$;
 
 ALTER TABLE public.mailboxes
   VALIDATE CONSTRAINT mailboxes_recoverable_items_retention_days_check;
