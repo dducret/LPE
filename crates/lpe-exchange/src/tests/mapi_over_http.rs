@@ -13085,7 +13085,7 @@ async fn mapi_over_http_content_sync_move_across_folders_exports_source_tombston
 ) {
     let inbox_id = Uuid::parse_str("53535353-5353-5353-5353-535353535353").unwrap();
     let archive_id = Uuid::parse_str("54545454-5454-5454-5454-545454545454").unwrap();
-    let moved_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
+    let moved_id = Uuid::parse_str("66666666-6666-6666-8666-666666666666").unwrap();
     let inbox = FakeStore::mailbox(&inbox_id.to_string(), "inbox", "Inbox");
     let mut archive = FakeStore::mailbox(&archive_id.to_string(), "archive", "Archive");
     archive.total_emails = 1;
