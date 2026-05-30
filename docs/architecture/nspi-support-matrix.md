@@ -22,7 +22,9 @@ published version available from Microsoft Learn on that date.
   visibility.
 - Contact rows come only from canonical contacts readable by the authenticated
   account.
-- Distribution-list rows come from canonical group aliases.
+- Distribution-list rows come from canonical group aliases; member enumeration is
+  read-only and bounded to canonical group-alias target data that resolves to
+  tenant-visible address-book rows.
 - Hidden authenticated accounts are not browsed, but can resolve themselves for
   Outlook profile bootstrap.
 - Address-book rows use Exchange address-book identity semantics: `PidTagAddressType`
@@ -41,7 +43,7 @@ published version available from Microsoft Learn on that date.
 | `Unbind` | Releases the authenticated NSPI session. | Session state only. | Supported |
 | `QueryRows` | Returns tenant-visible account/contact/distribution-list rows using the requested table filter where present; filtered rowsets use the same deterministic ANR ranking as `ResolveNames`. | Canonical accounts, readable contacts, and group aliases. | Supported |
 | `ResolveNames` / `ResolveNamesW` | Resolves ANR values against canonical directory rows with deterministic ranking: exact SMTP, display name, and legacy DN matches before prefix/contains matches, with account, distribution-list, then contact tie-breaking. | Canonical accounts, readable contacts, and group aliases; hidden self-resolution only for the authenticated principal. | Supported |
-| `GetProps` | Returns properties for a requested tenant-visible row, or the authenticated principal for bootstrap requests without a row selector. | Canonical account/contact/distribution-list row projection. | Supported |
+| `GetProps` | Returns properties for a requested tenant-visible row, or the authenticated principal for bootstrap requests without a row selector. Distribution-list member properties are returned only from canonical group-alias membership data that resolves to tenant-visible address-book rows. | Canonical account/contact/distribution-list row projection and bounded canonical group-alias member projection. | Supported |
 | `GetMatches` | Returns matching tenant-visible minimal IDs and row data ranked by ANR match quality. | Canonical accounts, readable contacts, and group aliases. | Supported |
 | `DNToMId` | Maps tenant-visible legacy DNs and SMTP values to minimal IDs. | Canonical account/contact/distribution-list row projection. | Supported |
 | `GetPropList` / `QueryColumns` | Returns the bounded bootstrap property set used by Outlook profile/address-book probes. | No storage mutation. | Supported |
@@ -55,8 +57,8 @@ published version available from Microsoft Learn on that date.
 ## Deferred
 
 - Full address-book template semantics.
-- Distribution list expansion and membership enumeration beyond the canonical
-  list row.
+- Distribution list expansion beyond canonical group-alias membership targets.
+- Distribution-list member mutation through `NSPI`.
 - Exchange parity for every ambiguous-name ranking edge case.
 
 ## Validation

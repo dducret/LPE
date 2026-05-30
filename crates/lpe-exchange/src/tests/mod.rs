@@ -343,6 +343,7 @@ struct FakeStore {
     task_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
     group_aliases: Arc<Mutex<Vec<(Uuid, String, String)>>>,
+    group_alias_members: Arc<Mutex<HashMap<Uuid, Vec<String>>>>,
     contact_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
@@ -1355,6 +1356,7 @@ impl ExchangeStore for FakeStore {
                 email: account.email,
                 entry_kind: ExchangeAddressBookEntryKind::Account,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                member_emails: Vec::new(),
             })
             .collect::<Vec<_>>();
         let principal_account_id = principal_account
@@ -1386,8 +1388,10 @@ impl ExchangeStore for FakeStore {
                     email: contact.email.clone(),
                     entry_kind: ExchangeAddressBookEntryKind::Contact,
                     directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                    member_emails: Vec::new(),
                 }),
         );
+        let group_alias_members = self.group_alias_members.lock().unwrap().clone();
         entries.extend(self.group_aliases.lock().unwrap().iter().map(
             |(id, display_name, email)| ExchangeAddressBookEntry {
                 id: *id,
@@ -1395,6 +1399,7 @@ impl ExchangeStore for FakeStore {
                 email: email.clone(),
                 entry_kind: ExchangeAddressBookEntryKind::DistributionList,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                member_emails: group_alias_members.get(id).cloned().unwrap_or_default(),
             },
         ));
         entries.sort_by(|left, right| {

@@ -47,12 +47,12 @@ where
         MapiRequestType::ModLinkAtt => nspi_disabled_mutation_response(
             "ModLinkAtt",
             request_id,
-            "NSPI link-attribute mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
+            "NSPI link-attribute mutation is disabled; LPE address-book data is projected from canonical accounts, contacts, and group aliases.",
         ),
         MapiRequestType::ModProps => nspi_disabled_mutation_response(
             "ModProps",
             request_id,
-            "NSPI property mutation is disabled; LPE address-book data is projected from canonical accounts and contacts.",
+            "NSPI property mutation is disabled; LPE address-book data is projected from canonical accounts, contacts, and group aliases.",
         ),
         MapiRequestType::GetAddressBookUrl => {
             endpoint_url_response("GetAddressBookUrl", request_id, headers, "/mapi/nspi/")
@@ -180,6 +180,9 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x803C_001F, // PidTagAddressBookObjectDistinguishedName
     0x800F_101E, // PidTagAddressBookProxyAddresses string8
     0x800F_101F, // PidTagAddressBookProxyAddresses
+    0x8009_000D, // PidTagAddressBookMember
+    0x8CE2_0003, // PidTagAddressBookDistributionListMemberCount
+    0x8CE3_0003, // PidTagAddressBookDistributionListExternalMemberCount
     0x8C6D_0102, // PidTagAddressBookObjectGuid
     0xFFFD_0003, // PidTagAddressBookContainerId
 ];
@@ -355,6 +358,7 @@ where
             principal.account_id,
             entry,
             &columns,
+            &entries,
         ));
     } else {
         body.push(0);
@@ -729,6 +733,7 @@ where
             principal.account_id,
             entry,
             &tags,
+            &entries,
         ));
     } else {
         body.push(0);
@@ -1044,7 +1049,12 @@ where
         write_large_property_tag_array(&mut body, &tags);
         write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
         for entry in &entries {
-            body.extend_from_slice(&nspi_resolved_entry_row(principal.account_id, entry, &tags));
+            body.extend_from_slice(&nspi_resolved_entry_row(
+                principal.account_id,
+                entry,
+                &tags,
+                &entries,
+            ));
         }
     }
     write_u32(&mut body, 0);
@@ -1204,7 +1214,12 @@ where
         write_large_property_tag_array(&mut body, &tags);
         write_u32(&mut body, entries.len().min(u32::MAX as usize) as u32);
         for entry in &entries {
-            body.extend_from_slice(&nspi_resolved_entry_row(principal.account_id, entry, &tags));
+            body.extend_from_slice(&nspi_resolved_entry_row(
+                principal.account_id,
+                entry,
+                &tags,
+                &entries,
+            ));
         }
     }
     write_u32(&mut body, 0);
@@ -1319,6 +1334,7 @@ where
         principal.account_id,
         &entry,
         NSPI_BOOTSTRAP_PROPERTY_TAGS,
+        &[],
     ));
     write_u32(&mut body, 0);
     mapi_response("GetTemplateInfo", request_id, 0, body, None)
@@ -1338,6 +1354,7 @@ pub(in crate::mapi) fn nspi_resolved_entry_row(
     account_id: Uuid,
     entry: &ExchangeAddressBookEntry,
     columns: &[u32],
+    directory_entries: &[ExchangeAddressBookEntry],
 ) -> Vec<u8> {
     let mut row = Vec::new();
     row.push(0);
@@ -1345,7 +1362,7 @@ pub(in crate::mapi) fn nspi_resolved_entry_row(
         write_address_book_property_value(
             &mut row,
             *property_tag,
-            &nspi_entry_value(account_id, entry, *property_tag),
+            &nspi_entry_value_with_directory(account_id, entry, *property_tag, directory_entries),
         );
     }
     row
@@ -1355,6 +1372,7 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
     account_id: Uuid,
     entry: &ExchangeAddressBookEntry,
     tags: &[u32],
+    directory_entries: &[ExchangeAddressBookEntry],
 ) -> Vec<u8> {
     let mut values = Vec::new();
     write_u32(&mut values, 0);
@@ -1363,7 +1381,7 @@ pub(in crate::mapi) fn nspi_entry_property_value_list(
         write_address_book_tagged_property_value(
             &mut values,
             *property_tag,
-            &nspi_entry_value(account_id, entry, *property_tag),
+            &nspi_entry_value_with_directory(account_id, entry, *property_tag, directory_entries),
         );
     }
     values
@@ -1373,6 +1391,7 @@ pub(in crate::mapi) enum NspiValue<'a> {
     String(&'a str),
     OwnedString(String),
     MultiString(Vec<String>),
+    EmbeddedTable(Uuid, Vec<ExchangeAddressBookEntry>),
     OwnedBinary(Vec<u8>),
     U32(u32),
     Bool(bool),
@@ -1383,6 +1402,15 @@ pub(in crate::mapi) fn nspi_entry_value(
     entry: &ExchangeAddressBookEntry,
     property_tag: u32,
 ) -> NspiValue<'_> {
+    nspi_entry_value_with_directory(account_id, entry, property_tag, &[])
+}
+
+pub(in crate::mapi) fn nspi_entry_value_with_directory<'a>(
+    account_id: Uuid,
+    entry: &'a ExchangeAddressBookEntry,
+    property_tag: u32,
+    directory_entries: &'a [ExchangeAddressBookEntry],
+) -> NspiValue<'a> {
     match property_tag {
         0x0FF8_0102 => NspiValue::OwnedBinary(mapi_mailstore::STORE_REPLICA_GUID.to_vec()),
         0x3902_0102 => NspiValue::OwnedBinary(nspi_entry_permanent_entry_id(entry)),
@@ -1405,6 +1433,16 @@ pub(in crate::mapi) fn nspi_entry_value(
         0x3F08_0003 => NspiValue::U32(0),
         0x803C_001F | 0x803C_001E => NspiValue::OwnedString(nspi_entry_unprefixed_legacy_dn(entry)),
         0x800F_101F | 0x800F_101E => NspiValue::MultiString(vec![format!("SMTP:{}", entry.email)]),
+        0x8009_000D => NspiValue::EmbeddedTable(
+            account_id,
+            nspi_distribution_list_members(entry, directory_entries),
+        ),
+        0x8CE2_0003 => NspiValue::U32(
+            nspi_distribution_list_members(entry, directory_entries)
+                .len()
+                .min(u32::MAX as usize) as u32,
+        ),
+        0x8CE3_0003 => NspiValue::U32(0),
         0x8C6D_0102 => NspiValue::OwnedBinary(entry.id.to_bytes_le().to_vec()),
         0xFFFD_0003 => NspiValue::U32(0),
         _ => match property_tag & 0xFFFF {
@@ -1413,6 +1451,29 @@ pub(in crate::mapi) fn nspi_entry_value(
             _ => NspiValue::U32(0),
         },
     }
+}
+
+fn nspi_distribution_list_members(
+    entry: &ExchangeAddressBookEntry,
+    directory_entries: &[ExchangeAddressBookEntry],
+) -> Vec<ExchangeAddressBookEntry> {
+    if entry.entry_kind != ExchangeAddressBookEntryKind::DistributionList {
+        return Vec::new();
+    }
+    entry
+        .member_emails
+        .iter()
+        .filter_map(|email| {
+            let normalized = email.trim().to_ascii_lowercase();
+            directory_entries
+                .iter()
+                .find(|candidate| {
+                    candidate.entry_kind != ExchangeAddressBookEntryKind::DistributionList
+                        && candidate.email.trim().eq_ignore_ascii_case(&normalized)
+                })
+                .cloned()
+        })
+        .collect()
 }
 
 pub(in crate::mapi) async fn allocate_nspi_entry_identities<S>(
@@ -1570,6 +1631,7 @@ pub(in crate::mapi) fn principal_address_book_entry(
         email: principal.email.clone(),
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
     }
 }
 
@@ -1624,6 +1686,9 @@ pub(in crate::mapi) fn write_address_book_property_value(
         }
         (0x101E, NspiValue::MultiString(values)) => write_multi_string8(body, values),
         (0x101F, NspiValue::MultiString(values)) => write_multi_string(body, values),
+        (0x000D, NspiValue::EmbeddedTable(account_id, entries)) => {
+            write_embedded_address_book_table(body, *account_id, entries)
+        }
         (0x0102, NspiValue::OwnedBinary(value)) => write_nspi_binary(body, value),
         (0x0003, NspiValue::U32(value)) => write_u32(body, *value),
         (0x0003, _) => write_u32(body, 0),
@@ -1634,6 +1699,9 @@ pub(in crate::mapi) fn write_address_book_property_value(
         (_, NspiValue::Bool(value)) => body.push(u8::from(*value)),
         (_, NspiValue::OwnedBinary(value)) => write_nspi_binary(body, value),
         (_, NspiValue::MultiString(values)) => write_multi_string(body, values),
+        (_, NspiValue::EmbeddedTable(account_id, entries)) => {
+            write_embedded_address_book_table(body, *account_id, entries)
+        }
         (_, NspiValue::String(value)) => {
             body.push(0xFF);
             write_utf16z(body, value);
@@ -1642,6 +1710,21 @@ pub(in crate::mapi) fn write_address_book_property_value(
             body.push(0xFF);
             write_utf16z(body, value);
         }
+    }
+}
+
+fn write_embedded_address_book_table(
+    body: &mut Vec<u8>,
+    account_id: Uuid,
+    entries: &[ExchangeAddressBookEntry],
+) {
+    let columns = [0x3001_001F, 0x39FE_001F, 0x3003_001F, 0x3900_0003];
+    write_large_property_tag_array(body, &columns);
+    write_u32(body, entries.len().min(u32::MAX as usize) as u32);
+    for entry in entries {
+        body.extend_from_slice(&nspi_resolved_entry_row(
+            account_id, entry, &columns, entries,
+        ));
     }
 }
 
@@ -2222,6 +2305,7 @@ mod tests {
             email: "bob.contact@example.test".to_string(),
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
         };
         let legacy_dn = nspi_entry_unprefixed_legacy_dn(&entry);
         let permanent_entry_id = nspi_entry_permanent_entry_id(&entry);
@@ -2378,6 +2462,7 @@ mod tests {
             email: "denis.ducret@sdic.ch".to_string(),
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
         };
         let account = ExchangeAddressBookEntry {
             id: Uuid::from_bytes([0x34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
@@ -2385,6 +2470,7 @@ mod tests {
             email: "test@l-p-e.ch".to_string(),
             entry_kind: ExchangeAddressBookEntryKind::Account,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
         };
 
         let filtered =
@@ -2412,6 +2498,7 @@ mod tests {
             email: "bob.contact@example.test".to_string(),
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
         };
 
         let summary = format_nspi_entry_summaries_for_debug(account_id, &[entry]);
@@ -2428,6 +2515,7 @@ mod tests {
                 email: "bob.contact@example.test".to_string(),
                 entry_kind: ExchangeAddressBookEntryKind::Contact,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                member_emails: Vec::new(),
             },
             ExchangeAddressBookEntry {
                 id: Uuid::parse_str("9bd2958d-9858-4fe3-8e6b-4ddd9dcc6bc6").unwrap(),
@@ -2435,6 +2523,7 @@ mod tests {
                 email: "BOB.CONTACT@example.test".to_string(),
                 entry_kind: ExchangeAddressBookEntryKind::Contact,
                 directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                member_emails: Vec::new(),
             },
         ];
 
@@ -2453,6 +2542,7 @@ mod tests {
             email: "bob.contact@example.test".to_string(),
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
         };
         let second = ExchangeAddressBookEntry {
             id: Uuid::parse_str("9bd2958d-9858-4fe3-8e6b-4ddd9dcc6bc6").unwrap(),
@@ -2460,6 +2550,7 @@ mod tests {
             email: "bob.contact@example.test".to_string(),
             entry_kind: ExchangeAddressBookEntryKind::Contact,
             directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
         };
 
         assert_eq!(

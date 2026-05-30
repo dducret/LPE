@@ -5455,6 +5455,7 @@ fn principal_address_book_entry(principal: &AccountPrincipal) -> ExchangeAddress
         email: principal.email.clone(),
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
     }
 }
 
@@ -8849,6 +8850,7 @@ fn rpc_proxy_principal_address_book_entry(
         email: principal.email.clone(),
         entry_kind: ExchangeAddressBookEntryKind::Account,
         directory_kind: ExchangeAddressBookDirectoryKind::Person,
+        member_emails: Vec::new(),
     }
 }
 

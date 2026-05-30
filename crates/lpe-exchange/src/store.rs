@@ -236,6 +236,7 @@ pub(crate) struct ExchangeAddressBookEntry {
     pub(crate) email: String,
     pub(crate) entry_kind: ExchangeAddressBookEntryKind,
     pub(crate) directory_kind: ExchangeAddressBookDirectoryKind,
+    pub(crate) member_emails: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2084,6 +2085,7 @@ impl ExchangeStore for Storage {
                     email: row.get("primary_email"),
                     entry_kind: ExchangeAddressBookEntryKind::Account,
                     directory_kind: directory_kind_from_storage(row.get("directory_kind")),
+                    member_emails: Vec::new(),
                 })
                 .collect::<Vec<_>>();
 
@@ -2100,6 +2102,7 @@ impl ExchangeStore for Storage {
                         email: contact.email,
                         entry_kind: ExchangeAddressBookEntryKind::Contact,
                         directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                        member_emails: Vec::new(),
                     }),
             );
             let group_rows = sqlx::query(
@@ -2124,6 +2127,7 @@ impl ExchangeStore for Storage {
                     email: source,
                     entry_kind: ExchangeAddressBookEntryKind::DistributionList,
                     directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                    member_emails: vec![target],
                 }
             }));
             entries.sort_by(|left, right| {

@@ -139,6 +139,19 @@ non-canonical LPE state.
 - Any message sent from Outlook must be recorded by canonical LPE submission and
   visible in canonical `Sent`. Cross-protocol checks must agree through JMAP,
   IMAP where applicable, and the MAPI projection.
+- MAPI submission cancellation is canonical queue cancellation, not message
+  deletion and not a client-spooler side channel. When implemented,
+  `RopAbortSubmit` resolves the requested folder/message identifiers to the
+  authenticated account's canonical `Sent` membership and then to the matching
+  `submission_queue` row. It may transition only `queued`, `ready`, or
+  `deferred` rows to terminal `cancelled`, set `terminal_at`, append a
+  `submission_events.cancelled` row, write the canonical submission change-log
+  event, and wake normal mailbox-change listeners. It must not remove the
+  authoritative `Sent` copy, recreate the source draft, mutate recipients,
+  cancel `handed_off` transport custody, or recall an already relayed message.
+  Already terminal rows stay terminal; duplicate cancellation of an already
+  `cancelled` row is idempotent, while `handed_off`, `relayed`, `bounced`, and
+  `failed` rows return a parseable cannot-abort ROP error without side effects.
 - Draft save, send, move, copy, delete, read/unread, flag, attachment, and
   protected-recipient behavior must map to canonical mailbox state.
 - `Bcc` is protected metadata. It must not leak through MAPI search, AI-facing
@@ -268,6 +281,35 @@ non-canonical LPE state.
 - Journal and Notes data are canonical account-owned items. MAPI coverage must
   project and mutate them only through canonical item tables, APIs, and change
   tracking.
+
+### Transport Spooler Advisory ROPs
+
+`RopSetSpooler`, `RopSpoolerLockMessage`, and `RopTransportNewMail` remain
+parseable unsupported probes until LPE has a canonical advisory model that is
+observable outside the MAPI session. The current canonical transport state is
+`submission_queue`, `submission_recipients`, `submission_events`,
+`mail_change_log`, and the LPE-to-LPE-CT handoff. None of those tables expresses
+client-spooler ownership, per-message spooler locks, or client-announced new
+mail delivery.
+
+The supported design constraints are:
+
+- `RopSetSpooler` must not persist a MAPI-local "spooler active" flag. If a
+  later Outlook trace requires an acknowledgement, it can become a session-local
+  no-op only after tests prove Outlook does not depend on durable behavior.
+- `RopSpoolerLockMessage` must not lock canonical messages or queue rows because
+  LPE-CT owns transport custody after handoff and canonical mailbox state uses
+  normal transaction boundaries. A future implementation needs a documented
+  queue lease or advisory lock model shared with the outbound worker before this
+  ROP can mutate state.
+- `RopTransportNewMail` must not create or announce inbound mail. Inbound
+  delivery belongs to LPE-CT final delivery and canonical mailbox insertion; MAPI
+  clients learn about new mail through contents sync, notifications, and
+  `mail_change_log` replay.
+
+Until those prerequisites exist, all three ROPs are parsed to their documented
+request lengths and return ROP-specific protocol errors without modifying
+mailbox, submission, notification, or LPE-CT state.
 
 ## Implemented Coverage
 

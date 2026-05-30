@@ -24488,6 +24488,72 @@ async fn mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_firs
 }
 
 #[tokio::test]
+async fn mapi_over_http_nspi_distribution_list_members_are_bounded_to_canonical_rows() {
+    let mut bob = FakeStore::account();
+    bob.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    bob.email = "bob@example.test".to_string();
+    bob.display_name = "Bob Member".to_string();
+
+    let group_id = Uuid::from_bytes([0x34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        group_aliases: Arc::new(Mutex::new(vec![(
+            group_id,
+            "Sales".to_string(),
+            "sales@example.test".to_string(),
+        )])),
+        group_alias_members: Arc::new(Mutex::new(HashMap::from([(
+            group_id,
+            vec![
+                "bob@example.test".to_string(),
+                "mallory@external.test".to_string(),
+            ],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let mut request = Vec::new();
+    request.extend_from_slice(&0x4000_0034u32.to_le_bytes());
+    for tag in [0x8009_000Du32, 0x8CE2_0003, 0x8CE3_0003] {
+        request.extend_from_slice(&tag.to_le_bytes());
+    }
+    let headers = nspi_bound_headers(&service, "GetProps").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    assert!(contains_bytes(&body, &0x8009_000Du32.to_le_bytes()));
+    assert!(contains_bytes(&body, &utf16z("Bob Member")));
+    assert!(contains_bytes(&body, &utf16z("bob@example.test")));
+    assert!(contains_bytes(
+        &body,
+        &[
+            0x8CE2_0003u32.to_le_bytes().as_slice(),
+            0u32.to_le_bytes().as_slice(),
+            1u32.to_le_bytes().as_slice(),
+        ]
+        .concat()
+    ));
+    assert!(contains_bytes(
+        &body,
+        &[
+            0x8CE3_0003u32.to_le_bytes().as_slice(),
+            0u32.to_le_bytes().as_slice(),
+            0u32.to_le_bytes().as_slice(),
+        ]
+        .concat()
+    ));
+    assert!(!contains_bytes(&body, b"mallory@external.test"));
+    assert!(!contains_bytes(&body, &utf16z("mallory@external.test")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_hidden_authenticated_account_is_not_browsed_but_resolves_self() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -25163,7 +25229,7 @@ async fn mapi_over_http_nspi_mutation_requests_return_parseable_disabled_errors(
         let body = String::from_utf8(response_bytes(response).await).unwrap();
         assert!(body.contains("disabled"), "{request_type}: {body}");
         assert!(
-            body.contains("canonical accounts and contacts"),
+            body.contains("canonical accounts, contacts, and group aliases"),
             "{request_type}: {body}"
         );
     }
