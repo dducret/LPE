@@ -2718,6 +2718,24 @@ where
         .await
 }
 
+async fn upsert_custom_property_values_from_map<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    object_kind: MapiCustomPropertyObjectKind,
+    canonical_id: Uuid,
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<()>
+where
+    S: ExchangeStore,
+{
+    let values = properties
+        .iter()
+        .filter(|(tag, _value)| is_custom_property_tag(**tag))
+        .map(|(tag, value)| (*tag, value.clone()))
+        .collect::<Vec<_>>();
+    upsert_custom_property_values(store, principal, object_kind, canonical_id, values).await
+}
+
 async fn fetch_custom_property_values_for_request<S>(
     store: &S,
     principal: &AccountPrincipal,
@@ -5247,6 +5265,23 @@ where
                                         continue;
                                     }
                                 };
+                                if upsert_custom_property_values_from_map(
+                                    store,
+                                    principal,
+                                    MapiCustomPropertyObjectKind::Contact,
+                                    contact.id,
+                                    &properties,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
                                 session.handles.insert(
                                     handle,
                                     MapiObject::Contact {
@@ -5327,6 +5362,23 @@ where
                                         continue;
                                     }
                                 };
+                                if upsert_custom_property_values_from_map(
+                                    store,
+                                    principal,
+                                    MapiCustomPropertyObjectKind::CalendarEvent,
+                                    event.id,
+                                    &properties,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
                                 session.handles.insert(
                                     handle,
                                     MapiObject::Event {
@@ -5394,6 +5446,23 @@ where
                                         continue;
                                     }
                                 };
+                                if upsert_custom_property_values_from_map(
+                                    store,
+                                    principal,
+                                    MapiCustomPropertyObjectKind::Task,
+                                    task.id,
+                                    &properties,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
                                 session
                                     .handles
                                     .insert(handle, MapiObject::Task { folder_id, task_id });
@@ -5445,6 +5514,23 @@ where
                                         continue;
                                     }
                                 };
+                                if upsert_custom_property_values_from_map(
+                                    store,
+                                    principal,
+                                    MapiCustomPropertyObjectKind::Note,
+                                    note.id,
+                                    &properties,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
                                 session
                                     .handles
                                     .insert(handle, MapiObject::Note { folder_id, note_id });
@@ -5504,6 +5590,23 @@ where
                                         continue;
                                     }
                                 };
+                                if upsert_custom_property_values_from_map(
+                                    store,
+                                    principal,
+                                    MapiCustomPropertyObjectKind::JournalEntry,
+                                    entry.id,
+                                    &properties,
+                                )
+                                .await
+                                .is_err()
+                                {
+                                    responses.extend_from_slice(&rop_error_response(
+                                        0x0C,
+                                        request.response_handle_index(),
+                                        0x8004_010F,
+                                    ));
+                                    continue;
+                                }
                                 session.handles.insert(
                                     handle,
                                     MapiObject::JournalEntry {
@@ -5846,6 +5949,23 @@ where
                                     continue;
                                 }
                             };
+                        if upsert_custom_property_values_from_map(
+                            store,
+                            principal,
+                            MapiCustomPropertyObjectKind::Message,
+                            email.id,
+                            &properties,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        }
                         session.handles.insert(
                             handle,
                             MapiObject::Message {
@@ -6902,6 +7022,23 @@ where
                         .await
                     {
                         Ok(Some((_email, stored))) => {
+                            if upsert_custom_property_values_from_map(
+                                store,
+                                principal,
+                                MapiCustomPropertyObjectKind::Attachment,
+                                stored.id,
+                                &properties,
+                            )
+                            .await
+                            .is_err()
+                            {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x25,
+                                    request.response_handle_index(),
+                                    0x8004_010F,
+                                ));
+                                continue;
+                            }
                             session.handles.insert(
                                 handle,
                                 MapiObject::SavedAttachment {
@@ -6937,6 +7074,23 @@ where
                         .await
                     {
                         Ok(Some(stored)) => {
+                            if upsert_custom_property_values_from_map(
+                                store,
+                                principal,
+                                MapiCustomPropertyObjectKind::Attachment,
+                                stored.id,
+                                &properties,
+                            )
+                            .await
+                            .is_err()
+                            {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x25,
+                                    request.response_handle_index(),
+                                    0x8004_010F,
+                                ));
+                                continue;
+                            }
                             session.handles.insert(
                                 handle,
                                 MapiObject::SavedAttachment {

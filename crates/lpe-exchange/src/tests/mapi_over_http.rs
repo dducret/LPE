@@ -281,6 +281,335 @@ async fn mapi_over_http_custom_named_property_round_trips_on_supported_object() 
 }
 
 #[tokio::test]
+async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kinds() {
+    let account = FakeStore::account();
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "34343434-3434-3434-3434-343434343434";
+    let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let task_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let note_id = Uuid::parse_str("f1f1f1f1-f1f1-f1f1-f1f1-f1f1f1f1f1f1").unwrap();
+    let journal_id = Uuid::parse_str("f2f2f2f2-f2f2-f2f2-f2f2-f2f2f2f2f2f2").unwrap();
+    let mut inbox = FakeStore::mailbox(mailbox_id, "inbox", "Inbox");
+    inbox.total_emails = 1;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            mailbox_id,
+            "inbox",
+            "Custom message",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Custom event".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        task_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "tasks", "Tasks",
+        )])),
+        tasks: Arc::new(Mutex::new(vec![ClientTask {
+            id: task_id,
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            is_owned: true,
+            rights: FakeStore::rights(),
+            task_list_id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+            task_list_sort_order: 0,
+            title: "Custom task".to_string(),
+            description: String::new(),
+            status: "needs-action".to_string(),
+            due_at: None,
+            completed_at: None,
+            recurrence_rule: String::new(),
+            sort_order: 0,
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        }])),
+        notes: Arc::new(Mutex::new(vec![ClientNote {
+            id: note_id,
+            title: "Custom note".to_string(),
+            body_text: String::new(),
+            color: "yellow".to_string(),
+            categories_json: "[]".to_string(),
+            created_at: "2026-05-05T08:00:00Z".to_string(),
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        }])),
+        journal_entries: Arc::new(Mutex::new(vec![JournalEntry {
+            id: journal_id,
+            subject: "Custom journal".to_string(),
+            body_text: String::new(),
+            entry_type: "phone_call".to_string(),
+            message_class: "IPM.Activity".to_string(),
+            starts_at: None,
+            ends_at: None,
+            occurred_at: None,
+            companies_json: "[]".to_string(),
+            contacts_json: "[]".to_string(),
+            created_at: "2026-05-05T08:00:00Z".to_string(),
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let stored_custom_values = store.mapi_custom_property_values.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let cases = [
+        (
+            test_mapi_folder_id(5),
+            test_mapi_message_id(message_id),
+            0x8001_001F,
+            "message opaque value",
+        ),
+        (
+            test_mapi_folder_id(16),
+            test_mapi_uuid_id(&event_id),
+            0x8001_001F,
+            "event opaque value",
+        ),
+        (
+            test_mapi_folder_id(19),
+            test_mapi_uuid_id(&task_id),
+            0x8001_001F,
+            "task opaque value",
+        ),
+        (
+            test_mapi_folder_id(18),
+            test_mapi_uuid_id(&note_id),
+            0x8001_001F,
+            "note opaque value",
+        ),
+        (
+            test_mapi_folder_id(17),
+            test_mapi_uuid_id(&journal_id),
+            0x8001_001F,
+            "journal opaque value",
+        ),
+    ];
+
+    let mut set_rops = Vec::new();
+    for (index, (folder_id, object_id, tag, value)) in cases.iter().enumerate() {
+        let folder_handle = 1 + (index as u8) * 2;
+        let object_handle = folder_handle + 1;
+        let mut property_values = Vec::new();
+        append_mapi_utf16_property(&mut property_values, *tag, value);
+        append_rop_open_folder(&mut set_rops, 0, folder_handle, *folder_id);
+        append_rop_open_message(
+            &mut set_rops,
+            folder_handle,
+            object_handle,
+            *folder_id,
+            *object_id,
+        );
+        append_rop_set_properties(&mut set_rops, object_handle, 1, &property_values);
+    }
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &set_rops,
+                &[
+                    1,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                ],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    let stored_values = stored_custom_values.lock().unwrap();
+    assert_eq!(stored_values.len(), cases.len());
+    for (_, _, _, value) in cases.iter() {
+        assert!(
+            stored_values
+                .values()
+                .any(|stored| contains_bytes(stored, &utf16z(*value))),
+            "missing stored custom value {value}"
+        );
+    }
+    drop(stored_values);
+
+    let mut delete_rops = Vec::new();
+    for (index, (folder_id, object_id, tag, _value)) in cases.iter().enumerate() {
+        let folder_handle = 1 + (index as u8) * 2;
+        let object_handle = folder_handle + 1;
+        append_rop_open_folder(&mut delete_rops, 0, folder_handle, *folder_id);
+        append_rop_open_message(
+            &mut delete_rops,
+            folder_handle,
+            object_handle,
+            *folder_id,
+            *object_id,
+        );
+        append_rop_delete_properties(&mut delete_rops, object_handle, &[*tag]);
+    }
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(
+                &delete_rops,
+                &[
+                    1,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                    u32::MAX,
+                ],
+            )),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+    assert!(stored_custom_values.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_custom_named_property_set_before_save_persists_on_created_item() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let custom_tag = 0x8001_001F;
+    let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x3001_001F, "Created Custom Contact");
+    append_mapi_utf16_property(&mut property_values, 0x39FE_001F, "created@example.test");
+    append_mapi_utf16_property(&mut property_values, custom_tag, "created opaque value");
+    let mut create_rops = Vec::new();
+    append_rop_create_message(&mut create_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_set_properties(&mut create_rops, 1, 3, &property_values);
+    append_rop_save_changes_message(&mut create_rops, 1, 1);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie.clone());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&create_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+
+    let mut read_rops = Vec::new();
+    append_rop_open_folder(&mut read_rops, 0, 1, test_mapi_folder_id(15));
+    append_rop_open_message(
+        &mut read_rops,
+        1,
+        2,
+        test_mapi_folder_id(15),
+        test_mapi_uuid_id(&contact_id),
+    );
+    append_rop_get_properties_specific(&mut read_rops, 2, &[0x3001_001F, custom_tag]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&read_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Created Custom Contact")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("created opaque value")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_set_properties_rejects_unsupported_canonical_contact_property() {
     let contact_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
     let contacts = Arc::new(Mutex::new(vec![FakeStore::contact(

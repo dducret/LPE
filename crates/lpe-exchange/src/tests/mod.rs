@@ -6,13 +6,14 @@ use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
-    CalendarEventAttachment, ClientReminder, ClientTask, CollaborationCollection,
+    CalendarEventAttachment, ClientNote, ClientReminder, ClientTask, CollaborationCollection,
     CollaborationRights, ConversationAction, DelegateFreeBusyMessageObject, JmapEmail,
     JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, MailboxRule, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput, UpsertConversationActionInput, UpsertSearchFolderInput,
+    JmapMailboxCreateInput, JournalEntry, MailboxRule, ReminderQuery, SavedDraftMessage,
+    SearchFolderDefinition, SieveScriptDocument, Storage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -348,6 +349,8 @@ struct FakeStore {
     tasks: Arc<Mutex<Vec<ClientTask>>>,
     task_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_tasks: Arc<Mutex<Vec<Uuid>>>,
+    notes: Arc<Mutex<Vec<ClientNote>>>,
+    journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
     active_sieve_script: Arc<Mutex<Option<String>>>,
     mailbox_rules: Arc<Mutex<Vec<MailboxRule>>>,
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
@@ -1900,6 +1903,95 @@ impl ExchangeStore for FakeStore {
         self.deleted_tasks.lock().unwrap().push(task_id);
         self.tasks.lock().unwrap().retain(|task| task.id != task_id);
         Box::pin(async move { Ok(()) })
+    }
+
+    fn fetch_mapi_notes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<ClientNote>> {
+        let notes = self.notes.lock().unwrap().clone();
+        Box::pin(async move { Ok(notes) })
+    }
+
+    fn fetch_mapi_notes_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<ClientNote>> {
+        let notes = self
+            .notes
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|note| ids.contains(&note.id))
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(notes) })
+    }
+
+    fn fetch_mapi_journal_entries<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<JournalEntry>> {
+        let entries = self.journal_entries.lock().unwrap().clone();
+        Box::pin(async move { Ok(entries) })
+    }
+
+    fn fetch_mapi_journal_entries_by_ids<'a>(
+        &'a self,
+        _account_id: Uuid,
+        ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<JournalEntry>> {
+        let entries = self
+            .journal_entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|entry| ids.contains(&entry.id))
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(entries) })
+    }
+
+    fn upsert_mapi_note<'a>(&'a self, input: UpsertClientNoteInput) -> StoreFuture<'a, ClientNote> {
+        let note = ClientNote {
+            id: input.id.unwrap_or_else(|| {
+                Uuid::parse_str("f1f1f1f1-f1f1-f1f1-f1f1-f1f1f1f1f1f1").unwrap()
+            }),
+            title: input.title,
+            body_text: input.body_text,
+            color: input.color,
+            categories_json: input.categories_json,
+            created_at: "2026-05-05T08:00:00Z".to_string(),
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        };
+        let mut notes = self.notes.lock().unwrap();
+        notes.retain(|existing| existing.id != note.id);
+        notes.push(note.clone());
+        Box::pin(async move { Ok(note) })
+    }
+
+    fn upsert_mapi_journal_entry<'a>(
+        &'a self,
+        input: UpsertJournalEntryInput,
+    ) -> StoreFuture<'a, JournalEntry> {
+        let entry = JournalEntry {
+            id: input.id.unwrap_or_else(|| {
+                Uuid::parse_str("f2f2f2f2-f2f2-f2f2-f2f2-f2f2f2f2f2f2").unwrap()
+            }),
+            subject: input.subject,
+            body_text: input.body_text,
+            entry_type: input.entry_type,
+            message_class: input.message_class,
+            starts_at: input.starts_at,
+            ends_at: input.ends_at,
+            occurred_at: input.occurred_at,
+            companies_json: input.companies_json,
+            contacts_json: input.contacts_json,
+            created_at: "2026-05-05T08:00:00Z".to_string(),
+            updated_at: "2026-05-05T08:00:00Z".to_string(),
+        };
+        let mut entries = self.journal_entries.lock().unwrap();
+        entries.retain(|existing| existing.id != entry.id);
+        entries.push(entry.clone());
+        Box::pin(async move { Ok(entry) })
     }
 
     fn fetch_jmap_mailboxes<'a>(&'a self, _account_id: Uuid) -> StoreFuture<'a, Vec<JmapMailbox>> {
@@ -5036,6 +5128,14 @@ fn append_rop_set_properties(
     rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
     rops.extend_from_slice(&property_count.to_le_bytes());
     rops.extend_from_slice(property_values);
+}
+
+fn append_rop_delete_properties(rops: &mut Vec<u8>, input: u8, property_tags: &[u32]) {
+    rops.extend_from_slice(&[0x0B, 0x00, input]);
+    rops.extend_from_slice(&(property_tags.len() as u16).to_le_bytes());
+    for tag in property_tags {
+        rops.extend_from_slice(&tag.to_le_bytes());
+    }
 }
 
 fn append_rop_modify_recipients(rops: &mut Vec<u8>, input: u8, rows: &[(u32, u8, &[u8])]) {
