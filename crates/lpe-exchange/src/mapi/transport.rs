@@ -1258,8 +1258,8 @@ where
                 .poll_mapi_notifications(principal.account_id, cursor)
                 .await
             {
-                events = poll.events;
-                event_pending = poll.event_pending;
+                events = session.matching_notifications(poll.events);
+                event_pending = poll.event_pending || !events.is_empty();
                 session.notification_cursor = poll.cursor.or(Some(cursor));
             }
         }

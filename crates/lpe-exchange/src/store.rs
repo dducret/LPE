@@ -2,19 +2,18 @@ use anyhow::Result;
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CanonicalChangeCategory,
-    ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
-    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JournalEntry, MailboxRule,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertSearchFolderInput,
+    AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, ClientNote, ClientReminder,
+    ClientTask, CollaborationCollection, ConversationAction, DelegateFreeBusyMessageObject,
+    JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JournalEntry, MailboxRule, ReminderQuery, SavedDraftMessage,
+    SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
 
-use crate::mapi::notifications::MapiNotificationEvent;
+use crate::mapi::notifications::{MapiNotificationEvent, MapiNotificationKind};
 use crate::mapi::permissions::{owner_permission, rights_from_grant, MapiFolderPermission};
 use crate::mapi::properties::{
     is_reserved_named_property_id, MapiNamedProperty, MapiNamedPropertyKind,
@@ -1824,7 +1823,23 @@ impl ExchangeStore for Storage {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, Option<i64>> {
-        Box::pin(async move { self.fetch_canonical_change_cursor(account_id).await })
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            sqlx::query_scalar::<_, Option<i64>>(
+                r#"
+                SELECT MAX(cursor)
+                FROM mail_change_log
+                WHERE tenant_id = $1
+                  AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+                  AND (retained_until IS NULL OR retained_until > NOW())
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .fetch_one(self.pool())
+            .await
+            .map_err(Into::into)
+        })
     }
 
     fn poll_mapi_notifications<'a>(
@@ -1833,19 +1848,115 @@ impl ExchangeStore for Storage {
         after_cursor: i64,
     ) -> StoreFuture<'a, MapiNotificationPoll> {
         Box::pin(async move {
-            let replay = self
-                .replay_canonical_changes(
-                    account_id,
-                    after_cursor,
-                    &[CanonicalChangeCategory::Mail],
-                    100,
-                )
-                .await?;
-            let cursor = replay.change_set.journal_cursor().or(replay.current_cursor);
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let current_cursor = sqlx::query_scalar::<_, Option<i64>>(
+                r#"
+                SELECT MAX(cursor)
+                FROM mail_change_log
+                WHERE tenant_id = $1
+                  AND (account_id = $2 OR affected_principal_ids @> ARRAY[$2]::uuid[])
+                  AND (retained_until IS NULL OR retained_until > NOW())
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .fetch_one(self.pool())
+            .await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    log.cursor,
+                    log.object_kind,
+                    log.object_id,
+                    log.mailbox_id,
+                    log.change_kind,
+                    log.modseq,
+                    log.summary_json,
+                    scope_box.role AS scope_role,
+                    scope_box.total_messages AS scope_total_messages,
+                    scope_box.unread_messages AS scope_unread_messages,
+                    object_box.role AS object_role,
+                    object_box.parent_mailbox_id AS object_parent_id,
+                    object_box.total_messages AS object_total_messages,
+                    object_box.unread_messages AS object_unread_messages,
+                    parent_box.role AS parent_role,
+                    scope_identity.mapi_object_id AS scope_mapi_object_id,
+                    object_identity.mapi_object_id AS object_mapi_object_id,
+                    parent_identity.mapi_object_id AS parent_mapi_object_id,
+                    message_identity.mapi_object_id AS message_mapi_object_id,
+                    source_identity.mapi_object_id AS source_mapi_object_id
+                FROM mail_change_log log
+                LEFT JOIN mailboxes scope_box
+                  ON scope_box.tenant_id = log.tenant_id
+                 AND scope_box.account_id = log.account_id
+                 AND scope_box.id = log.mailbox_id
+                LEFT JOIN mailboxes object_box
+                  ON object_box.tenant_id = log.tenant_id
+                 AND object_box.account_id = log.account_id
+                 AND object_box.id = log.object_id
+                 AND log.object_kind = 'mailbox'
+                LEFT JOIN mailboxes parent_box
+                  ON parent_box.tenant_id = object_box.tenant_id
+                 AND parent_box.account_id = object_box.account_id
+                 AND parent_box.id = object_box.parent_mailbox_id
+                LEFT JOIN mapi_object_identities scope_identity
+                  ON scope_identity.tenant_id = log.tenant_id
+                 AND scope_identity.account_id = log.account_id
+                 AND scope_identity.object_kind = 'mailbox'
+                 AND scope_identity.canonical_id = log.mailbox_id
+                 AND scope_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities object_identity
+                  ON object_identity.tenant_id = log.tenant_id
+                 AND object_identity.account_id = log.account_id
+                 AND object_identity.object_kind = 'mailbox'
+                 AND object_identity.canonical_id = log.object_id
+                 AND object_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities parent_identity
+                  ON parent_identity.tenant_id = log.tenant_id
+                 AND parent_identity.account_id = log.account_id
+                 AND parent_identity.object_kind = 'mailbox'
+                 AND parent_identity.canonical_id = object_box.parent_mailbox_id
+                 AND parent_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities message_identity
+                  ON message_identity.tenant_id = log.tenant_id
+                 AND message_identity.account_id = log.account_id
+                 AND message_identity.object_kind = 'message'
+                 AND message_identity.canonical_id = (log.summary_json->>'messageId')::uuid
+                 AND message_identity.deleted_at IS NULL
+                LEFT JOIN mapi_object_identities source_identity
+                  ON source_identity.tenant_id = log.tenant_id
+                 AND source_identity.account_id = log.account_id
+                 AND source_identity.object_kind = 'mailbox'
+                 AND source_identity.canonical_id = (log.summary_json->>'sourceMailboxId')::uuid
+                 AND source_identity.deleted_at IS NULL
+                WHERE log.tenant_id = $1
+                  AND log.cursor > $2
+                  AND (log.account_id = $3 OR log.affected_principal_ids @> ARRAY[$3]::uuid[])
+                  AND (log.retained_until IS NULL OR log.retained_until > NOW())
+                  AND log.object_kind IN ('mailbox', 'mailbox_message', 'attachment')
+                ORDER BY log.cursor ASC
+                LIMIT 101
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(after_cursor)
+            .bind(account_id)
+            .fetch_all(self.pool())
+            .await?;
+            let truncated = rows.len() > 100;
+            let mut cursor = None;
+            let mut events = Vec::new();
+            for row in rows.into_iter().take(100) {
+                cursor = Some(row.get("cursor"));
+                if let Some(event) = mapi_notification_event_from_change_row(row) {
+                    events.push(event);
+                }
+            }
+            let cursor = cursor.or(current_cursor);
             Ok(MapiNotificationPoll {
-                event_pending: replay.truncated || !replay.change_set.is_empty(),
+                event_pending: truncated || !events.is_empty(),
                 cursor,
-                events: Vec::new(),
+                events,
             })
         })
     }
@@ -3525,6 +3636,84 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         object_id: row.get::<i64, _>("mapi_object_id") as u64,
         source_key: row.get("source_key"),
     })
+}
+
+fn mapi_notification_event_from_change_row(
+    row: sqlx::postgres::PgRow,
+) -> Option<MapiNotificationEvent> {
+    let object_kind = row.get::<String, _>("object_kind");
+    let change_kind = row.get::<String, _>("change_kind");
+    let event_mask = mapi_notification_event_mask_for_change(&change_kind);
+    let cursor = row.get::<i64, _>("cursor");
+    let modseq = row.get::<i64, _>("modseq").max(0) as u64;
+    match object_kind.as_str() {
+        "mailbox" => {
+            let changed_folder_id = mapi_folder_id_from_role_or_identity(
+                row.try_get::<String, _>("object_role").ok().as_deref(),
+                row.try_get::<i64, _>("object_mapi_object_id").ok(),
+            )?;
+            let parent_folder_id = row
+                .try_get::<String, _>("parent_role")
+                .ok()
+                .as_deref()
+                .and_then(crate::mapi_store::reserved_folder_counter_for_role)
+                .map(crate::mapi::identity::mapi_store_id)
+                .or_else(|| {
+                    row.try_get::<i64, _>("parent_mapi_object_id")
+                        .ok()
+                        .map(|value| value as u64)
+                })
+                .or(Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID));
+            Some(MapiNotificationEvent::canonical(
+                MapiNotificationKind::Hierarchy,
+                event_mask,
+                parent_folder_id?,
+                Some(changed_folder_id),
+                None,
+                cursor,
+                modseq,
+                row.try_get("object_total_messages").ok(),
+                row.try_get("object_unread_messages").ok(),
+            ))
+        }
+        "mailbox_message" | "attachment" => {
+            let folder_id = mapi_folder_id_from_role_or_identity(
+                row.try_get::<String, _>("scope_role").ok().as_deref(),
+                row.try_get::<i64, _>("scope_mapi_object_id").ok(),
+            )?;
+            Some(MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                event_mask,
+                folder_id,
+                row.try_get::<i64, _>("message_mapi_object_id")
+                    .ok()
+                    .map(|value| value as u64),
+                row.try_get::<i64, _>("source_mapi_object_id")
+                    .ok()
+                    .map(|value| value as u64),
+                cursor,
+                modseq,
+                row.try_get("scope_total_messages").ok(),
+                row.try_get("scope_unread_messages").ok(),
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn mapi_folder_id_from_role_or_identity(role: Option<&str>, identity: Option<i64>) -> Option<u64> {
+    role.and_then(crate::mapi_store::reserved_folder_counter_for_role)
+        .map(crate::mapi::identity::mapi_store_id)
+        .or_else(|| identity.map(|value| value as u64))
+}
+
+fn mapi_notification_event_mask_for_change(change_kind: &str) -> u16 {
+    match change_kind {
+        "created" => 0x0004,
+        "destroyed" | "deleted" | "expunged" => 0x0008,
+        "moved" => 0x0020,
+        _ => 0x0010,
+    }
 }
 
 #[allow(dead_code)]

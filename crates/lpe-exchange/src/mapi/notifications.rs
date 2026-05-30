@@ -12,7 +12,7 @@ pub(in crate::mapi) struct MapiNotificationRegistration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::mapi) enum MapiNotificationKind {
+pub(crate) enum MapiNotificationKind {
     Content,
     Hierarchy,
 }
@@ -21,8 +21,13 @@ pub(in crate::mapi) enum MapiNotificationKind {
 pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) folder_id: u64,
     pub(in crate::mapi) message_id: Option<u64>,
+    pub(in crate::mapi) old_folder_id: Option<u64>,
     pub(in crate::mapi) kind: MapiNotificationKind,
     pub(in crate::mapi) event_mask: u16,
+    pub(in crate::mapi) change_cursor: Option<i64>,
+    pub(in crate::mapi) modseq: Option<u64>,
+    pub(in crate::mapi) total_messages: Option<i32>,
+    pub(in crate::mapi) unread_messages: Option<i32>,
 }
 
 impl MapiNotificationEvent {
@@ -30,8 +35,13 @@ impl MapiNotificationEvent {
         Self {
             folder_id,
             message_id,
+            old_folder_id: None,
             kind: MapiNotificationKind::Content,
             event_mask: MapiNotificationEventMask::TableModified.as_u16(),
+            change_cursor: None,
+            modseq: None,
+            total_messages: None,
+            unread_messages: None,
         }
     }
 
@@ -39,8 +49,37 @@ impl MapiNotificationEvent {
         Self {
             folder_id,
             message_id: changed_folder_id,
+            old_folder_id: None,
             kind: MapiNotificationKind::Hierarchy,
             event_mask: MapiNotificationEventMask::TableModified.as_u16(),
+            change_cursor: None,
+            modseq: None,
+            total_messages: None,
+            unread_messages: None,
+        }
+    }
+
+    pub(crate) fn canonical(
+        kind: MapiNotificationKind,
+        event_mask: u16,
+        folder_id: u64,
+        message_id: Option<u64>,
+        old_folder_id: Option<u64>,
+        change_cursor: i64,
+        modseq: u64,
+        total_messages: Option<i32>,
+        unread_messages: Option<i32>,
+    ) -> Self {
+        Self {
+            folder_id,
+            message_id,
+            old_folder_id,
+            kind,
+            event_mask,
+            change_cursor: Some(change_cursor),
+            modseq: Some(modseq),
+            total_messages,
+            unread_messages,
         }
     }
 }
@@ -66,7 +105,12 @@ pub(in crate::mapi) fn notification_wait_body_with_events(
             MapiNotificationKind::Content => 1,
             MapiNotificationKind::Hierarchy => 2,
         });
-        body.push(u8::from(event.message_id.is_some()));
+        body.push(
+            u8::from(event.message_id.is_some())
+                | (u8::from(event.old_folder_id.is_some()) << 1)
+                | (u8::from(event.total_messages.is_some() || event.unread_messages.is_some())
+                    << 2),
+        );
         body.extend_from_slice(&wire_id_bytes_from_object_id(event.folder_id).unwrap_or([0; 8]));
         body.extend_from_slice(
             &event
@@ -74,6 +118,16 @@ pub(in crate::mapi) fn notification_wait_body_with_events(
                 .and_then(wire_id_bytes_from_object_id)
                 .unwrap_or([0; 8]),
         );
+        body.extend_from_slice(
+            &event
+                .old_folder_id
+                .and_then(wire_id_bytes_from_object_id)
+                .unwrap_or([0; 8]),
+        );
+        write_u64(&mut body, event.change_cursor.unwrap_or_default() as u64);
+        write_u64(&mut body, event.modseq.unwrap_or_default());
+        write_u32(&mut body, event.total_messages.unwrap_or(-1) as u32);
+        write_u32(&mut body, event.unread_messages.unwrap_or(-1) as u32);
     }
     body
 }
@@ -90,12 +144,20 @@ pub(in crate::mapi) fn registration_matches_event(
 
     match event.kind {
         MapiNotificationKind::Content => {
-            registration.notification_types & MAPI_CONTENT_NOTIFICATION_MASK != 0
+            notification_type_matches(registration.notification_types, event.event_mask)
+                && registration.notification_types & MAPI_CONTENT_NOTIFICATION_MASK != 0
         }
         MapiNotificationKind::Hierarchy => {
-            registration.notification_types & MAPI_HIERARCHY_NOTIFICATION_MASK != 0
+            notification_type_matches(registration.notification_types, event.event_mask)
+                && registration.notification_types & MAPI_HIERARCHY_NOTIFICATION_MASK != 0
         }
     }
+}
+
+fn notification_type_matches(requested: u16, event_mask: u16) -> bool {
+    requested & event_mask != 0
+        || requested & MapiNotificationEventMask::TableModified.as_u16() != 0
+        || event_mask == MapiNotificationEventMask::TableModified.as_u16()
 }
 
 pub(in crate::mapi) fn notification_registration_from_request(

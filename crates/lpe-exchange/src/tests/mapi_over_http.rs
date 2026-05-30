@@ -17848,6 +17848,84 @@ async fn mapi_over_http_notification_wait_polls_canonical_change_cursor() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_notification_wait_serializes_canonical_change_details() {
+    let folder_id = test_mapi_folder_id(5);
+    let message_id = test_mapi_message_id("99999999-9999-9999-9999-999999999999");
+    let source_folder_id = test_mapi_folder_id(14);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(7))),
+        mapi_notification_polls: Arc::new(Mutex::new(vec![MapiNotificationPoll {
+            event_pending: true,
+            cursor: Some(8),
+            events: vec![
+                crate::mapi::notifications::MapiNotificationEvent::canonical(
+                    crate::mapi::notifications::MapiNotificationKind::Content,
+                    0x0020,
+                    folder_id,
+                    Some(message_id),
+                    Some(source_folder_id),
+                    8,
+                    44,
+                    Some(12),
+                    Some(3),
+                ),
+            ],
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, folder_id);
+    rops.push(0);
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0x0020u16.to_le_bytes());
+    rops.push(1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut wait_headers = mapi_headers("NotificationWait");
+    wait_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &wait_headers, b"")
+        .await
+        .unwrap();
+    let body = response_bytes(response).await;
+    assert_eq!(u32::from_le_bytes(body[8..12].try_into().unwrap()), 1);
+    assert_eq!(u32::from_le_bytes(body[12..16].try_into().unwrap()), 1);
+    assert_eq!(u16::from_le_bytes(body[16..18].try_into().unwrap()), 0x0020);
+    assert_eq!(body[18], 1);
+    assert_eq!(body[19], 0b0000_0111);
+    assert_eq!(&body[20..28], &mapi_wire_id_bytes(folder_id));
+    assert_eq!(&body[28..36], &mapi_wire_id_bytes(message_id));
+    assert_eq!(&body[36..44], &mapi_wire_id_bytes(source_folder_id));
+    assert_eq!(u64::from_le_bytes(body[44..52].try_into().unwrap()), 8);
+    assert_eq!(u64::from_le_bytes(body[52..60].try_into().unwrap()), 44);
+    assert_eq!(u32::from_le_bytes(body[60..64].try_into().unwrap()), 12);
+    assert_eq!(u32::from_le_bytes(body[64..68].try_into().unwrap()), 3);
+}
+
+#[tokio::test]
 async fn mapi_over_http_notification_wait_reports_hierarchy_event_after_registered_create_folder() {
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {

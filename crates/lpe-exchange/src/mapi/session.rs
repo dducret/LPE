@@ -744,6 +744,24 @@ impl MapiSession {
         self.pending_notifications.drain(..).collect()
     }
 
+    pub(in crate::mapi) fn matching_notifications(
+        &self,
+        events: Vec<MapiNotificationEvent>,
+    ) -> Vec<MapiNotificationEvent> {
+        events
+            .into_iter()
+            .filter(|event| {
+                self.handles.values().any(|object| {
+                    matches!(
+                        object,
+                        MapiObject::NotificationSubscription { registration }
+                            if registration_matches_event(registration, *event)
+                    )
+                })
+            })
+            .collect()
+    }
+
     pub(in crate::mapi) fn hierarchy_sync_completed(&self) -> bool {
         self.post_hierarchy_actions
             .last_completed_hierarchy_sync_root
