@@ -1,4 +1,5 @@
 use super::notifications::*;
+use super::nspi::{normalize_nspi_lookup_value, principal_legacy_dn_aliases};
 use super::permissions::*;
 use super::properties::*;
 use super::rop::*;
@@ -3078,6 +3079,49 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect::<Vec<_>>()
         .join("")
+}
+
+fn log_rop_logon_request_identity(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request: &RopLogonRequest,
+) {
+    let essdn = decode_logon_identity_bytes(&request.essdn);
+    let normalized_essdn = normalize_nspi_lookup_value(&essdn);
+    let aliases = principal_legacy_dn_aliases(principal);
+    let essdn_matches_principal = !normalized_essdn.is_empty()
+        && aliases
+            .iter()
+            .any(|alias| normalized_essdn == alias.to_ascii_lowercase());
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0xfe",
+        mapi_request_id = request_id,
+        logon_flags = %format!("{:#04x}", request.logon_flags),
+        logon_output_handle_index = request.output_handle_index,
+        logon_prefix_bytes = request.prefix.len(),
+        logon_prefix = %bytes_to_hex(&request.prefix),
+        logon_essdn = %essdn,
+        logon_essdn_bytes = request.essdn.len(),
+        principal_aliases = %aliases.join("|"),
+        essdn_matches_principal,
+        message = "rca debug mapi logon request identity"
+    );
+}
+
+fn decode_logon_identity_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    let bytes = bytes.split(|byte| *byte == 0).next().unwrap_or(bytes);
+    String::from_utf8_lossy(bytes).trim().to_string()
 }
 
 fn log_calendar_folder_contract(
@@ -9514,6 +9558,9 @@ where
                 input_object_mut(session, &handle_slots, &request),
             )),
             Some(RopId::Logon) => {
+                if let TypedRopRequest::Logon(logon_request) = &typed_request {
+                    log_rop_logon_request_identity(principal, request_id, logon_request);
+                }
                 if request.payload.first().copied().unwrap_or(0) & 0x01 == 0 {
                     responses.extend_from_slice(&unsupported_rop_response(
                         0xFE,

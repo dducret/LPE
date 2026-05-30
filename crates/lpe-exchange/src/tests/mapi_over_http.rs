@@ -23791,6 +23791,31 @@ async fn mapi_over_http_dn_to_mid_resolves_outlook_unprefixed_legacy_dn_to_princ
 }
 
 #[tokio::test]
+async fn mapi_over_http_dn_to_mid_resolves_connect_display_name_legacy_dn_to_principal() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request =
+        b"\0\0\0\0\xff\x01\0\0\0/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=alice\0\0\0\0\0";
+    let headers = nspi_bound_headers(&service, "DNToMId").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let matched_id = u32::from_le_bytes(body[13..17].try_into().unwrap());
+    assert_ne!(matched_id, 0);
+    assert_eq!(matched_id & 0x8000_0000, 0x8000_0000);
+    assert_eq!(u32::from_le_bytes(body[17..21].try_into().unwrap()), 0);
+}
+
+#[tokio::test]
 async fn mapi_over_http_unbind_consumes_nspi_session() {
     let store = FakeStore {
         session: Some(FakeStore::account()),

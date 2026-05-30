@@ -481,35 +481,100 @@ where
         );
     }
     let values = resolve_names_requested_values(request);
-    let matched_mid = values
-        .first()
-        .and_then(|value| nspi_match_entry(principal.account_id, &entries, value))
-        .map(|entry| nspi_entry_id(principal.account_id, entry))
-        .or_else(|| {
-            values
-                .iter()
-                .any(|value| nspi_lookup_matches_principal(value, principal))
-                .then(|| principal_minimal_entry_id(principal))
-        })
-        .or_else(|| {
-            values
-                .is_empty()
-                .then(|| {
-                    entries
-                        .iter()
-                        .find(|entry| nspi_entry_is_principal(entry, principal))
-                })
-                .flatten()
-                .map(|entry| nspi_entry_id(principal.account_id, entry))
-        });
+    let matched = nspi_dn_to_mid_match(principal, &entries, &values);
+    log_nspi_dn_to_mid_debug(principal, request_id, request, &values, &matched);
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
     body.push(1);
     write_u32(&mut body, 1);
-    write_u32(&mut body, matched_mid.unwrap_or(0));
+    write_u32(&mut body, matched.mid.unwrap_or(0));
     write_u32(&mut body, 0);
     mapi_response("DNToMId", request_id, 0, body, None)
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct NspiDnToMidMatch {
+    mid: Option<u32>,
+    source: &'static str,
+}
+
+fn nspi_dn_to_mid_match(
+    principal: &AccountPrincipal,
+    entries: &[ExchangeAddressBookEntry],
+    values: &[String],
+) -> NspiDnToMidMatch {
+    if let Some(entry) = values
+        .first()
+        .and_then(|value| nspi_match_entry(principal.account_id, entries, value))
+    {
+        return NspiDnToMidMatch {
+            mid: Some(nspi_entry_id(principal.account_id, entry)),
+            source: "address_book_entry",
+        };
+    }
+    if values
+        .iter()
+        .any(|value| nspi_lookup_matches_principal(value, principal))
+    {
+        return NspiDnToMidMatch {
+            mid: Some(principal_minimal_entry_id(principal)),
+            source: "principal_alias",
+        };
+    }
+    if let Some(entry) = values
+        .is_empty()
+        .then(|| {
+            entries
+                .iter()
+                .find(|entry| nspi_entry_is_principal(entry, principal))
+        })
+        .flatten()
+    {
+        return NspiDnToMidMatch {
+            mid: Some(nspi_entry_id(principal.account_id, entry)),
+            source: "principal_default",
+        };
+    }
+    NspiDnToMidMatch {
+        mid: None,
+        source: "none",
+    }
+}
+
+fn log_nspi_dn_to_mid_debug(
+    principal: &AccountPrincipal,
+    request_id: &str,
+    request: &[u8],
+    values: &[String],
+    matched: &NspiDnToMidMatch,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "nspi",
+        tenant_id = %principal.tenant_id,
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "DNToMId",
+        mapi_request_id = request_id,
+        request_body_bytes = request.len(),
+        requested_value_count = values.len(),
+        requested_values = %format_nspi_lookup_values_for_debug(values),
+        principal_aliases = %format_nspi_lookup_values_for_debug(&principal_legacy_dn_aliases(principal)),
+        matched_mid = %matched.mid.map(|mid| format!("{mid:#010x}")).unwrap_or_default(),
+        match_source = matched.source,
+        message = "rca debug nspi dn to mid"
+    );
+}
+
+fn format_nspi_lookup_values_for_debug(values: &[String]) -> String {
+    values
+        .iter()
+        .take(12)
+        .map(|value| value.chars().take(180).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 pub(in crate::mapi) fn nspi_property_tags_response(
@@ -1630,7 +1695,17 @@ pub(in crate::mapi) fn nspi_entry_legacy_dn_with_prefix(
         }
         ExchangeAddressBookEntryKind::Contact => format!("{}-{}", entry.email, entry.id),
     };
-    let legacy_user = source
+    let legacy_user = nspi_legacy_cn_from_source(&source);
+    let legacy_cn = if include_kind_prefix {
+        format!("{prefix}-{legacy_user}")
+    } else {
+        legacy_user
+    };
+    nspi_legacy_dn_from_cn(&legacy_cn)
+}
+
+fn nspi_legacy_cn_from_source(source: &str) -> String {
+    source
         .chars()
         .map(|ch| {
             if ch.is_ascii_alphanumeric() {
@@ -1639,13 +1714,11 @@ pub(in crate::mapi) fn nspi_entry_legacy_dn_with_prefix(
                 '-'
             }
         })
-        .collect::<String>();
-    let legacy_cn = if include_kind_prefix {
-        format!("{prefix}-{legacy_user}")
-    } else {
-        legacy_user
-    };
-    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_cn}")
+        .collect::<String>()
+}
+
+fn nspi_legacy_dn_from_cn(cn: &str) -> String {
+    format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={cn}")
 }
 
 fn nspi_entry_alias(entry: &ExchangeAddressBookEntry) -> String {
@@ -1671,10 +1744,37 @@ pub(in crate::mapi) fn nspi_lookup_matches_principal(
 ) -> bool {
     let value = normalize_nspi_lookup_value(value);
     let email = principal.email.to_ascii_lowercase();
-    let principal_entry = principal_address_book_entry(principal);
     value == email
-        || value == nspi_entry_legacy_dn(&principal_entry).to_ascii_lowercase()
-        || value == nspi_entry_unprefixed_legacy_dn(&principal_entry).to_ascii_lowercase()
+        || principal_legacy_dn_aliases(principal)
+            .iter()
+            .any(|alias| value == alias.to_ascii_lowercase())
+}
+
+pub(in crate::mapi) fn principal_legacy_dn_aliases(principal: &AccountPrincipal) -> Vec<String> {
+    let principal_entry = principal_address_book_entry(principal);
+    let mut aliases = vec![
+        nspi_entry_legacy_dn(&principal_entry),
+        nspi_entry_unprefixed_legacy_dn(&principal_entry),
+    ];
+    push_principal_legacy_dn_alias(&mut aliases, &principal.display_name);
+    if let Some((local_part, _)) = principal.email.split_once('@') {
+        push_principal_legacy_dn_alias(&mut aliases, local_part);
+    }
+    aliases.sort_by_key(|alias| alias.to_ascii_lowercase());
+    aliases.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    aliases
+}
+
+fn push_principal_legacy_dn_alias(aliases: &mut Vec<String>, source: &str) {
+    let source = source.trim();
+    if source.is_empty() {
+        return;
+    }
+    let cn = nspi_legacy_cn_from_source(source);
+    if cn.is_empty() {
+        return;
+    }
+    aliases.push(nspi_legacy_dn_from_cn(&cn));
 }
 
 pub(in crate::mapi) fn nspi_requested_entry<'a>(
@@ -2121,6 +2221,29 @@ mod tests {
                 .chain(std::iter::once(0))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn principal_lookup_accepts_autodiscover_and_connect_legacy_dn_aliases() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::from_u128(0xaaaaaaaa_aaaa_aaaa_aaaa_aaaaaaaaaaaa),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+
+        assert!(nspi_lookup_matches_principal(
+            "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test-l-p-e-ch",
+            &principal
+        ));
+        assert!(nspi_lookup_matches_principal(
+            "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=acct-test-l-p-e-ch",
+            &principal
+        ));
+        assert!(nspi_lookup_matches_principal(
+            "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn=test",
+            &principal
+        ));
     }
 
     #[test]
