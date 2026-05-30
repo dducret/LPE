@@ -549,6 +549,11 @@ where
             reserved_global_counter: None,
             source_key: None,
         })
+        .chain(crate::mapi_store::collaboration_folder_identity_requests(
+            &contact_collections,
+            &calendar_collections,
+            &task_collections,
+        ))
         .chain(events.iter().map(|event| MapiIdentityRequest {
             object_kind: MapiIdentityObjectKind::CalendarEvent,
             canonical_id: event.id,

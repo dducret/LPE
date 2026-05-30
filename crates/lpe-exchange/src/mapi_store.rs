@@ -5,6 +5,7 @@ use lpe_storage::{
     DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule,
     ReminderQuery, SearchFolderDefinition,
 };
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::mapi::permissions::{
@@ -1079,7 +1080,9 @@ impl<T: ExchangeStore> MapiStore for T {
             let identity_requests = mapi_identity_requests(
                 &mailboxes,
                 &emails,
+                &contact_collections,
                 &calendar_collections,
+                &task_collections,
                 &contacts,
                 &events,
                 &tasks,
@@ -1134,7 +1137,9 @@ impl<T: ExchangeStore> MapiStore for T {
 fn mapi_identity_requests(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    contact_collections: &[CollaborationCollection],
     calendar_collections: &[CollaborationCollection],
+    task_collections: &[CollaborationCollection],
     contacts: &[AccessibleContact],
     events: &[AccessibleEvent],
     tasks: &[ClientTask],
@@ -1153,6 +1158,11 @@ fn mapi_identity_requests(
         reserved_global_counter: reserved_folder_counter_for_role(&mailbox.role),
         source_key: None,
     }));
+    requests.extend(collaboration_folder_identity_requests(
+        contact_collections,
+        calendar_collections,
+        task_collections,
+    ));
     requests.extend(emails.iter().map(|email| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::Message,
         canonical_id: email.id,
@@ -1241,6 +1251,40 @@ fn mapi_identity_requests(
     requests
 }
 
+pub(crate) fn collaboration_folder_identity_requests(
+    contact_collections: &[CollaborationCollection],
+    calendar_collections: &[CollaborationCollection],
+    task_collections: &[CollaborationCollection],
+) -> Vec<MapiIdentityRequest> {
+    contact_collections
+        .iter()
+        .filter_map(|collection| {
+            collaboration_folder_identity_canonical_id(
+                MapiCollaborationFolderKind::Contacts,
+                collection,
+            )
+        })
+        .chain(calendar_collections.iter().filter_map(|collection| {
+            collaboration_folder_identity_canonical_id(
+                MapiCollaborationFolderKind::Calendar,
+                collection,
+            )
+        }))
+        .chain(task_collections.iter().filter_map(|collection| {
+            collaboration_folder_identity_canonical_id(
+                MapiCollaborationFolderKind::Task,
+                collection,
+            )
+        }))
+        .map(|canonical_id| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::Mailbox,
+            canonical_id,
+            reserved_global_counter: None,
+            source_key: None,
+        })
+        .collect()
+}
+
 pub(crate) fn default_calendar_folder_identity_request(
     calendar_collections: &[CollaborationCollection],
 ) -> Option<MapiIdentityRequest> {
@@ -1310,37 +1354,58 @@ fn mapi_collaboration_folder_id(
         (MapiCollaborationFolderKind::Task, "default" | "tasks") => {
             crate::mapi::identity::TASKS_FOLDER_ID
         }
-        _ => collection
-            .id
-            .parse::<Uuid>()
-            .ok()
-            .or_else(|| {
-                collection
-                    .id
-                    .rsplit('-')
-                    .next()
-                    .and_then(|value| Uuid::parse_str(value).ok())
-            })
+        _ => collaboration_folder_identity_canonical_id(kind, collection)
             .and_then(|id| crate::mapi::identity::mapped_mapi_object_id(&id))
-            .unwrap_or_else(|| {
-                let seed = match kind {
-                    MapiCollaborationFolderKind::Contacts => 1_000,
-                    MapiCollaborationFolderKind::Calendar => 2_000,
-                    MapiCollaborationFolderKind::Task => 3_000,
-                };
-                crate::mapi::identity::mapi_store_id(seed + stable_text_counter(&collection.id))
-            }),
+            .expect("MAPI collaboration folder identity mapping missing"),
     }
+}
+
+fn collaboration_folder_identity_canonical_id(
+    kind: MapiCollaborationFolderKind,
+    collection: &CollaborationCollection,
+) -> Option<Uuid> {
+    collaboration_collection_identity_key(kind, &collection.id)
+}
+
+fn collaboration_collection_identity_key(
+    kind: MapiCollaborationFolderKind,
+    collection_id: &str,
+) -> Option<Uuid> {
+    match (kind, collection_id) {
+        (MapiCollaborationFolderKind::Contacts, "default" | "contacts")
+        | (MapiCollaborationFolderKind::Contacts, "suggested_contacts")
+        | (MapiCollaborationFolderKind::Contacts, "quick_contacts")
+        | (MapiCollaborationFolderKind::Contacts, "im_contact_list")
+        | (MapiCollaborationFolderKind::Calendar, "default" | "calendar")
+        | (MapiCollaborationFolderKind::Task, "default" | "tasks") => None,
+        _ => Some(deterministic_collaboration_folder_uuid(kind, collection_id)),
+    }
+}
+
+fn deterministic_collaboration_folder_uuid(
+    kind: MapiCollaborationFolderKind,
+    collection_id: &str,
+) -> Uuid {
+    let mut hash = Sha256::new();
+    hash.update(b"lpe:mapi:collaboration-folder:v1");
+    hash.update([0]);
+    hash.update(match kind {
+        MapiCollaborationFolderKind::Contacts => b"contacts".as_slice(),
+        MapiCollaborationFolderKind::Calendar => b"calendar".as_slice(),
+        MapiCollaborationFolderKind::Task => b"task".as_slice(),
+    });
+    hash.update([0]);
+    hash.update(collection_id.as_bytes());
+    let digest = hash.finalize();
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
 }
 
 fn task_collection_matches(task: &ClientTask, collection_id: &str) -> bool {
     matches!(collection_id, "tasks" | "default") || task.task_list_id.to_string() == collection_id
-}
-
-fn stable_text_counter(value: &str) -> u64 {
-    value.bytes().fold(0u64, |acc, byte| {
-        acc.wrapping_mul(131).wrapping_add(u64::from(byte))
-    }) & 0x0000_FFFF_FFFF_FFFF
 }
 
 pub(crate) fn reserved_folder_counter_for_role(role: &str) -> Option<u64> {
@@ -1695,6 +1760,178 @@ mod tests {
                 crate::mapi::identity::mapi_store_id(92)
             )
             .is_some());
+    }
+
+    #[test]
+    fn collaboration_folder_identity_requests_cover_custom_and_shared_collections() {
+        let owner_id = Uuid::parse_str("99999999-9999-4999-8999-999999999999").unwrap();
+        let custom_calendar_id = Uuid::parse_str("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa").unwrap();
+        let rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        };
+        let contact_collections = vec![CollaborationCollection {
+            id: format!("shared-contacts-{owner_id}"),
+            kind: "contacts".to_string(),
+            owner_account_id: owner_id,
+            owner_email: "owner@example.test".to_string(),
+            owner_display_name: "Owner".to_string(),
+            display_name: "Owner Contacts".to_string(),
+            is_owned: false,
+            rights: rights.clone(),
+        }];
+        let calendar_collections = vec![
+            CollaborationCollection {
+                id: custom_calendar_id.to_string(),
+                kind: "calendar".to_string(),
+                owner_account_id: owner_id,
+                owner_email: "owner@example.test".to_string(),
+                owner_display_name: "Owner".to_string(),
+                display_name: "Custom".to_string(),
+                is_owned: true,
+                rights: rights.clone(),
+            },
+            CollaborationCollection {
+                id: format!("shared-calendar-{owner_id}"),
+                kind: "calendar".to_string(),
+                owner_account_id: owner_id,
+                owner_email: "owner@example.test".to_string(),
+                owner_display_name: "Owner".to_string(),
+                display_name: "Owner Calendar".to_string(),
+                is_owned: false,
+                rights: rights.clone(),
+            },
+        ];
+        let task_collections = vec![CollaborationCollection {
+            id: format!("shared-tasks-{owner_id}"),
+            kind: "tasks".to_string(),
+            owner_account_id: owner_id,
+            owner_email: "owner@example.test".to_string(),
+            owner_display_name: "Owner".to_string(),
+            display_name: "Owner Tasks".to_string(),
+            is_owned: false,
+            rights,
+        }];
+
+        let requests = collaboration_folder_identity_requests(
+            &contact_collections,
+            &calendar_collections,
+            &task_collections,
+        );
+        let canonical_ids = requests
+            .iter()
+            .map(|request| request.canonical_id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(requests.len(), 4);
+        assert!(requests
+            .iter()
+            .all(|request| request.object_kind == MapiIdentityObjectKind::Mailbox));
+        assert_eq!(
+            canonical_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            4
+        );
+        assert!(!canonical_ids.contains(&owner_id));
+        assert!(!canonical_ids.contains(&custom_calendar_id));
+    }
+
+    #[test]
+    fn snapshot_uses_allocated_identities_for_custom_and_shared_collaboration_folders() {
+        let owner_id = Uuid::parse_str("99999999-9999-4999-8999-999999999999").unwrap();
+        let rights = CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        };
+        let contact_collection = CollaborationCollection {
+            id: format!("shared-contacts-{owner_id}"),
+            kind: "contacts".to_string(),
+            owner_account_id: owner_id,
+            owner_email: "owner@example.test".to_string(),
+            owner_display_name: "Owner".to_string(),
+            display_name: "Owner Contacts".to_string(),
+            is_owned: false,
+            rights: rights.clone(),
+        };
+        let calendar_collection = CollaborationCollection {
+            id: format!("shared-calendar-{owner_id}"),
+            kind: "calendar".to_string(),
+            owner_account_id: owner_id,
+            owner_email: "owner@example.test".to_string(),
+            owner_display_name: "Owner".to_string(),
+            display_name: "Owner Calendar".to_string(),
+            is_owned: false,
+            rights: rights.clone(),
+        };
+        let task_collection = CollaborationCollection {
+            id: format!("shared-tasks-{owner_id}"),
+            kind: "tasks".to_string(),
+            owner_account_id: owner_id,
+            owner_email: "owner@example.test".to_string(),
+            owner_display_name: "Owner".to_string(),
+            display_name: "Owner Tasks".to_string(),
+            is_owned: false,
+            rights,
+        };
+        let cases = [
+            (
+                MapiCollaborationFolderKind::Contacts,
+                &contact_collection,
+                crate::mapi::identity::mapi_store_id(201),
+            ),
+            (
+                MapiCollaborationFolderKind::Calendar,
+                &calendar_collection,
+                crate::mapi::identity::mapi_store_id(202),
+            ),
+            (
+                MapiCollaborationFolderKind::Task,
+                &task_collection,
+                crate::mapi::identity::mapi_store_id(203),
+            ),
+        ];
+        for (kind, collection, object_id) in cases {
+            let canonical_id =
+                collaboration_folder_identity_canonical_id(kind, collection).unwrap();
+            crate::mapi::identity::remember_mapi_identity(canonical_id, object_id);
+        }
+
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![contact_collection],
+            vec![calendar_collection],
+            vec![task_collection],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let folder_ids = snapshot
+            .collaboration_folders()
+            .iter()
+            .map(|folder| folder.id)
+            .collect::<Vec<_>>();
+
+        assert!(folder_ids.contains(&crate::mapi::identity::mapi_store_id(201)));
+        assert!(folder_ids.contains(&crate::mapi::identity::mapi_store_id(202)));
+        assert!(folder_ids.contains(&crate::mapi::identity::mapi_store_id(203)));
+        assert_eq!(
+            folder_ids
+                .iter()
+                .copied()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            3
+        );
     }
 
     #[test]

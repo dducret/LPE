@@ -12,6 +12,7 @@ lpe-mail-auth = { path = "../lpe-mail-auth" }
 lpe-magika = { path = "../lpe-magika" }
 lpe-core = { path = "../lpe-core" }
 lpe-storage = { path = "../lpe-storage" }
+sha2.workspace = true
 sqlx.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
