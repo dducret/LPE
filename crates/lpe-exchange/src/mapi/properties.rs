@@ -217,11 +217,6 @@ pub(in crate::mapi) const PID_TAG_OST_OSTID: u32 = 0x7C04_0102;
 pub(in crate::mapi) const PID_TAG_MID: u32 = 0x674A_0014;
 pub(in crate::mapi) const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
 pub(in crate::mapi) const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
-pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_TEMPLATE_ID: u32 = 0x6841_0003;
-pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_ID: u32 = 0x6842_0102;
-pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_DEFINITION: u32 = 0x6845_0102;
-pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_STORAGE_TYPE: u32 = 0x6846_0003;
-pub(in crate::mapi) const PID_TAG_SEARCH_FOLDER_EFP_FLAGS: u32 = 0x6848_0003;
 pub(in crate::mapi) const PID_TAG_WLINK_GROUP_HEADER_ID: u32 = 0x6842_0048;
 pub(in crate::mapi) const PID_TAG_WLINK_SAVE_STAMP: u32 = 0x6847_0003;
 pub(in crate::mapi) const PID_TAG_WLINK_TYPE: u32 = 0x6849_0003;
@@ -1305,9 +1300,19 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(false)),
         PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
-        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST => Some(
-            MapiValue::Binary(mapi_mailstore::source_key_for_store_id(message.id)),
-        ),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            ),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => {
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            )))
+        }
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
@@ -1414,9 +1419,19 @@ pub(in crate::mapi) fn conversation_action_property_value(
         PID_TAG_CONVERSATION_INDEX => Some(MapiValue::Binary(conversation_index_for_uuid(
             action.conversation_id,
         ))),
-        PID_TAG_SOURCE_KEY | PID_TAG_CHANGE_KEY | PID_TAG_PREDECESSOR_CHANGE_LIST => Some(
-            MapiValue::Binary(mapi_mailstore::source_key_for_store_id(message.id)),
-        ),
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            message.id,
+        ))),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            ),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => {
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                mapi_mailstore::change_number_for_store_id(message.id),
+            )))
+        }
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(message.folder_id),
         )),
@@ -4542,6 +4557,96 @@ mod tests {
         value[532..536].copy_from_slice(&1_000_030u32.to_le_bytes());
         value[536..540].copy_from_slice(&1u32.to_le_bytes());
         value
+    }
+
+    #[test]
+    fn associated_fai_identity_properties_do_not_reuse_source_key_for_change_keys() {
+        let shortcut_id = crate::mapi::identity::mapi_store_id(91);
+        let shortcut = MapiNavigationShortcutMessage {
+            id: shortcut_id,
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x9191),
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(INBOX_FOLDER_ID),
+            shortcut_type: 1,
+            flags: 0,
+            section: 0,
+            ordinal: 0,
+            group_header_id: None,
+            group_name: String::new(),
+        };
+        let source_key =
+            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_SOURCE_KEY);
+        let change_key =
+            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_CHANGE_KEY);
+        let predecessor = navigation_shortcut_property_value(
+            &shortcut,
+            Uuid::nil(),
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+        );
+
+        assert_eq!(
+            source_key,
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                shortcut_id
+            )))
+        );
+        assert_eq!(
+            change_key,
+            Some(MapiValue::Binary(
+                mapi_mailstore::change_key_for_change_number(
+                    mapi_mailstore::change_number_for_store_id(shortcut_id)
+                )
+            ))
+        );
+        assert_eq!(
+            predecessor,
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                mapi_mailstore::change_number_for_store_id(shortcut_id)
+            )))
+        );
+        assert_ne!(source_key, predecessor);
+
+        let action_id = crate::mapi::identity::mapi_store_id(92);
+        let action = MapiConversationActionMessage {
+            id: action_id,
+            folder_id: CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x9292),
+            action: lpe_storage::ConversationAction {
+                id: Uuid::from_u128(0x9292),
+                conversation_id: Uuid::from_u128(0xabab),
+                subject: "Conv.Action".to_string(),
+                move_folder_entry_id: None,
+                move_store_entry_id: None,
+                move_target_mailbox_id: None,
+                categories_json: "[]".to_string(),
+                max_delivery_time: None,
+                last_applied_time: None,
+                version: 1,
+                processed: 0,
+                created_at: "2026-05-30T00:00:00Z".to_string(),
+                updated_at: "2026-05-30T00:00:00Z".to_string(),
+            },
+        };
+        let source_key = conversation_action_property_value(&action, PID_TAG_SOURCE_KEY);
+        let change_key = conversation_action_property_value(&action, PID_TAG_CHANGE_KEY);
+        let predecessor =
+            conversation_action_property_value(&action, PID_TAG_PREDECESSOR_CHANGE_LIST);
+        assert_eq!(
+            change_key,
+            Some(MapiValue::Binary(
+                mapi_mailstore::change_key_for_change_number(
+                    mapi_mailstore::change_number_for_store_id(action_id)
+                )
+            ))
+        );
+        assert_eq!(
+            predecessor,
+            Some(MapiValue::Binary(mapi_mailstore::predecessor_change_list(
+                mapi_mailstore::change_number_for_store_id(action_id)
+            )))
+        );
+        assert_ne!(source_key, predecessor);
     }
 
     fn round_trip(property_tag: u32, value: &MapiValue) -> MapiValue {

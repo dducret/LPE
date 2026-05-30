@@ -892,57 +892,12 @@ impl Storage {
                 ends_after,
             )
             .await?;
-        let owner_email = free_busy
-            .first()
-            .map(|block| block.owner_email.clone())
-            .or_else(|| delegate.map(|object| object.owner_email.clone()))
-            .unwrap_or_else(|| owner_account_id.to_string());
-
-        let mut materialized = Vec::new();
-        if let Some(delegate) = delegate {
-            materialized.push(DelegateFreeBusyMaterialization {
-                id: stable_delegate_freebusy_id(&[
-                    "delegate",
-                    &principal_account_id.to_string(),
-                    &owner_account_id.to_string(),
-                ]),
-                message_kind: "delegate".to_string(),
-                subject: format!("Delegate access for {}", delegate.owner_email),
-                body_text: format!(
-                    "calendarRead={}; calendarWrite={}; meetingObjects={}; sendOnBehalf={}",
-                    delegate.can_open_calendar,
-                    delegate.can_create_or_update_calendar_items,
-                    delegate.can_receive_meeting_objects,
-                    delegate.can_send_on_behalf
-                ),
-                starts_at: None,
-                ends_at: None,
-                busy_status: None,
-                payload_json: serde_json::to_value(delegate)?,
-            });
-        }
-        for block in free_busy {
-            materialized.push(DelegateFreeBusyMaterialization {
-                id: stable_delegate_freebusy_id(&[
-                    "freebusy",
-                    &principal_account_id.to_string(),
-                    &owner_account_id.to_string(),
-                    &block.start,
-                    &block.end,
-                    &block.status,
-                ]),
-                message_kind: "freebusy".to_string(),
-                subject: format!("{}: {}", block.owner_email, block.status),
-                body_text: format!("{} from {} to {}", block.status, block.start, block.end),
-                starts_at: Some(block.start),
-                ends_at: Some(block.end),
-                busy_status: Some(block.status),
-                payload_json: serde_json::json!({
-                    "ownerAccountId": owner_account_id,
-                    "ownerEmail": block.owner_email,
-                }),
-            });
-        }
+        let materialized = delegate_freebusy_materializations(
+            principal_account_id,
+            owner_account_id,
+            delegate,
+            free_busy,
+        )?;
 
         let mut tx = self.pool.begin().await?;
         sqlx::query(
@@ -986,29 +941,6 @@ impl Storage {
 
         self.fetch_delegate_freebusy_messages(principal_account_id, Some(owner_account_id))
             .await
-            .map(|mut messages| {
-                if messages.is_empty() && materialized.is_empty() {
-                    messages.push(DelegateFreeBusyMessageObject {
-                        id: stable_delegate_freebusy_id(&[
-                            "empty",
-                            &principal_account_id.to_string(),
-                            &owner_account_id.to_string(),
-                        ]),
-                        account_id: principal_account_id,
-                        owner_account_id,
-                        owner_email,
-                        message_kind: "delegate".to_string(),
-                        subject: "No delegate or free/busy objects".to_string(),
-                        body_text: String::new(),
-                        starts_at: None,
-                        ends_at: None,
-                        busy_status: None,
-                        payload_json: "{}".to_string(),
-                        updated_at: "1970-01-01T00:00:00Z".to_string(),
-                    });
-                }
-                messages
-            })
     }
 
     pub async fn fetch_delegate_freebusy_messages(
@@ -2379,6 +2311,60 @@ struct DelegateFreeBusyMaterialization {
     payload_json: serde_json::Value,
 }
 
+fn delegate_freebusy_materializations(
+    principal_account_id: Uuid,
+    owner_account_id: Uuid,
+    delegate: Option<&DelegateAccessObject>,
+    free_busy: Vec<FreeBusyBlock>,
+) -> Result<Vec<DelegateFreeBusyMaterialization>> {
+    let mut materialized = Vec::new();
+    if let Some(delegate) = delegate {
+        materialized.push(DelegateFreeBusyMaterialization {
+            id: stable_delegate_freebusy_id(&[
+                "delegate",
+                &principal_account_id.to_string(),
+                &owner_account_id.to_string(),
+            ]),
+            message_kind: "delegate".to_string(),
+            subject: format!("Delegate access for {}", delegate.owner_email),
+            body_text: format!(
+                "calendarRead={}; calendarWrite={}; meetingObjects={}; sendOnBehalf={}",
+                delegate.can_open_calendar,
+                delegate.can_create_or_update_calendar_items,
+                delegate.can_receive_meeting_objects,
+                delegate.can_send_on_behalf
+            ),
+            starts_at: None,
+            ends_at: None,
+            busy_status: None,
+            payload_json: serde_json::to_value(delegate)?,
+        });
+    }
+    for block in free_busy {
+        materialized.push(DelegateFreeBusyMaterialization {
+            id: stable_delegate_freebusy_id(&[
+                "freebusy",
+                &principal_account_id.to_string(),
+                &owner_account_id.to_string(),
+                &block.start,
+                &block.end,
+                &block.status,
+            ]),
+            message_kind: "freebusy".to_string(),
+            subject: format!("{}: {}", block.owner_email, block.status),
+            body_text: format!("{} from {} to {}", block.status, block.start, block.end),
+            starts_at: Some(block.start),
+            ends_at: Some(block.end),
+            busy_status: Some(block.status),
+            payload_json: serde_json::json!({
+                "ownerAccountId": owner_account_id,
+                "ownerEmail": block.owner_email,
+            }),
+        });
+    }
+    Ok(materialized)
+}
+
 fn stable_delegate_freebusy_id(parts: &[&str]) -> Uuid {
     let mut hasher = Sha256::new();
     for part in parts {
@@ -2464,5 +2450,58 @@ mod free_busy_tests {
         );
 
         assert_eq!(blocks[0].status, "busy");
+    }
+
+    #[test]
+    fn delegate_freebusy_materialization_does_not_create_empty_placeholder() {
+        let principal_account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let owner_account_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+
+        let materialized = delegate_freebusy_materializations(
+            principal_account_id,
+            owner_account_id,
+            None,
+            vec![],
+        )
+        .unwrap();
+
+        assert!(materialized.is_empty());
+    }
+
+    #[test]
+    fn delegate_freebusy_materialization_uses_only_canonical_delegate_and_blocks() {
+        let principal_account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let owner_account_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let delegate = DelegateAccessObject {
+            owner_account_id,
+            owner_email: "owner@example.test".to_string(),
+            grantee_account_id: principal_account_id,
+            grantee_email: "delegate@example.test".to_string(),
+            can_view_free_busy: true,
+            can_open_calendar: true,
+            can_create_or_update_calendar_items: true,
+            can_delete_calendar_items: false,
+            can_receive_meeting_objects: true,
+            can_send_on_behalf: true,
+        };
+        let free_busy = vec![FreeBusyBlock {
+            owner_account_id,
+            owner_email: "owner@example.test".to_string(),
+            start: "2026-05-30T08:00:00Z".to_string(),
+            end: "2026-05-30T09:00:00Z".to_string(),
+            status: "busy".to_string(),
+        }];
+
+        let materialized = delegate_freebusy_materializations(
+            principal_account_id,
+            owner_account_id,
+            Some(&delegate),
+            free_busy,
+        )
+        .unwrap();
+
+        assert_eq!(materialized.len(), 2);
+        assert_eq!(materialized[0].message_kind, "delegate");
+        assert_eq!(materialized[1].message_kind, "freebusy");
     }
 }

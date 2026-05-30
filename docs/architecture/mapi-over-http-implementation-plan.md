@@ -106,7 +106,7 @@ state. The supported projection surface is:
 | Contents tables | Folder membership rows with stable message identifiers, source/change keys, predecessor lists, subject, dates, sender, recipients where supported, flags, message class, read state, size, and attachment indicators. |
 | Attachment tables | Canonical attachment rows with stable attachment numbering and properties required by Outlook cached-mode reads. |
 | Permission tables | Read-only canonical permission projection. Permission mutation is deferred. |
-| Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions, hierarchy rows, and FAI rows for the bounded Outlook bootstrap surfaces. |
+| Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions plus hierarchy/content projections; no Common Views search-definition FAI rows are published until documented search-folder BLOB parity exists. |
 
 ### Specification Basis
 
@@ -163,17 +163,13 @@ non-canonical LPE state.
   the global counter maps to an LPE-advertised MAPI special folder; normal
   mailbox items still require the canonical store replica GUID or authenticated
   mailbox GUID.
-- Search folders are canonical persisted definitions plus folder-associated
-  information rows. Built-in definitions cover the Outlook bootstrap surfaces
-  such as Common Views, To-Do, Tracked Mail Processing, and Contacts Search.
-  `[MS-OXOSRCH]` requires each persisted search folder definition to have a
-  Common Views FAI definition message, so LPE projects rows from
-  `search_folders`; it must not create Common Views search-definition rows
-  unless a persisted definition exists, and it must expose the documented
-  search-folder properties instead of an LPE-private JSON body. Until LPE has
-  a complete `[MS-OXOSRCH]` criteria serializer for its canonical search JSON,
-  the MAPI definition payload must stay neutral rather than inventing
-  role-specific template IDs or private criteria encodings.
+- Search folders are canonical persisted definitions and computed folder
+  projections. Built-in definitions cover Outlook bootstrap surfaces such as
+  To-Do, Tracked Mail Processing, Contacts Search, and Reminders, but LPE does
+  not export them as Common Views FAI definition messages until it has a
+  complete `[MS-OXOSRCH]` criteria serializer for canonical search JSON.
+  Search-folder hierarchy and contents remain canonical projections; Common
+  Views search-definition FAI rows must not be invented from LPE-private JSON.
   User-saved definitions project as MAPI `FOLDER_SEARCH` hierarchy rows with
   stable canonical identities and container classes derived from their canonical
   result object kind.
@@ -225,7 +221,11 @@ non-canonical LPE state.
   flags, and read-only group-type extensions remain deferred until real Outlook
   traces require them.
 - Reminder projection is a computed search-folder surface over canonical
-  calendar/task/message data, not a protocol-local reminder store.
+  calendar/task/message data, not a protocol-local reminder store. LPE-owned
+  search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`
+  Common Views FAI rows until the MAPI adapter can persist and replay a
+  documented `[MS-OXOSRCH]` `PidTagSearchFolderDefinition` blob. Publishing a
+  locally invented SFInfo blob is an Outlook-visible protocol violation.
 - Delegate and free/busy objects are canonical projections over
   `calendar_grants`, `sender_rights`, and `calendar_events`. LPE does not create
   Exchange public-folder free/busy state or protocol-local delegate data-folder
@@ -234,6 +234,10 @@ non-canonical LPE state.
   free/busy blocks, calendar read grants preserve tentative/busy distinctions,
   and calendar write plus `send-on-behalf` is the supported canonical signal for
   receiving or processing meeting-related objects on behalf of a delegator.
+  Empty delegate/free-busy materialization stays empty; LPE must not create
+  placeholder `IPM.Microsoft.Delegate` or
+  `IPM.Microsoft.ScheduleData.FreeBusy` messages just to satisfy Outlook folder
+  contents.
 - `PidTagSwappedToDoData` uses the documented version-1 validation. Malformed
   blobs fail validation instead of being accepted into canonical task state.
 - Journal and Notes data are canonical account-owned items. MAPI coverage must
@@ -370,7 +374,7 @@ not by itself authorize broad client publication.
 | Tasks | task lists, task rows, grants, reminder metadata | `/api/mail/tasks`, `/api/mail/task-lists`, reminders API | `TaskList/*`, `Task/*`, `Reminder/*` | Task folder and reminder/search-folder projections | Covered by task/reminder/JMAP/MAPI tests. |
 | Notes | canonical client note rows | `/api/mail/notes` | private `Note/*` | Notes folder item projection and custom properties | Covered by notes API/JMAP/MAPI tests. |
 | Journals | canonical journal rows | `/api/mail/journal` | private `JournalEntry/*` | Journal folder item projection and custom properties | Covered by journal API/JMAP/MAPI tests. |
-| Search Folders | `search_folders` definitions plus FAI/hierarchy projections | `/api/mail/search-folders` | private `SearchFolder/*` | `FOLDER_SEARCH` hierarchy rows, FAI rows, bounded evaluators | CRUD and projection tests cover canonical wiring; full Microsoft search template BLOB parity remains deferred. |
+| Search Folders | `search_folders` definitions plus hierarchy/content projections | `/api/mail/search-folders` | private `SearchFolder/*` | `FOLDER_SEARCH` hierarchy rows and bounded evaluators; no Common Views SFInfo rows until `[MS-OXOSRCH]` BLOB parity exists | CRUD and projection tests cover canonical wiring; full Microsoft search template BLOB parity remains deferred. |
 | Rules | `sieve_scripts` | `/api/mail/rules` read projection; Sieve API mutates | private read-only `Rule/*` | `RopGetRulesTable` projection | Persistence/retrieval/profile visibility tests cover canonical wiring; Exchange rule blobs, client-only rules, provider-specific predicates, delegate templates, and deferred actions remain unsupported. |
 | Settings | `server_settings`, mailbox state, `mapi_profile_settings`, computed store/folder defaults | `/api/mail/outlook-profile` read summary and server setting APIs | private read-only `OutlookProfile/*` | Store/logon properties, default-folder properties, IPM subtree OST identity reload | Tests cover profile-state summary and OST identity reuse; full Exchange profile blobs and client registry state are unsupported. |
 | Identities | `account_identities`, authenticated account state, sender rights | workspace/session APIs and delegation APIs | `Identity/*` | mailbox owner/user GUID/store identity properties | Covered by identity/delegation tests. |
@@ -577,6 +581,8 @@ state. Outlook-only attachment state is not stored.
 Delegate/free-busy readiness additionally requires the canonical
 `/api/mail/delegation/free-busy` layer to return delegate access objects and
 merged non-overlapping availability blocks for the target mailbox calendar.
+When no canonical delegate or free/busy state exists, the message-object list is
+empty rather than a fabricated status object.
 This follows the Microsoft MAPI over HTTP session model, the delegate calendar
 constraints in MS-OXODLGT, the delegate-management contract in MS-OXWSDLGM, and
 the Outlook free/busy block behavior described by Microsoft's Free/Busy API

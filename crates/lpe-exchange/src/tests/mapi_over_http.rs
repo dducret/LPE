@@ -11142,7 +11142,7 @@ async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by
 }
 
 #[tokio::test]
-async fn mapi_over_http_common_views_sync_projects_persisted_search_definition_fai() {
+async fn mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai() {
     let account = FakeStore::account();
     let definition_id = Uuid::parse_str("73737373-7373-4373-8373-737373737373").unwrap();
     let store = FakeStore {
@@ -11214,28 +11214,15 @@ async fn mapi_over_http_common_views_sync_projects_persisted_search_definition_f
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
-    assert_eq!(stream.message_changes.len(), 1);
-    assert!(stream.message_changes[0].associated);
-    assert_eq!(stream.message_changes[0].subject, "Reminders");
-    assert!(contains_bytes(
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.WunderBar.SFInfo")
     ));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_BODY_W));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_SEARCH_FOLDER_TEMPLATE_ID));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_SEARCH_FOLDER_ID));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_SEARCH_FOLDER_DEFINITION));
-    assert!(stream.message_changes[0]
-        .body_tags
-        .contains(&PID_TAG_SEARCH_FOLDER_STORAGE_TYPE));
+    assert!(!contains_bytes(
+        &response_rops,
+        &PID_TAG_SEARCH_FOLDER_DEFINITION.to_le_bytes()
+    ));
     assert!(!contains_bytes(&response_rops, b"definitionKind"));
     assert!(!contains_bytes(&response_rops, b"restriction"));
     assert!(!contains_bytes(
@@ -11291,7 +11278,7 @@ async fn mapi_over_http_common_views_observed_outlook_partial_sync_returns_no_sy
     ] {
         rops.extend_from_slice(&u32::to_le_bytes(tag));
     }
-    for state_tag in [0x4017_0102, 0x6796_0102, 0x67DA_0102, 0x67D2_0102] {
+    for state_tag in [0x4017_0102u32, 0x6796_0102, 0x67DA_0102, 0x67D2_0102] {
         rops.extend_from_slice(&[0x75, 0x00, 0x02]); // RopSynchronizationUploadStateStreamBegin
         rops.extend_from_slice(&u32::to_le_bytes(state_tag));
         rops.extend_from_slice(&0u32.to_le_bytes());
@@ -14762,6 +14749,56 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
             "default", "calendar", "Calendar",
         )])),
+        search_folders: Arc::new(Mutex::new(vec![
+            SearchFolderDefinition {
+                id: Uuid::parse_str("34343434-3434-4434-8434-343434343401").unwrap(),
+                account_id: account.account_id,
+                role: "reminders".to_string(),
+                display_name: "Reminders".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "mixed".to_string(),
+                scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
+                restriction_json: serde_json::json!({"kind": "exchange_reminders"}),
+                excluded_folder_roles: exchange_reminder_excluded_folder_roles(),
+                is_builtin: true,
+            },
+            SearchFolderDefinition {
+                id: Uuid::parse_str("34343434-3434-4434-8434-343434343402").unwrap(),
+                account_id: account.account_id,
+                role: "contacts_search".to_string(),
+                display_name: "Contacts Search".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "contact".to_string(),
+                scope_json: serde_json::json!({"scope": "contacts"}),
+                restriction_json: serde_json::json!({"kind": "contacts_search"}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: true,
+            },
+            SearchFolderDefinition {
+                id: Uuid::parse_str("34343434-3434-4434-8434-343434343403").unwrap(),
+                account_id: account.account_id,
+                role: "tracked_mail_processing".to_string(),
+                display_name: "Tracked Mail Processing".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "message".to_string(),
+                scope_json: serde_json::json!({"scope": "mail"}),
+                restriction_json: serde_json::json!({"kind": "tracked_mail_processing"}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: true,
+            },
+            SearchFolderDefinition {
+                id: Uuid::parse_str("34343434-3434-4434-8434-343434343404").unwrap(),
+                account_id: account.account_id,
+                role: "todo_search".to_string(),
+                display_name: "To-Do".to_string(),
+                definition_kind: "exchange_builtin".to_string(),
+                result_object_kind: "task".to_string(),
+                scope_json: serde_json::json!({"scope": "tasks"}),
+                restriction_json: serde_json::json!({"kind": "todo_search"}),
+                excluded_folder_roles: Vec::new(),
+                is_builtin: true,
+            },
+        ])),
         ..Default::default()
     };
     store
@@ -15311,6 +15348,48 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
             Some(crate::mapi::identity::ROOT_FOLDER_ID)
         );
     }
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut common_views_rops = Vec::new();
+    append_rop_open_folder(
+        &mut common_views_rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    common_views_rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x39, 0xA1, // content sync, observed Outlook flags 0xa139
+        0x00, 0x00, // RestrictionDataSize
+        0x0d, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | MessageSize | CN
+        0x00, 0x00, // PropertyTagCount
+    ]);
+    for state_tag in [0x4017_0102u32, 0x6796_0102, 0x67DA_0102, 0x67D2_0102] {
+        common_views_rops.extend_from_slice(&[0x75, 0x00, 0x02]);
+        common_views_rops.extend_from_slice(&state_tag.to_le_bytes());
+        common_views_rops.extend_from_slice(&0u32.to_le_bytes());
+        common_views_rops.extend_from_slice(&[0x77, 0x00, 0x02]);
+    }
+    common_views_rops.extend_from_slice(&[0x4E, 0x00, 0x02]);
+    common_views_rops.extend_from_slice(&31680u16.to_le_bytes());
+    let common_views_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&common_views_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    cookie = mapi_cookie_header(&common_views_response);
+    let common_views_rops = response_rops_from_execute_response(common_views_response).await;
+    let common_views_stream =
+        strict_content_sync_transfer_from_response(&common_views_rops).unwrap();
+    assert!(common_views_stream.message_changes.is_empty());
+    assert!(!contains_bytes(
+        &common_views_rops,
+        &utf16z("IPM.Microsoft.WunderBar.SFInfo")
+    ));
 
     let mut disconnect_headers = mapi_headers("Disconnect");
     disconnect_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());

@@ -18,7 +18,7 @@ const WORKSPACE_STORAGE: &str = include_str!("workspace.rs");
 const ADMIN_STORAGE: &str = include_str!("admin.rs");
 const AUTH_STORAGE: &str = include_str!("auth.rs");
 const EXCHANGE_STORE: &str = include_str!("../../lpe-exchange/src/store.rs");
-const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests.rs");
+const EXCHANGE_TESTS: &str = include_str!("../../lpe-exchange/src/tests/mapi_over_http.rs");
 const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
@@ -704,7 +704,7 @@ fn update_script_rejects_non_current_schema_without_mutating_it() {
             "INSTALLED_SCHEMA_VERSION",
             "EXPECTED_SCHEMA_VERSION",
             "requires an empty database initialized with init-schema.sh",
-            "does not apply SQL updates during update-lpe.sh",
+            "Applying LPE 0.4 schema compatibility updates",
         ],
     );
 }
@@ -1408,7 +1408,8 @@ fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
             "mapi_over_http_contact_crud_uses_canonical_contacts",
             "mapi_over_http_calendar_crud_uses_canonical_events",
             "mapi_over_http_task_crud_uses_canonical_tasks",
-            "mapi_over_http_common_views_content_sync_exports_navigation_shortcuts_only",
+            "mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai",
+            "mapi_over_http_common_views_create_associated_navigation_shortcut_persists",
             "SearchFolderDefinition",
             "mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc",
             "mapi_over_http_non_empty_modify_rules_is_terminal_without_canonical_side_effects",

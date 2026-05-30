@@ -140,18 +140,8 @@ pub(crate) struct MapiNavigationShortcutMessage {
     pub(crate) group_name: String,
 }
 
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub(crate) struct MapiSearchFolderDefinitionMessage {
-    pub(crate) id: u64,
-    pub(crate) folder_id: u64,
-    pub(crate) canonical_id: Uuid,
-    pub(crate) definition: SearchFolderDefinition,
-}
-
 pub(crate) enum MapiCommonViewsMessage {
     NavigationShortcut(MapiNavigationShortcutMessage),
-    SearchFolderDefinition(MapiSearchFolderDefinitionMessage),
 }
 
 #[derive(Debug, Clone)]
@@ -879,26 +869,11 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage> {
-        let mut messages = self
+        let messages = self
             .navigation_shortcut_messages()
             .into_iter()
             .map(MapiCommonViewsMessage::NavigationShortcut)
             .collect::<Vec<_>>();
-        messages.extend(
-            self.search_folder_definitions
-                .iter()
-                .cloned()
-                .map(|definition| {
-                    MapiCommonViewsMessage::SearchFolderDefinition(
-                        MapiSearchFolderDefinitionMessage {
-                            id: mapi_item_id(&definition.id),
-                            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
-                            canonical_id: definition.id,
-                            definition,
-                        },
-                    )
-                }),
-        );
         messages.into_iter()
     }
 
