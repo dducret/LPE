@@ -646,6 +646,24 @@ pub(in crate::mapi) fn rop_simple_success_response(request: &RopRequest) -> Vec<
     response
 }
 
+pub(in crate::mapi) fn rop_get_search_criteria_response(
+    request: &RopRequest,
+    restriction: &[u8],
+    folder_ids: &[u64],
+    search_flags: u32,
+) -> Vec<u8> {
+    let mut response = vec![0x31, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(restriction.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(&restriction[..restriction.len().min(u16::MAX as usize)]);
+    response.extend_from_slice(&(folder_ids.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for folder_id in folder_ids.iter().take(u16::MAX as usize) {
+        write_object_id(&mut response, *folder_id);
+    }
+    write_u32(&mut response, search_flags);
+    response
+}
+
 pub(in crate::mapi) fn rop_upload_state_success_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![request.rop_id, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
@@ -2896,13 +2914,6 @@ impl RopRequest {
                         .to_vec(),
                 })
             }
-            Some(RopId::ModifyRules) if self.modify_rules_count().unwrap_or(0) != 0 => {
-                TypedRopRequest::Unsupported(RopUnsupportedRequest {
-                    rop_id: self.rop_id,
-                    input_handle_index: self.input_handle_index,
-                    reserved: false,
-                })
-            }
             Some(rop_id) if rop_id.is_supported_by_dispatch() => {
                 TypedRopRequest::SupportedRaw(RopSupportedRawRequest {
                     rop_id: self.rop_id,
@@ -2986,6 +2997,26 @@ impl RopRequest {
         }
         let bytes = self.payload.get(1..3)?;
         Some(u16::from_le_bytes(bytes.try_into().ok()?))
+    }
+
+    pub(in crate::mapi) fn modify_rules_rows(&self) -> Result<Vec<ModifyRulesRow>> {
+        if self.rop_id != 0x41 {
+            return Ok(Vec::new());
+        }
+        let count = self.modify_rules_count().unwrap_or(0) as usize;
+        let mut cursor = Cursor::new(self.payload.get(3..).unwrap_or_default());
+        let mut rows = Vec::with_capacity(count);
+        for _ in 0..count {
+            let flags = cursor.read_u8()?;
+            let property_count = cursor.read_u16()? as usize;
+            let mut properties = HashMap::new();
+            for _ in 0..property_count {
+                let (property_tag, value) = parse_tagged_property(&mut cursor)?;
+                properties.insert(property_tag, value);
+            }
+            rows.push(ModifyRulesRow { flags, properties });
+        }
+        Ok(rows)
     }
 
     pub(in crate::mapi) fn notification_types(&self) -> Option<u16> {
@@ -3348,6 +3379,57 @@ impl RopRequest {
 
     pub(in crate::mapi) fn local_replica_midset_deleted(&self) -> &[u8] {
         self.payload.as_slice()
+    }
+
+    pub(in crate::mapi) fn search_criteria_restriction_bytes(&self) -> Option<&[u8]> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::SetSearchCriteria)) {
+            return None;
+        }
+        let size = u16::from_le_bytes(self.payload.get(..2)?.try_into().ok()?) as usize;
+        self.payload.get(2..2 + size)
+    }
+
+    pub(in crate::mapi) fn search_criteria_folder_ids(&self) -> Option<Vec<u64>> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::SetSearchCriteria)) {
+            return None;
+        }
+        let size = u16::from_le_bytes(self.payload.get(..2)?.try_into().ok()?) as usize;
+        let count_offset = 2 + size;
+        let count = u16::from_le_bytes(
+            self.payload
+                .get(count_offset..count_offset + 2)?
+                .try_into()
+                .ok()?,
+        ) as usize;
+        let ids_offset = count_offset + 2;
+        Some(
+            self.payload
+                .get(ids_offset..ids_offset + count * 8)?
+                .chunks_exact(8)
+                .filter_map(crate::mapi::identity::object_id_from_wire_id)
+                .collect(),
+        )
+    }
+
+    pub(in crate::mapi) fn search_criteria_flags(&self) -> Option<u32> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::SetSearchCriteria)) {
+            return None;
+        }
+        let size = u16::from_le_bytes(self.payload.get(..2)?.try_into().ok()?) as usize;
+        let count_offset = 2 + size;
+        let count = u16::from_le_bytes(
+            self.payload
+                .get(count_offset..count_offset + 2)?
+                .try_into()
+                .ok()?,
+        ) as usize;
+        let flags_offset = count_offset + 2 + count * 8;
+        Some(u32::from_le_bytes(
+            self.payload
+                .get(flags_offset..flags_offset + 4)?
+                .try_into()
+                .ok()?,
+        ))
     }
 
     pub(in crate::mapi) fn receive_folder_message_class(&self) -> Option<&str> {
@@ -4344,6 +4426,16 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             let mut payload = vec![cursor.read_u8()?];
             let rules_count = cursor.read_u16()? as usize;
             payload.extend_from_slice(&(rules_count as u16).to_le_bytes());
+            for _ in 0..rules_count {
+                payload.push(cursor.read_u8()?);
+                let property_count = cursor.read_u16()? as usize;
+                payload.extend_from_slice(&(property_count as u16).to_le_bytes());
+                for _ in 0..property_count {
+                    let (property_tag, value) = parse_tagged_property(cursor)?;
+                    payload.extend_from_slice(&property_tag.to_le_bytes());
+                    write_mapi_value(&mut payload, property_tag, &value);
+                }
+            }
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -5432,6 +5524,11 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
             })
         }
     }
+}
+
+pub(in crate::mapi) struct ModifyRulesRow {
+    pub(in crate::mapi) flags: u8,
+    pub(in crate::mapi) properties: HashMap<u32, MapiValue>,
 }
 
 #[allow(dead_code)]

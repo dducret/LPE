@@ -14,8 +14,520 @@ use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiSyncChangeSet, MapiSyncCheckpoint,
     UpsertMapiNavigationShortcutInput,
 };
+use lpe_storage::{AuditEntryInput, UpsertSearchFolderInput};
+use serde_json::{json, Value};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
+
+const EC_SEARCH_UNSUPPORTED: u32 = 0x8004_0102;
+const EC_SEARCH_NOT_FOUND: u32 = 0x8004_010F;
+const EC_SEARCH_ACCESS_DENIED: u32 = 0x8007_0005;
+const EC_SEARCH_INVALID_PARAMETER: u32 = 0x8007_0057;
+const SEARCH_RUNNING_FLAG: u32 = 0x0000_0001;
+const SEARCH_RECURSIVE_FLAG: u32 = 0x0000_0004;
+const EC_RULE_UNSUPPORTED: u32 = 0x8004_0102;
+const EC_RULE_NOT_FOUND: u32 = 0x8004_010F;
+const EC_RULE_INVALID_PARAMETER: u32 = 0x8007_0057;
+const ROW_ADD: u8 = 0x01;
+const ROW_MODIFY: u8 = 0x02;
+const ROW_REMOVE: u8 = 0x04;
+const PID_TAG_RULE_ID: u32 = 0x6674_0014;
+const PID_TAG_RULE_STATE: u32 = 0x6677_0003;
+const PID_TAG_RULE_NAME_W: u32 = 0x6682_001F;
+const PID_TAG_RULE_PROVIDER_DATA: u32 = 0x6684_0102;
+const ST_ENABLED: u32 = 0x0000_0001;
+
+#[derive(Debug)]
+struct BoundedSearchCriteria {
+    scope_json: Value,
+    restriction_json: Value,
+}
+
+struct BoundedRuleMutation {
+    name: String,
+    content: String,
+    active: bool,
+}
+
+fn bounded_rule_mutation_from_row(row: &ModifyRulesRow) -> Result<BoundedRuleMutation, u32> {
+    if row
+        .properties
+        .keys()
+        .any(|tag| matches!(*tag, 0x6679_00FD | 0x6680_00FE))
+    {
+        return Err(EC_RULE_UNSUPPORTED);
+    }
+    let name = row
+        .properties
+        .get(&PID_TAG_RULE_NAME_W)
+        .and_then(|value| value.clone().into_text())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or(EC_RULE_INVALID_PARAMETER)?;
+    let active = row
+        .properties
+        .get(&PID_TAG_RULE_STATE)
+        .and_then(MapiValue::as_i64)
+        .map(|value| value as u32 & ST_ENABLED != 0)
+        .unwrap_or(true);
+    let provider_data = row
+        .properties
+        .get(&PID_TAG_RULE_PROVIDER_DATA)
+        .and_then(|value| match value {
+            MapiValue::Binary(bytes) => serde_json::from_slice::<Value>(bytes).ok(),
+            _ => None,
+        })
+        .ok_or(EC_RULE_UNSUPPORTED)?;
+    let content = bounded_rule_sieve_from_json(&provider_data)?;
+    Ok(BoundedRuleMutation {
+        name,
+        content,
+        active,
+    })
+}
+
+fn bounded_rule_sieve_from_json(value: &Value) -> Result<String, u32> {
+    if value
+        .get("clientOnly")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || value
+            .get("delegate")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || value
+            .get("deferredAction")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || value.get("exchangeBlob").is_some()
+    {
+        return Err(EC_RULE_UNSUPPORTED);
+    }
+    let condition = value.get("condition").unwrap_or(&Value::Null);
+    let test = match condition
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("always")
+    {
+        "always" => "true".to_string(),
+        "subjectContains" => format!(
+            r#"header :contains "Subject" "{}""#,
+            sieve_escape(
+                condition
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .ok_or(EC_RULE_INVALID_PARAMETER)?
+            )
+        ),
+        "fromContains" => format!(
+            r#"address :contains "From" "{}""#,
+            sieve_escape(
+                condition
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .ok_or(EC_RULE_INVALID_PARAMETER)?
+            )
+        ),
+        _ => return Err(EC_RULE_UNSUPPORTED),
+    };
+    let mut requirements = Vec::new();
+    let mut actions = Vec::new();
+    for action in value
+        .get("actions")
+        .and_then(Value::as_array)
+        .ok_or(EC_RULE_INVALID_PARAMETER)?
+    {
+        match action.get("type").and_then(Value::as_str) {
+            Some("move") => {
+                requirements.push("fileinto");
+                actions.push(format!(
+                    r#"fileinto "{}";"#,
+                    sieve_escape(
+                        action
+                            .get("folder")
+                            .and_then(Value::as_str)
+                            .ok_or(EC_RULE_INVALID_PARAMETER)?
+                    )
+                ));
+            }
+            Some("delete") => actions.push("discard;".to_string()),
+            Some("forward") | Some("redirect") => {
+                requirements.push("redirect");
+                actions.push(format!(
+                    r#"redirect "{}";"#,
+                    sieve_escape(
+                        action
+                            .get("address")
+                            .and_then(Value::as_str)
+                            .ok_or(EC_RULE_INVALID_PARAMETER)?
+                    )
+                ));
+            }
+            Some("markRead") => actions.push("keep;".to_string()),
+            _ => return Err(EC_RULE_UNSUPPORTED),
+        }
+    }
+    if value
+        .get("stopProcessing")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        actions.push("stop;".to_string());
+    }
+    if actions.is_empty() {
+        return Err(EC_RULE_INVALID_PARAMETER);
+    }
+    requirements.sort_unstable();
+    requirements.dedup();
+    let require = if requirements.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "require [{}];\n",
+            requirements
+                .iter()
+                .map(|requirement| format!(r#""{requirement}""#))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    Ok(format!(
+        "{require}if {test} {{\n    {}\n}}",
+        actions.join("\n    ")
+    ))
+}
+
+fn sieve_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn rule_audit(principal: &AccountPrincipal, action: &str, subject: &str) -> AuditEntryInput {
+    AuditEntryInput {
+        actor: principal.email.clone(),
+        action: action.to_string(),
+        subject: subject.to_string(),
+    }
+}
+
+fn bounded_search_criteria_from_rop(
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+) -> Result<BoundedSearchCriteria, u32> {
+    let restriction_bytes = request
+        .search_criteria_restriction_bytes()
+        .ok_or(EC_SEARCH_INVALID_PARAMETER)?;
+    let restriction = if restriction_bytes.is_empty() {
+        None
+    } else {
+        Some(parse_mapi_restriction(restriction_bytes).map_err(|_| EC_SEARCH_UNSUPPORTED)?)
+    };
+    let clauses = match restriction {
+        Some(restriction) => bounded_search_restriction_clauses(&restriction)?,
+        None => Vec::new(),
+    };
+    let folder_ids = request
+        .search_criteria_folder_ids()
+        .ok_or(EC_SEARCH_INVALID_PARAMETER)?;
+    let flags = request
+        .search_criteria_flags()
+        .ok_or(EC_SEARCH_INVALID_PARAMETER)?;
+    let mut canonical_folder_ids = Vec::new();
+    let mut folder_roles = Vec::new();
+    for folder_id in folder_ids {
+        if let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) {
+            canonical_folder_ids.push(mailbox.id.to_string());
+            if !mailbox.role.is_empty() {
+                folder_roles.push(mailbox.role.clone());
+            }
+        } else if let Some(role) = role_for_folder_id(folder_id) {
+            folder_roles.push(role.to_string());
+        } else {
+            return Err(EC_SEARCH_NOT_FOUND);
+        }
+    }
+    folder_roles.sort();
+    folder_roles.dedup();
+    let scope_json = json!({
+        "kind": "mapi_bounded",
+        "scope": "folders",
+        "recursive": flags & SEARCH_RECURSIVE_FLAG != 0,
+        "folderIds": canonical_folder_ids,
+        "folderRoles": folder_roles
+    });
+    let restriction_json = json!({
+        "kind": "mapi_bounded",
+        "all": clauses
+    });
+    Ok(BoundedSearchCriteria {
+        scope_json,
+        restriction_json,
+    })
+}
+
+fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<Vec<Value>, u32> {
+    match restriction {
+        MapiRestriction::And(children) => {
+            let mut clauses = Vec::new();
+            for child in children {
+                clauses.extend(bounded_search_restriction_clauses(child)?);
+            }
+            Ok(clauses)
+        }
+        MapiRestriction::Content {
+            property_tag,
+            value,
+        } => bounded_search_content_clause(*property_tag, value).map(|clause| vec![clause]),
+        MapiRestriction::Property {
+            relop,
+            property_tag,
+            value,
+        } => {
+            bounded_search_property_clause(*relop, *property_tag, value).map(|clause| vec![clause])
+        }
+        MapiRestriction::Bitmask {
+            property_tag,
+            mask,
+            must_be_nonzero,
+        } if *property_tag == PID_TAG_MESSAGE_FLAGS && *mask == MSGFLAG_READ => Ok(vec![json!({
+            "field": "unread",
+            "equals": !*must_be_nonzero
+        })]),
+        _ => Err(EC_SEARCH_UNSUPPORTED),
+    }
+}
+
+fn bounded_search_content_clause(property_tag: u32, value: &str) -> Result<Value, u32> {
+    let field = match canonical_property_storage_tag(property_tag) {
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => "subject",
+        PID_TAG_BODY_W | PID_TAG_BODY_STRING8 | PID_TAG_BODY_HTML_W => "body",
+        PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => "sender",
+        PID_NAME_KEYWORDS_TAG => "category",
+        _ => return Err(EC_SEARCH_UNSUPPORTED),
+    };
+    Ok(json!({
+        "field": field,
+        "contains": value
+    }))
+}
+
+fn bounded_search_property_clause(
+    relop: u8,
+    property_tag: u32,
+    value: &MapiValue,
+) -> Result<Value, u32> {
+    match canonical_property_storage_tag(property_tag) {
+        PID_TAG_READ if relop == 0x04 => Ok(json!({
+            "field": "unread",
+            "equals": !value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?
+        })),
+        PID_TAG_FLAG_STATUS if relop == 0x04 => Ok(json!({
+            "field": "flagged",
+            "equals": value.as_i64().ok_or(EC_SEARCH_UNSUPPORTED)? == FOLLOWUP_FLAGGED as i64
+        })),
+        PID_NAME_KEYWORDS_TAG if relop == 0x04 => Ok(json!({
+            "field": "category",
+            "equals": match value {
+                MapiValue::String(value) => value.clone(),
+                MapiValue::MultiString(values) if values.len() == 1 => values[0].clone(),
+                _ => return Err(EC_SEARCH_UNSUPPORTED),
+            }
+        })),
+        PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W if relop == 0x04 => Ok(json!({
+            "field": "sender",
+            "equals": value.clone().into_text().ok_or(EC_SEARCH_UNSUPPORTED)?
+        })),
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W if relop == 0x04 => Ok(json!({
+            "field": "subject",
+            "equals": value.clone().into_text().ok_or(EC_SEARCH_UNSUPPORTED)?
+        })),
+        PID_TAG_BODY_W | PID_TAG_BODY_STRING8 | PID_TAG_BODY_HTML_W if relop == 0x04 => Ok(json!({
+            "field": "body",
+            "equals": value.clone().into_text().ok_or(EC_SEARCH_UNSUPPORTED)?
+        })),
+        PID_TAG_CLIENT_SUBMIT_TIME => {
+            let value = filetime_to_rfc3339_utc(value.as_i64().ok_or(EC_SEARCH_UNSUPPORTED)?)
+                .ok_or(EC_SEARCH_UNSUPPORTED)?;
+            match relop {
+                0x01 => "beforeOrAt",
+                0x03 => "afterOrAt",
+                0x04 => "equals",
+                _ => return Err(EC_SEARCH_UNSUPPORTED),
+            };
+            let mut clause = serde_json::Map::new();
+            clause.insert("field".to_string(), Value::String("receivedAt".to_string()));
+            clause.insert(
+                match relop {
+                    0x01 => "beforeOrAt",
+                    0x03 => "afterOrAt",
+                    _ => "equals",
+                }
+                .to_string(),
+                Value::String(value),
+            );
+            Ok(Value::Object(clause))
+        }
+        _ => Err(EC_SEARCH_UNSUPPORTED),
+    }
+}
+
+fn bounded_search_criteria_to_rop(
+    definition: &lpe_storage::SearchFolderDefinition,
+    mailboxes: &[JmapMailbox],
+) -> Result<(Vec<u8>, Vec<u64>, u32), u32> {
+    if definition
+        .restriction_json
+        .get("kind")
+        .and_then(Value::as_str)
+        != Some("mapi_bounded")
+    {
+        return Err(EC_SEARCH_UNSUPPORTED);
+    }
+    let clauses = definition
+        .restriction_json
+        .get("all")
+        .and_then(Value::as_array)
+        .ok_or(EC_SEARCH_UNSUPPORTED)?;
+    let mut restrictions = Vec::new();
+    for clause in clauses {
+        restrictions.push(rop_restriction_from_json_clause(clause)?);
+    }
+    let restriction = if restrictions.is_empty() {
+        Vec::new()
+    } else if restrictions.len() == 1 {
+        restrictions.remove(0)
+    } else {
+        let mut bytes = vec![0x00];
+        bytes.extend_from_slice(&(restrictions.len() as u16).to_le_bytes());
+        for child in restrictions {
+            bytes.extend_from_slice(&child);
+        }
+        bytes
+    };
+    let mut folder_ids = Vec::new();
+    if let Some(ids) = definition
+        .scope_json
+        .get("folderIds")
+        .and_then(Value::as_array)
+    {
+        for id in ids {
+            if let Some(id) = id.as_str().and_then(|id| uuid::Uuid::parse_str(id).ok()) {
+                if let Some(mailbox) = mailboxes.iter().find(|mailbox| mailbox.id == id) {
+                    if let Some(folder_id) =
+                        crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
+                    {
+                        folder_ids.push(folder_id);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(roles) = definition
+        .scope_json
+        .get("folderRoles")
+        .and_then(Value::as_array)
+    {
+        for role in roles {
+            if let Some(role) = role.as_str().and_then(folder_id_for_role) {
+                folder_ids.push(role);
+            }
+        }
+    }
+    folder_ids.sort();
+    folder_ids.dedup();
+    let mut flags = SEARCH_RUNNING_FLAG;
+    if definition
+        .scope_json
+        .get("recursive")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        flags |= SEARCH_RECURSIVE_FLAG;
+    }
+    Ok((restriction, folder_ids, flags))
+}
+
+fn rop_restriction_from_json_clause(clause: &Value) -> Result<Vec<u8>, u32> {
+    let field = clause
+        .get("field")
+        .and_then(Value::as_str)
+        .ok_or(EC_SEARCH_UNSUPPORTED)?;
+    if let Some(value) = clause.get("contains").and_then(Value::as_str) {
+        return Ok(rop_content_restriction(
+            property_tag_for_search_field(field)?,
+            value,
+        ));
+    }
+    if let Some(value) = clause.get("equals") {
+        return rop_property_restriction(field, 0x04, value);
+    }
+    for (key, relop) in [("beforeOrAt", 0x01), ("afterOrAt", 0x03)] {
+        if let Some(value) = clause.get(key) {
+            return rop_property_restriction(field, relop, value);
+        }
+    }
+    Err(EC_SEARCH_UNSUPPORTED)
+}
+
+fn rop_content_restriction(property_tag: u32, value: &str) -> Vec<u8> {
+    let mut bytes = vec![0x03];
+    bytes.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    bytes.extend_from_slice(&property_tag.to_le_bytes());
+    bytes.extend_from_slice(&property_tag.to_le_bytes());
+    write_mapi_value(
+        &mut bytes,
+        property_tag,
+        &MapiValue::String(value.to_string()),
+    );
+    bytes
+}
+
+fn rop_property_restriction(field: &str, relop: u8, value: &Value) -> Result<Vec<u8>, u32> {
+    let property_tag = property_tag_for_search_field(field)?;
+    let mapi_value = match field {
+        "unread" => MapiValue::Bool(!value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?),
+        "flagged" => MapiValue::U32(if value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)? {
+            FOLLOWUP_FLAGGED
+        } else {
+            0
+        }),
+        "receivedAt" => {
+            let value = value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?;
+            MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))
+        }
+        _ => MapiValue::String(value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?.to_string()),
+    };
+    let mut bytes = vec![0x04, relop];
+    bytes.extend_from_slice(&property_tag.to_le_bytes());
+    bytes.extend_from_slice(&property_tag.to_le_bytes());
+    write_mapi_value(&mut bytes, property_tag, &mapi_value);
+    Ok(bytes)
+}
+
+fn property_tag_for_search_field(field: &str) -> Result<u32, u32> {
+    match field {
+        "subject" => Ok(PID_TAG_SUBJECT_W),
+        "body" => Ok(PID_TAG_BODY_W),
+        "sender" => Ok(PID_TAG_SENDER_EMAIL_ADDRESS_W),
+        "category" => Ok(PID_NAME_KEYWORDS_TAG),
+        "unread" => Ok(PID_TAG_READ),
+        "flagged" => Ok(PID_TAG_FLAG_STATUS),
+        "receivedAt" => Ok(PID_TAG_CLIENT_SUBMIT_TIME),
+        _ => Err(EC_SEARCH_UNSUPPORTED),
+    }
+}
+
+fn folder_id_for_role(role: &str) -> Option<u64> {
+    match role {
+        "inbox" => Some(INBOX_FOLDER_ID),
+        "sent" => Some(SENT_FOLDER_ID),
+        "trash" => Some(TRASH_FOLDER_ID),
+        "drafts" => Some(DRAFTS_FOLDER_ID),
+        "junk" => Some(JUNK_FOLDER_ID),
+        "archive" => Some(ARCHIVE_FOLDER_ID),
+        "outbox" => Some(OUTBOX_FOLDER_ID),
+        _ => None,
+    }
+}
 
 async fn hard_delete_folder_contents<S: ExchangeStore>(
     store: &S,
@@ -6991,6 +7503,99 @@ where
                 request.response_handle_index(),
                 0x8004_0102,
             )),
+            Some(RopId::SetSearchCriteria) => {
+                let Some(MapiObject::Folder { folder_id, .. }) =
+                    input_object(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x30,
+                        request.response_handle_index(),
+                        EC_SEARCH_UNSUPPORTED,
+                    ));
+                    continue;
+                };
+                let Some(definition) = snapshot.search_folder_definition_for_folder_id(*folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x30,
+                        request.response_handle_index(),
+                        EC_SEARCH_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                if definition.is_builtin {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x30,
+                        request.response_handle_index(),
+                        EC_SEARCH_ACCESS_DENIED,
+                    ));
+                    continue;
+                }
+                let criteria = match bounded_search_criteria_from_rop(&request, mailboxes) {
+                    Ok(criteria) => criteria,
+                    Err(error) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x30,
+                            request.response_handle_index(),
+                            error,
+                        ));
+                        continue;
+                    }
+                };
+                let input = UpsertSearchFolderInput {
+                    id: Some(definition.id),
+                    account_id: principal.account_id,
+                    display_name: definition.display_name.clone(),
+                    result_object_kind: definition.result_object_kind.clone(),
+                    scope_json: criteria.scope_json,
+                    restriction_json: criteria.restriction_json,
+                    excluded_folder_roles: definition.excluded_folder_roles.clone(),
+                };
+                match store.upsert_search_folder(input).await {
+                    Ok(_) => responses.extend_from_slice(&rop_simple_success_response(&request)),
+                    Err(_) => responses.extend_from_slice(&rop_error_response(
+                        0x30,
+                        request.response_handle_index(),
+                        EC_SEARCH_NOT_FOUND,
+                    )),
+                }
+            }
+            Some(RopId::GetSearchCriteria) => {
+                let Some(MapiObject::Folder { folder_id, .. }) =
+                    input_object(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x31,
+                        request.response_handle_index(),
+                        EC_SEARCH_UNSUPPORTED,
+                    ));
+                    continue;
+                };
+                let Some(definition) = snapshot.search_folder_definition_for_folder_id(*folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x31,
+                        request.response_handle_index(),
+                        EC_SEARCH_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                match bounded_search_criteria_to_rop(definition, mailboxes) {
+                    Ok((restriction, folder_ids, flags)) => {
+                        responses.extend_from_slice(&rop_get_search_criteria_response(
+                            &request,
+                            &restriction,
+                            &folder_ids,
+                            flags,
+                        ))
+                    }
+                    Err(error) => responses.extend_from_slice(&rop_error_response(
+                        0x31,
+                        request.response_handle_index(),
+                        error,
+                    )),
+                }
+            }
             Some(RopId::GetReceiveFolder) => {
                 echo_input_handle_table = true;
                 let Some(message_class) = request.receive_folder_message_class() else {
@@ -9536,6 +10141,102 @@ where
             }
             Some(RopId::ModifyPermissions) => {
                 responses.extend_from_slice(&rop_modify_permissions_response(&request))
+            }
+            Some(RopId::ModifyRules) => {
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                };
+                if folder_row_for_id(folder_id, mailboxes).is_none()
+                    && role_for_folder_id(folder_id).is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x41,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                }
+                let rows = match request.modify_rules_rows() {
+                    Ok(rows) => rows,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x41,
+                            request.response_handle_index(),
+                            EC_RULE_INVALID_PARAMETER,
+                        ));
+                        continue;
+                    }
+                };
+                let mut failed = None;
+                for row in rows {
+                    let row_kind = row.flags & (ROW_ADD | ROW_MODIFY | ROW_REMOVE);
+                    if row_kind == ROW_REMOVE {
+                        let Some(rule_id) = row
+                            .properties
+                            .get(&PID_TAG_RULE_ID)
+                            .and_then(MapiValue::as_i64)
+                            .map(|value| value.max(0) as u64)
+                        else {
+                            failed = Some(EC_RULE_INVALID_PARAMETER);
+                            break;
+                        };
+                        let Some(rule) = snapshot.rules().iter().find(|rule| rule.id == rule_id)
+                        else {
+                            failed = Some(EC_RULE_NOT_FOUND);
+                            break;
+                        };
+                        if store
+                            .delete_sieve_script(
+                                principal.account_id,
+                                &rule.name,
+                                rule_audit(principal, "mapi.rule.delete", &rule.name),
+                            )
+                            .await
+                            .is_err()
+                        {
+                            failed = Some(EC_RULE_NOT_FOUND);
+                            break;
+                        }
+                        continue;
+                    }
+                    if row_kind != ROW_ADD && row_kind != ROW_MODIFY {
+                        failed = Some(EC_RULE_UNSUPPORTED);
+                        break;
+                    }
+                    let mutation = match bounded_rule_mutation_from_row(&row) {
+                        Ok(mutation) => mutation,
+                        Err(error) => {
+                            failed = Some(error);
+                            break;
+                        }
+                    };
+                    if store
+                        .put_sieve_script(
+                            principal.account_id,
+                            &mutation.name,
+                            &mutation.content,
+                            mutation.active,
+                            rule_audit(principal, "mapi.rule.upsert", &mutation.name),
+                        )
+                        .await
+                        .is_err()
+                    {
+                        failed = Some(EC_RULE_INVALID_PARAMETER);
+                        break;
+                    }
+                }
+                if let Some(error) = failed {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x41,
+                        request.response_handle_index(),
+                        error,
+                    ));
+                } else {
+                    responses.extend_from_slice(&rop_simple_success_response(&request));
+                }
             }
             Some(RopId::GetStoreState) => {
                 responses.extend_from_slice(&rop_get_store_state_response(&request))

@@ -12,7 +12,7 @@ use lpe_storage::{
     JmapMailboxCreateInput, MailboxRule, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
     SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
     SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertClientTaskInput, UpsertConversationActionInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -1727,6 +1727,35 @@ impl ExchangeStore for FakeStore {
         if activate {
             *self.active_sieve_script.lock().unwrap() = Some(content.to_string());
         }
+        let (condition_summary, action_summary) =
+            if let Some((condition, action)) = content.split_once('{') {
+                (
+                    condition.trim().to_string(),
+                    action.trim_end_matches('}').trim().to_string(),
+                )
+            } else {
+                (String::new(), content.to_string())
+            };
+        let mut rules = self.mailbox_rules.lock().unwrap();
+        if let Some(rule) = rules.iter_mut().find(|rule| rule.name == name) {
+            rule.is_active = activate;
+            rule.condition_summary = condition_summary;
+            rule.action_summary = action_summary;
+            rule.size_octets = content.len() as u64;
+        } else {
+            rules.push(MailboxRule {
+                id: Uuid::new_v4(),
+                name: name.to_string(),
+                is_active: activate,
+                source_kind: "sieve_script".to_string(),
+                condition_summary,
+                action_summary,
+                supported_outlook_projection: true,
+                unsupported_exchange_features: Vec::new(),
+                size_octets: content.len() as u64,
+                updated_at: "2026-05-05T08:00:00Z".to_string(),
+            });
+        }
         let script = SieveScriptDocument {
             name: name.to_string(),
             content: content.to_string(),
@@ -1734,6 +1763,19 @@ impl ExchangeStore for FakeStore {
             updated_at: "2026-05-05T08:00:00Z".to_string(),
         };
         Box::pin(async move { Ok(script) })
+    }
+
+    fn delete_sieve_script<'a>(
+        &'a self,
+        _account_id: Uuid,
+        name: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        self.mailbox_rules
+            .lock()
+            .unwrap()
+            .retain(|rule| rule.name != name);
+        Box::pin(async move { Ok(()) })
     }
 
     fn set_active_sieve_script<'a>(
@@ -1888,6 +1930,38 @@ impl ExchangeStore for FakeStore {
     ) -> StoreFuture<'a, Vec<SearchFolderDefinition>> {
         let search_folders = self.search_folders.lock().unwrap().clone();
         Box::pin(async move { Ok(search_folders) })
+    }
+
+    fn upsert_search_folder<'a>(
+        &'a self,
+        input: UpsertSearchFolderInput,
+    ) -> StoreFuture<'a, SearchFolderDefinition> {
+        let search_folders = self.search_folders.clone();
+        Box::pin(async move {
+            let mut search_folders = search_folders.lock().unwrap();
+            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let definition = SearchFolderDefinition {
+                id,
+                account_id: input.account_id,
+                role: "custom".to_string(),
+                display_name: input.display_name,
+                definition_kind: "user_saved".to_string(),
+                result_object_kind: input.result_object_kind,
+                scope_json: input.scope_json,
+                restriction_json: input.restriction_json,
+                excluded_folder_roles: input.excluded_folder_roles,
+                is_builtin: false,
+            };
+            if let Some(existing) = search_folders.iter_mut().find(|folder| folder.id == id) {
+                if existing.is_builtin {
+                    return Err(anyhow::anyhow!("builtin search folders cannot be updated"));
+                }
+                *existing = definition.clone();
+            } else {
+                search_folders.push(definition.clone());
+            }
+            Ok(definition)
+        })
     }
 
     fn fetch_conversation_actions<'a>(
@@ -4896,6 +4970,46 @@ fn append_rop_open_folder(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: 
     rops.extend_from_slice(&[0x02, input, 0x00, output]);
     append_mapi_wire_id(rops, folder_id);
     rops.push(0);
+}
+
+fn append_rop_set_search_criteria(
+    rops: &mut Vec<u8>,
+    input: u8,
+    restriction: &[u8],
+    folder_ids: &[u64],
+    flags: u32,
+) {
+    rops.extend_from_slice(&[0x30, 0x00, input]);
+    rops.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+    rops.extend_from_slice(restriction);
+    rops.extend_from_slice(&(folder_ids.len() as u16).to_le_bytes());
+    for folder_id in folder_ids {
+        append_mapi_wire_id(rops, *folder_id);
+    }
+    rops.extend_from_slice(&flags.to_le_bytes());
+}
+
+fn append_rop_get_search_criteria(rops: &mut Vec<u8>, input: u8) {
+    rops.extend_from_slice(&[0x31, 0x00, input, 1, 1, 1]);
+}
+
+fn append_search_content(restriction: &mut Vec<u8>, property_tag: u32, value: &str) {
+    restriction.push(0x03);
+    restriction.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    append_mapi_utf16_property(restriction, property_tag, value);
+}
+
+fn append_search_property_bool(
+    restriction: &mut Vec<u8>,
+    property_tag: u32,
+    relop: u8,
+    value: bool,
+) {
+    restriction.extend_from_slice(&[0x04, relop]);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.push(value as u8);
 }
 
 fn append_rop_create_message(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {

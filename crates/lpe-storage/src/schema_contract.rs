@@ -1409,11 +1409,14 @@ fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
             "mapi_over_http_calendar_crud_uses_canonical_events",
             "mapi_over_http_task_crud_uses_canonical_tasks",
             "mapi_over_http_common_views_sync_suppresses_lpe_search_definition_fai",
+            "mapi_over_http_set_get_search_criteria_updates_canonical_search_folder",
+            "mapi_over_http_set_search_criteria_rejects_unsupported_restriction",
             "mapi_over_http_common_views_create_associated_navigation_shortcut_persists",
             "SearchFolderDefinition",
             "mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc",
-            "mapi_over_http_non_empty_modify_rules_is_terminal_without_canonical_side_effects",
-            "imported_emails.lock().unwrap().is_empty()",
+            "mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule",
+            "mapi_over_http_modify_rules_rejects_exchange_rule_blobs",
+            "active_sieve.lock().unwrap().is_none()",
         ],
     );
     assert_source_contains_all(

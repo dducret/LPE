@@ -228,6 +228,18 @@ non-canonical LPE state.
   Common Views FAI rows until the MAPI adapter can persist and replay a
   documented `[MS-OXOSRCH]` `PidTagSearchFolderDefinition` blob. Publishing a
   locally invented SFInfo blob is an Outlook-visible protocol violation.
+- `RopSetSearchCriteria` and `RopGetSearchCriteria` are bounded to canonical
+  `search_folders` rows. The supported criteria subset is folder scope,
+  unread/read predicates, follow-up flagged predicates, category keywords,
+  sender display or address text, subject/body text, and received-date
+  equality or inclusive bounds. `RopSetSearchCriteria` updates only existing
+  user-saved search folders by translating that subset into canonical
+  `scope_json` and `restriction_json` with `kind = "mapi_bounded"`.
+  Built-in search folders remain read-only. Unsupported restriction operators,
+  disjunctions, subobjects, comments, recipient/Bcc predicates, unknown
+  folders, and any criteria that cannot round-trip through canonical JSON
+  return parseable ROP-specific errors without creating a MAPI-local
+  search-folder store.
 - Delegate and free/busy objects are canonical projections over
   `calendar_grants`, `sender_rights`, and `calendar_events`. LPE does not create
   Exchange public-folder free/busy state or protocol-local delegate data-folder
@@ -360,8 +372,8 @@ not by itself authorize broad client publication.
 | NSPI mutation | Deferred. Address-book writes and link-table mutation remain disabled. |
 | Raw FastTransfer destination upload streams | Deferred except for bounded import behavior that mutates canonical mailbox state through supported ROPs. |
 | Folder move/copy and non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
-| Full search-folder parity | Partially implemented. Full Microsoft template BLOB parity and secondary sender/recipient reminder promotion remain deferred. |
-| Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Rule mutation, Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, and deferred-action messages remain deferred; no MAPI-local rule store is allowed. |
+| Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
+| Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, and deferred-action messages remain unsupported; no MAPI-local rule store is allowed. |
 | Folder permission mutation | Deferred. Read-only permission table projection is supported. |
 | Full notification registration and delivery | Partially implemented through pending session events with bounded folder/message/table payloads and change-cursor replay; full parity remains deferred. |
 | Outlook tolerance beyond the documented lab matrix | Unknown until captured through the release gates below. |
@@ -377,7 +389,7 @@ not by itself authorize broad client publication.
 | Notes | canonical client note rows | `/api/mail/notes` | private `Note/*` | Notes folder item projection and custom properties | Covered by notes API/JMAP/MAPI tests. |
 | Journals | canonical journal rows | `/api/mail/journal` | private `JournalEntry/*` | Journal folder item projection and custom properties | Covered by journal API/JMAP/MAPI tests. |
 | Search Folders | `search_folders` definitions plus hierarchy/content projections | `/api/mail/search-folders` | private `SearchFolder/*` | `FOLDER_SEARCH` hierarchy rows and bounded evaluators; no Common Views SFInfo rows until `[MS-OXOSRCH]` BLOB parity exists | CRUD and projection tests cover canonical wiring; full Microsoft search template BLOB parity remains deferred. |
-| Rules | `sieve_scripts` | `/api/mail/rules` read projection; Sieve API mutates | private read-only `Rule/*` | `RopGetRulesTable` projection | Persistence/retrieval/profile visibility tests cover canonical wiring; Exchange rule blobs, client-only rules, provider-specific predicates, delegate templates, and deferred actions remain unsupported. |
+| Rules | `sieve_scripts` | `/api/mail/rules` read projection; Sieve API mutates | private read-only `Rule/*` | `RopGetRulesTable` projection plus bounded generated-Sieve `RopModifyRules` mutations | Persistence/retrieval/profile visibility tests cover canonical wiring; Exchange rule blobs, client-only rules, provider-specific predicates, delegate templates, and deferred actions remain unsupported. |
 | Settings | `server_settings`, mailbox state, `mapi_profile_settings`, computed store/folder defaults | `/api/mail/outlook-profile` read summary and server setting APIs | private read-only `OutlookProfile/*` | Store/logon properties, default-folder properties, IPM subtree OST identity reload | Tests cover profile-state summary and OST identity reuse; full Exchange profile blobs and client registry state are unsupported. |
 | Identities | `account_identities`, authenticated account state, sender rights | workspace/session APIs and delegation APIs | `Identity/*` | mailbox owner/user GUID/store identity properties | Covered by identity/delegation tests. |
 | Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_sync_checkpoints`, `mapi_object_identities` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut FAI rows, ICS checkpoints, object IDs/source keys/change keys | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
@@ -475,6 +487,15 @@ not by itself authorize broad client publication.
   state and rely on the same change-log/tombstone path used by other protocols.
 - MAPI state must remain consistent with JMAP and IMAP-visible state where those
   protocols expose the same user-visible fact.
+- `RopModifyRules` is bounded to canonical Sieve-backed mailbox rules. The
+  adapter accepts only generated bounded rule definitions that can be translated
+  into canonical Sieve text and stored through the existing `sieve_scripts`
+  mutation path: move/fileinto, delete/discard, forward/redirect where canonical
+  sender rights allow submission, mark-read as a bounded canonical rule action,
+  and stop-processing. Exchange-only rule condition/action blobs, client-only
+  rules, delegate templates, provider-specific predicates, and deferred-action
+  messages return parseable ROP errors and must not create a MAPI-local rule
+  store. `RopGetRulesTable` remains a projection from canonical rule state.
 
 ## Release Gates
 

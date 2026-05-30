@@ -860,6 +860,15 @@ impl MapiMailStoreSnapshot {
             .find(|definition| definition.role == role)
     }
 
+    pub(crate) fn search_folder_definition_for_folder_id(
+        &self,
+        folder_id: u64,
+    ) -> Option<&SearchFolderDefinition> {
+        self.search_folder_definitions.iter().find(|definition| {
+            crate::mapi::identity::mapped_mapi_object_id(&definition.id) == Some(folder_id)
+        })
+    }
+
     pub(crate) fn rules(&self) -> &[MapiRule] {
         &self.rules
     }

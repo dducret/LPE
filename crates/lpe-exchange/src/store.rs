@@ -9,7 +9,7 @@ use lpe_storage::{
     ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
     SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput,
+    UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -636,6 +636,13 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, Option<String>>;
 
+    fn delete_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
     fn create_accessible_task<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -676,6 +683,11 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<SearchFolderDefinition>>;
+
+    fn upsert_search_folder<'a>(
+        &'a self,
+        input: UpsertSearchFolderInput,
+    ) -> StoreFuture<'a, SearchFolderDefinition>;
 
     fn fetch_conversation_actions<'a>(
         &'a self,
@@ -2278,6 +2290,15 @@ impl ExchangeStore for Storage {
         Box::pin(async move { self.set_active_sieve_script(account_id, name, audit).await })
     }
 
+    fn delete_sieve_script<'a>(
+        &'a self,
+        account_id: Uuid,
+        name: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move { self.delete_sieve_script(account_id, name, audit).await })
+    }
+
     fn create_accessible_task<'a>(
         &'a self,
         _principal_account_id: Uuid,
@@ -2344,6 +2365,13 @@ impl ExchangeStore for Storage {
         account_id: Uuid,
     ) -> StoreFuture<'a, Vec<SearchFolderDefinition>> {
         Box::pin(async move { self.fetch_search_folders(account_id).await })
+    }
+
+    fn upsert_search_folder<'a>(
+        &'a self,
+        input: UpsertSearchFolderInput,
+    ) -> StoreFuture<'a, SearchFolderDefinition> {
+        Box::pin(async move { self.upsert_search_folder(input).await })
     }
 
     fn fetch_conversation_actions<'a>(

@@ -118,7 +118,9 @@ Mailbox filtering rules are canonical `sieve_scripts` state. Protocol adapters
 that expose rule-like behavior must project to or from Sieve-backed rule state
 and must not add EWS-only, MAPI-only, or deferred-action-message rule stores.
 The admin API/JMAP `Rule/*` read surface and MAPI `RopGetRulesTable` are
-bounded projections of these rows for Outlook profile visibility; full Exchange
+bounded projections of these rows for Outlook profile visibility. Bounded MAPI
+`RopModifyRules` writes generated Sieve through the same `sieve_scripts`
+mutation path when the rule maps cleanly to canonical behavior; full Exchange
 rule blobs, provider-specific predicates, client-only rules, delegate rule
 templates, and deferred action messages are explicitly unsupported.
 Sieve script create, update, activation, rename, and delete paths write
@@ -220,6 +222,11 @@ Conversation Action Settings FAI messages are projections of
 `conversation_actions` rows with `object_kind = 'conversation_action'` change
 rows. These rows are canonical LPE state, not Exchange-only FAI message stores
 or protocol-owned rule tables.
+MAPI `RopSetSearchCriteria` writes only existing user-saved `search_folders`
+rows and only when the request maps to the documented `mapi_bounded` JSON
+subset in `scope_json` and `restriction_json`. `RopGetSearchCriteria` reads the
+same canonical JSON. Unsupported criteria return protocol errors instead of
+creating a MAPI-local search-folder store.
 Common Views navigation shortcut FAI messages are persisted as
 `mapi_navigation_shortcuts` rows with durable MAPI identity rows using
 `object_kind = 'navigation_shortcut'`. The table stores only the bounded
