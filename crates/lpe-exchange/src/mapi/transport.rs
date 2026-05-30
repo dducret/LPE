@@ -1110,6 +1110,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::ConversationAction { .. } => "conversation_action",
         MapiObject::NavigationShortcut { .. } => "navigation_shortcut",
         MapiObject::DelegateFreeBusyMessage { .. } => "delegate_freebusy_message",
+        MapiObject::RecoverableItem { .. } => "recoverable_item",
         MapiObject::PendingMessage { .. } => "pending_message",
         MapiObject::PendingContact { .. } => "pending_contact",
         MapiObject::PendingEvent { .. } => "pending_event",
@@ -1130,6 +1131,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::NotificationSubscription { .. } => "notification_subscription",
         MapiObject::SynchronizationSource { .. } => "synchronization_source",
         MapiObject::SynchronizationCollector { .. } => "synchronization_collector",
+        MapiObject::FastTransferDestination { .. } => "fast_transfer_destination",
     }
 }
 

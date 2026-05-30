@@ -6,10 +6,11 @@ use lpe_storage::{
     ClientTask, CollaborationCollection, ConversationAction, DelegateFreeBusyMessageObject,
     JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
     JmapMailboxCreateInput, JmapMailboxUpdateInput, JournalEntry,
-    MailboxFolderDelegationGrantInput, MailboxRule, ReminderQuery, SavedDraftMessage,
-    SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
+    MailboxFolderDelegationGrantInput, MailboxRule, RecoverableItem, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
+    UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -273,6 +274,7 @@ pub(crate) enum MapiContentTableSortField {
 pub(crate) enum ExchangeAddressBookEntryKind {
     Account,
     Contact,
+    DistributionList,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -768,6 +770,27 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         query: MapiContentTableQuery,
     ) -> StoreFuture<'a, MapiContentTableQueryResult>;
+
+    fn list_recoverable_items<'a>(
+        &'a self,
+        account_id: Uuid,
+        recoverable_folder: Option<&'a str>,
+    ) -> StoreFuture<'a, Vec<RecoverableItem>>;
+
+    fn restore_recoverable_item<'a>(
+        &'a self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        target_mailbox_id: Option<Uuid>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail>;
+
+    fn purge_recoverable_item<'a>(
+        &'a self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 
     fn fetch_jmap_emails<'a>(
         &'a self,
@@ -2079,6 +2102,30 @@ impl ExchangeStore for Storage {
                         directory_kind: ExchangeAddressBookDirectoryKind::Person,
                     }),
             );
+            let group_rows = sqlx::query(
+                r#"
+                SELECT id, source, target
+                FROM aliases
+                WHERE tenant_id = $1
+                  AND kind = 'group'
+                  AND status = 'active'
+                ORDER BY lower(source) ASC, id ASC
+                "#,
+            )
+            .bind(tenant_id)
+            .fetch_all(self.pool())
+            .await?;
+            entries.extend(group_rows.into_iter().map(|row| {
+                let source: String = row.get("source");
+                let target: String = row.get("target");
+                ExchangeAddressBookEntry {
+                    id: row.get("id"),
+                    display_name: address_book_group_display_name(&source, &target),
+                    email: source,
+                    entry_kind: ExchangeAddressBookEntryKind::DistributionList,
+                    directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                }
+            }));
             entries.sort_by(|left, right| {
                 left.display_name
                     .to_ascii_lowercase()
@@ -2785,6 +2832,42 @@ impl ExchangeStore for Storage {
                 ids,
                 total: total.max(0) as u64,
             })
+        })
+    }
+
+    fn list_recoverable_items<'a>(
+        &'a self,
+        account_id: Uuid,
+        recoverable_folder: Option<&'a str>,
+    ) -> StoreFuture<'a, Vec<RecoverableItem>> {
+        Box::pin(async move {
+            self.list_recoverable_items(account_id, recoverable_folder)
+                .await
+        })
+    }
+
+    fn restore_recoverable_item<'a>(
+        &'a self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        target_mailbox_id: Option<Uuid>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        Box::pin(async move {
+            self.restore_recoverable_item(account_id, recoverable_item_id, target_mailbox_id, audit)
+                .await
+        })
+    }
+
+    fn purge_recoverable_item<'a>(
+        &'a self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.purge_recoverable_item(account_id, recoverable_item_id, audit)
+                .await
         })
     }
 
@@ -3664,6 +3747,19 @@ fn directory_kind_from_storage(value: String) -> ExchangeAddressBookDirectoryKin
         "equipment" => ExchangeAddressBookDirectoryKind::Equipment,
         _ => ExchangeAddressBookDirectoryKind::Person,
     }
+}
+
+fn address_book_group_display_name(source: &str, target: &str) -> String {
+    let target = target.trim();
+    if !target.is_empty() && !target.eq_ignore_ascii_case(source.trim()) {
+        return target.to_string();
+    }
+    source
+        .split_once('@')
+        .map(|(local_part, _)| local_part)
+        .filter(|local_part| !local_part.trim().is_empty())
+        .unwrap_or(source)
+        .to_string()
 }
 
 async fn mapi_tenant_id_for_account(storage: &Storage, account_id: Uuid) -> Result<Uuid> {

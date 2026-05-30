@@ -5498,6 +5498,7 @@ fn ews_mailbox_type(entry: &ExchangeAddressBookEntry) -> &'static str {
     match entry.entry_kind {
         ExchangeAddressBookEntryKind::Contact => "Contact",
         ExchangeAddressBookEntryKind::Account => "Mailbox",
+        ExchangeAddressBookEntryKind::DistributionList => "PublicDL",
     }
 }
 
@@ -8884,7 +8885,9 @@ fn rpc_proxy_nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
     let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     match entry.entry_kind {
         ExchangeAddressBookEntryKind::Account => value | 0x8000_0000,
-        ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
+        ExchangeAddressBookEntryKind::Contact | ExchangeAddressBookEntryKind::DistributionList => {
+            value | 0x4000_0000
+        }
     }
     .max(2)
 }
@@ -8893,6 +8896,7 @@ fn rpc_proxy_nspi_entry_legacy_name(entry: &ExchangeAddressBookEntry) -> String 
     let prefix = match entry.entry_kind {
         ExchangeAddressBookEntryKind::Account => "acct",
         ExchangeAddressBookEntryKind::Contact => "contact",
+        ExchangeAddressBookEntryKind::DistributionList => "group",
     };
     let source = if entry.email.trim().is_empty() {
         entry.id.to_string()

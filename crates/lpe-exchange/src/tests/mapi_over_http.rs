@@ -38,6 +38,34 @@ fn test_legacy_dn(source: &str) -> String {
     format!("/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={legacy_cn}")
 }
 
+fn test_category_id(folder_id: u64, property_tag: u32, value: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in folder_id
+        .to_le_bytes()
+        .into_iter()
+        .chain(property_tag.to_le_bytes())
+        .chain(value.as_bytes().iter().copied())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    hash | 0x8000_0000_0000_0000
+}
+
+fn test_collapse_state(folder_id: u64, row_id: u64, position: u32, category_id: u64) -> Vec<u8> {
+    let mut state = Vec::new();
+    state.extend_from_slice(b"LPECS1");
+    state.extend_from_slice(&folder_id.to_le_bytes());
+    state.extend_from_slice(&row_id.to_le_bytes());
+    state.extend_from_slice(&0u32.to_le_bytes());
+    state.extend_from_slice(&position.to_le_bytes());
+    state.extend_from_slice(&1u16.to_le_bytes());
+    state.extend_from_slice(&1u16.to_le_bytes());
+    state.extend_from_slice(&1u16.to_le_bytes());
+    state.extend_from_slice(&category_id.to_le_bytes());
+    state
+}
+
 #[tokio::test]
 async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let store = FakeStore {
@@ -4812,18 +4840,27 @@ async fn mapi_over_http_seek_row_fractional_moves_table_cursor() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_categorized_table_rops_return_rop_specific_protocol_errors() {
+async fn mapi_over_http_categorized_table_rops_use_bounded_table_state() {
     let mut inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
-    inbox.total_emails = 1;
+    inbox.total_emails = 2;
+    let mut first = FakeStore::email(
+        "87878787-8787-8787-8787-878787878787",
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Categorized first",
+    );
+    first.categories = vec!["Project".to_string()];
+    let mut second = FakeStore::email(
+        "88888888-8888-8888-8888-888888888888",
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Categorized second",
+    );
+    second.categories = vec!["Project".to_string()];
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![inbox])),
-        emails: Arc::new(Mutex::new(vec![FakeStore::email(
-            "87878787-8787-8787-8787-878787878787",
-            "55555555-5555-5555-5555-555555555555",
-            "inbox",
-            "Categorized table probe",
-        )])),
+        emails: Arc::new(Mutex::new(vec![first, second])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -4841,23 +4878,34 @@ async fn mapi_over_http_categorized_table_rops_return_rop_specific_protocol_erro
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]);
-    rops.extend_from_slice(&[0x59, 0x00, 0x02]);
-    rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(
-        &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
-    );
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x674D_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x9000_101Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[0x13, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x9000_101Fu32.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    rops.extend_from_slice(&10u16.to_le_bytes());
+    let category_id = test_category_id(test_mapi_folder_id(5), 0x9000_101F, "Project");
     rops.extend_from_slice(&[0x5A, 0x00, 0x02]);
-    rops.extend_from_slice(
-        &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
-    );
+    rops.extend_from_slice(&category_id.to_le_bytes());
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    rops.extend_from_slice(&10u16.to_le_bytes());
+    rops.extend_from_slice(&[0x59, 0x00, 0x02]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&category_id.to_le_bytes());
     rops.extend_from_slice(&[0x6B, 0x00, 0x02]);
-    rops.extend_from_slice(
-        &test_mapi_message_id("87878787-8787-8787-8787-878787878787").to_le_bytes(),
-    );
+    rops.extend_from_slice(&category_id.to_le_bytes());
     rops.extend_from_slice(&0u32.to_le_bytes());
+    let state = test_collapse_state(test_mapi_folder_id(5), category_id, 0, category_id);
     rops.extend_from_slice(&[0x6C, 0x00, 0x02]);
-    rops.extend_from_slice(&4u16.to_le_bytes());
-    rops.extend_from_slice(b"LPEC");
+    rops.extend_from_slice(&(state.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&state);
 
     let response = service
         .handle_mapi(
@@ -4870,21 +4918,26 @@ async fn mapi_over_http_categorized_table_rops_return_rop_specific_protocol_erro
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x13, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &utf16z("Project")));
+    assert!(contains_bytes(&response_rops, &utf16z("Categorized first")));
     assert!(contains_bytes(
         &response_rops,
-        &[0x59, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &utf16z("Categorized second")
     ));
     assert!(contains_bytes(
         &response_rops,
-        &[0x5A, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &[0x5A, 0x02, 0, 0, 0, 0, 2, 0, 0, 0]
     ));
     assert!(contains_bytes(
         &response_rops,
-        &[0x6B, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &[0x59, 0x02, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0]
     ));
+    assert!(contains_bytes(&response_rops, &[0x6B, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, b"LPECS1"));
     assert!(contains_bytes(
         &response_rops,
-        &[0x6C, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &[0x6C, 0x02, 0, 0, 0, 0, 4, 0]
     ));
     assert!(!contains_bytes(
         &response_rops,
@@ -8447,6 +8500,182 @@ async fn mapi_over_http_guessed_recoverable_items_folder_id_is_not_opened() {
         &response_rops,
         &[0x02, 0x01, 0x0F, 0x01, 0x04, 0x80]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_browses_recoverable_items_virtual_folder() {
+    let item = FakeStore::recoverable_item(
+        "abababab-abab-abab-abab-abababababab",
+        "deletions",
+        "Recoverable browse subject",
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        recoverable_items: Arc::new(Mutex::new(vec![item])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
+        0x12, 0x00, 0x02, 0x00, // RopSetColumns
+    ]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
+    ]);
+    rops.extend_from_slice(&10u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Recoverable browse subject")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Note")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_restores_recoverable_item_through_canonical_store() {
+    let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let item_id = Uuid::parse_str("bcbcbcbc-bcbc-bcbc-bcbc-bcbcbcbcbcbc").unwrap();
+    let item = FakeStore::recoverable_item(&item_id.to_string(), "deletions", "Restore me");
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        recoverable_items: Arc::new(Mutex::new(vec![item])),
+        ..Default::default()
+    };
+    let restored = store.restored_recoverable_items.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID,
+    );
+    append_rop_open_folder(&mut rops, 0, 2, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[
+        0x33, 0x00, 0x01, 0x02, // RopMoveCopyMessages, move
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(
+        &mut rops,
+        crate::mapi_store::mapi_recoverable_item_id(&item_id),
+    );
+    rops.push(0);
+    rops.push(0);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, 2, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert_eq!(
+        restored.lock().unwrap().as_slice(),
+        &[(item_id, Some(inbox_id))]
+    );
+    assert!(contains_bytes(&response_rops, &[0x33, 0x01, 0, 0, 0, 0, 0]));
+}
+
+#[tokio::test]
+async fn mapi_over_http_recoverable_purge_reports_partial_when_canonical_store_blocks() {
+    let item_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
+    let mut item = FakeStore::recoverable_item(&item_id.to_string(), "deletions", "Held item");
+    item.legal_hold = true;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        recoverable_items: Arc::new(Mutex::new(vec![item])),
+        failed_purge_recoverable_item_ids: Arc::new(Mutex::new(vec![item_id])),
+        ..Default::default()
+    };
+    let purged = store.purged_recoverable_items.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x59, 0x00, 0x01, // RopHardDeleteMessages
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(
+        &mut rops,
+        crate::mapi_store::mapi_recoverable_item_id(&item_id),
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(purged.lock().unwrap().is_empty());
+    assert!(contains_bytes(&response_rops, &[0x59, 0x01, 0, 0, 0, 0, 1]));
 }
 
 #[tokio::test]
@@ -17172,7 +17401,14 @@ async fn mapi_over_http_fast_transfer_copy_properties_message_returns_canonical_
 }
 
 #[tokio::test]
-async fn mapi_over_http_fast_transfer_upload_rops_return_rop_specific_protocol_errors() {
+async fn mapi_over_http_fast_transfer_destination_upload_saves_canonical_email() {
+    fn append_fast_transfer_utf16_property(values: &mut Vec<u8>, property_tag: u32, value: &str) {
+        let bytes = utf16z(value);
+        values.extend_from_slice(&property_tag.to_le_bytes());
+        values.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        values.extend_from_slice(&bytes);
+    }
+
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -17181,6 +17417,7 @@ async fn mapi_over_http_fast_transfer_upload_rops_return_rop_specific_protocol_e
         )])),
         ..Default::default()
     };
+    let imported_emails = store.imported_emails.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -17192,20 +17429,38 @@ async fn mapi_over_http_fast_transfer_upload_rops_return_rop_specific_protocol_e
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
+    let mut transfer_data = Vec::new();
+    append_fast_transfer_utf16_property(
+        &mut transfer_data,
+        0x0037_001F,
+        "FastTransfer uploaded subject",
+    );
+    append_fast_transfer_utf16_property(
+        &mut transfer_data,
+        0x1000_001F,
+        "FastTransfer uploaded body",
+    );
+
     let mut rops = vec![0x02, 0x00, 0x00, 0x01];
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
-    rops.extend_from_slice(&[0x53, 0x00, 0x01, 0x02, 0x01, 0x00]);
-    rops.extend_from_slice(&[0x54, 0x00, 0x01]);
+    rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
     rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(&[0x86, 0x00, 0x01]);
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x54, 0x00, 0x03]);
+    rops.extend_from_slice(&(transfer_data.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&transfer_data);
+    rops.extend_from_slice(&[0x86, 0x00, 0x03]);
     rops.extend_from_slice(&[15, 20, 0, 1, 0, 0]);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x02, 0x00]);
 
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
         )
         .await
         .unwrap();
@@ -17214,19 +17469,59 @@ async fn mapi_over_http_fast_transfer_upload_rops_return_rop_specific_protocol_e
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x53, 0x02, 0x02, 0x01, 0x04, 0x80]
+        &[0x53, 0x03, 0x00, 0x00, 0x00, 0x00]
     ));
     assert!(contains_bytes(
         &response_rops,
-        &[0x54, 0x01, 0x02, 0x01, 0x04, 0x80]
+        &[
+            0x54,
+            0x03,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            transfer_data.len() as u8,
+            0x00,
+        ]
     ));
     assert!(contains_bytes(
         &response_rops,
-        &[0x86, 0x01, 0x02, 0x01, 0x04, 0x80]
+        &[0x86, 0x03, 0x00, 0x00, 0x00, 0x00]
     ));
-    assert!(!contains_bytes(
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+
+    let recorded = imported_emails.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].subject, "FastTransfer uploaded subject");
+    assert_eq!(recorded[0].body_text, "FastTransfer uploaded body");
+}
+
+#[tokio::test]
+async fn mapi_over_http_fast_transfer_destination_put_buffer_extended_is_parseable() {
+    let mut transfer_data = Vec::new();
+    let subject = utf16z("FastTransfer extended subject");
+    transfer_data.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    transfer_data.extend_from_slice(&(subject.len() as u32).to_le_bytes());
+    transfer_data.extend_from_slice(&subject);
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x06, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    rops.push(0);
+    rops.extend_from_slice(&[0x53, 0x00, 0x02, 0x03, 0x01, 0x00]);
+    rops.extend_from_slice(&[0x9D, 0x00, 0x03]);
+    rops.extend_from_slice(&(transfer_data.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&transfer_data);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX, u32::MAX]).await;
+
+    assert!(contains_bytes(
         &response_rops,
-        &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]
+        &[0x9D, 0x03, 0, 0, 0, 0, transfer_data.len() as u8, 0, 0, 0]
     ));
 }
 
@@ -22792,6 +23087,9 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
         session: Some(FakeStore::account()),
         ..Default::default()
     };
+    let submitted_messages = store.submitted_messages.clone();
+    let saved_drafts = store.saved_drafts.clone();
+    let imported_emails = store.imported_emails.clone();
     let service = ExchangeService::new(store);
     let connect = service
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
@@ -22837,6 +23135,9 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
         &response_rops,
         &[0x7B, 0x00, 0, 0, 0, 0, 0, 0, 0, 0]
     ));
+    assert!(submitted_messages.lock().unwrap().is_empty());
+    assert!(saved_drafts.lock().unwrap().is_empty());
+    assert!(imported_emails.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -24005,6 +24306,51 @@ async fn mapi_over_http_resolve_names_ranks_exact_contact_before_partial_account
     ));
     assert!(contains_bytes(&body, &utf16z("Bob Contact")));
     assert!(!contains_bytes(&body, &utf16z("bob.alias@example.test")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_nspi_get_matches_ranks_distribution_list_exact_smtp_first() {
+    let mut display_name_account = FakeStore::account();
+    display_name_account.account_id =
+        Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    display_name_account.email = "sales.account@example.test".to_string();
+    display_name_account.display_name = "sales@example.test".to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![display_name_account])),
+        group_aliases: Arc::new(Mutex::new(vec![(
+            Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+            "Sales".to_string(),
+            "sales@example.test".to_string(),
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let request = resolve_names_request(
+        "sales@example.test",
+        &[0x3001_001F, 0x39FE_001F, 0x3900_0003],
+    );
+    let headers = nspi_bound_headers(&service, "GetMatches").await;
+
+    let response = service
+        .handle_mapi(MapiEndpoint::Nspi, &headers, &request)
+        .await
+        .unwrap();
+
+    let body = response_bytes(response).await;
+    assert_eq!(body[9], 1);
+    let group_name = utf16z("Sales");
+    let account_name = utf16z("sales@example.test");
+    let group_position = body
+        .windows(group_name.len())
+        .position(|window| window == group_name.as_slice())
+        .expect("distribution list row");
+    let account_position = body
+        .windows(account_name.len())
+        .position(|window| window == account_name.as_slice())
+        .expect("account row");
+    assert!(group_position < account_position);
 }
 
 #[tokio::test]

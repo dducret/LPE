@@ -112,8 +112,10 @@ source mailbox id, source IMAP UID, message id, retention deadline, and
 legal-hold flag. Recoverable items are not normal `mailboxes` rows and are not
 listed by JMAP `Mailbox/*` or IMAP folder discovery. MAPI and EWS may project
 Recoverable Items Root, Deletions, Versions, and Purges as virtual
-compatibility folders only after their ROP/API behavior is wired to this
-canonical table.
+compatibility folders only when their protocol behavior is wired to this
+canonical table. MAPI currently projects those virtual folders for bounded
+browse, restore, and purge behavior while keeping recovery state out of normal
+mailbox hierarchy and content sync.
 The canonical `/api/mail/recoverable-items` surface lists active recoverable
 items, restores an item by creating a fresh target mailbox membership with a
 new target UID, and purges only unheld items whose recoverable retention has

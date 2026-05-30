@@ -8,7 +8,7 @@ use super::store_adapter::*;
 use super::sync::*;
 use super::tables::*;
 use super::transport::*;
-use super::wire::{FastTransferMarker, MapiPropertyType, MapiSyncType, RopId};
+use super::wire::{MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
@@ -617,6 +617,40 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
     Ok((deleted_any, partial_completion))
 }
 
+async fn hard_delete_recoverable_folder_contents<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<(bool, bool), u32> {
+    let items = snapshot.recoverable_items_for_folder(folder_id);
+    if crate::mapi_store::recoverable_storage_folder(folder_id).is_none() {
+        return Err(0x8004_010F);
+    }
+    let mut partial_completion = false;
+    let mut deleted_any = false;
+    for item in items {
+        if store
+            .purge_recoverable_item(
+                principal.account_id,
+                item.canonical_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "mapi-empty-recoverable-folder".to_string(),
+                    subject: format!("recoverable:{}", item.canonical_id),
+                },
+            )
+            .await
+            .is_err()
+        {
+            partial_completion = true;
+        } else {
+            deleted_any = true;
+        }
+    }
+    Ok((deleted_any, partial_completion))
+}
+
 pub(in crate::mapi) async fn execute_response<S, V>(
     store: &S,
     validator: &Validator<V>,
@@ -844,13 +878,13 @@ where
                     Err(fallback_error) => {
                         store_session(session_id.clone(), session);
                         return execute_failure_response(
-                                request_id,
-                                4,
-                                &format!(
-                                    "failed to load MAPI mail store view: {error:#}; fallback failed: {fallback_error:#}"
-                                ),
-                                Some(session_cookie(endpoint, &session_id, false)),
-                            );
+                            request_id,
+                            4,
+                            &format!(
+                                "failed to load MAPI mail store view: {error:#}; fallback failed: {fallback_error:#}"
+                            ),
+                            Some(session_cookie(endpoint, &session_id, false)),
+                        );
                     }
                 }
             } else {
@@ -1624,6 +1658,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
         Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
+        Some(MapiObject::RecoverableItem { .. }) => "recoverable_item",
         Some(MapiObject::PendingMessage { .. }) => "pending_message",
         Some(MapiObject::PendingContact { .. }) => "pending_contact",
         Some(MapiObject::PendingEvent { .. }) => "pending_event",
@@ -1644,6 +1679,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::NotificationSubscription { .. }) => "notification_subscription",
         Some(MapiObject::SynchronizationSource { .. }) => "synchronization_source",
         Some(MapiObject::SynchronizationCollector { .. }) => "synchronization_collector",
+        Some(MapiObject::FastTransferDestination { .. }) => "fast_transfer_destination",
     }
 }
 
@@ -2415,7 +2451,7 @@ where
                     })
                     .await?;
             }
-            MapiObject::DelegateFreeBusyMessage { .. } => {}
+            MapiObject::DelegateFreeBusyMessage { .. } | MapiObject::RecoverableItem { .. } => {}
             _ => return Err(anyhow!("MAPI object does not support property mutation")),
         }
     }
@@ -4835,6 +4871,29 @@ where
                             0x8004_010F,
                         ));
                     }
+                } else if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
+                    if let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id) {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::RecoverableItem {
+                                folder_id,
+                                item_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &item.item.subject,
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
                 } else {
                     responses.extend_from_slice(&rop_error_response(
                         0x03,
@@ -4858,6 +4917,9 @@ where
                         folder_id,
                         columns,
                         sort_orders: Vec::new(),
+                        category_count: 0,
+                        expanded_count: 0,
+                        collapsed_categories: HashSet::new(),
                         restriction: None,
                         bookmarks: HashMap::new(),
                         next_bookmark: 1,
@@ -4901,6 +4963,9 @@ where
                             .is_some_and(|flags| flags & 0x02 != 0),
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
+                        category_count: 0,
+                        expanded_count: 0,
+                        collapsed_categories: HashSet::new(),
                         restriction: None,
                         bookmarks: HashMap::new(),
                         next_bookmark: 1,
@@ -6241,17 +6306,31 @@ where
             Some(RopId::SortTable) => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::HierarchyTable {
                     sort_orders,
+                    category_count,
+                    expanded_count,
+                    collapsed_categories,
                     position,
                     bookmarks,
                     ..
                 })
                 | Some(MapiObject::ContentsTable {
                     sort_orders,
+                    category_count,
+                    expanded_count,
+                    collapsed_categories,
                     position,
                     bookmarks,
                     ..
-                })
-                | Some(MapiObject::AttachmentTable {
+                }) => {
+                    *sort_orders = request.sort_orders();
+                    *category_count = request.sort_category_count();
+                    *expanded_count = request.sort_expanded_count();
+                    collapsed_categories.clear();
+                    *position = 0;
+                    bookmarks.clear();
+                    responses.extend_from_slice(&rop_sort_table_response(&request));
+                }
+                Some(MapiObject::AttachmentTable {
                     sort_orders,
                     position,
                     bookmarks,
@@ -6367,6 +6446,37 @@ where
                     &request,
                     input_object(session, &handle_slots, &request),
                     snapshot,
+                ))
+            }
+            Some(RopId::ExpandRow) if !matches!(
+                input_object(session, &handle_slots, &request),
+                Some(MapiObject::Folder { .. })
+            ) => {
+                responses.extend_from_slice(&rop_expand_row_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                ))
+            }
+            Some(RopId::CollapseRow) => responses.extend_from_slice(&rop_collapse_row_response(
+                &request,
+                input_object_mut(session, &handle_slots, &request),
+                mailboxes,
+                emails,
+                snapshot,
+            )),
+            Some(RopId::GetCollapseState) => {
+                responses.extend_from_slice(&rop_get_collapse_state_response(
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                ))
+            }
+            Some(RopId::SetCollapseState) => {
+                responses.extend_from_slice(&rop_set_collapse_state_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request),
                 ))
             }
             Some(RopId::CreateFolder) => {
@@ -6715,15 +6825,10 @@ where
                     partial_completion,
                 ));
             }
-            Some(RopId::DeleteMessages | RopId::HardDeleteMessages) | Some(RopId::ExpandRow)
-                if request.rop_id != RopId::ExpandRow.as_u8()
-                    || !request.message_ids().is_empty() =>
-            {
+            Some(RopId::DeleteMessages | RopId::HardDeleteMessages | RopId::ExpandRow) => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
-                    _ if request.rop_id == RopId::ExpandRow.as_u8()
-                        || request.rop_id == RopId::HardDeleteMessages.as_u8() =>
-                    {
+                    _ if request.rop_id == RopId::HardDeleteMessages.as_u8() => {
                         responses.extend_from_slice(&unsupported_rop_response(
                             request.rop_id,
                             request.response_handle_index(),
@@ -6753,6 +6858,29 @@ where
                     continue;
                 }
                 for message_id in request.message_ids() {
+                    if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
+                        let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id)
+                        else {
+                            partial_completion = true;
+                            continue;
+                        };
+                        if store
+                            .purge_recoverable_item(
+                                principal.account_id,
+                                item.canonical_id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-purge-recoverable-message".to_string(),
+                                    subject: format!("recoverable:{}", item.canonical_id),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                        continue;
+                    }
                     if let Some(contact) = snapshot.contact_for_id(folder_id, message_id) {
                         if store
                             .delete_accessible_contact(principal.account_id, contact.canonical_id)
@@ -7777,6 +7905,51 @@ where
                     ));
                     continue;
                 }
+                if crate::mapi_store::recoverable_storage_folder(source_folder_id).is_some() {
+                    let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes)
+                    else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x33,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        continue;
+                    };
+                    let mut partial_completion = false;
+                    for message_id in request.move_copy_message_ids() {
+                        let Some(item) =
+                            snapshot.recoverable_item_for_id(source_folder_id, message_id)
+                        else {
+                            partial_completion = true;
+                            continue;
+                        };
+                        if store
+                            .restore_recoverable_item(
+                                principal.account_id,
+                                item.canonical_id,
+                                Some(target_mailbox.id),
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-restore-recoverable-message".to_string(),
+                                    subject: format!(
+                                        "recoverable:{}->{}",
+                                        item.canonical_id, target_mailbox.id
+                                    ),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                    }
+                    responses.extend_from_slice(&rop_partial_completion_response(
+                        0x33,
+                        request.response_handle_index(),
+                        partial_completion,
+                    ));
+                    continue;
+                }
                 let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes) else {
                     responses.extend_from_slice(&rop_error_response(
                         0x33,
@@ -8528,16 +8701,92 @@ where
                 responses.extend_from_slice(&rop_fast_transfer_source_copy_response(&request));
                 output_handles.push(handle);
             }
-            Some(RopId::FastTransferDestinationPutBuffer)
-                if first_fast_transfer_marker(&request)
-                    .is_some_and(|marker| FastTransferMarker::from_u32(marker).is_none()) =>
-            {
-                responses.extend_from_slice(&rop_error_response(
-                    0x54,
-                    request.response_handle_index(),
-                    0x8004_0102,
+            Some(RopId::FastTransferDestinationConfigure) => {
+                let Some(target_handle) = input_handle(&handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x53,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let Some(folder_id) = session
+                    .handles
+                    .get(&target_handle)
+                    .and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x53,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                };
+                let handle = session.allocate_output_handle(
+                    request.output_handle_index,
+                    MapiObject::FastTransferDestination {
+                        folder_id,
+                        target_handle,
+                        buffer: Vec::new(),
+                    },
+                );
+                set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                responses.extend_from_slice(&rop_simple_success_response(&request));
+                output_handles.push(handle);
+            }
+            Some(
+                RopId::FastTransferDestinationPutBuffer
+                | RopId::FastTransferDestinationPutBufferExtended,
+            ) => {
+                if first_fast_transfer_marker(&request).is_some() {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    break;
+                }
+                let upload_data = request.fast_transfer_upload_data().to_vec();
+                let Some((target_handle, full_buffer)) =
+                    append_fast_transfer_destination_buffer(session, &handle_slots, &request)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                let property_values = match fast_transfer_property_values(&full_buffer) {
+                    Ok(values) => values,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        break;
+                    }
+                };
+                if !property_values.is_empty()
+                    && apply_fast_transfer_destination_properties(
+                        session,
+                        target_handle,
+                        property_values,
+                    )
+                    .is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                responses.extend_from_slice(&rop_fast_transfer_put_buffer_response(
+                    &request,
+                    upload_data.len(),
                 ));
-                break;
             }
             Some(
                 RopId::FastTransferSourceCopyFolder
@@ -8633,9 +8882,7 @@ where
                                     "folder=0x{:016x};checkpoint_kind={};checkpoint_mailbox={};seq={};modseq={};state={};state_summary={};upload_buffer={};client_state={};incremental={};requested={};response={};payload={};status={};completed={};position={}/{};{}",
                                     *folder_id,
                                     checkpoint_kind.as_str(),
-                                    (*mailbox_id)
-                                        .map(|id| id.to_string())
-                                        .unwrap_or_default(),
+                                    (*mailbox_id).map(|id| id.to_string()).unwrap_or_default(),
                                     *checkpoint_change_sequence,
                                     *checkpoint_modseq,
                                     state.len(),
@@ -8934,7 +9181,8 @@ where
             }
             Some(RopId::TellVersion) => match input_object(session, &handle_slots, &request) {
                 Some(MapiObject::SynchronizationSource { .. })
-                | Some(MapiObject::SynchronizationCollector { .. }) => {
+                | Some(MapiObject::SynchronizationCollector { .. })
+                | Some(MapiObject::FastTransferDestination { .. }) => {
                     responses.extend_from_slice(&rop_simple_success_response(&request));
                 }
                 _ => responses.extend_from_slice(&rop_error_response(
@@ -10071,11 +10319,17 @@ where
                     continue;
                 };
 
-                match hard_delete_folder_contents(
-                    store, principal, folder_id, mailboxes, emails, snapshot,
-                )
-                .await
-                {
+                let result = if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
+                    hard_delete_recoverable_folder_contents(store, principal, folder_id, snapshot)
+                        .await
+                } else {
+                    hard_delete_folder_contents(
+                        store, principal, folder_id, mailboxes, emails, snapshot,
+                    )
+                    .await
+                };
+
+                match result {
                     Ok((deleted_any, partial_completion)) => {
                         if deleted_any {
                             session.record_notification(MapiNotificationEvent::content(
@@ -10851,6 +11105,116 @@ fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
     let bytes = request.payload.get(2..2 + size)?;
     let marker = u32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
     (marker & 0x4000_0000 != 0).then_some(marker)
+}
+
+fn append_fast_transfer_destination_buffer(
+    session: &mut MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+) -> Option<(u32, Vec<u8>)> {
+    match input_object_mut(session, handle_slots, request)? {
+        MapiObject::FastTransferDestination {
+            target_handle,
+            buffer,
+            ..
+        } => {
+            buffer.extend_from_slice(request.fast_transfer_upload_data());
+            Some((*target_handle, buffer.clone()))
+        }
+        _ => None,
+    }
+}
+
+fn apply_fast_transfer_destination_properties(
+    session: &mut MapiSession,
+    target_handle: u32,
+    property_values: Vec<(u32, MapiValue)>,
+) -> Option<()> {
+    let properties = match session.handles.get_mut(&target_handle)? {
+        MapiObject::PendingMessage { properties, .. }
+        | MapiObject::PendingContact { properties, .. }
+        | MapiObject::PendingEvent { properties, .. }
+        | MapiObject::PendingTask { properties, .. }
+        | MapiObject::PendingNote { properties, .. }
+        | MapiObject::PendingJournalEntry { properties, .. }
+        | MapiObject::PendingConversationAction { properties, .. }
+        | MapiObject::PendingNavigationShortcut { properties, .. } => properties,
+        _ => return None,
+    };
+    for (property_tag, value) in property_values {
+        properties.insert(canonical_property_storage_tag(property_tag), value);
+    }
+    Some(())
+}
+
+fn fast_transfer_property_values(bytes: &[u8]) -> Result<Vec<(u32, MapiValue)>> {
+    let mut cursor = Cursor::new(bytes);
+    let mut values = Vec::new();
+    while cursor.remaining() > 0 {
+        let property_tag = cursor.read_u32()?;
+        if property_tag & 0x4000_0000 != 0 {
+            return Err(anyhow::anyhow!("unsupported FastTransfer marker"));
+        }
+        values.push((
+            property_tag,
+            read_fast_transfer_property_value(&mut cursor, property_tag)?,
+        ));
+    }
+    Ok(values)
+}
+
+fn read_fast_transfer_property_value(
+    cursor: &mut Cursor<'_>,
+    property_tag: u32,
+) -> Result<MapiValue> {
+    match MapiPropertyType::from_code((property_tag & 0xFFFF) as u16) {
+        Some(MapiPropertyType::Integer16) => Ok(MapiValue::I16(cursor.read_u16()? as i16)),
+        Some(MapiPropertyType::Integer32) => Ok(MapiValue::I32(cursor.read_i32()?)),
+        Some(MapiPropertyType::Boolean) => Ok(MapiValue::Bool(cursor.read_u16()? != 0)),
+        Some(MapiPropertyType::Integer64) | Some(MapiPropertyType::Time) => {
+            Ok(MapiValue::I64(cursor.read_i64()?))
+        }
+        Some(MapiPropertyType::String8) => {
+            let bytes = read_fast_transfer_variable_bytes(cursor)?;
+            Ok(MapiValue::String(decode_fast_transfer_string8(&bytes)))
+        }
+        Some(MapiPropertyType::String) => {
+            let bytes = read_fast_transfer_variable_bytes(cursor)?;
+            Ok(MapiValue::String(decode_fast_transfer_utf16(&bytes)?))
+        }
+        Some(MapiPropertyType::Binary) => Ok(MapiValue::Binary(read_fast_transfer_variable_bytes(
+            cursor,
+        )?)),
+        Some(MapiPropertyType::Guid) => {
+            let bytes = cursor.read_bytes(16)?;
+            Ok(MapiValue::Guid(bytes.try_into().unwrap_or([0; 16])))
+        }
+        _ => Err(anyhow::anyhow!("unsupported FastTransfer property type")),
+    }
+}
+
+fn read_fast_transfer_variable_bytes(cursor: &mut Cursor<'_>) -> Result<Vec<u8>> {
+    let len = cursor.read_u32()? as usize;
+    Ok(cursor.read_bytes(len)?.to_vec())
+}
+
+fn decode_fast_transfer_string8(bytes: &[u8]) -> String {
+    let trimmed = bytes.strip_suffix(&[0]).unwrap_or(bytes);
+    String::from_utf8_lossy(trimmed).into_owned()
+}
+
+fn decode_fast_transfer_utf16(bytes: &[u8]) -> Result<String> {
+    if bytes.len() % 2 != 0 {
+        return Err(anyhow::anyhow!("odd UTF-16 FastTransfer string length"));
+    }
+    let mut units = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
+        .collect::<Vec<_>>();
+    if units.last() == Some(&0) {
+        units.pop();
+    }
+    Ok(String::from_utf16(&units)?)
 }
 
 async fn mapi_submit_attachments_from_email<S>(

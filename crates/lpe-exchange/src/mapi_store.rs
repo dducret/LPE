@@ -3,7 +3,7 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
     ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
     DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule,
-    ReminderQuery, SearchFolderDefinition,
+    RecoverableItem, ReminderQuery, SearchFolderDefinition,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -29,6 +29,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
+    recoverable_items: Vec<MapiRecoverableItemMessage>,
     reminders: Vec<ClientReminder>,
     folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
@@ -160,6 +161,15 @@ pub(crate) struct MapiDelegateFreeBusyMessage {
     pub(crate) folder_id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) message: DelegateFreeBusyMessageObject,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiRecoverableItemMessage {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) item: RecoverableItem,
 }
 
 #[derive(Debug, Clone)]
@@ -361,6 +371,7 @@ impl MapiMailStoreSnapshot {
             navigation_shortcuts: Vec::new(),
             conversation_actions: Vec::new(),
             delegate_freebusy_messages: Vec::new(),
+            recoverable_items: Vec::new(),
             reminders: Vec::new(),
             folder_permissions,
             content_windows: Vec::new(),
@@ -428,6 +439,25 @@ impl MapiMailStoreSnapshot {
                 folder_id: crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
                 canonical_id: message.id,
                 message,
+            })
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_recoverable_items(
+        mut self,
+        recoverable_items: Vec<RecoverableItem>,
+    ) -> Self {
+        self.recoverable_items = recoverable_items
+            .into_iter()
+            .filter_map(|item| {
+                let folder_id = recoverable_mapi_folder_id(&item.recoverable_folder)?;
+                Some(MapiRecoverableItemMessage {
+                    id: mapi_recoverable_item_id(&item.id),
+                    folder_id,
+                    canonical_id: item.id,
+                    item,
+                })
             })
             .collect();
         self
@@ -921,6 +951,26 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
     }
 
+    pub(crate) fn recoverable_items_for_folder(
+        &self,
+        folder_id: u64,
+    ) -> Vec<&MapiRecoverableItemMessage> {
+        self.recoverable_items
+            .iter()
+            .filter(|item| item.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn recoverable_item_for_id(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> Option<&MapiRecoverableItemMessage> {
+        self.recoverable_items
+            .iter()
+            .find(|item| item.folder_id == folder_id && item.id == item_id)
+    }
+
     pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
         let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) else {
             return Vec::new();
@@ -1053,6 +1103,13 @@ impl<T: ExchangeStore> MapiStore for T {
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let delegate_freebusy_messages =
                 self.fetch_delegate_freebusy_messages(account_id).await?;
+            let mut recoverable_items = Vec::new();
+            for folder in ["deletions", "versions", "purges"] {
+                recoverable_items.extend(
+                    self.list_recoverable_items(account_id, Some(folder))
+                        .await?,
+                );
+            }
             let reminders = self
                 .query_client_reminders(
                     account_id,
@@ -1113,6 +1170,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_navigation_shortcuts(navigation_shortcuts))
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
+            .map(|snapshot| snapshot.with_recoverable_items(recoverable_items))
             .map(|snapshot| snapshot.with_reminders(reminders))
         })
     }
@@ -1313,6 +1371,28 @@ fn mapi_message_id(email: &JmapEmail) -> u64 {
 
 fn mapi_item_id(id: &Uuid) -> u64 {
     crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI item identity mapping missing")
+}
+
+pub(crate) fn mapi_recoverable_item_id(id: &Uuid) -> u64 {
+    crate::mapi::identity::legacy_migration_object_id(id)
+}
+
+pub(crate) fn recoverable_mapi_folder_id(folder: &str) -> Option<u64> {
+    match folder {
+        "deletions" => Some(crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID),
+        "versions" => Some(crate::mapi::identity::RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID),
+        "purges" => Some(crate::mapi::identity::RECOVERABLE_ITEMS_PURGES_FOLDER_ID),
+        _ => None,
+    }
+}
+
+pub(crate) fn recoverable_storage_folder(folder_id: u64) -> Option<&'static str> {
+    match folder_id {
+        crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID => Some("deletions"),
+        crate::mapi::identity::RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID => Some("versions"),
+        crate::mapi::identity::RECOVERABLE_ITEMS_PURGES_FOLDER_ID => Some("purges"),
+        _ => None,
+    }
 }
 
 fn mapi_collaboration_folder_id(

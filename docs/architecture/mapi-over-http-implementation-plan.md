@@ -108,6 +108,16 @@ state. The supported projection surface is:
 | Permission tables | Canonical permission projection plus bounded mutation through `mailbox_delegation_grants`; no MAPI-local ACL table is allowed. |
 | Search and reminder folders | Persisted canonical built-in and user-saved search-folder definitions plus hierarchy/content projections; no Common Views search-definition FAI rows are published until documented search-folder BLOB parity exists. |
 
+Categorized contents tables are bounded to the canonical rows already available
+through the table projection. `RopSortTable` category counts create
+session-local category metadata on the table handle, `RopQueryRows` emits
+category header rows and expanded leaf rows from canonical contents rows,
+`RopExpandRow` and `RopCollapseRow` update only that table handle, and
+`RopGetCollapseState` / `RopSetCollapseState` serialize and restore a bounded
+collapse-state blob for the active table. LPE does not persist categorized
+collapse state as profile data unless a future architecture update explicitly
+defines it as bounded profile state.
+
 ### Specification Basis
 
 The wire contract is based on Microsoft MAPI over HTTP, EMSMDB, NSPI, ROP,
@@ -376,9 +386,9 @@ not by itself authorize broad client publication.
 | Client SMTP in core LPE | Forbidden. Submission must use canonical LPE submission, not a client SMTP endpoint in the core server. |
 | Protocol-local Sent/Outbox | Forbidden. Sent and submission state must be canonical. |
 | NSPI mutation | Deferred. Address-book writes and link-table mutation remain disabled. |
-| Raw FastTransfer destination upload streams | Deferred except for bounded import behavior that mutates canonical mailbox state through supported ROPs. |
+| Raw FastTransfer destination upload streams | Partially implemented. Destination configure plus PutBuffer / PutBufferExtended accepts bounded FastTransfer property streams on pending canonical objects and routes them through the existing save/import paths. Exchange marker/subobject stream shapes remain unsupported and return parseable ROP errors without creating protocol-local state. |
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
-| Recoverable Items / dumpster ROP exposure | Foundation implemented as canonical `recoverable_items` lifecycle state with core `/api/mail/recoverable-items` browse, restore, and purge APIs. MAPI Recoverable Items Root, Deletions, Versions, Purges, `OpenSoftDeleted`, recovery browsing, restore, and purge ROP behavior remain disabled until they project this table/API behavior and pass dedicated MAPI/HTTP tests. No MAPI-local dumpster store is allowed. |
+| Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. Restore uses canonical recoverable restore, purge and empty-folder use canonical recoverable purge, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `OpenSoftDeleted`, complete Exchange dumpster folder parity, and any MAPI-local dumpster store remain unsupported. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, and deferred-action messages remain unsupported; no MAPI-local rule store is allowed. |
 | Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants`, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
@@ -389,7 +399,7 @@ not by itself authorize broad client publication.
 
 | Profile data | Canonical storage | API | JMAP | MAPI over HTTP | Tests and gaps |
 | --- | --- | --- | --- | --- | --- |
-| Messages | `messages`, `mailbox_messages`, `recoverable_items`, MIME/body/blob tables, submission rows | `/api/mail/messages/submit`, draft and flag APIs; `/api/mail/recoverable-items` browse/restore/purge | `Email/*`, `Mailbox/*`, `Thread/*`, `EmailSubmission/*`; normal views exclude recoverable items | Contents tables, ICS, FastTransfer, import/save/send ROPs; dumpster ROPs remain disabled until backed by `recoverable_items` | Covered by existing mail/JMAP/MAPI tests plus canonical recoverable-state tests; no PST/OST content handling. |
+| Messages | `messages`, `mailbox_messages`, `recoverable_items`, MIME/body/blob tables, submission rows | `/api/mail/messages/submit`, draft and flag APIs; `/api/mail/recoverable-items` browse/restore/purge | `Email/*`, `Mailbox/*`, `Thread/*`, `EmailSubmission/*`; normal views exclude recoverable items | Contents tables, ICS, FastTransfer, import/save/send ROPs; bounded Recoverable Items virtual folders for browse/restore/purge over `recoverable_items` | Covered by existing mail/JMAP/MAPI tests plus canonical recoverable-state tests; no PST/OST content handling. |
 | Contacts | collaboration contact collections and contact rows | `/api/mail/contacts` and sharing APIs | `AddressBook/*`, `ContactCard/*` | NSPI and MAPI contact projections | Covered by collaboration/JMAP/MAPI tests; NSPI mutation remains deferred. |
 | Calendars | calendar collections, events, grants, free/busy projections | `/api/mail/calendar/events`, delegation/free-busy APIs | `Calendar/*`, `CalendarEvent/*` | Calendar folder, appointment EntryIDs, free/busy/delegate projections | Covered by calendar/JMAP/MAPI tests; full Exchange delegate data folders remain unsupported. |
 | Tasks | task lists, task rows, grants, reminder metadata | `/api/mail/tasks`, `/api/mail/task-lists`, reminders API | `TaskList/*`, `Task/*`, `Reminder/*` | Task folder and reminder/search-folder projections | Covered by task/reminder/JMAP/MAPI tests. |

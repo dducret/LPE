@@ -597,6 +597,62 @@ pub(in crate::mapi) fn rop_sort_table_response(request: &RopRequest) -> Vec<u8> 
     response
 }
 
+pub(in crate::mapi) fn rop_expand_row_success_response(
+    request: &RopRequest,
+    expanded_row_count: usize,
+    rows: Vec<Vec<u8>>,
+) -> Vec<u8> {
+    let mut response = vec![0x59, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u32(
+        &mut response,
+        expanded_row_count.min(u32::MAX as usize) as u32,
+    );
+    write_u16(&mut response, rows.len().min(u16::MAX as usize) as u16);
+    for row in rows.into_iter().take(u16::MAX as usize) {
+        write_standard_property_row(&mut response, &row);
+    }
+    response
+}
+
+pub(in crate::mapi) fn rop_collapse_row_success_response(
+    request: &RopRequest,
+    collapsed_row_count: usize,
+) -> Vec<u8> {
+    let mut response = vec![0x5A, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u32(
+        &mut response,
+        collapsed_row_count.min(u32::MAX as usize) as u32,
+    );
+    response
+}
+
+pub(in crate::mapi) fn rop_get_collapse_state_success_response(
+    request: &RopRequest,
+    collapse_state: &[u8],
+) -> Vec<u8> {
+    let mut response = vec![0x6B, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u16(
+        &mut response,
+        collapse_state.len().min(u16::MAX as usize) as u16,
+    );
+    response.extend_from_slice(&collapse_state[..collapse_state.len().min(u16::MAX as usize)]);
+    response
+}
+
+pub(in crate::mapi) fn rop_set_collapse_state_success_response(
+    request: &RopRequest,
+    bookmark: &[u8],
+) -> Vec<u8> {
+    let mut response = vec![0x6C, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u16(&mut response, bookmark.len().min(u16::MAX as usize) as u16);
+    response.extend_from_slice(&bookmark[..bookmark.len().min(u16::MAX as usize)]);
+    response
+}
+
 pub(in crate::mapi) fn rop_restrict_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x14, request.response_handle_index()];
     write_u32(&mut response, 0);
@@ -667,6 +723,21 @@ pub(in crate::mapi) fn rop_get_search_criteria_response(
 pub(in crate::mapi) fn rop_upload_state_success_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![request.rop_id, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
+    response
+}
+
+pub(in crate::mapi) fn rop_fast_transfer_put_buffer_response(
+    request: &RopRequest,
+    used_size: usize,
+) -> Vec<u8> {
+    let mut response = vec![request.rop_id, request.input_handle_index().unwrap_or(0)];
+    write_u32(&mut response, 0);
+    if request.rop_id == RopId::FastTransferDestinationPutBufferExtended.as_u8() {
+        write_u32(&mut response, used_size.min(u32::MAX as usize) as u32);
+    } else {
+        response.push(0);
+        write_u16(&mut response, used_size.min(u16::MAX as usize) as u16);
+    }
     response
 }
 
@@ -964,6 +1035,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 );
             };
             serialize_delegate_freebusy_row(message, &columns)
+        }
+        Some(MapiObject::RecoverableItem { folder_id, item_id }) => {
+            let Some(item) = snapshot.recoverable_item_for_id(*folder_id, *item_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_recoverable_item_row(item, &columns)
         }
         Some(MapiObject::Folder {
             folder_id,
@@ -1745,6 +1826,11 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{message_id:#018x}"),
         ),
+        Some(MapiObject::RecoverableItem { folder_id, item_id }) => (
+            "recoverable_item",
+            format!("{folder_id:#018x}"),
+            format!("{item_id:#018x}"),
+        ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
             format!("{folder_id:#018x}"),
@@ -1858,6 +1944,15 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             "synchronization_collector",
             format!("{folder_id:#018x}"),
             format!("{checkpoint_kind:?}"),
+        ),
+        Some(MapiObject::FastTransferDestination {
+            folder_id,
+            target_handle,
+            ..
+        }) => (
+            "fast_transfer_destination",
+            format!("{folder_id:#018x}"),
+            format!("target_handle={target_handle}"),
         ),
         None => ("unknown", String::new(), String::new()),
     }
@@ -2228,6 +2323,14 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::DelegateFreeBusyMessage { message_id, .. }) => snapshot
             .delegate_freebusy_message_for_id(*message_id)
             .map(|message| serialize_delegate_freebusy_row(message, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::RecoverableItem { folder_id, item_id }) => snapshot
+            .recoverable_item_for_id(*folder_id, *item_id)
+            .map(|item| serialize_recoverable_item_row(item, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);
@@ -3224,6 +3327,23 @@ impl RopRequest {
         self.payload.get(4..4 + size).unwrap_or_default()
     }
 
+    pub(in crate::mapi) fn fast_transfer_upload_data(&self) -> &[u8] {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(
+                RopId::FastTransferDestinationPutBuffer
+                    | RopId::FastTransferDestinationPutBufferExtended
+            )
+        ) {
+            return &[];
+        }
+        let Some(size_bytes) = self.payload.get(..2) else {
+            return &[];
+        };
+        let size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
+        self.payload.get(2..2 + size).unwrap_or_default()
+    }
+
     pub(in crate::mapi) fn upload_state_property_tag(&self) -> Option<u32> {
         self.payload
             .get(..4)
@@ -3727,6 +3847,72 @@ impl RopRequest {
                 order: bytes[4],
             })
             .collect()
+    }
+
+    pub(in crate::mapi) fn sort_category_count(&self) -> u16 {
+        self.payload
+            .get(3..5)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn sort_expanded_count(&self) -> u16 {
+        self.payload
+            .get(5..7)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn category_id(&self) -> Option<u64> {
+        let offset = match RopId::from_u8(self.rop_id) {
+            Some(RopId::ExpandRow) => 2,
+            Some(RopId::CollapseRow) => 0,
+            _ => return None,
+        };
+        self.payload
+            .get(offset..offset + 8)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u64::from_le_bytes)
+    }
+
+    pub(in crate::mapi) fn expand_max_row_count(&self) -> usize {
+        self.payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(usize::from)
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn collapse_state(&self) -> &[u8] {
+        let size = self
+            .payload
+            .get(..2)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .map(usize::from)
+            .unwrap_or(0);
+        self.payload.get(2..2 + size).unwrap_or_default()
+    }
+
+    pub(in crate::mapi) fn collapse_state_row_id(&self) -> Option<u64> {
+        if self.rop_id != 0x6B {
+            return None;
+        }
+        self.payload
+            .get(..8)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u64::from_le_bytes)
+    }
+
+    pub(in crate::mapi) fn collapse_state_row_instance_number(&self) -> u32 {
+        self.payload
+            .get(8..12)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0)
     }
 
     pub(in crate::mapi) fn property_tags(&self) -> Vec<u32> {
@@ -4804,7 +4990,10 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
                 payload,
             })
         }
-        Some(RopId::FastTransferDestinationPutBuffer) => {
+        Some(
+            RopId::FastTransferDestinationPutBuffer
+            | RopId::FastTransferDestinationPutBufferExtended,
+        ) => {
             let input_handle_index = cursor.read_u8()?;
             let transfer_data_size = cursor.read_u16()? as usize;
             let mut payload = Vec::new();

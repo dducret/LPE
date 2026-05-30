@@ -3031,6 +3031,34 @@ fn virtual_special_folder_metadata(
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             "IPF.Note",
         )),
+        crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID => Some((
+            "recoverable_items_root",
+            "Recoverable Items",
+            210,
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID => Some((
+            "recoverable_items_deletions",
+            "Deletions",
+            211,
+            crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID => Some((
+            "recoverable_items_versions",
+            "Versions",
+            212,
+            crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+            "IPF.Note",
+        )),
+        crate::mapi::identity::RECOVERABLE_ITEMS_PURGES_FOLDER_ID => Some((
+            "recoverable_items_purges",
+            "Purges",
+            213,
+            crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+            "IPF.Note",
+        )),
         _ => None,
     }
 }

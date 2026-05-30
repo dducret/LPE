@@ -155,6 +155,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         message_id: u64,
     },
+    RecoverableItem {
+        folder_id: u64,
+        item_id: u64,
+    },
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -192,6 +196,9 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
+        category_count: u16,
+        expanded_count: u16,
+        collapsed_categories: HashSet<u64>,
         restriction: Option<MapiRestriction>,
         bookmarks: HashMap<Vec<u8>, TableBookmark>,
         next_bookmark: u32,
@@ -202,6 +209,9 @@ pub(in crate::mapi) enum MapiObject {
         associated: bool,
         columns: Vec<u32>,
         sort_orders: Vec<MapiSortOrder>,
+        category_count: u16,
+        expanded_count: u16,
+        collapsed_categories: HashSet<u64>,
         restriction: Option<MapiRestriction>,
         bookmarks: HashMap<Vec<u8>, TableBookmark>,
         next_bookmark: u32,
@@ -289,6 +299,11 @@ pub(in crate::mapi) enum MapiObject {
         uploaded_normal_change_numbers: Vec<u64>,
         uploaded_fai_change_numbers: Vec<u64>,
         uploaded_read_change_numbers: Vec<u64>,
+    },
+    FastTransferDestination {
+        folder_id: u64,
+        target_handle: u32,
+        buffer: Vec<u8>,
     },
 }
 
@@ -940,6 +955,7 @@ impl MapiObject {
             | MapiObject::ConversationAction { folder_id, .. }
             | MapiObject::NavigationShortcut { folder_id, .. }
             | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
+            | MapiObject::RecoverableItem { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
             | MapiObject::PendingContact { folder_id, .. }
             | MapiObject::PendingEvent { folder_id, .. }
@@ -957,7 +973,8 @@ impl MapiObject {
             | MapiObject::PendingAttachment { folder_id, .. }
             | MapiObject::SavedAttachment { folder_id, .. }
             | MapiObject::SynchronizationSource { folder_id, .. }
-            | MapiObject::SynchronizationCollector { folder_id, .. } => Some(*folder_id),
+            | MapiObject::SynchronizationCollector { folder_id, .. }
+            | MapiObject::FastTransferDestination { folder_id, .. } => Some(*folder_id),
         }
     }
 }

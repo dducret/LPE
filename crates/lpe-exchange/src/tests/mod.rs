@@ -3,6 +3,7 @@ use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use lpe_magika::{DetectionSource, Detector, MagikaDetection, Validator};
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
+use lpe_storage::RecoverableItem;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
@@ -341,6 +342,7 @@ struct FakeStore {
     calendar_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     task_collections: Arc<Mutex<Vec<CollaborationCollection>>>,
     contacts: Arc<Mutex<Vec<AccessibleContact>>>,
+    group_aliases: Arc<Mutex<Vec<(Uuid, String, String)>>>,
     contact_versions: Arc<Mutex<HashMap<Uuid, u64>>>,
     deleted_contacts: Arc<Mutex<Vec<Uuid>>>,
     events: Arc<Mutex<Vec<AccessibleEvent>>>,
@@ -365,6 +367,10 @@ struct FakeStore {
     moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     copied_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     failed_delete_email_ids: Arc<Mutex<Vec<Uuid>>>,
+    recoverable_items: Arc<Mutex<Vec<RecoverableItem>>>,
+    restored_recoverable_items: Arc<Mutex<Vec<(Uuid, Option<Uuid>)>>>,
+    purged_recoverable_items: Arc<Mutex<Vec<Uuid>>>,
+    failed_purge_recoverable_item_ids: Arc<Mutex<Vec<Uuid>>>,
     mailboxes: Arc<Mutex<Vec<JmapMailbox>>>,
     queried_jmap_email_ids: Arc<AtomicU64>,
     created_mailboxes: Arc<Mutex<Vec<JmapMailboxCreateInput>>>,
@@ -639,6 +645,28 @@ impl FakeStore {
             internet_message_id: None,
             mime_blob_ref: Some(format!("test:{id}")),
             delivery_status: "stored".to_string(),
+        }
+    }
+
+    fn recoverable_item(id: &str, folder: &str, subject: &str) -> RecoverableItem {
+        RecoverableItem {
+            id: Uuid::parse_str(id).unwrap(),
+            message_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+            source_mailbox_message_id: Uuid::parse_str("22222222-3333-4444-5555-666666666666")
+                .unwrap(),
+            source_mailbox_id: Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap(),
+            source_imap_uid: 42,
+            recoverable_folder: folder.to_string(),
+            delete_kind: "hard_delete".to_string(),
+            status: "active".to_string(),
+            deleted_at: "2026-05-03T12:00:00Z".to_string(),
+            retained_until: None,
+            legal_hold: false,
+            subject: subject.to_string(),
+            sender_address: "alice@example.test".to_string(),
+            received_at: "2026-05-03T11:00:00Z".to_string(),
+            size_octets: 512,
+            has_attachments: false,
         }
     }
 
@@ -1360,6 +1388,15 @@ impl ExchangeStore for FakeStore {
                     directory_kind: ExchangeAddressBookDirectoryKind::Person,
                 }),
         );
+        entries.extend(self.group_aliases.lock().unwrap().iter().map(
+            |(id, display_name, email)| ExchangeAddressBookEntry {
+                id: *id,
+                display_name: display_name.clone(),
+                email: email.clone(),
+                entry_kind: ExchangeAddressBookEntryKind::DistributionList,
+                directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            },
+        ));
         entries.sort_by(|left, right| {
             left.display_name
                 .cmp(&right.display_name)
@@ -2397,6 +2434,103 @@ impl ExchangeStore for FakeStore {
             .map(|email| email.id)
             .collect();
         Box::pin(async move { Ok(ids) })
+    }
+
+    fn list_recoverable_items<'a>(
+        &'a self,
+        _account_id: Uuid,
+        recoverable_folder: Option<&'a str>,
+    ) -> StoreFuture<'a, Vec<RecoverableItem>> {
+        let items = self
+            .recoverable_items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|item| item.status == "active")
+            .filter(|item| {
+                recoverable_folder
+                    .map(|folder| item.recoverable_folder == folder)
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(items) })
+    }
+
+    fn restore_recoverable_item<'a>(
+        &'a self,
+        _account_id: Uuid,
+        recoverable_item_id: Uuid,
+        target_mailbox_id: Option<Uuid>,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapEmail> {
+        self.restored_recoverable_items
+            .lock()
+            .unwrap()
+            .push((recoverable_item_id, target_mailbox_id));
+        let item = self
+            .recoverable_items
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|item| item.id == recoverable_item_id)
+            .map(|item| {
+                item.status = "restored".to_string();
+                item.clone()
+            });
+        let target = target_mailbox_id.and_then(|target_id| {
+            self.mailboxes
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|mailbox| mailbox.id == target_id)
+                .cloned()
+        });
+        Box::pin(async move {
+            let item = item.ok_or_else(|| anyhow::anyhow!("recoverable item not found"))?;
+            let mailbox_id = target
+                .as_ref()
+                .map(|mailbox| mailbox.id)
+                .or(target_mailbox_id)
+                .unwrap_or(item.source_mailbox_id);
+            let mailbox_role = target
+                .as_ref()
+                .map(|mailbox| mailbox.role.as_str())
+                .unwrap_or("restored");
+            Ok(FakeStore::email(
+                &item.message_id.to_string(),
+                &mailbox_id.to_string(),
+                mailbox_role,
+                &item.subject,
+            ))
+        })
+    }
+
+    fn purge_recoverable_item<'a>(
+        &'a self,
+        _account_id: Uuid,
+        recoverable_item_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        if self
+            .failed_purge_recoverable_item_ids
+            .lock()
+            .unwrap()
+            .contains(&recoverable_item_id)
+        {
+            return Box::pin(
+                async move { Err(anyhow::anyhow!("forced recoverable purge failure")) },
+            );
+        }
+        self.purged_recoverable_items
+            .lock()
+            .unwrap()
+            .push(recoverable_item_id);
+        self.recoverable_items
+            .lock()
+            .unwrap()
+            .retain(|item| item.id != recoverable_item_id);
+        Box::pin(async move { Ok(()) })
     }
 
     fn fetch_jmap_emails<'a>(

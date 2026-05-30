@@ -5,6 +5,10 @@ use super::session::*;
 use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
+use crate::mapi::identity::{
+    RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID, RECOVERABLE_ITEMS_PURGES_FOLDER_ID,
+    RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
+};
 use crate::mapi_store::{
     MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
     MapiMessage, MapiNavigationShortcutMessage, MapiRule, MapiTask,
@@ -38,6 +42,12 @@ pub(in crate::mapi) fn folder_message_count(
             + snapshot.reminder_tasks().len()
             + snapshot.reminder_messages().len();
         return count.min(u32::MAX as usize) as u32;
+    }
+    if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
+        return snapshot
+            .recoverable_items_for_folder(folder_id)
+            .len()
+            .min(u32::MAX as usize) as u32;
     }
     folder_row_for_id(folder_id, mailboxes)
         .map(|mailbox| mailbox.total_emails)
@@ -96,6 +106,8 @@ pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
 pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
     vec![
         PID_TAG_MID,
+        PID_TAG_INST_ID,
+        PID_TAG_INSTANCE_NUM,
         PID_TAG_SUBJECT_W,
         PID_TAG_NORMALIZED_SUBJECT_W,
         PID_TAG_MESSAGE_CLASS_W,
@@ -117,6 +129,165 @@ pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
     ]
+}
+
+const COLLAPSE_STATE_MAGIC: &[u8; 6] = b"LPECS1";
+
+#[derive(Clone)]
+struct CategorizedTableRow {
+    category_id: u64,
+    leaf_count: usize,
+    row: Vec<u8>,
+    leaf: bool,
+}
+
+fn category_id_for_value(folder_id: u64, property_tag: u32, value: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in folder_id
+        .to_le_bytes()
+        .into_iter()
+        .chain(property_tag.to_le_bytes())
+        .chain(value.as_bytes().iter().copied())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
+    }
+    hash | 0x8000_0000_0000_0000
+}
+
+fn category_value_for_email(email: &JmapEmail, property_tag: u32) -> String {
+    match canonical_property_storage_tag(property_tag) {
+        PID_NAME_KEYWORDS_TAG => email
+            .categories
+            .iter()
+            .find(|category| !category.trim().is_empty())
+            .map(|category| category.trim().to_string())
+            .unwrap_or_default(),
+        tag => email_property_value(email, tag)
+            .map(|value| category_value_to_string(&value))
+            .unwrap_or_default(),
+    }
+}
+
+fn category_value_to_string(value: &MapiValue) -> String {
+    match value {
+        MapiValue::Bool(value) => value.to_string(),
+        MapiValue::I16(value) => value.to_string(),
+        MapiValue::I32(value) => value.to_string(),
+        MapiValue::I64(value) => value.to_string(),
+        MapiValue::U32(value) => value.to_string(),
+        MapiValue::U64(value) => value.to_string(),
+        MapiValue::String(value) => value.clone(),
+        MapiValue::MultiString(values) => values.first().cloned().unwrap_or_default(),
+        MapiValue::Binary(value) => format_bytes_hex(value),
+        MapiValue::Guid(value) => format_bytes_hex(value),
+        MapiValue::Error(value) => format!("{value:#010x}"),
+        MapiValue::MultiI16(values) => values.first().map(i16::to_string).unwrap_or_default(),
+        MapiValue::MultiI32(values) => values.first().map(i32::to_string).unwrap_or_default(),
+        MapiValue::MultiI64(values) => values.first().map(i64::to_string).unwrap_or_default(),
+        MapiValue::MultiBinary(values) => values
+            .first()
+            .map(|value| format_bytes_hex(value))
+            .unwrap_or_default(),
+        MapiValue::MultiGuid(values) => values
+            .first()
+            .map(|value| format_bytes_hex(value))
+            .unwrap_or_default(),
+    }
+}
+
+fn format_bytes_hex(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+fn categorized_email_rows(
+    folder_id: u64,
+    emails: Vec<&JmapEmail>,
+    columns: &[u32],
+    sort_orders: &[MapiSortOrder],
+    expanded_count: u16,
+    collapsed_categories: &HashSet<u64>,
+) -> Vec<CategorizedTableRow> {
+    let Some(category_sort) = sort_orders.first() else {
+        return emails
+            .into_iter()
+            .map(|email| CategorizedTableRow {
+                category_id: 0,
+                leaf_count: 1,
+                row: serialize_message_row(email, columns),
+                leaf: true,
+            })
+            .collect();
+    };
+    let mut groups: Vec<(u64, String, Vec<&JmapEmail>)> = Vec::new();
+    for email in emails {
+        let value = category_value_for_email(email, category_sort.property_tag);
+        let category_id = category_id_for_value(folder_id, category_sort.property_tag, &value);
+        if let Some((_, _, rows)) = groups.iter_mut().find(|(id, _, _)| *id == category_id) {
+            rows.push(email);
+        } else {
+            groups.push((category_id, value, vec![email]));
+        }
+    }
+    groups.sort_by(|left, right| {
+        apply_sort_direction(
+            compare_case_insensitive(&left.1, &right.1),
+            category_sort.order,
+        )
+    });
+
+    let mut rows = Vec::new();
+    for (category_id, value, leaves) in groups {
+        rows.push(CategorizedTableRow {
+            category_id,
+            leaf_count: leaves.len(),
+            row: serialize_category_header_row(
+                category_id,
+                &value,
+                leaves.len(),
+                category_sort.property_tag,
+                columns,
+            ),
+            leaf: false,
+        });
+        if expanded_count > 0 && !collapsed_categories.contains(&category_id) {
+            rows.extend(leaves.into_iter().map(|email| CategorizedTableRow {
+                category_id,
+                leaf_count: 1,
+                row: serialize_message_row(email, columns),
+                leaf: true,
+            }));
+        }
+    }
+    rows
+}
+
+fn serialize_category_header_row(
+    category_id: u64,
+    value: &str,
+    leaf_count: usize,
+    category_property_tag: u32,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match canonical_property_storage_tag(*column) {
+            PID_TAG_INST_ID => write_u64(&mut row, category_id),
+            PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
+            PID_TAG_ROW_TYPE => write_u32(&mut row, 1),
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, leaf_count.min(u32::MAX as usize) as u32),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            tag if tag == canonical_property_storage_tag(category_property_tag) => {
+                write_mapi_value(&mut row, *column, &MapiValue::String(value.to_string()))
+            }
+            _ => write_property_default(&mut row, *column),
+        }
+    }
+    row
 }
 
 pub(in crate::mapi) fn default_navigation_shortcut_property_tags() -> Vec<u32> {
@@ -744,6 +915,9 @@ pub(in crate::mapi) fn rop_query_rows_response(
             associated,
             columns,
             sort_orders,
+            category_count,
+            expanded_count,
+            collapsed_categories,
             restriction,
             position: table_position,
             ..
@@ -904,6 +1078,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         )
                     })
                     .collect::<Vec<_>>()
+            } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
+                let mut rows = snapshot.recoverable_items_for_folder(*folder_id);
+                sort_recoverable_items(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|item| serialize_recoverable_item_row(item, &columns))
+                    .collect::<Vec<_>>()
             } else {
                 let window_offset = if request.query_forward_read() {
                     start_position
@@ -922,17 +1102,45 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     } else {
                         window_emails.len()
                     };
-                    window_emails
+                    if *category_count > 0 {
+                        categorized_email_rows(
+                            *folder_id,
+                            window_emails,
+                            &columns,
+                            sort_orders,
+                            *expanded_count,
+                            collapsed_categories,
+                        )
                         .into_iter()
-                        .map(|email| serialize_message_row(email, &columns))
+                        .map(|row| row.row)
                         .collect::<Vec<_>>()
+                    } else {
+                        window_emails
+                            .into_iter()
+                            .map(|email| serialize_message_row(email, &columns))
+                            .collect::<Vec<_>>()
+                    }
                 } else {
                     let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
                     rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
                     sort_emails(&mut rows, sort_orders);
-                    rows.into_iter()
-                        .map(|email| serialize_message_row(email, &columns))
+                    if *category_count > 0 {
+                        categorized_email_rows(
+                            *folder_id,
+                            rows,
+                            &columns,
+                            sort_orders,
+                            *expanded_count,
+                            collapsed_categories,
+                        )
+                        .into_iter()
+                        .map(|row| row.row)
                         .collect::<Vec<_>>()
+                    } else {
+                        rows.into_iter()
+                            .map(|email| serialize_message_row(email, &columns))
+                            .collect::<Vec<_>>()
+                    }
                 }
             }
         }
@@ -1101,6 +1309,242 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
     response
 }
 
+pub(in crate::mapi) fn rop_expand_row_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    _snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(category_id) = request.category_id() else {
+        return rop_error_response(0x59, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        sort_orders,
+        category_count,
+        expanded_count,
+        collapsed_categories,
+        restriction,
+        ..
+    }) = object
+    else {
+        return rop_error_response(0x59, request.response_handle_index(), 0x8004_0102);
+    };
+    if *associated || *category_count == 0 || sort_orders.is_empty() {
+        return rop_error_response(0x59, request.response_handle_index(), 0x8004_0102);
+    }
+
+    let columns = if columns.is_empty() {
+        default_contents_columns()
+    } else {
+        columns.clone()
+    };
+    let mut source_rows = emails_for_folder(*folder_id, mailboxes, emails);
+    source_rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+    sort_emails(&mut source_rows, sort_orders);
+    let rows = categorized_email_rows(
+        *folder_id,
+        source_rows,
+        &columns,
+        sort_orders,
+        1,
+        &HashSet::new(),
+    );
+    let leaf_rows = rows
+        .into_iter()
+        .filter(|row| row.leaf && row.category_id == category_id)
+        .map(|row| row.row)
+        .collect::<Vec<_>>();
+    if leaf_rows.is_empty() {
+        return rop_error_response(0x59, request.response_handle_index(), 0x8004_010F);
+    }
+
+    collapsed_categories.remove(&category_id);
+    *expanded_count = (*expanded_count).max(1);
+    let max_rows = request.expand_max_row_count();
+    let selected = if max_rows == 0 {
+        Vec::new()
+    } else {
+        leaf_rows.iter().take(max_rows).cloned().collect()
+    };
+    rop_expand_row_success_response(request, leaf_rows.len(), selected)
+}
+
+pub(in crate::mapi) fn rop_collapse_row_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    _snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u8> {
+    let Some(category_id) = request.category_id() else {
+        return rop_error_response(0x5A, request.response_handle_index(), 0x8004_0102);
+    };
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        sort_orders,
+        category_count,
+        collapsed_categories,
+        restriction,
+        ..
+    }) = object
+    else {
+        return rop_error_response(0x5A, request.response_handle_index(), 0x8004_0102);
+    };
+    if *associated || *category_count == 0 || sort_orders.is_empty() {
+        return rop_error_response(0x5A, request.response_handle_index(), 0x8004_0102);
+    }
+
+    let columns = if columns.is_empty() {
+        default_contents_columns()
+    } else {
+        columns.clone()
+    };
+    let mut source_rows = emails_for_folder(*folder_id, mailboxes, emails);
+    source_rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
+    sort_emails(&mut source_rows, sort_orders);
+    let rows = categorized_email_rows(
+        *folder_id,
+        source_rows,
+        &columns,
+        sort_orders,
+        1,
+        &HashSet::new(),
+    );
+    let collapsed_count = rows
+        .iter()
+        .find(|row| !row.leaf && row.category_id == category_id)
+        .map(|row| row.leaf_count)
+        .unwrap_or(0);
+    if collapsed_count == 0 {
+        return rop_error_response(0x5A, request.response_handle_index(), 0x8004_010F);
+    }
+    collapsed_categories.insert(category_id);
+    rop_collapse_row_success_response(request, collapsed_count)
+}
+
+pub(in crate::mapi) fn rop_get_collapse_state_response(
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+) -> Vec<u8> {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        category_count,
+        expanded_count,
+        collapsed_categories,
+        position,
+        ..
+    }) = object
+    else {
+        return rop_error_response(0x6B, request.response_handle_index(), 0x8004_0102);
+    };
+    if *category_count == 0 {
+        return rop_error_response(0x6B, request.response_handle_index(), 0x8004_0102);
+    }
+    let mut state = Vec::new();
+    state.extend_from_slice(COLLAPSE_STATE_MAGIC);
+    write_u64(&mut state, *folder_id);
+    write_u64(
+        &mut state,
+        request.collapse_state_row_id().unwrap_or_default(),
+    );
+    write_u32(&mut state, request.collapse_state_row_instance_number());
+    write_u32(&mut state, (*position).min(u32::MAX as usize) as u32);
+    write_u16(&mut state, *category_count);
+    write_u16(&mut state, *expanded_count);
+    write_u16(
+        &mut state,
+        collapsed_categories.len().min(u16::MAX as usize) as u16,
+    );
+    for category_id in collapsed_categories.iter().take(u16::MAX as usize) {
+        write_u64(&mut state, *category_id);
+    }
+    rop_get_collapse_state_success_response(request, &state)
+}
+
+pub(in crate::mapi) fn rop_set_collapse_state_response(
+    request: &RopRequest,
+    object: Option<&mut MapiObject>,
+) -> Vec<u8> {
+    let Some(object) = object else {
+        return rop_error_response(0x6C, request.response_handle_index(), 0x8004_0102);
+    };
+    let state = request.collapse_state();
+    if state.len() < 30 || state.get(..6) != Some(COLLAPSE_STATE_MAGIC.as_slice()) {
+        return rop_error_response(0x6C, request.response_handle_index(), 0x8004_0102);
+    }
+    let mut offset = 6;
+    let folder_id = read_u64_from(state, &mut offset).unwrap_or_default();
+    let _row_id = read_u64_from(state, &mut offset).unwrap_or_default();
+    let _row_instance = read_u32_from(state, &mut offset).unwrap_or_default();
+    let position = read_u32_from(state, &mut offset).unwrap_or_default() as usize;
+    let category_count = read_u16_from(state, &mut offset).unwrap_or_default();
+    let expanded_count = read_u16_from(state, &mut offset).unwrap_or_default();
+    let collapsed_count = read_u16_from(state, &mut offset).unwrap_or_default() as usize;
+    let mut collapsed = HashSet::new();
+    for _ in 0..collapsed_count.min(256) {
+        if let Some(category_id) = read_u64_from(state, &mut offset) {
+            collapsed.insert(category_id);
+        }
+    }
+
+    let MapiObject::ContentsTable {
+        folder_id: table_folder_id,
+        category_count: table_category_count,
+        expanded_count: table_expanded_count,
+        collapsed_categories,
+        position: table_position,
+        bookmarks,
+        next_bookmark,
+        ..
+    } = object
+    else {
+        return rop_error_response(0x6C, request.response_handle_index(), 0x8004_0102);
+    };
+    if *table_folder_id != folder_id || category_count == 0 {
+        return rop_error_response(0x6C, request.response_handle_index(), 0x8004_0102);
+    }
+    *table_category_count = category_count;
+    *table_expanded_count = expanded_count;
+    *collapsed_categories = collapsed;
+    *table_position = position;
+
+    let bookmark_id = *next_bookmark;
+    *next_bookmark = next_bookmark.saturating_add(1);
+    let bookmark = bookmark_id.to_le_bytes().to_vec();
+    bookmarks.insert(
+        bookmark.clone(),
+        TableBookmark {
+            position,
+            row_key: None,
+        },
+    );
+    rop_set_collapse_state_success_response(request, &bookmark)
+}
+
+fn read_u16_from(bytes: &[u8], offset: &mut usize) -> Option<u16> {
+    let value = u16::from_le_bytes(bytes.get(*offset..*offset + 2)?.try_into().ok()?);
+    *offset += 2;
+    Some(value)
+}
+
+fn read_u32_from(bytes: &[u8], offset: &mut usize) -> Option<u32> {
+    let value = u32::from_le_bytes(bytes.get(*offset..*offset + 4)?.try_into().ok()?);
+    *offset += 4;
+    Some(value)
+}
+
+fn read_u64_from(bytes: &[u8], offset: &mut usize) -> Option<u64> {
+    let value = u64::from_le_bytes(bytes.get(*offset..*offset + 8)?.try_into().ok()?);
+    *offset += 8;
+    Some(value)
+}
+
 pub(in crate::mapi) fn sort_emails(rows: &mut [&JmapEmail], sort_orders: &[MapiSortOrder]) {
     if sort_orders.is_empty() {
         return;
@@ -1178,6 +1622,41 @@ pub(in crate::mapi) fn sort_mapi_messages(
                 PID_TAG_MESSAGE_SIZE => left.email.size_octets.cmp(&right.email.size_octets),
                 PID_TAG_HAS_ATTACHMENTS => {
                     left.email.has_attachments.cmp(&right.email.has_attachments)
+                }
+                PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        Ordering::Equal
+    });
+}
+
+pub(in crate::mapi) fn sort_recoverable_items(
+    rows: &mut [&crate::mapi_store::MapiRecoverableItemMessage],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.item.subject, &right.item.subject)
+                }
+                PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => {
+                    compare_case_insensitive(&left.item.sender_address, &right.item.sender_address)
+                }
+                PID_TAG_MESSAGE_DELIVERY_TIME | PID_TAG_LAST_MODIFICATION_TIME => {
+                    left.item.received_at.cmp(&right.item.received_at)
+                }
+                PID_TAG_MESSAGE_SIZE => left.item.size_octets.cmp(&right.item.size_octets),
+                PID_TAG_HAS_ATTACHMENTS => {
+                    left.item.has_attachments.cmp(&right.item.has_attachments)
                 }
                 PID_TAG_MID => left.id.cmp(&right.id),
                 _ => Ordering::Equal,
@@ -2216,6 +2695,8 @@ pub(in crate::mapi) fn table_position_and_count(
                         restriction_matches_journal_entry(restriction.as_ref(), &entry.entry)
                     })
                     .count()
+            } else if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
+                snapshot.recoverable_items_for_folder(*folder_id).len()
             } else {
                 snapshot
                     .content_table_total(
@@ -2374,6 +2855,11 @@ pub(in crate::mapi) fn table_row_keys(
                 sort_journal_entries(&mut rows, sort_orders);
                 return rows.into_iter().map(|entry| entry.id).collect();
             }
+            if crate::mapi_store::recoverable_storage_folder(*folder_id).is_some() {
+                let mut rows = snapshot.recoverable_items_for_folder(*folder_id);
+                sort_recoverable_items(&mut rows, sort_orders);
+                return rows.into_iter().map(|item| item.id).collect();
+            }
             let mut rows = emails_for_folder(*folder_id, mailboxes, emails);
             rows.retain(|email| restriction_matches_email(restriction.as_ref(), email));
             sort_emails(&mut rows, sort_orders);
@@ -2431,6 +2917,10 @@ pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
             | VIEWS_FOLDER_ID
             | SHORTCUTS_FOLDER_ID
             | FREEBUSY_DATA_FOLDER_ID
+            | RECOVERABLE_ITEMS_ROOT_FOLDER_ID
+            | RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID
+            | RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID
+            | RECOVERABLE_ITEMS_PURGES_FOLDER_ID
     ) || role_for_folder_id(folder_id).is_some()
 }
 
@@ -2616,6 +3106,25 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             ("Tracked Mail Processing", ROOT_FOLDER_ID, "IPF.Note", false)
         }
         TODO_SEARCH_FOLDER_ID => ("To-Do", ROOT_FOLDER_ID, "IPF.Task", false),
+        RECOVERABLE_ITEMS_ROOT_FOLDER_ID => ("Recoverable Items", ROOT_FOLDER_ID, "IPF.Note", true),
+        RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID => (
+            "Deletions",
+            RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+            "IPF.Note",
+            false,
+        ),
+        RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID => (
+            "Versions",
+            RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+            "IPF.Note",
+            false,
+        ),
+        RECOVERABLE_ITEMS_PURGES_FOLDER_ID => (
+            "Purges",
+            RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+            "IPF.Note",
+            false,
+        ),
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => (
             "Conversation Action Settings",
             IPM_SUBTREE_FOLDER_ID,
@@ -3122,6 +3631,9 @@ mod tests {
                 0x6845_0102,
             ],
             sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
             restriction: None,
             bookmarks: HashMap::new(),
             next_bookmark: 1,
@@ -3419,6 +3931,9 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
     for column in columns {
         match *column {
             PID_TAG_MID => write_object_id(&mut row, mapi_message_id(email)),
+            PID_TAG_INST_ID => write_u64(&mut row, mapi_message_id(email)),
+            PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
+            PID_TAG_ROW_TYPE => write_u32(&mut row, 0),
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                 write_utf16z(&mut row, &email.subject)
             }
@@ -3463,6 +3978,72 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_recoverable_item_row(
+    item: &crate::mapi_store::MapiRecoverableItemMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match canonical_property_storage_tag(*column) {
+            PID_TAG_MID => write_object_id(&mut row, item.id),
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                write_utf16z(&mut row, &item.item.subject)
+            }
+            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPM.Note"),
+            PID_TAG_MESSAGE_DELIVERY_TIME
+            | PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME => write_u64(
+                &mut row,
+                mapi_mailstore::filetime_from_rfc3339_utc(&item.item.received_at),
+            ),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
+            PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, MSGFLAG_READ),
+            PID_TAG_READ => row.push(1),
+            PID_TAG_MESSAGE_SIZE => write_u32(
+                &mut row,
+                item.item.size_octets.clamp(0, u32::MAX as i64) as u32,
+            ),
+            PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => {
+                write_utf16z(&mut row, &item.item.sender_address)
+            }
+            PID_TAG_DISPLAY_TO_W | PID_TAG_DISPLAY_CC_W | PID_TAG_BODY_W => {
+                write_utf16z(&mut row, "")
+            }
+            PID_TAG_HAS_ATTACHMENTS => row.push(item.item.has_attachments as u8),
+            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &crate::mapi::identity::instance_key_for_object_id(item.id),
+            ),
+            PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(item.id),
+            ),
+            PID_TAG_PARENT_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(item.folder_id),
+            ),
+            PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::change_key_for_change_number(
+                    mapi_mailstore::change_number_for_store_id(item.id),
+                ),
+            ),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::predecessor_change_list(
+                    mapi_mailstore::change_number_for_store_id(item.id),
+                ),
+            ),
+            PID_TAG_CHANGE_NUMBER => write_u64(
+                &mut row,
+                mapi_mailstore::change_number_for_store_id(item.id),
+            ),
+            _ => write_property_default(&mut row, *column),
         }
     }
     row

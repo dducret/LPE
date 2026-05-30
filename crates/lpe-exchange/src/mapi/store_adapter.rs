@@ -355,6 +355,16 @@ where
         .fetch_delegate_freebusy_messages(account_id)
         .await
         .context("fetch MAPI delegate freebusy messages")?;
+    log_mapi_store_load_step(account_id, plan, "fetch recoverable items", 0);
+    let mut recoverable_items = Vec::new();
+    for folder in ["deletions", "versions", "purges"] {
+        recoverable_items.extend(
+            store
+                .list_recoverable_items(account_id, Some(folder))
+                .await
+                .with_context(|| format!("fetch MAPI recoverable items in {folder}"))?,
+        );
+    }
     log_mapi_store_load_step(account_id, plan, "fetch reminders", 0);
     let reminders = store
         .query_client_reminders(
@@ -689,6 +699,7 @@ where
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
     .with_delegate_freebusy_messages(delegate_freebusy_messages)
+    .with_recoverable_items(recoverable_items)
     .with_reminders(reminders)
     .with_content_windows(content_windows)
     .with_calendar_attachments(calendar_attachments))
@@ -1041,6 +1052,9 @@ fn simulate_table_access(
                     folder_id,
                     columns: default_hierarchy_columns(),
                     sort_orders: Vec::new(),
+                    category_count: 0,
+                    expanded_count: 0,
+                    collapsed_categories: HashSet::new(),
                     restriction: None,
                     bookmarks: HashMap::new(),
                     next_bookmark: 1,
@@ -1066,6 +1080,9 @@ fn simulate_table_access(
                         .is_some_and(|flags| flags & 0x02 != 0),
                     columns: Vec::new(),
                     sort_orders: Vec::new(),
+                    category_count: 0,
+                    expanded_count: 0,
+                    collapsed_categories: HashSet::new(),
                     restriction: None,
                     bookmarks: HashMap::new(),
                     next_bookmark: 1,
@@ -1313,6 +1330,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::PendingNavigationShortcut { folder_id, .. }
         | MapiObject::SynchronizationSource { folder_id, .. }
         | MapiObject::SynchronizationCollector { folder_id, .. }
+        | MapiObject::FastTransferDestination { folder_id, .. }
         | MapiObject::RuleTable { folder_id, .. }
         | MapiObject::PermissionTable { folder_id, .. } => {
             push_unique(&mut plan.object_ids, *folder_id);
@@ -1393,6 +1411,10 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *message_id);
+        }
+        MapiObject::RecoverableItem { folder_id, item_id } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *item_id);
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }
@@ -1671,11 +1693,7 @@ mod tests {
         );
 
         assert_eq!(
-            format_unresolved_mapi_object_scopes(&[
-                ROOT_FOLDER_ID,
-                dynamic_id,
-                invalid_replid_id
-            ]),
+            format_unresolved_mapi_object_scopes(&[ROOT_FOLDER_ID, dynamic_id, invalid_replid_id]),
             format!(
                 "{ROOT_FOLDER_ID:#018x}:advertised_special_folder,{dynamic_id:#018x}:unallocated_store_object,{invalid_replid_id:#018x}:foreign_or_invalid_replid"
             )

@@ -245,6 +245,7 @@ pub(in crate::mapi) enum RopId {
     HardDeleteMessages = 0x91,
     HardDeleteMessagesAndSubfolders = 0x92,
     SetLocalReplicaMidsetDeleted = 0x93,
+    FastTransferDestinationPutBufferExtended = 0x9D,
     WriteStreamExtended = 0xA3,
     Logon = 0xFE,
 }
@@ -390,6 +391,7 @@ impl RopId {
             0x91 => Some(Self::HardDeleteMessages),
             0x92 => Some(Self::HardDeleteMessagesAndSubfolders),
             0x93 => Some(Self::SetLocalReplicaMidsetDeleted),
+            0x9D => Some(Self::FastTransferDestinationPutBufferExtended),
             0xA3 => Some(Self::WriteStreamExtended),
             0xFE => Some(Self::Logon),
             _ => {
@@ -538,6 +540,7 @@ impl RopId {
                 | Self::FreeBookmark
                 | Self::WriteAndCommitStream
                 | Self::SetLocalReplicaMidsetDeleted
+                | Self::FastTransferDestinationPutBufferExtended
                 | Self::WriteStreamExtended
                 | Self::Logon
         )
@@ -546,10 +549,12 @@ impl RopId {
     #[allow(dead_code)]
     pub(in crate::mapi) fn known_unsupported_name(value: u8) -> Option<&'static str> {
         match value {
+            0x34 => Some("RopAbortSubmit"),
             0x39 => Some("RopCopyTo"),
             0x46 => Some("RopOpenEmbeddedMessage"),
             0x47 => Some("RopSetSpooler"),
             0x48 => Some("RopSpoolerLockMessage"),
+            0x51 => Some("RopTransportNewMail"),
             0x59 => Some("RopExpandRow"),
             0x5A => Some("RopCollapseRow"),
             0x5B => Some("RopLockRegionStream"),
@@ -892,6 +897,10 @@ mod tests {
         assert_eq!(RopId::HardDeleteMessages.as_u8(), 0x91);
         assert_eq!(RopId::HardDeleteMessagesAndSubfolders.as_u8(), 0x92);
         assert_eq!(RopId::SetLocalReplicaMidsetDeleted.as_u8(), 0x93);
+        assert_eq!(
+            RopId::FastTransferDestinationPutBufferExtended.as_u8(),
+            0x9D
+        );
         assert_eq!(RopId::SynchronizationConfigure.as_u8(), 0x70);
         assert_eq!(RopId::Logon.as_u8(), 0xFE);
         assert_eq!(MapiPropertyType::Boolean.as_u16(), 0x000B);
@@ -964,11 +973,20 @@ mod tests {
 
         assert_eq!(RopId::from_u8(0x02), Some(RopId::OpenFolder));
         assert_eq!(RopId::from_u8(0x39), Some(RopId::CopyTo));
+        assert_eq!(
+            RopId::from_u8(0x9D),
+            Some(RopId::FastTransferDestinationPutBufferExtended)
+        );
         assert_eq!(RopId::from_u8(0xA3), Some(RopId::WriteStreamExtended));
         assert_eq!(RopId::from_u8(0xAA), None);
         assert!(RopId::is_reserved(0x28));
         assert!(!RopId::is_reserved(0x70));
+        assert_eq!(RopId::known_unsupported_name(0x34), Some("RopAbortSubmit"));
         assert_eq!(RopId::known_unsupported_name(0x39), Some("RopCopyTo"));
+        assert_eq!(
+            RopId::known_unsupported_name(0x51),
+            Some("RopTransportNewMail")
+        );
         assert_eq!(
             MapiPropertyType::from_code(0x001F),
             Some(MapiPropertyType::String)

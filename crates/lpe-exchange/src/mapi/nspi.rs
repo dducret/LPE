@@ -763,6 +763,7 @@ fn log_nspi_get_props_debug(
         .map(|entry| match entry.entry_kind {
             ExchangeAddressBookEntryKind::Account => "account",
             ExchangeAddressBookEntryKind::Contact => "contact",
+            ExchangeAddressBookEntryKind::DistributionList => "distribution_list",
         })
         .unwrap_or("");
     let entry_email = entry.map(|entry| entry.email.as_str()).unwrap_or("");
@@ -940,6 +941,7 @@ fn format_nspi_entry_summaries_for_debug(
             let kind = match entry.entry_kind {
                 ExchangeAddressBookEntryKind::Account => "account",
                 ExchangeAddressBookEntryKind::Contact => "contact",
+                ExchangeAddressBookEntryKind::DistributionList => "distribution_list",
             };
             format!(
                 "{:#010x}:{}:{}:{}",
@@ -961,6 +963,7 @@ fn format_nspi_duplicate_entry_keys_for_debug(
         let kind = match entry.entry_kind {
             ExchangeAddressBookEntryKind::Account => "account",
             ExchangeAddressBookEntryKind::Contact => "contact",
+            ExchangeAddressBookEntryKind::DistributionList => "distribution_list",
         };
         let key = format!(
             "{}:{}:{}",
@@ -1003,7 +1006,7 @@ where
     let lookup_values = scan_address_book_lookup_values(request);
     let explicit_entry_ids = nspi_query_rows_explicit_entry_ids(request_type, request);
     let entries = if explicit_entry_ids.is_empty() {
-        nspi_filter_entries_for_request(entries, request)
+        nspi_filter_entries_for_request(principal.account_id, entries, request)
     } else {
         nspi_filter_explicit_table_entries(principal.account_id, entries, &explicit_entry_ids)
     };
@@ -1167,7 +1170,7 @@ where
     };
     let available_entry_count = entries.len();
     let lookup_values = scan_address_book_lookup_values(request);
-    let entries = nspi_filter_entries_for_request(entries, request);
+    let entries = nspi_filter_entries_for_request(principal.account_id, entries, request);
     if let Err(error) = allocate_nspi_entry_identities(store, principal, &entries).await {
         return mapi_diagnostic_response(
             "GetMatches",
@@ -1422,7 +1425,7 @@ where
 {
     let requests = entries
         .iter()
-        .map(nspi_identity_request)
+        .filter_map(nspi_identity_request)
         .collect::<Vec<_>>();
     remember_nspi_identity_records(store, principal, &requests).await
 }
@@ -1435,7 +1438,9 @@ where
     S: ExchangeStore,
 {
     let entry = principal_address_book_entry(principal);
-    let request = nspi_identity_request(&entry);
+    let Some(request) = nspi_identity_request(&entry) else {
+        return Ok(());
+    };
     remember_nspi_identity_records(store, principal, &[request]).await
 }
 
@@ -1466,16 +1471,18 @@ where
     Ok(())
 }
 
-fn nspi_identity_request(entry: &ExchangeAddressBookEntry) -> MapiIdentityRequest {
-    MapiIdentityRequest {
-        object_kind: match entry.entry_kind {
-            ExchangeAddressBookEntryKind::Account => MapiIdentityObjectKind::Account,
-            ExchangeAddressBookEntryKind::Contact => MapiIdentityObjectKind::Contact,
-        },
+fn nspi_identity_request(entry: &ExchangeAddressBookEntry) -> Option<MapiIdentityRequest> {
+    let object_kind = match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => MapiIdentityObjectKind::Account,
+        ExchangeAddressBookEntryKind::Contact => MapiIdentityObjectKind::Contact,
+        ExchangeAddressBookEntryKind::DistributionList => return None,
+    };
+    Some(MapiIdentityRequest {
+        object_kind,
         canonical_id: entry.id,
         reserved_global_counter: None,
         source_key: None,
-    }
+    })
 }
 
 fn remember_nspi_identity(account_id: Uuid, kind_key: u8, canonical_id: Uuid, object_id: u64) {
@@ -1503,6 +1510,7 @@ fn nspi_identity_kind_key(entry_kind: ExchangeAddressBookEntryKind) -> u8 {
     match entry_kind {
         ExchangeAddressBookEntryKind::Account => 1,
         ExchangeAddressBookEntryKind::Contact => 2,
+        ExchangeAddressBookEntryKind::DistributionList => 3,
     }
 }
 
@@ -1528,7 +1536,8 @@ pub(in crate::mapi) fn nspi_minimal_id_from_object_id(
     let value = (counter & 0x3FFF_FFFF)
         | match entry_kind {
             ExchangeAddressBookEntryKind::Account => 0x8000_0000,
-            ExchangeAddressBookEntryKind::Contact => 0x4000_0000,
+            ExchangeAddressBookEntryKind::Contact
+            | ExchangeAddressBookEntryKind::DistributionList => 0x4000_0000,
         };
     (value >= 2).then_some(value)
 }
@@ -1538,7 +1547,9 @@ fn legacy_nspi_entry_id(entry: &ExchangeAddressBookEntry) -> u32 {
     let value = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     match entry.entry_kind {
         ExchangeAddressBookEntryKind::Account => value | 0x8000_0000,
-        ExchangeAddressBookEntryKind::Contact => value | 0x4000_0000,
+        ExchangeAddressBookEntryKind::Contact | ExchangeAddressBookEntryKind::DistributionList => {
+            value | 0x4000_0000
+        }
     }
     .max(2)
 }
@@ -1564,6 +1575,7 @@ pub(in crate::mapi) fn principal_address_book_entry(
 
 pub(in crate::mapi) fn nspi_entry_display_type(entry: &ExchangeAddressBookEntry) -> u32 {
     match (entry.entry_kind, entry.directory_kind) {
+        (ExchangeAddressBookEntryKind::DistributionList, _) => 1,
         (ExchangeAddressBookEntryKind::Contact, _) => 6,
         (ExchangeAddressBookEntryKind::Account, ExchangeAddressBookDirectoryKind::Room) => 7,
         (ExchangeAddressBookEntryKind::Account, ExchangeAddressBookDirectoryKind::Equipment) => 8,
@@ -1684,6 +1696,7 @@ pub(in crate::mapi) fn nspi_entry_legacy_dn_with_prefix(
     let prefix = match entry.entry_kind {
         ExchangeAddressBookEntryKind::Account => "acct",
         ExchangeAddressBookEntryKind::Contact => "contact",
+        ExchangeAddressBookEntryKind::DistributionList => "group",
     };
     let source = match entry.entry_kind {
         ExchangeAddressBookEntryKind::Account if entry.email.trim().is_empty() => {
@@ -1694,6 +1707,10 @@ pub(in crate::mapi) fn nspi_entry_legacy_dn_with_prefix(
             entry.id.to_string()
         }
         ExchangeAddressBookEntryKind::Contact => format!("{}-{}", entry.email, entry.id),
+        ExchangeAddressBookEntryKind::DistributionList if entry.email.trim().is_empty() => {
+            entry.id.to_string()
+        }
+        ExchangeAddressBookEntryKind::DistributionList => entry.email.clone(),
     };
     let legacy_user = nspi_legacy_cn_from_source(&source);
     let legacy_cn = if include_kind_prefix {
@@ -1803,6 +1820,7 @@ pub(in crate::mapi) fn nspi_request_has_entry_selector(request: &[u8]) -> bool {
 }
 
 pub(in crate::mapi) fn nspi_filter_entries_for_request(
+    account_id: Uuid,
     entries: Vec<ExchangeAddressBookEntry>,
     request: &[u8],
 ) -> Vec<ExchangeAddressBookEntry> {
@@ -1810,10 +1828,7 @@ pub(in crate::mapi) fn nspi_filter_entries_for_request(
     if values.is_empty() {
         return entries;
     }
-    entries
-        .into_iter()
-        .filter(|entry| values.iter().any(|value| nspi_entry_matches(entry, value)))
-        .collect()
+    nspi_ranked_matching_entries(account_id, entries, &values)
 }
 
 fn nspi_filter_explicit_table_entries(
@@ -1842,10 +1857,7 @@ pub(in crate::mapi) fn nspi_match_entry<'a>(
         .filter_map(|entry| {
             Some((
                 nspi_entry_match_rank(entry, value)?,
-                match entry.entry_kind {
-                    ExchangeAddressBookEntryKind::Account => 0u8,
-                    ExchangeAddressBookEntryKind::Contact => 1u8,
-                },
+                nspi_entry_kind_rank(entry.entry_kind),
                 entry.display_name.to_ascii_lowercase(),
                 entry.email.to_ascii_lowercase(),
                 nspi_entry_id(account_id, entry),
@@ -1863,8 +1875,48 @@ pub(in crate::mapi) fn nspi_match_entry<'a>(
         .map(|(_, _, _, _, _, entry)| entry)
 }
 
-pub(in crate::mapi) fn nspi_entry_matches(entry: &ExchangeAddressBookEntry, value: &str) -> bool {
-    nspi_entry_match_rank(entry, value).is_some()
+fn nspi_ranked_matching_entries(
+    account_id: Uuid,
+    entries: Vec<ExchangeAddressBookEntry>,
+    values: &[String],
+) -> Vec<ExchangeAddressBookEntry> {
+    let mut ranked = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let rank = values
+                .iter()
+                .filter_map(|value| nspi_entry_match_rank(&entry, value))
+                .min()?;
+            Some((
+                rank,
+                nspi_entry_kind_rank(entry.entry_kind),
+                entry.display_name.to_ascii_lowercase(),
+                entry.email.to_ascii_lowercase(),
+                nspi_entry_id(account_id, &entry),
+                entry,
+            ))
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.cmp(&right.3))
+            .then_with(|| left.4.cmp(&right.4))
+    });
+    ranked
+        .into_iter()
+        .map(|(_, _, _, _, _, entry)| entry)
+        .collect()
+}
+
+fn nspi_entry_kind_rank(entry_kind: ExchangeAddressBookEntryKind) -> u8 {
+    match entry_kind {
+        ExchangeAddressBookEntryKind::Account => 0,
+        ExchangeAddressBookEntryKind::DistributionList => 1,
+        ExchangeAddressBookEntryKind::Contact => 2,
+    }
 }
 
 pub(in crate::mapi) fn nspi_entry_match_rank(
