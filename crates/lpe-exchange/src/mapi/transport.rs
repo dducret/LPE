@@ -1472,12 +1472,13 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
     body: Vec<u8>,
     cookies: Vec<String>,
 ) -> Response {
+    let start_time = mapi_http_date(SystemTime::now());
     let mut framed_body = Vec::new();
     framed_body.extend_from_slice(b"PROCESSING\r\n");
     framed_body.extend_from_slice(b"DONE\r\n");
     framed_body.extend_from_slice(format!("X-ResponseCode: {response_code}\r\n").as_bytes());
     framed_body.extend_from_slice(b"X-ElapsedTime: 0\r\n");
-    framed_body.extend_from_slice(b"X-StartTime: Mon, 01 Jan 2001 00:00:00 GMT\r\n");
+    framed_body.extend_from_slice(format!("X-StartTime: {start_time}\r\n").as_bytes());
     framed_body.extend_from_slice(b"\r\n");
     framed_body.extend_from_slice(&body);
 
@@ -1508,6 +1509,43 @@ pub(in crate::mapi) fn mapi_response_with_cookies(
         }
     }
     response
+}
+
+fn mapi_http_date(time: SystemTime) -> String {
+    const WEEKDAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let duration = time
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_seconds = duration.as_secs();
+    let days = (total_seconds / 86_400) as i64;
+    let seconds_of_day = total_seconds % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    let weekday = WEEKDAYS[days.rem_euclid(7) as usize];
+    format!(
+        "{weekday}, {day:02} {} {year:04} {hour:02}:{minute:02}:{second:02} GMT",
+        MONTHS[(month - 1) as usize]
+    )
+}
+
+fn civil_from_days(days_since_epoch: i64) -> (i64, u32, u32) {
+    let days = days_since_epoch + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_position = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_position + 2) / 5 + 1;
+    let month = month_position + if month_position < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    (year, month as u32, day as u32)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2063,6 +2101,31 @@ mod tests {
             auxiliary_buffer.len() as u32
         );
         assert!(summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn mapi_http_date_formats_imf_fixdate_in_gmt() {
+        assert_eq!(
+            mapi_http_date(SystemTime::UNIX_EPOCH + Duration::from_secs(0)),
+            "Thu, 01 Jan 1970 00:00:00 GMT"
+        );
+        assert_eq!(
+            mapi_http_date(SystemTime::UNIX_EPOCH + Duration::from_secs(1_780_144_640)),
+            "Sat, 30 May 2026 12:37:20 GMT"
+        );
+    }
+
+    #[tokio::test]
+    async fn mapi_response_start_time_uses_current_http_date_not_sentinel() {
+        let response = mapi_response("Execute", "request:1", 0, Vec::new(), None);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(body.contains("\r\nX-StartTime: "));
+        assert!(body.contains(" GMT\r\n\r\n"));
+        assert!(!body.contains("Mon, 01 Jan 2001 00:00:00 GMT"));
     }
 
     #[test]
