@@ -14729,6 +14729,119 @@ async fn mapi_over_http_default_folder_probe_after_hierarchy_sync_succeeds() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_mailbox_only_account_syncs_empty_contacts_and_calendar() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut hierarchy_rops = Vec::new();
+    append_rop_open_folder(
+        &mut hierarchy_rops,
+        0,
+        1,
+        crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+    );
+    append_rop_outlook_hierarchy_sync_manifest_get_buffer(&mut hierarchy_rops, 1, 2, 4096);
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let hierarchy_rops = response_rops_from_execute_response(hierarchy_response).await;
+    let hierarchy = strict_hierarchy_sync_transfer_from_response(&hierarchy_rops).unwrap();
+    let contacts = hierarchy
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name == "Contacts")
+        .expect("Contacts hierarchy row");
+    assert_eq!(
+        contacts.parent_folder_id,
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
+    assert_eq!(contacts.container_class.as_deref(), Some("IPF.Contact"));
+    let calendar = hierarchy
+        .folder_changes
+        .iter()
+        .find(|folder| folder.display_name == "Calendar")
+        .expect("Calendar hierarchy row");
+    assert_eq!(
+        calendar.parent_folder_id,
+        Some(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+    );
+    assert_eq!(calendar.container_class.as_deref(), Some("IPF.Appointment"));
+
+    let contacts_rops = content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::CONTACTS_FOLDER_ID,
+        &[],
+    )
+    .await;
+    let contacts_stream = strict_content_sync_transfer_from_response(&contacts_rops).unwrap();
+    assert!(contacts_stream.message_changes.is_empty());
+    let contacts_checkpoint_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CONTACTS_FOLDER_ID)
+            .unwrap()
+            .id;
+    assert!(store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(contacts_checkpoint_id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .is_some());
+
+    let calendar_rops = content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+        &[],
+    )
+    .await;
+    let calendar_stream = strict_content_sync_transfer_from_response(&calendar_rops).unwrap();
+    assert!(calendar_stream.message_changes.is_empty());
+    assert!(!contains_bytes(
+        &calendar_rops,
+        &utf16z("IPM.Configuration.Calendar")
+    ));
+    let calendar_checkpoint_id =
+        mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .unwrap()
+            .id;
+    assert!(store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(calendar_checkpoint_id),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .is_some());
+    assert!(store.contact_collections.lock().unwrap().is_empty());
+    assert!(store.calendar_collections.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial_sync_contracts() {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555501").unwrap();

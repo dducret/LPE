@@ -173,13 +173,15 @@ non-canonical LPE state.
   User-saved definitions project as MAPI `FOLDER_SEARCH` hierarchy rows with
   stable canonical identities and container classes derived from their canonical
   result object kind.
-- The default Calendar collection is materialized in canonical collaboration
-  storage when calendar collections are read, and the projected Calendar folder
-  identity is persisted with the reserved Calendar MAPI counter. Outlook may
-  write back or cache the Calendar default-folder EntryID during profile
-  bootstrap, so the advertised folder must have durable backing even when the
-  calendar has no events yet. LPE does not synthesize Calendar configuration FAI
-  rows during first sync. `[MS-OXOCFG]` defines how `IPM.Configuration.Calendar`,
+- MAPI projects Outlook's default Contacts and Calendar folders even when the
+  account has no canonical contact or calendar collections yet. Those empty
+  folder projections use reserved MAPI counters, stable source keys, and virtual
+  folder checkpoint scopes; they must not create canonical collections until a
+  user/API action creates real collaboration state. Outlook may write back or
+  cache the Calendar default-folder EntryID during profile bootstrap, so the
+  advertised folder must have durable MAPI backing even when the calendar has no
+  events yet. LPE does not synthesize Calendar configuration FAI rows during
+  first sync. `[MS-OXOCFG]` defines how `IPM.Configuration.Calendar`,
   `IPM.Configuration.CategoryList`, and `IPM.Configuration.WorkHours` messages
   are stored when configuration data exists, but partially fabricated bootstrap
   configuration rows are not canonical calendar state and are unsafe for

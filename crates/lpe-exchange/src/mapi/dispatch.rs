@@ -506,7 +506,7 @@ struct LogonResponseDebugSummary {
 fn log_execute_rop_debug(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
-    _headers: &HeaderMap,
+    headers: &HeaderMap,
     _session_id: &str,
     request_id: &str,
     request: &RopRequestDebugSummary,
@@ -521,6 +521,10 @@ fn log_execute_rop_debug(
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let post_hierarchy = post_hierarchy_action_summary(session, false);
     let message = "rca debug mapi execute rops";
 
@@ -533,6 +537,10 @@ fn log_execute_rop_debug(
         mailbox = %principal.email,
         request_type = "Execute",
         mapi_request_id = request_id,
+        client_request_id = %client_request_id,
+        client_application = %client_application,
+        client_info = %client_info,
+        trace_id = %trace_id,
         request_rop_ids = %request.ids_csv,
         request_rop_names = %request.names_csv,
         request_rop_count = request.ids.len(),
@@ -574,6 +582,10 @@ fn log_execute_rop_debug(
             mailbox = %principal.email,
             request_type = "Execute",
             mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
             output_handle_index = %logon.output_handle_index,
             logon_error_code = %logon.error_code,
             logon_flags = %logon.logon_flags,
@@ -600,6 +612,10 @@ fn log_execute_rop_debug(
             mailbox = %principal.email,
             request_type = "Execute",
             mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
             request_rop_ids = %request.ids_csv,
             request_rop_names = %request.names_csv,
             request_rop_parse_error = %request.parse_error,
@@ -625,6 +641,10 @@ fn log_execute_rop_debug(
             mailbox = %principal.email,
             request_type = "Execute",
             mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
             response_framing_context = response_framing_context,
             request_rop_ids = %request.ids_csv,
             request_rop_names = %request.names_csv,
@@ -659,6 +679,10 @@ fn log_execute_rop_debug(
             mailbox = %principal.email,
             request_type = "Execute",
             mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
             last_completed_hierarchy_sync_root =
                 %post_hierarchy.last_completed_hierarchy_sync_root,
             first_post_hierarchy_execute = post_hierarchy_observation.first_execute,
@@ -698,6 +722,10 @@ fn log_execute_rop_debug(
                 mailbox = %principal.email,
                 request_type = "Execute",
                 mapi_request_id = request_id,
+                client_request_id = %client_request_id,
+                client_application = %client_application,
+                client_info = %client_info,
+                trace_id = %trace_id,
                 last_completed_hierarchy_sync_root =
                     %post_hierarchy.last_completed_hierarchy_sync_root,
                 post_hierarchy_execute_count = post_hierarchy.execute_count,
@@ -719,7 +747,7 @@ fn log_execute_rop_debug(
 fn log_execute_request_start_debug(
     endpoint: MapiEndpoint,
     principal: &AccountPrincipal,
-    _headers: &HeaderMap,
+    headers: &HeaderMap,
     request_id: &str,
     request_body_bytes: usize,
     request_rop_buffer: &[u8],
@@ -729,6 +757,10 @@ fn log_execute_request_start_debug(
         MapiEndpoint::Emsmdb => "emsmdb",
         MapiEndpoint::Nspi => "nspi",
     };
+    let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
+    let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let message = "rca debug mapi execute request start";
 
     tracing::info!(
@@ -740,6 +772,10 @@ fn log_execute_request_start_debug(
         mailbox = %principal.email,
         request_type = "Execute",
         mapi_request_id = request_id,
+        client_request_id = %client_request_id,
+        client_application = %client_application,
+        client_info = %client_info,
+        trace_id = %trace_id,
         body_bytes = request_body_bytes,
         request_rop_buffer_bytes = request_rop_buffer.len(),
         rop_ids = %request.ids_csv,
