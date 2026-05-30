@@ -22954,8 +22954,9 @@ async fn mapi_over_http_set_get_search_criteria_updates_canonical_search_folder(
     );
 
     let mut restriction = vec![0x00];
-    restriction.extend_from_slice(&2u16.to_le_bytes());
+    restriction.extend_from_slice(&3u16.to_le_bytes());
     append_search_property_bool(&mut restriction, 0x0E69_000B, 0x04, false);
+    append_search_property_bool(&mut restriction, 0x0E1B_000B, 0x04, true);
     append_search_content(&mut restriction, 0x0037_001F, "invoice");
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
@@ -22994,6 +22995,7 @@ async fn mapi_over_http_set_get_search_criteria_updates_canonical_search_folder(
             "kind": "mapi_bounded",
             "all": [
                 {"field": "unread", "equals": true},
+                {"field": "hasAttachment", "equals": true},
                 {"field": "subject", "contains": "invoice"}
             ]
         })
@@ -23014,6 +23016,10 @@ async fn mapi_over_http_set_get_search_criteria_updates_canonical_search_folder(
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x31, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0E1B_000Bu32.to_le_bytes()
+    ));
     assert!(contains_bytes(&response_rops, &utf16z("invoice")));
 }
 
@@ -23050,7 +23056,10 @@ async fn mapi_over_http_set_search_criteria_rejects_unsupported_restriction() {
         HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
     );
 
-    let unsupported_or_restriction = [0x01, 0x00, 0x00];
+    let mut unsupported_or_restriction = vec![0x01];
+    unsupported_or_restriction.extend_from_slice(&2u16.to_le_bytes());
+    append_search_property_bool(&mut unsupported_or_restriction, 0x0E1B_000B, 0x04, true);
+    append_search_property_bool(&mut unsupported_or_restriction, 0x0E69_000B, 0x04, false);
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
     append_rop_set_search_criteria(&mut rops, 1, &unsupported_or_restriction, &[], 0);

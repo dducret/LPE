@@ -231,8 +231,9 @@ non-canonical LPE state.
 - `RopSetSearchCriteria` and `RopGetSearchCriteria` are bounded to canonical
   `search_folders` rows. The supported criteria subset is folder scope,
   unread/read predicates, follow-up flagged predicates, category keywords,
-  sender display or address text, subject/body text, and received-date
-  equality or inclusive bounds. `RopSetSearchCriteria` updates only existing
+  attachment-presence predicates, sender display or address text, subject/body
+  text, and received-date equality or inclusive bounds. `RopSetSearchCriteria`
+  updates only existing
   user-saved search folders by translating that subset into canonical
   `scope_json` and `restriction_json` with `kind = "mapi_bounded"`.
   Built-in search folders remain read-only. Unsupported restriction operators,
@@ -377,7 +378,7 @@ not by itself authorize broad client publication.
 | NSPI mutation | Deferred. Address-book writes and link-table mutation remain disabled. |
 | Raw FastTransfer destination upload streams | Deferred except for bounded import behavior that mutates canonical mailbox state through supported ROPs. |
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` and `RopHardDeleteMessagesAndSubfolders` are bounded to hard-deleting visible memberships in canonical mailbox folders through the canonical tombstone/change-log path. |
-| Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
+| Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, and deferred-action messages remain unsupported; no MAPI-local rule store is allowed. |
 | Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants`, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
 | Full notification registration and delivery | Partially implemented through session-local pending events with bounded folder/message/table payloads and canonical change-cursor replay. Cross-process notification replay remains deferred; clients must re-register after reconnect or worker movement and use normal sync to converge. |

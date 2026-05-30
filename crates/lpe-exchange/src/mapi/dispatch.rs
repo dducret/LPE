@@ -327,6 +327,10 @@ fn bounded_search_property_clause(
             "field": "flagged",
             "equals": value.as_i64().ok_or(EC_SEARCH_UNSUPPORTED)? == FOLLOWUP_FLAGGED as i64
         })),
+        PID_TAG_HAS_ATTACHMENTS if relop == 0x04 => Ok(json!({
+            "field": "hasAttachment",
+            "equals": value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?
+        })),
         PID_NAME_KEYWORDS_TAG if relop == 0x04 => Ok(json!({
             "field": "category",
             "equals": match value {
@@ -493,6 +497,7 @@ fn rop_property_restriction(field: &str, relop: u8, value: &Value) -> Result<Vec
         } else {
             0
         }),
+        "hasAttachment" => MapiValue::Bool(value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?),
         "receivedAt" => {
             let value = value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?;
             MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))
@@ -514,6 +519,7 @@ fn property_tag_for_search_field(field: &str) -> Result<u32, u32> {
         "category" => Ok(PID_NAME_KEYWORDS_TAG),
         "unread" => Ok(PID_TAG_READ),
         "flagged" => Ok(PID_TAG_FLAG_STATUS),
+        "hasAttachment" => Ok(PID_TAG_HAS_ATTACHMENTS),
         "receivedAt" => Ok(PID_TAG_CLIENT_SUBMIT_TIME),
         _ => Err(EC_SEARCH_UNSUPPORTED),
     }

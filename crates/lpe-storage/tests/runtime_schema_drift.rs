@@ -2980,7 +2980,13 @@ async fn exercise_canonical_search_folder_and_rule_replay(
             display_name: "Runtime unread from Alice".to_string(),
             result_object_kind: "message".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
-            restriction_json: serde_json::json!({"kind": "text", "query": "alice"}),
+            restriction_json: serde_json::json!({
+                "kind": "mapi_bounded",
+                "all": [
+                    {"field": "sender", "contains": "alice"},
+                    {"field": "hasAttachment", "equals": true}
+                ]
+            }),
             excluded_folder_roles: vec!["trash".to_string()],
         })
         .await
@@ -2997,7 +3003,16 @@ async fn exercise_canonical_search_folder_and_rule_replay(
     anyhow::ensure!(
         fetched_custom
             .iter()
-            .any(|folder| folder.display_name == "Runtime unread from Alice"),
+            .any(|folder| folder.display_name == "Runtime unread from Alice"
+                && folder
+                    .restriction_json
+                    .get("all")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|clauses| clauses.iter().any(|clause| clause
+                        == &serde_json::json!({
+                            "field": "hasAttachment",
+                            "equals": true
+                        })))),
         "created search folder must be readable by id"
     );
 
@@ -3008,7 +3023,13 @@ async fn exercise_canonical_search_folder_and_rule_replay(
             display_name: "Runtime unread from Alice updated".to_string(),
             result_object_kind: "message".to_string(),
             scope_json: serde_json::json!({"scope": "top_of_personal_folders"}),
-            restriction_json: serde_json::json!({"kind": "text", "query": "alice updated"}),
+            restriction_json: serde_json::json!({
+                "kind": "mapi_bounded",
+                "all": [
+                    {"field": "sender", "contains": "alice updated"},
+                    {"field": "hasAttachment", "equals": false}
+                ]
+            }),
             excluded_folder_roles: vec!["trash".to_string(), "junk".to_string()],
         })
         .await
