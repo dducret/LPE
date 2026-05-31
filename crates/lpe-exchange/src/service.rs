@@ -22,10 +22,10 @@ use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, PublicFolder, PublicFolderItem, Storage,
-    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput, UpsertPublicFolderItemInput,
+    ClientTask, CollaborationCollection, CreatePublicFolderInput, JmapEmail, JmapEmailAddress,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, PublicFolder, PublicFolderItem,
+    Storage, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput, UpsertPublicFolderItemInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -2163,15 +2163,24 @@ where
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let public_folder_item_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("public-folder-item:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
             if ids.is_empty()
-                || contact_ids.len() + event_ids.len() + task_ids.len() + message_ids.len()
+                || contact_ids.len()
+                    + event_ids.len()
+                    + task_ids.len()
+                    + message_ids.len()
+                    + public_folder_item_ids.len()
                     != ids.len()
             {
                 return Ok(operation_error_response(
                     "UpdateItem",
                     "ErrorInvalidOperation",
-                    "UpdateItem currently supports only contact, calendar, task, and read/flag message item ids.",
+                    "UpdateItem currently supports only contact, calendar, task, public folder item, and read/flag message item ids.",
                 ));
             }
 
@@ -2255,6 +2264,31 @@ where
                     )
                     .await?;
                 items.push_str(&task_item_xml(&updated));
+            }
+            let public_folder_items = self
+                .store
+                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                .await?;
+            if public_folder_items.len() != public_folder_item_ids.len() {
+                return Ok(operation_error_response(
+                    "UpdateItem",
+                    "ErrorItemNotFound",
+                    "public folder item not found",
+                ));
+            }
+            for existing in public_folder_items {
+                let updated = self
+                    .store
+                    .upsert_public_folder_item(
+                        parse_update_public_folder_item_input(principal, &existing, request),
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-update-public-folder-item".to_string(),
+                            subject: existing.id.to_string(),
+                        },
+                    )
+                    .await?;
+                items.push_str(&public_folder_item_xml(&updated));
             }
 
             Ok(update_item_success_response(items))
@@ -2441,13 +2475,75 @@ where
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let public_folder_item_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("public-folder-item:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
-            if ids.is_empty() || message_ids.len() != ids.len() {
+            if ids.is_empty()
+                || message_ids.len() + public_folder_item_ids.len() != ids.len()
+                || (!message_ids.is_empty() && !public_folder_item_ids.is_empty())
+            {
                 return Ok(operation_error_response(
                     "MoveItem",
                     "ErrorInvalidOperation",
-                    "MoveItem currently supports only canonical message ids.",
+                    "MoveItem currently supports only canonical message ids or public folder item ids.",
                 ));
+            }
+            if !public_folder_item_ids.is_empty() {
+                let target_public_folder_ids = requested_public_folder_ids(request);
+                if target_public_folder_ids.len() != 1 {
+                    return Ok(operation_error_response(
+                        "MoveItem",
+                        "ErrorInvalidOperation",
+                        "MoveItem requires exactly one canonical public-folder target for public folder items.",
+                    ));
+                }
+                let target_public_folder_id = target_public_folder_ids[0];
+                let existing_items = self
+                    .store
+                    .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                    .await?;
+                if existing_items.len() != public_folder_item_ids.len() {
+                    return Ok(operation_error_response(
+                        "MoveItem",
+                        "ErrorItemNotFound",
+                        "public folder item not found",
+                    ));
+                }
+                let mut items = String::new();
+                for existing in existing_items {
+                    let moved = self
+                        .store
+                        .upsert_public_folder_item(
+                            public_folder_item_clone_input(
+                                principal,
+                                &existing,
+                                target_public_folder_id,
+                            ),
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-move-public-folder-item-copy".to_string(),
+                                subject: format!("{}->{target_public_folder_id}", existing.id),
+                            },
+                        )
+                        .await?;
+                    self.store
+                        .delete_public_folder_item(
+                            principal.account_id,
+                            existing.public_folder_id,
+                            existing.id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-move-public-folder-item-delete".to_string(),
+                                subject: existing.id.to_string(),
+                            },
+                        )
+                        .await?;
+                    items.push_str(&public_folder_item_xml(&moved));
+                }
+                return Ok(move_item_success_response(items));
             }
 
             let target_mailbox_ids = self
@@ -2511,13 +2607,63 @@ where
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let public_folder_item_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("public-folder-item:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
-            if ids.is_empty() || message_ids.len() != ids.len() {
+            if ids.is_empty()
+                || message_ids.len() + public_folder_item_ids.len() != ids.len()
+                || (!message_ids.is_empty() && !public_folder_item_ids.is_empty())
+            {
                 return Ok(operation_error_response(
                     "CopyItem",
                     "ErrorInvalidOperation",
-                    "CopyItem currently supports only canonical message ids.",
+                    "CopyItem currently supports only canonical message ids or public folder item ids.",
                 ));
+            }
+            if !public_folder_item_ids.is_empty() {
+                let target_public_folder_ids = requested_public_folder_ids(request);
+                if target_public_folder_ids.len() != 1 {
+                    return Ok(operation_error_response(
+                        "CopyItem",
+                        "ErrorInvalidOperation",
+                        "CopyItem requires exactly one canonical public-folder target for public folder items.",
+                    ));
+                }
+                let target_public_folder_id = target_public_folder_ids[0];
+                let existing_items = self
+                    .store
+                    .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                    .await?;
+                if existing_items.len() != public_folder_item_ids.len() {
+                    return Ok(operation_error_response(
+                        "CopyItem",
+                        "ErrorItemNotFound",
+                        "public folder item not found",
+                    ));
+                }
+                let mut items = String::new();
+                for existing in existing_items {
+                    let copied = self
+                        .store
+                        .upsert_public_folder_item(
+                            public_folder_item_clone_input(
+                                principal,
+                                &existing,
+                                target_public_folder_id,
+                            ),
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-copy-public-folder-item".to_string(),
+                                subject: format!("{}->{target_public_folder_id}", existing.id),
+                            },
+                        )
+                        .await?;
+                    items.push_str(&public_folder_item_xml(&copied));
+                }
+                return Ok(copy_item_success_response(items));
             }
 
             let target_mailbox_ids = self
@@ -2605,6 +2751,28 @@ where
         let result = async {
             let display_name = element_text(request, "DisplayName")
                 .ok_or_else(|| anyhow!("CreateFolder is missing DisplayName"))?;
+            if let Some(parent_folder_id) = requested_public_folder_ids(request).into_iter().next()
+            {
+                let folder = self
+                    .store
+                    .create_public_folder_child(
+                        CreatePublicFolderInput {
+                            account_id: principal.account_id,
+                            parent_folder_id,
+                            display_name: display_name.clone(),
+                            folder_class: element_text(request, "FolderClass")
+                                .unwrap_or_else(|| "IPF.Note".to_string()),
+                            sort_order: 0,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-create-public-folder".to_string(),
+                            subject: parent_folder_id.to_string(),
+                        },
+                    )
+                    .await?;
+                return Ok(create_public_folder_success_response(&folder));
+            }
             let mailbox = self
                 .store
                 .create_jmap_mailbox(
@@ -2634,12 +2802,29 @@ where
 
     async fn delete_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
+            let public_folder_ids = requested_public_folder_ids(request);
+            if !public_folder_ids.is_empty() {
+                for folder_id in public_folder_ids {
+                    self.store
+                        .delete_public_folder(
+                            principal.account_id,
+                            folder_id,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-delete-public-folder".to_string(),
+                                subject: folder_id.to_string(),
+                            },
+                        )
+                        .await?;
+                }
+                return Ok(delete_folder_success_response());
+            }
             let folder_ids = requested_mailbox_folder_ids(request);
             if folder_ids.is_empty() {
                 return Ok(operation_error_response(
                     "DeleteFolder",
                     "ErrorInvalidOperation",
-                    "DeleteFolder currently supports only mailbox folder ids.",
+                    "DeleteFolder currently supports only mailbox or public folder ids.",
                 ));
             }
 
@@ -3320,6 +3505,64 @@ fn parse_update_task_input(
         },
         sort_order: existing.sort_order,
     })
+}
+
+fn parse_update_public_folder_item_input(
+    principal: &AccountPrincipal,
+    existing: &PublicFolderItem,
+    request: &str,
+) -> UpsertPublicFolderItemInput {
+    let message = element_content(request, "Message").unwrap_or(request);
+    let body_text = if field_deleted(request, "item:Body") {
+        String::new()
+    } else if let Some(body_value) = element_text(message, "Body") {
+        let body_tag = open_tag_text(message, "Body").unwrap_or_default();
+        let body_type = attribute_value(body_tag, "BodyType").unwrap_or("Text");
+        if body_type.eq_ignore_ascii_case("HTML") {
+            html_to_text(&body_value)
+        } else {
+            body_value
+        }
+    } else {
+        existing.body_text.clone()
+    };
+    UpsertPublicFolderItemInput {
+        id: Some(existing.id),
+        account_id: principal.account_id,
+        public_folder_id: existing.public_folder_id,
+        item_kind: existing.item_kind.clone(),
+        message_class: element_text(message, "ItemClass")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| existing.message_class.clone()),
+        subject: deleted_or_updated_text(
+            request,
+            message,
+            "item:Subject",
+            "Subject",
+            &existing.subject,
+        ),
+        body_text,
+        body_html_sanitized: existing.body_html_sanitized.clone(),
+        source_payload_json: existing.source_payload_json.clone(),
+    }
+}
+
+fn public_folder_item_clone_input(
+    principal: &AccountPrincipal,
+    existing: &PublicFolderItem,
+    target_public_folder_id: Uuid,
+) -> UpsertPublicFolderItemInput {
+    UpsertPublicFolderItemInput {
+        id: None,
+        account_id: principal.account_id,
+        public_folder_id: target_public_folder_id,
+        item_kind: existing.item_kind.clone(),
+        message_class: existing.message_class.clone(),
+        subject: existing.subject.clone(),
+        body_text: existing.body_text.clone(),
+        body_html_sanitized: existing.body_html_sanitized.clone(),
+        source_payload_json: existing.source_payload_json.clone(),
+    }
 }
 
 fn requested_task_list_id(request: &str) -> Result<Option<Uuid>> {
@@ -5147,6 +5390,22 @@ fn create_folder_success_response(mailbox: &JmapMailbox) -> String {
             "</m:CreateFolderResponse>"
         ),
         folder = mailbox_folder_xml(mailbox),
+    )
+}
+
+fn create_public_folder_success_response(folder: &PublicFolder) -> String {
+    format!(
+        concat!(
+            "<m:CreateFolderResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateFolderResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Folders>{folder}</m:Folders>",
+            "</m:CreateFolderResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateFolderResponse>"
+        ),
+        folder = public_folder_xml(folder, None, 0, 0),
     )
 }
 

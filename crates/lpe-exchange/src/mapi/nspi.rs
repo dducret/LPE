@@ -1397,7 +1397,8 @@ pub(in crate::mapi) enum NspiValue<'a> {
     Bool(bool),
 }
 
-pub(in crate::mapi) fn nspi_entry_value(
+#[cfg(test)]
+fn nspi_entry_value(
     account_id: Uuid,
     entry: &ExchangeAddressBookEntry,
     property_tag: u32,

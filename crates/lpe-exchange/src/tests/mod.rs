@@ -8,7 +8,7 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
     CalendarEventAttachment, CancelSubmissionResult, ClientNote, ClientReminder, ClientTask,
-    CollaborationCollection, CollaborationRights, ConversationAction,
+    CollaborationCollection, CollaborationRights, ConversationAction, CreatePublicFolderInput,
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
@@ -361,6 +361,8 @@ struct FakeStore {
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
+    public_folders: Arc<Mutex<Vec<PublicFolder>>>,
+    deleted_public_folders: Arc<Mutex<Vec<Uuid>>>,
     public_folder_items: Arc<Mutex<Vec<PublicFolderItem>>>,
     deleted_public_folder_items: Arc<Mutex<Vec<Uuid>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
@@ -699,6 +701,29 @@ impl FakeStore {
         }
     }
 
+    fn public_folder(id: &str, parent_id: Option<&str>, display_name: &str) -> PublicFolder {
+        PublicFolder {
+            id: Uuid::parse_str(id).unwrap(),
+            tree_id: Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap(),
+            parent_folder_id: parent_id.map(|id| Uuid::parse_str(id).unwrap()),
+            canonical_id: Uuid::parse_str(id).unwrap(),
+            display_name: display_name.to_string(),
+            folder_class: "IPF.Note".to_string(),
+            path: format!("/{display_name}"),
+            sort_order: 0,
+            lifecycle_state: "active".to_string(),
+            change_counter: 1,
+            rights: lpe_storage::PublicFolderRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+            created_at: "2026-05-07T12:00:00Z".to_string(),
+            updated_at: "2026-05-07T12:00:00Z".to_string(),
+        }
+    }
+
     fn email_addresses(recipients: &[SubmittedRecipientInput]) -> Vec<JmapEmailAddress> {
         recipients
             .iter()
@@ -946,17 +971,74 @@ impl ExchangeStore for FakeStore {
     fn fetch_public_folder<'a>(
         &'a self,
         _principal_account_id: Uuid,
-        _folder_id: Uuid,
+        folder_id: Uuid,
     ) -> StoreFuture<'a, PublicFolder> {
-        Box::pin(async move { Err(anyhow::anyhow!("public folder not found")) })
+        let folder = self
+            .public_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|folder| folder.id == folder_id && folder.lifecycle_state == "active")
+            .cloned();
+        Box::pin(async move { folder.ok_or_else(|| anyhow::anyhow!("public folder not found")) })
     }
 
     fn fetch_public_folder_children<'a>(
         &'a self,
         _principal_account_id: Uuid,
-        _folder_id: Uuid,
+        folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolder>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        let folders = self
+            .public_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|folder| {
+                folder.parent_folder_id == Some(folder_id) && folder.lifecycle_state == "active"
+            })
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(folders) })
+    }
+
+    fn create_public_folder_child<'a>(
+        &'a self,
+        input: CreatePublicFolderInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolder> {
+        let folder_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
+        let mut folder = FakeStore::public_folder(
+            &folder_id.to_string(),
+            Some(&input.parent_folder_id.to_string()),
+            &input.display_name,
+        );
+        folder.folder_class = input.folder_class;
+        folder.sort_order = input.sort_order;
+        self.public_folders.lock().unwrap().push(folder.clone());
+        Box::pin(async move { Ok(folder) })
+    }
+
+    fn delete_public_folder<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        folder_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let deleted = {
+            let mut folders = self.public_folders.lock().unwrap();
+            if let Some(folder) = folders.iter_mut().find(|folder| folder.id == folder_id) {
+                folder.lifecycle_state = "deleted".to_string();
+                true
+            } else {
+                false
+            }
+        };
+        if deleted {
+            self.deleted_public_folders.lock().unwrap().push(folder_id);
+            Box::pin(async move { Ok(()) })
+        } else {
+            Box::pin(async move { Err(anyhow::anyhow!("public folder not found")) })
+        }
     }
 
     fn fetch_public_folder_items<'a>(

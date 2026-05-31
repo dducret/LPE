@@ -6,8 +6,17 @@ Public folders now have canonical `LPE` storage, authenticated mail APIs,
 permission rows, per-user read/unread rows, replay facts, and tombstones.
 MAPI/HTTP public-folder logon and replica ROPs remain guarded protocol work;
 they must not create protocol-local public-folder state. Bounded EWS folder,
-item projection, item lookup, post creation, and item deletion may expose or
-mutate public-folder data only through the canonical tables described here.
+item projection, item lookup, post creation, item update, and item deletion may
+expose or mutate public-folder data only through the canonical tables described
+here.
+
+Current bounded EWS coverage includes public-folder `FindFolder`, `GetFolder`,
+`SyncFolderHierarchy`, `CreateFolder`, `DeleteFolder`, `FindItem`,
+`SyncFolderItems`, `GetItem`, `CreateItem` with `SaveOnly`, `UpdateItem`,
+`DeleteItem`, `CopyItem`, and `MoveItem`.
+`CopyItem` and `MoveItem` for public-folder posts are public-folder-to-public-
+folder only; message-to-public-folder and public-folder-to-mailbox conversion
+remain out of scope until a canonical cross-store conversion rule is documented.
 
 ## Implementation/Usage
 
@@ -63,6 +72,16 @@ rights allow item deletion. Share rights allow grant mutation. Owner/admin
 rights are required for folder deletion and structural tree mutation.
 Initial folder deletion is conservative: root folders cannot be deleted, and a
 folder with active child folders or active items must be emptied first.
+
+The EWS adapter may expose public folders with `public-folder:{uuid}` folder
+ids and `public-folder-item:{uuid}` item ids. EWS folder creation and deletion,
+plus post creation, update, delete, copy, and move, must call the canonical
+public-folder storage methods; it must not keep EWS-only folder state, item
+state, MIME blobs, ACLs, or read-state facts. Public-folder copy and move are
+currently bounded to post-like public-folder items between canonical public
+folders. EWS folder deletion inherits the canonical conservative delete rule:
+root folders, folders with active child folders, and folders with active items
+must not be removed through EWS.
 
 Per-user read/unread is private to the authenticated account unless an explicit
 future administrative audit/export flow is documented. It must never be modeled

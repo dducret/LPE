@@ -4,14 +4,14 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CancelSubmissionResult,
     ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
-    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule, PublicFolder, PublicFolderItem,
-    PublicFolderTree, RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    CreatePublicFolderInput, DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule,
+    PublicFolder, PublicFolderItem, PublicFolderTree, RecoverableItem, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
+    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
+    UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
+    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -460,6 +460,19 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolder>>;
+
+    fn create_public_folder_child<'a>(
+        &'a self,
+        input: CreatePublicFolderInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolder>;
+
+    fn delete_public_folder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 
     fn fetch_public_folder_items<'a>(
         &'a self,
@@ -1990,6 +2003,25 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Vec<PublicFolder>> {
         Box::pin(async move {
             Storage::fetch_public_folder_children(self, principal_account_id, folder_id).await
+        })
+    }
+
+    fn create_public_folder_child<'a>(
+        &'a self,
+        input: CreatePublicFolderInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolder> {
+        Box::pin(async move { Storage::create_public_folder_child(self, input, audit).await })
+    }
+
+    fn delete_public_folder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            Storage::delete_public_folder(self, principal_account_id, folder_id, audit).await
         })
     }
 
