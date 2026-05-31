@@ -130,7 +130,9 @@ folder defaults. `RopGetPermissionsTable` on public-folder handles projects
 canonical `public_folder_permissions` grants plus reserved `Default` and
 `Anonymous` compatibility rows. `RopModifyPermissions` supports bounded add,
 modify, and remove rows for same-tenant account members and writes only the
-canonical public-folder grant path.
+canonical public-folder grant path. Member IDs that do not resolve to canonical
+same-tenant account identities are rejected without writing
+`public_folder_permissions` rows.
 Canonical public-folder permission, replica, and per-user-state upserts record
 `created` for first materialization and `updated` for existing-row changes so
 replay consumers can distinguish new ACL/topology/private-state rows from later
@@ -181,6 +183,13 @@ owner row are reported as ghosted. `RopGetOwningServers` returns the active
 canonical replica server names for the requested public folder, ordered by
 `sort_order` and server name. This is a topology projection, not a full
 Exchange-compatible public-folder replication engine.
+The local MAPI harness keeps Outlook-style public-folder probes covered as a
+single interoperability surface: replica lookups and ghost-state checks validate
+canonical folder IDs, per-user information ROPs round-trip only the bounded
+LPE stream into canonical read-state patches, permission table and mutation
+ROPs use canonical grants and share-right checks, and recipient-bearing
+public-folder item creates are rejected before any `public_folder_items` row is
+created.
 
 ## Reference Table/List
 

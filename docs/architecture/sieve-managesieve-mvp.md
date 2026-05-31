@@ -36,7 +36,8 @@ HTTP `RopGetRulesTable` all read from `sieve_scripts` and the canonical rule
 change log. Bounded MAPI `RopModifyRules` writes only generated canonical Sieve
 scripts for rule rows that can be represented safely. It does not create
 protocol-local rule rows, hidden Exchange rule messages, or
-deferred-action-message stores.
+deferred-action-message stores. `RopUpdateDeferredActionMessages` stays a
+parseable unsupported path and must not activate or create Sieve scripts.
 
 The Outlook projection is intentionally bounded. It exposes the script id, name,
 active state, source kind, Sieve-derived condition/action summaries, size,
@@ -46,8 +47,9 @@ predicates and actions that map to canonical behavior: file into a folder,
 discard/delete, redirect/forward through canonical submission, mark-read as a
 canonical rule action marker, and stop-processing. Full Exchange rule condition
 blobs, action blobs, provider-specific predicates, client-only rule execution,
-delegate rule templates, and deferred-action messages are rejected with
-parseable ROP errors and are not represented. Rule creation, update,
+delegate rule templates, deferred-action provider data, and deferred-action
+message updates are rejected with parseable ROP errors and are not represented.
+Rule creation, update,
 activation, rename, and delete continue to use the Sieve script persistence and
 canonical rule change log.
 

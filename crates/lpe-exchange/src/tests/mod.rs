@@ -6021,6 +6021,11 @@ fn append_search_property_i64(restriction: &mut Vec<u8>, property_tag: u32, relo
     restriction.extend_from_slice(&value.to_le_bytes());
 }
 
+fn append_search_exists(restriction: &mut Vec<u8>, property_tag: u32) {
+    restriction.push(0x08);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+}
+
 fn append_rop_create_message(rops: &mut Vec<u8>, input: u8, output: u8, folder_id: u64) {
     rops.extend_from_slice(&[0x06, input, 0x01, output]);
     rops.extend_from_slice(&1200u16.to_le_bytes());

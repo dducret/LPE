@@ -17998,6 +17998,10 @@ async fn mapi_over_http_modify_rules_rejects_exchange_rule_blobs() {
     let cases = [
         ("Client-only", serde_json::json!({"clientOnly": true})),
         ("Delegate", serde_json::json!({"delegate": true})),
+        (
+            "Delegate template",
+            serde_json::json!({"delegateTemplate": {"messageClass": "IPM.Rule.Version2.Message"}}),
+        ),
         ("Deferred", serde_json::json!({"deferredAction": true})),
         (
             "Exchange blob",
@@ -18027,6 +18031,53 @@ async fn mapi_over_http_modify_rules_rejects_exchange_rule_blobs() {
         );
         assert!(sieve.is_none(), "{name}: {sieve:?}");
     }
+}
+
+#[tokio::test]
+async fn mapi_over_http_update_deferred_action_messages_rejects_without_sieve_side_effect() {
+    let inbox_id = "55555555-5555-5555-5555-555555555555";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let active_sieve = store.active_sieve_script.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[0x57, 0x00, 0x01]);
+    rops.extend_from_slice(&4u16.to_le_bytes());
+    rops.extend_from_slice(b"SRVR");
+    rops.extend_from_slice(&6u16.to_le_bytes());
+    rops.extend_from_slice(b"CLIENT");
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x57, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+    assert!(active_sieve.lock().unwrap().is_none());
 }
 
 async fn modify_rules_response(
@@ -23802,6 +23853,100 @@ async fn mapi_over_http_set_get_search_criteria_round_trips_received_date_bounds
 }
 
 #[tokio::test]
+async fn mapi_over_http_set_get_search_criteria_round_trips_attachment_exists() {
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555503").unwrap();
+    let search_folder_id = Uuid::parse_str("34343434-3434-4434-8434-343434343495").unwrap();
+    let search_folder_mapi_id = test_mapi_uuid_id(&search_folder_id);
+    crate::mapi::identity::remember_mapi_identity(search_folder_id, search_folder_mapi_id);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: search_folder_id,
+            account_id: account.account_id,
+            role: "custom".to_string(),
+            display_name: "Has attachments".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({}),
+            restriction_json: serde_json::json!({}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: false,
+        }])),
+        ..Default::default()
+    };
+    let stored_search_folders = store.search_folders.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut restriction = Vec::new();
+    append_search_exists(&mut restriction, 0x0E1B_000B);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+    append_rop_set_search_criteria(
+        &mut rops,
+        1,
+        &restriction,
+        &[test_mapi_folder_id(5)],
+        0x0000_0005,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x30, 0x01, 0, 0, 0, 0]));
+    let stored = stored_search_folders.lock().unwrap();
+    assert_eq!(
+        stored[0].restriction_json,
+        serde_json::json!({
+            "kind": "mapi_bounded",
+            "all": [
+                {"field": "hasAttachment", "equals": true}
+            ]
+        })
+    );
+    drop(stored);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, search_folder_mapi_id);
+    append_rop_get_search_criteria(&mut get_rops, 1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x31, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0E1B_000Bu32.to_le_bytes()
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_set_search_criteria_rejects_unsupported_restriction() {
     let account = FakeStore::account();
     let search_folder_id = Uuid::parse_str("34343434-3434-4434-8434-343434343498").unwrap();
@@ -23841,6 +23986,27 @@ async fn mapi_over_http_set_search_criteria_rejects_unsupported_restriction() {
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
     append_rop_set_search_criteria(&mut rops, 1, &unsupported_or_restriction, &[], 0);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x30, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut unsupported_exists_restriction = Vec::new();
+    append_search_exists(&mut unsupported_exists_restriction, 0x0037_001F);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+    append_rop_set_search_criteria(&mut rops, 1, &unsupported_exists_restriction, &[], 0);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -24845,6 +25011,104 @@ async fn mapi_over_http_public_folder_modify_permissions_requires_share_right() 
     assert!(contains_bytes(
         &response_rops,
         &[0x40, 0x01, 0x05, 0x00, 0x07, 0x80]
+    ));
+    assert!(observed_permissions.lock().unwrap().is_empty());
+    assert!(observed_audits.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_public_folder_modify_permissions_rejects_unknown_member_without_grant() {
+    let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let root_uuid = Uuid::parse_str(root_id).unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            root_id,
+            None,
+            "Public Root",
+        )])),
+        ..Default::default()
+    };
+    let observed_permissions = store.public_folder_permissions.clone();
+    let observed_audits = store.mapi_folder_permission_audits.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&logon_response);
+
+    let mut hierarchy_rops = vec![
+        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+        0x12, 0x00, 0x01, 0x00, // RopSetColumns
+    ];
+    hierarchy_rops.extend_from_slice(&1u16.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&[
+        0x15, 0x00, 0x01, 0x00, 0x01, // RopQueryRows
+    ]);
+    hierarchy_rops.extend_from_slice(&10u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hierarchy_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&hierarchy_response);
+
+    let root_mapi_id = crate::mapi::identity::mapped_mapi_object_id(&root_uuid).unwrap();
+    let unknown_member_id = crate::mapi::identity::mapi_store_id(1984);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, root_mapi_id);
+    rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x6671_0014u32.to_le_bytes());
+    rops.extend_from_slice(&(unknown_member_id as i64).to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(
+        &(crate::mapi::permissions::rights_from_grant(true, true, false, false) as i32)
+            .to_le_bytes(),
+    );
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x40, 0x01, 0x57, 0x00, 0x07, 0x80]
     ));
     assert!(observed_permissions.lock().unwrap().is_empty());
     assert!(observed_audits.lock().unwrap().is_empty());
@@ -26825,6 +27089,103 @@ async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical
 }
 
 #[tokio::test]
+async fn mapi_over_http_public_folder_per_user_information_rejects_exchange_blob_without_state_change(
+) {
+    let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let item_id = "cccccccc-dddd-eeee-ffff-000000000000";
+    let items = Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+        item_id,
+        root_id,
+        "Read state post",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            root_id,
+            None,
+            "Public Root",
+        )])),
+        public_folder_items: items.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&logon_response);
+
+    let mut hierarchy_rops = vec![
+        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+        0x12, 0x00, 0x01, 0x00, // RopSetColumns
+    ];
+    hierarchy_rops.extend_from_slice(&1u16.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&[
+        0x15, 0x00, 0x01, 0x00, 0x01, // RopQueryRows
+    ]);
+    hierarchy_rops.extend_from_slice(&10u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hierarchy_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&hierarchy_response);
+
+    let root_mapi_id =
+        crate::mapi::identity::mapped_mapi_object_id(&Uuid::parse_str(root_id).unwrap()).unwrap();
+    let root_long_term_id = crate::mapi::identity::long_term_id_from_object_id(root_mapi_id)
+        .expect("public folder MAPI identity should have a LongTermID");
+    let exchange_blob = b"\x01\x00\x00\x00ExchangePerUserBlob";
+    let mut write_rops = vec![0x64, 0x00, 0x00];
+    write_rops.extend_from_slice(&root_long_term_id);
+    write_rops.push(1);
+    write_rops.extend_from_slice(&0u32.to_le_bytes());
+    write_rops.extend_from_slice(&(exchange_blob.len() as u16).to_le_bytes());
+    write_rops.extend_from_slice(exchange_blob);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let write_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&write_rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(write_response.status(), StatusCode::OK);
+    let write_response_rops = response_rops_from_execute_response(write_response).await;
+    let mut invalid_parameter = vec![0x64, 0x00];
+    invalid_parameter.extend_from_slice(&0x8007_0057u32.to_le_bytes());
+    assert!(contains_bytes(&write_response_rops, &invalid_parameter));
+    assert!(!items.lock().unwrap()[0].is_read);
+}
+
+#[tokio::test]
 async fn mapi_over_http_public_folder_is_ghosted_validates_canonical_folder() {
     let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     let store = FakeStore {
@@ -26926,6 +27287,123 @@ async fn mapi_over_http_public_folder_is_ghosted_validates_canonical_folder() {
         &response_rops,
         &[0x45, 0x00, 0x0F, 0x01, 0x04, 0x80]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_public_folder_get_owning_servers_uses_ordered_canonical_replicas() {
+    let root_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let mut replica_two = FakeStore::public_folder_replica(
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        root_id,
+        "LPE-MBX-02",
+    );
+    replica_two.sort_order = 20;
+    let mut replica_one = FakeStore::public_folder_replica(
+        "cccccccc-cccc-cccc-cccc-cccccccccccc",
+        root_id,
+        "LPE-MBX-01",
+    );
+    replica_one.sort_order = 10;
+    let mut replica_zero = FakeStore::public_folder_replica(
+        "dddddddd-dddd-dddd-dddd-dddddddddddd",
+        root_id,
+        "LPE-MBX-00",
+    );
+    replica_zero.sort_order = 10;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            root_id,
+            None,
+            "Public Root",
+        )])),
+        public_folder_replicas: Arc::new(Mutex::new(vec![replica_two, replica_one, replica_zero])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&logon_response);
+
+    let mut hierarchy_rops = vec![
+        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+        0x12, 0x00, 0x01, 0x00, // RopSetColumns
+    ];
+    hierarchy_rops.extend_from_slice(&1u16.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    hierarchy_rops.extend_from_slice(&[
+        0x15, 0x00, 0x01, 0x00, 0x01, // RopQueryRows
+    ]);
+    hierarchy_rops.extend_from_slice(&10u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hierarchy_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&hierarchy_response);
+
+    let root_mapi_id =
+        crate::mapi::identity::mapped_mapi_object_id(&Uuid::parse_str(root_id).unwrap()).unwrap();
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, root_mapi_id);
+    rops.extend_from_slice(&[0x42, 0x00, 0x00]);
+    append_mapi_wire_id(&mut rops, root_mapi_id);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x42, 0x00, 0, 0, 0, 0, 3, 0]
+    ));
+    let first = response_rops
+        .windows(b"LPE-MBX-00\0".len())
+        .position(|window| window == b"LPE-MBX-00\0")
+        .unwrap();
+    let second = response_rops
+        .windows(b"LPE-MBX-01\0".len())
+        .position(|window| window == b"LPE-MBX-01\0")
+        .unwrap();
+    let third = response_rops
+        .windows(b"LPE-MBX-02\0".len())
+        .position(|window| window == b"LPE-MBX-02\0")
+        .unwrap();
+    assert!(first < second && second < third);
 }
 
 #[tokio::test]

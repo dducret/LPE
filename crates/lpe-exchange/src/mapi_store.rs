@@ -573,6 +573,12 @@ impl MapiMailStoreSnapshot {
         mut self,
         replicas: Vec<PublicFolderReplica>,
     ) -> Self {
+        let mut replicas = replicas;
+        replicas.sort_by(|left, right| {
+            left.sort_order
+                .cmp(&right.sort_order)
+                .then_with(|| left.server_name.cmp(&right.server_name))
+        });
         self.public_folder_replicas = replicas
             .into_iter()
             .filter_map(|replica| {

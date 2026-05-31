@@ -99,6 +99,7 @@ fn bounded_rule_sieve_from_json(value: &Value) -> Result<String, u32> {
             .get("delegate")
             .and_then(Value::as_bool)
             .unwrap_or(false)
+        || value.get("delegateTemplate").is_some()
         || value
             .get("deferredAction")
             .and_then(Value::as_bool)
@@ -343,6 +344,14 @@ fn bounded_search_restriction_clauses(restriction: &MapiRestriction) -> Result<V
             "field": "unread",
             "equals": !*must_be_nonzero
         })]),
+        MapiRestriction::Exist { property_tag }
+            if canonical_property_storage_tag(*property_tag) == PID_TAG_HAS_ATTACHMENTS =>
+        {
+            Ok(vec![json!({
+                "field": "hasAttachment",
+                "equals": true
+            })])
+        }
         _ => Err(EC_SEARCH_UNSUPPORTED),
     }
 }
