@@ -11334,6 +11334,24 @@ where
                 responses.extend_from_slice(&rop_write_per_user_information_response(&request));
             }
             Some(RopId::PublicFolderIsGhosted) => {
+                let Some(folder_id) = request.public_folder_probe_object_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x45,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
+                    && snapshot.public_folder_for_id(folder_id).is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x45,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request))
             }
             Some(RopId::GetAddressTypes) => {

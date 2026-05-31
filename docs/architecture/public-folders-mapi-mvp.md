@@ -147,8 +147,10 @@ single-chunk LPE-owned stream derived from canonical
 `public_folder_per_user_state`; `WritePerUserInformation` only accepts that
 stream shape back into canonical read-state patches. Arbitrary
 Exchange-compatible binary per-user blobs remain unsupported and must not be
-stored as protocol-local state. Public-folder replica ROPs may expose only documented single-server or
-cluster metadata that exists in canonical LPE state.
+stored as protocol-local state. `RopPublicFolderIsGhosted` validates the target
+against the canonical public-folder container and returns `IsGhosted = false`
+for known folders because LPE currently has one canonical active folder store.
+`RopGetOwningServers` remains guarded until canonical replica topology exists.
 
 ## Reference Table/List
 

@@ -3230,6 +3230,18 @@ impl RopRequest {
         self.payload.get(..8)
     }
 
+    pub(in crate::mapi) fn public_folder_probe_object_id(&self) -> Option<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::GetOwningServers | RopId::PublicFolderIsGhosted)
+        ) {
+            return None;
+        }
+        let bytes = self.payload.get(..8)?;
+        crate::mapi::identity::object_id_from_wire_id(bytes)
+            .or_else(|| crate::mapi::identity::object_id_from_trailing_replid_wire_id(bytes))
+    }
+
     pub(in crate::mapi) fn modify_permissions_count(&self) -> Option<u16> {
         if self.rop_id != 0x40 {
             return None;
