@@ -3599,6 +3599,27 @@ async fn exercise_public_folder_permission_replay_path(
         )
         .await
         .context("create public folder tree for permission replay path")?;
+    let grantee_account_id = Uuid::new_v4();
+    let grantee_email = format!("bob-acl-{}@example.test", Uuid::new_v4().simple());
+    let domain_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT primary_domain_id FROM accounts WHERE id = $1")
+            .bind(fixture.account_id)
+            .fetch_one(pool)
+            .await
+            .context("load runtime fixture account domain for public folder ACL grantee")?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, $4, 'Bob ACL')
+        "#,
+    )
+    .bind(grantee_account_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(&grantee_email)
+    .execute(pool)
+    .await
+    .context("seed public folder ACL grantee account")?;
 
     storage
         .upsert_public_folder_permission(
@@ -3639,14 +3660,85 @@ async fn exercise_public_folder_permission_replay_path(
         .await
         .context("update public folder permission")?;
     storage
+        .upsert_public_folder_permission(
+            PublicFolderPermissionInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                principal_account_id: grantee_account_id,
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-permission.upsert",
+                "runtime public folder grantee permission",
+            ),
+        )
+        .await
+        .context("create public folder grantee permission")?;
+    storage
+        .upsert_public_folder_permission(
+            PublicFolderPermissionInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                principal_account_id: grantee_account_id,
+                may_read: false,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-permission.upsert",
+                "runtime public folder grantee permission revoke update",
+            ),
+        )
+        .await
+        .context("update public folder grantee permission to no rights")?;
+    let revoked_principal_in_update_change = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT affected_principal_ids @> ARRAY[$4]::uuid[]
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'public_folder_permission'
+          AND change_kind = 'updated'
+          AND summary_json ->> 'folderId' = $3
+          AND summary_json ->> 'principalAccountId' = $4::text
+        ORDER BY cursor DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id.to_string())
+    .bind(grantee_account_id)
+    .fetch_one(pool)
+    .await
+    .context("load public folder permission no-rights update affected principals")?;
+    anyhow::ensure!(
+        revoked_principal_in_update_change,
+        "public folder permission no-rights update replay must include the affected principal"
+    );
+    let before_revocation_canonical_sequence = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MAX(sequence) FROM canonical_change_journal WHERE tenant_id = $1",
+    )
+    .bind(fixture.tenant_id)
+    .fetch_one(pool)
+    .await
+    .context("load public folder ACL revocation starting canonical sequence")?
+    .unwrap_or(0);
+    storage
         .delete_public_folder_permission(
             fixture.account_id,
             root.id,
-            fixture.account_id,
+            grantee_account_id,
             audit(
                 &fixture.account_email,
                 "public-folder-permission.delete",
-                "runtime public folder permission",
+                "runtime public folder grantee permission",
             ),
         )
         .await
@@ -3669,7 +3761,7 @@ async fn exercise_public_folder_permission_replay_path(
     .fetch_all(pool)
     .await
     .context("count public folder permission change rows")?;
-    for (expected_kind, expected_count) in [("created", 1), ("updated", 1), ("destroyed", 1)] {
+    for (expected_kind, expected_count) in [("created", 2), ("updated", 2), ("destroyed", 1)] {
         let mut count = 0;
         for row in &permission_change_counts {
             if row.try_get::<String, _>("change_kind")? == expected_kind {
@@ -3707,6 +3799,52 @@ async fn exercise_public_folder_permission_replay_path(
     anyhow::ensure!(
         permission_tombstone_count == 1,
         "public folder permission deletion must write a canonical tombstone"
+    );
+    let revoked_principal_in_destroyed_change = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT affected_principal_ids @> ARRAY[$4]::uuid[]
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'public_folder_permission'
+          AND change_kind = 'destroyed'
+          AND summary_json ->> 'folderId' = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id.to_string())
+    .bind(grantee_account_id)
+    .fetch_one(pool)
+    .await
+    .context("load public folder permission revocation affected principals")?;
+    anyhow::ensure!(
+        revoked_principal_in_destroyed_change,
+        "public folder permission revocation replay must include the revoked principal"
+    );
+    let revoked_principal_in_canonical_scope = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT principal_account_ids @> ARRAY[$2]::uuid[]
+           AND account_ids @> ARRAY[$2]::uuid[]
+        FROM canonical_change_journal
+        WHERE tenant_id = $1
+          AND category = 'public_folders'
+          AND principal_account_ids @> ARRAY[$2]::uuid[]
+          AND account_ids @> ARRAY[$2]::uuid[]
+          AND sequence > $3
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(grantee_account_id)
+    .bind(before_revocation_canonical_sequence)
+    .fetch_optional(pool)
+    .await
+    .context("load public folder permission revocation canonical scope")?
+    .unwrap_or(false);
+    anyhow::ensure!(
+        revoked_principal_in_canonical_scope,
+        "public folder permission revocation push scope must include the revoked principal"
     );
 
     Ok(())
@@ -3752,6 +3890,54 @@ async fn exercise_public_folder_per_user_replay_path(
         )
         .await
         .context("create public folder item for per-user replay path")?;
+    let reader_account_id = Uuid::new_v4();
+    let reader_email = format!("reader-pu-{}@example.test", Uuid::new_v4().simple());
+    let domain_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT primary_domain_id FROM accounts WHERE id = $1")
+            .bind(fixture.account_id)
+            .fetch_one(pool)
+            .await
+            .context("load runtime fixture account domain for public folder reader")?;
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, $4, 'Public Folder Reader')
+        "#,
+    )
+    .bind(reader_account_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(&reader_email)
+    .execute(pool)
+    .await
+    .context("seed public folder per-user reader account")?;
+    storage
+        .upsert_public_folder_permission(
+            PublicFolderPermissionInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                principal_account_id: reader_account_id,
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-permission.upsert",
+                "runtime public folder per-user reader permission",
+            ),
+        )
+        .await
+        .context("grant public folder reader access before private state patches")?;
+    let before_private_state_sequence = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MAX(sequence) FROM canonical_change_journal WHERE tenant_id = $1",
+    )
+    .bind(fixture.tenant_id)
+    .fetch_one(pool)
+    .await
+    .context("load public folder per-user starting canonical sequence")?
+    .unwrap_or(0);
 
     storage
         .patch_public_folder_per_user_state(
@@ -3779,6 +3965,55 @@ async fn exercise_public_folder_per_user_replay_path(
         )
         .await
         .context("update public folder per-user read state")?;
+    let leaked_private_state_change = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM mail_change_log
+            WHERE tenant_id = $1
+              AND object_kind = 'public_folder_per_user_state'
+              AND summary_json ->> 'folderId' = $2
+              AND summary_json ->> 'itemId' = $3
+              AND affected_principal_ids @> ARRAY[$4]::uuid[]
+        )
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(root.id.to_string())
+    .bind(item.id.to_string())
+    .bind(reader_account_id)
+    .fetch_one(pool)
+    .await
+    .context("check public folder private state replay audience")?;
+    anyhow::ensure!(
+        !leaked_private_state_change,
+        "public folder per-user state replay must not notify other readers"
+    );
+    let leaked_private_state_push = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM canonical_change_journal
+            WHERE tenant_id = $1
+              AND category = 'public_folders'
+              AND sequence > $2
+              AND (
+                  principal_account_ids @> ARRAY[$3]::uuid[]
+                  OR account_ids @> ARRAY[$3]::uuid[]
+              )
+        )
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(before_private_state_sequence)
+    .bind(reader_account_id)
+    .fetch_one(pool)
+    .await
+    .context("check public folder private state push audience")?;
+    anyhow::ensure!(
+        !leaked_private_state_push,
+        "public folder per-user state push scope must stay private to the changed account"
+    );
 
     let states = storage
         .fetch_public_folder_per_user_state(fixture.account_id, root.id)
@@ -3824,6 +4059,58 @@ async fn exercise_public_folder_per_user_replay_path(
             "public folder per-user state {expected_kind} replay count must be {expected_count}"
         );
     }
+
+    storage
+        .delete_public_folder_item(
+            fixture.account_id,
+            root.id,
+            item.id,
+            audit(
+                &fixture.account_email,
+                "public-folder-item.delete",
+                "runtime public folder item tombstone",
+            ),
+        )
+        .await
+        .context("delete public folder item for tombstone modseq check")?;
+    let item_tombstone = sqlx::query(
+        r#"
+        SELECT tombstone.deleted_modseq, log.change_kind
+        FROM tombstones tombstone
+        JOIN mail_change_log log
+          ON log.tenant_id = tombstone.tenant_id
+         AND log.cursor = tombstone.change_cursor
+         AND log.object_kind = tombstone.object_kind
+         AND log.object_id = tombstone.object_id
+        WHERE tombstone.tenant_id = $1
+          AND tombstone.account_id = $2
+          AND tombstone.collection_id = $3
+          AND tombstone.object_kind = 'public_folder_item'
+          AND tombstone.object_id = $4
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id)
+    .bind(item.id)
+    .fetch_one(pool)
+    .await
+    .context("load public folder item tombstone")?;
+    anyhow::ensure!(
+        item_tombstone.try_get::<i64, _>("deleted_modseq")? == item.change_counter + 1
+            && item_tombstone.try_get::<String, _>("change_kind")? == "destroyed",
+        "public folder item tombstone must preserve the post-delete item change counter"
+    );
+    let visible_states_after_delete = storage
+        .fetch_public_folder_per_user_state(fixture.account_id, root.id)
+        .await
+        .context("fetch public folder per-user state after item delete")?;
+    anyhow::ensure!(
+        visible_states_after_delete
+            .iter()
+            .all(|state| state.item_id != item.id),
+        "public folder per-user state reads must not project deleted items"
+    );
 
     Ok(())
 }

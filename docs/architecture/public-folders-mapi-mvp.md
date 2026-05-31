@@ -133,10 +133,18 @@ Canonical public-folder permission, replica, and per-user-state upserts record
 replay consumers can distinguish new ACL/topology/private-state rows from later
 modifications. Public-folder item, permission, and replica deletes emit
 canonical tombstones joined to their destroyed change rows so clients can replay
-deletions without depending on protocol-local state.
+deletions without depending on protocol-local state. Public-folder item
+tombstones carry the item change counter after the delete mutation.
+Public-folder permission changes include the grant principal in the affected
+replay and push-refresh audience even when the mutation removes all rights or
+deletes the grant row.
 It also covers canonical read-state mutation through `RopSetReadFlags` and
 `RopSetMessageReadFlag`, mapped to `public_folder_per_user_state` for the
-authenticated account without shared item mutation. `RopGetPerUserLongTermIds`
+authenticated account without shared item mutation. Public per-user-state reads
+project only active canonical public-folder items; retained state for deleted
+items is replay/history data, not visible item state. Per-user-state replay and
+push notifications are scoped only to the account whose private state changed,
+not to every reader of the public folder. `RopGetPerUserLongTermIds`
 and `RopGetPerUserGuid` are bounded to canonical public-folder LongTermID and
 replica-GUID lookup from private mailbox or public-folder logon handles.
 `RopCreateMessage` plus `RopSetProperties`/body streams and

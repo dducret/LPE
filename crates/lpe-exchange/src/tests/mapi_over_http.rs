@@ -26654,6 +26654,34 @@ async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical
         &[0x64, 0x00, 0, 0, 0, 0]
     ));
     assert!(items.lock().unwrap()[0].is_read);
+
+    items.lock().unwrap()[0].lifecycle_state = "deleted".to_string();
+    let mut write_deleted_rops = vec![0x64, 0x00, 0x00];
+    write_deleted_rops.extend_from_slice(&root_long_term_id);
+    write_deleted_rops.push(1);
+    write_deleted_rops.extend_from_slice(&0u32.to_le_bytes());
+    write_deleted_rops.extend_from_slice(&(per_user_stream.len() as u16).to_le_bytes());
+    write_deleted_rops.extend_from_slice(&per_user_stream);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let write_deleted_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&write_deleted_rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(write_deleted_response.status(), StatusCode::OK);
+    let write_deleted_response_rops =
+        response_rops_from_execute_response(write_deleted_response).await;
+    let mut invalid_parameter = vec![0x64, 0x00];
+    invalid_parameter.extend_from_slice(&0x8007_0057u32.to_le_bytes());
+    assert!(contains_bytes(
+        &write_deleted_response_rops,
+        &invalid_parameter
+    ));
 }
 
 #[tokio::test]

@@ -807,7 +807,7 @@ impl Storage {
         let access = self.public_folder_access(account_id, folder_id).await?;
         ensure_delete(access)?;
         let mut tx = self.pool.begin().await?;
-        let deleted = sqlx::query_scalar::<_, i64>(
+        let deleted_modseq = sqlx::query_scalar::<_, i64>(
             r#"
             UPDATE public_folder_items
             SET lifecycle_state = 'deleted',
@@ -818,7 +818,7 @@ impl Storage {
               AND public_folder_id = $2
               AND id = $3
               AND lifecycle_state = 'active'
-            RETURNING 1::bigint
+            RETURNING change_counter
             "#,
         )
         .bind(&access.tenant_id)
@@ -827,10 +827,7 @@ impl Storage {
         .bind(account_id)
         .fetch_optional(&mut *tx)
         .await?
-        .is_some();
-        if !deleted {
-            bail!("public folder item not found");
-        }
+        .ok_or_else(|| anyhow::anyhow!("public folder item not found"))?;
         let cursor = self
             .record_public_folder_change(
                 &mut tx,
@@ -857,7 +854,7 @@ impl Storage {
         .bind(access.tree_admin_owner_account_id)
         .bind(folder_id)
         .bind(item_id)
-        .bind(cursor)
+        .bind(deleted_modseq)
         .bind(cursor)
         .execute(&mut *tx)
         .await?;
@@ -962,7 +959,7 @@ impl Storage {
         } else {
             "updated"
         };
-        self.record_public_folder_change(
+        self.record_public_folder_change_with_extra_affected(
             &mut tx,
             &access,
             input.account_id,
@@ -974,6 +971,7 @@ impl Storage {
                 "folderId": input.public_folder_id,
                 "principalAccountId": input.principal_account_id
             }),
+            &[input.principal_account_id],
         )
         .await?;
         self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
@@ -1012,7 +1010,7 @@ impl Storage {
         .await?
         .ok_or_else(|| anyhow::anyhow!("public folder permission not found"))?;
         let cursor = self
-            .record_public_folder_change(
+            .record_public_folder_change_with_extra_affected(
                 &mut tx,
                 &access,
                 account_id,
@@ -1021,6 +1019,7 @@ impl Storage {
                 permission_id,
                 "destroyed",
                 json!({"folderId": folder_id, "principalAccountId": principal_account_id}),
+                &[principal_account_id],
             )
             .await?;
         sqlx::query(
@@ -1221,16 +1220,23 @@ impl Storage {
         let rows = sqlx::query_as::<_, PublicFolderPerUserStateRow>(
             r#"
             SELECT
-                public_folder_id,
-                item_id,
-                account_id,
-                is_read,
-                last_seen_change,
-                private_json::text AS private_json,
-                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-            FROM public_folder_per_user_state
-            WHERE tenant_id = $1 AND public_folder_id = $2 AND account_id = $3
-            ORDER BY updated_at DESC, item_id ASC
+                state.public_folder_id,
+                state.item_id,
+                state.account_id,
+                state.is_read,
+                state.last_seen_change,
+                state.private_json::text AS private_json,
+                to_char(state.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM public_folder_per_user_state state
+            JOIN public_folder_items item
+              ON item.tenant_id = state.tenant_id
+             AND item.public_folder_id = state.public_folder_id
+             AND item.id = state.item_id
+             AND item.lifecycle_state = 'active'
+            WHERE state.tenant_id = $1
+              AND state.public_folder_id = $2
+              AND state.account_id = $3
+            ORDER BY state.updated_at DESC, state.item_id ASC
             "#,
         )
         .bind(&access.tenant_id)
@@ -1308,11 +1314,10 @@ impl Storage {
             } else {
                 "updated"
             };
-            self.record_public_folder_change(
+            self.record_public_folder_private_change(
                 &mut tx,
                 &access,
                 account_id,
-                folder_id,
                 "public_folder_per_user_state",
                 patch.item_id,
                 change_kind,
@@ -1439,6 +1444,32 @@ impl Storage {
         change_kind: &str,
         summary_json: serde_json::Value,
     ) -> Result<i64> {
+        self.record_public_folder_change_with_extra_affected(
+            tx,
+            access,
+            actor_account_id,
+            folder_id,
+            object_kind,
+            object_id,
+            change_kind,
+            summary_json,
+            &[],
+        )
+        .await
+    }
+
+    async fn record_public_folder_change_with_extra_affected(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        access: &PublicFolderAccess,
+        actor_account_id: Uuid,
+        folder_id: Uuid,
+        object_kind: &str,
+        object_id: Uuid,
+        change_kind: &str,
+        summary_json: serde_json::Value,
+        extra_affected_account_ids: &[Uuid],
+    ) -> Result<i64> {
         let mut affected = sqlx::query_scalar::<_, Uuid>(
             r#"
             SELECT principal_account_id
@@ -1452,6 +1483,7 @@ impl Storage {
         .await?;
         affected.push(access.tree_admin_owner_account_id);
         affected.push(actor_account_id);
+        affected.extend(extra_affected_account_ids);
         affected.sort();
         affected.dedup();
         let modseq = self
@@ -1480,7 +1512,49 @@ impl Storage {
             &access.tenant_id,
             CanonicalChangeCategory::PublicFolders,
             &affected,
-            &[access.tree_admin_owner_account_id],
+            &affected,
+        )
+        .await?;
+        Ok(cursor)
+    }
+
+    async fn record_public_folder_private_change(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        access: &PublicFolderAccess,
+        actor_account_id: Uuid,
+        object_kind: &str,
+        object_id: Uuid,
+        change_kind: &str,
+        summary_json: serde_json::Value,
+    ) -> Result<i64> {
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                tx,
+                &access.tenant_id,
+                actor_account_id,
+                CanonicalChangeCategory::PublicFolders.as_str(),
+            )
+            .await?;
+        let cursor = Self::insert_mail_change_log_in_tx(
+            tx,
+            &access.tenant_id,
+            Some(actor_account_id),
+            None,
+            object_kind,
+            object_id,
+            change_kind,
+            modseq,
+            &[actor_account_id],
+            summary_json,
+        )
+        .await?;
+        Self::emit_canonical_change(
+            tx,
+            &access.tenant_id,
+            CanonicalChangeCategory::PublicFolders,
+            &[actor_account_id],
+            &[actor_account_id],
         )
         .await?;
         Ok(cursor)

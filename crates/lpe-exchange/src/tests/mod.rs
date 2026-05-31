@@ -1245,7 +1245,11 @@ impl ExchangeStore for FakeStore {
         let item_id = input
             .id
             .unwrap_or_else(|| Uuid::parse_str("efefefef-efef-efef-efef-efefefefefef").unwrap());
-        if let Some(item) = items.iter_mut().find(|item| item.id == item_id) {
+        if let Some(item) = items.iter_mut().find(|item| {
+            item.id == item_id
+                && item.public_folder_id == input.public_folder_id
+                && item.lifecycle_state == "active"
+        }) {
             item.subject = input.subject;
             item.body_text = input.body_text;
             item.body_html_sanitized = input.body_html_sanitized;
@@ -1256,6 +1260,9 @@ impl ExchangeStore for FakeStore {
             item.change_counter += 1;
             let item = item.clone();
             return Box::pin(async move { Ok(item) });
+        }
+        if input.id.is_some() {
+            return Box::pin(async move { Err(anyhow::anyhow!("public folder item not found")) });
         }
         let item = PublicFolderItem {
             id: item_id,
@@ -1288,10 +1295,11 @@ impl ExchangeStore for FakeStore {
     ) -> StoreFuture<'a, ()> {
         let deleted = {
             let mut items = self.public_folder_items.lock().unwrap();
-            if let Some(item) = items
-                .iter_mut()
-                .find(|item| item.id == item_id && item.public_folder_id == folder_id)
-            {
+            if let Some(item) = items.iter_mut().find(|item| {
+                item.id == item_id
+                    && item.public_folder_id == folder_id
+                    && item.lifecycle_state == "active"
+            }) {
                 item.lifecycle_state = "deleted".to_string();
                 true
             } else {
@@ -1342,10 +1350,11 @@ impl ExchangeStore for FakeStore {
         let mut items = self.public_folder_items.lock().unwrap();
         let mut states = Vec::new();
         for patch in patches {
-            let Some(item) = items
-                .iter_mut()
-                .find(|item| item.public_folder_id == folder_id && item.id == patch.item_id)
-            else {
+            let Some(item) = items.iter_mut().find(|item| {
+                item.public_folder_id == folder_id
+                    && item.id == patch.item_id
+                    && item.lifecycle_state == "active"
+            }) else {
                 return Box::pin(
                     async move { Err(anyhow::anyhow!("public folder item not found")) },
                 );
