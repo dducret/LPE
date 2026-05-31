@@ -525,6 +525,12 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
+    fn fetch_public_folder_per_user_state<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>>;
+
     fn patch_public_folder_per_user_state<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -2138,6 +2144,16 @@ impl ExchangeStore for Storage {
                 audit,
             )
             .await
+        })
+    }
+
+    fn fetch_public_folder_per_user_state<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>> {
+        Box::pin(async move {
+            Storage::fetch_public_folder_per_user_state(self, principal_account_id, folder_id).await
         })
     }
 

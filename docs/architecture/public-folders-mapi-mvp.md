@@ -5,8 +5,8 @@
 Public folders now have canonical `LPE` storage, authenticated mail APIs,
 permission rows, per-user read/unread rows, replay facts, and tombstones.
 MAPI/HTTP public-folder replica, recipient-bearing item conversion, and
-per-user-information blob ROPs remain guarded protocol work; they must not
-create protocol-local public-folder state. The first bounded MAPI steps are
+arbitrary Exchange-compatible per-user-information blob import remain guarded
+protocol work; they must not create protocol-local public-folder state. The first bounded MAPI steps are
 enabled: public-folder `RopLogon` now creates a
 distinct public-folder store handle, an immediate root hierarchy probe returns
 an empty guarded hierarchy instead of leaking private mailbox folders, and a
@@ -142,11 +142,12 @@ existing bounded public-folder post items and stage new post items that
 because LPE does not define public-folder rules and must not create MAPI-local
 rule state. `RopGetMessageStatus` and `RopSetMessageStatus` accept canonical
 public-folder item IDs but keep their status bits session-local.
-`RopReadPerUserInformation` and
-`RopWritePerUserInformation` remain guarded because LPE does not yet define an
-Exchange-compatible binary per-user stream over `public_folder_per_user_state`;
-they must not create Exchange-compatible binary per-user blobs or protocol-local
-state. Public-folder replica ROPs may expose only documented single-server or
+`RopReadPerUserInformation` and `RopWritePerUserInformation` support a bounded
+single-chunk LPE-owned stream derived from canonical
+`public_folder_per_user_state`; `WritePerUserInformation` only accepts that
+stream shape back into canonical read-state patches. Arbitrary
+Exchange-compatible binary per-user blobs remain unsupported and must not be
+stored as protocol-local state. Public-folder replica ROPs may expose only documented single-server or
 cluster metadata that exists in canonical LPE state.
 
 ## Reference Table/List
@@ -156,7 +157,7 @@ cluster metadata that exists in canonical LPE state.
 | Public-folder tree | `public_folder_trees`, `public_folders` | Public-folder logon, hierarchy tables, and opened-folder property reads may expose only canonical root and child folder rows/properties. |
 | Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | Contents tables, item open/read, content sync export, bounded MAPI post creation, existing-item `SetProperties` updates, existing-item body stream writes, soft/hard item deletion, public-folder-to-public-folder copy/move, and sync-import create/update may project or mutate post-like items; recipient-bearing conversion remains gated; no opaque Exchange message blobs. |
 | Permissions | `public_folder_permissions` | `RopGetPermissionsTable` may project same-tenant grants plus reserved compatibility rows; `RopModifyPermissions` may add, modify, and remove same-tenant account grants through the canonical public-folder grant path; no MAPI-local ACLs. |
-| Per-user read/unread | `public_folder_per_user_state` | Content sync may export read/unread state from canonical item rows, bounded MAPI read-flag ROPs may update it for the authenticated account, and per-user LongTermID/GUID lookup may expose canonical public-folder identity only; user-private state only; item content change log is separate. |
+| Per-user read/unread | `public_folder_per_user_state` | Content sync may export read/unread state from canonical item rows, bounded MAPI read-flag ROPs may update it for the authenticated account, per-user LongTermID/GUID lookup may expose canonical public-folder identity only, and per-user information ROPs may round-trip the bounded LPE stream shape into canonical read-state patches; user-private state only; item content change log is separate. |
 | Replay | `public_folder_change_log` and public-folder tombstones, or proven generic equivalents | Must support permission revocation, item deletion, and per-user-state deltas. |
 | Rules | none for public folders | `RopGetRulesTable` returns an empty table for public-folder handles; no MAPI-local rules or Sieve rules are attached to public folders. |
 | Message status | session-local MAPI compatibility state | `RopGetMessageStatus` and `RopSetMessageStatus` validate public-folder item IDs against canonical items but do not persist item status state. |

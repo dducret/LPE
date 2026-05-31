@@ -16,8 +16,8 @@ use crate::store::{
 };
 use lpe_storage::{
     AuditEntryInput, CancelSubmissionResult, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, PublicFolderPermissionInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    JmapMailboxUpdateInput, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermissionInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
 
@@ -211,6 +211,53 @@ fn rule_audit(principal: &AccountPrincipal, action: &str, subject: &str) -> Audi
         action: action.to_string(),
         subject: subject.to_string(),
     }
+}
+
+const PUBLIC_FOLDER_PER_USER_STREAM_MAGIC: &[u8; 8] = b"LPEPFU1\0";
+
+fn public_folder_per_user_stream(states: &[PublicFolderPerUserState]) -> Vec<u8> {
+    let mut states = states.to_vec();
+    states.sort_by(|left, right| left.item_id.cmp(&right.item_id));
+    let mut stream = Vec::new();
+    stream.extend_from_slice(PUBLIC_FOLDER_PER_USER_STREAM_MAGIC);
+    stream.extend_from_slice(&(states.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for state in states.into_iter().take(u16::MAX as usize) {
+        stream.extend_from_slice(state.item_id.as_bytes());
+        stream.push(state.is_read as u8);
+        stream.extend_from_slice(&state.last_seen_change.to_le_bytes());
+    }
+    stream
+}
+
+fn public_folder_per_user_patches(data: &[u8]) -> Option<Vec<PublicFolderPerUserStatePatch>> {
+    if data.is_empty() {
+        return Some(Vec::new());
+    }
+    if data.len() < PUBLIC_FOLDER_PER_USER_STREAM_MAGIC.len() + 2
+        || &data[..PUBLIC_FOLDER_PER_USER_STREAM_MAGIC.len()]
+            != PUBLIC_FOLDER_PER_USER_STREAM_MAGIC.as_slice()
+    {
+        return None;
+    }
+    let mut offset = PUBLIC_FOLDER_PER_USER_STREAM_MAGIC.len();
+    let count = u16::from_le_bytes(data.get(offset..offset + 2)?.try_into().ok()?) as usize;
+    offset += 2;
+    let mut patches = Vec::with_capacity(count);
+    for _ in 0..count {
+        let item_id = uuid::Uuid::from_slice(data.get(offset..offset + 16)?).ok()?;
+        offset += 16;
+        let is_read = *data.get(offset)? != 0;
+        offset += 1;
+        let last_seen_change = i64::from_le_bytes(data.get(offset..offset + 8)?.try_into().ok()?);
+        offset += 8;
+        patches.push(PublicFolderPerUserStatePatch {
+            item_id,
+            is_read,
+            last_seen_change: Some(last_seen_change),
+            private_json: None,
+        });
+    }
+    (offset == data.len()).then_some(patches)
 }
 
 fn bounded_search_criteria_from_rop(
@@ -11192,6 +11239,99 @@ where
                     &request,
                     &crate::mapi::identity::STORE_REPLICA_GUID,
                 ));
+            }
+            Some(RopId::ReadPerUserInformation) => {
+                let Some(folder_id) = request.per_user_folder_object_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x63,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                let Some(public_folder) = snapshot.public_folder_for_id(folder_id) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x63,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                let states = match store
+                    .fetch_public_folder_per_user_state(
+                        principal.account_id,
+                        public_folder.folder.id,
+                    )
+                    .await
+                {
+                    Ok(states) => states,
+                    Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x63,
+                            request.response_handle_index(),
+                            EC_RULE_NOT_FOUND,
+                        ));
+                        continue;
+                    }
+                };
+                let stream = public_folder_per_user_stream(&states);
+                responses
+                    .extend_from_slice(&rop_read_per_user_information_response(&request, &stream));
+            }
+            Some(RopId::WritePerUserInformation) => {
+                let Some(folder_id) = request.per_user_folder_object_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x64,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                let Some(public_folder) = snapshot.public_folder_for_id(folder_id) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x64,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                if request.per_user_data_offset() != 0 || !request.per_user_has_finished() {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x64,
+                        request.response_handle_index(),
+                        EC_RULE_INVALID_PARAMETER,
+                    ));
+                    continue;
+                }
+                let patches = match public_folder_per_user_patches(request.per_user_write_data()) {
+                    Some(patches) => patches,
+                    None => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x64,
+                            request.response_handle_index(),
+                            EC_RULE_INVALID_PARAMETER,
+                        ));
+                        continue;
+                    }
+                };
+                if !patches.is_empty()
+                    && store
+                        .patch_public_folder_per_user_state(
+                            principal.account_id,
+                            public_folder.folder.id,
+                            &patches,
+                        )
+                        .await
+                        .is_err()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x64,
+                        request.response_handle_index(),
+                        EC_RULE_INVALID_PARAMETER,
+                    ));
+                    continue;
+                }
+                responses.extend_from_slice(&rop_write_per_user_information_response(&request));
             }
             Some(RopId::PublicFolderIsGhosted) => {
                 responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request))

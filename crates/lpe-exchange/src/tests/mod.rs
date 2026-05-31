@@ -1278,6 +1278,30 @@ impl ExchangeStore for FakeStore {
         }
     }
 
+    fn fetch_public_folder_per_user_state<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>> {
+        let states = self
+            .public_folder_items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|item| item.public_folder_id == folder_id && item.lifecycle_state == "active")
+            .map(|item| PublicFolderPerUserState {
+                public_folder_id: folder_id,
+                item_id: item.id,
+                account_id: principal_account_id,
+                is_read: item.is_read,
+                last_seen_change: item.change_counter,
+                private_json: "{}".to_string(),
+                updated_at: "2026-05-07T12:00:00Z".to_string(),
+            })
+            .collect();
+        Box::pin(async move { Ok(states) })
+    }
+
     fn patch_public_folder_per_user_state<'a>(
         &'a self,
         principal_account_id: Uuid,

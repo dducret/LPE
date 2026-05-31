@@ -523,6 +523,36 @@ pub(in crate::mapi) fn rop_get_per_user_guid_response(
     response
 }
 
+pub(in crate::mapi) fn rop_read_per_user_information_response(
+    request: &RopRequest,
+    stream: &[u8],
+) -> Vec<u8> {
+    let offset = request.per_user_data_offset() as usize;
+    let max_size = request.per_user_max_data_size();
+    let max_size = if max_size == 0 {
+        u16::MAX as usize
+    } else {
+        max_size as usize
+    };
+    if offset > stream.len() {
+        return rop_error_response(0x63, request.response_handle_index(), 0x8007_0057);
+    }
+    let end = offset.saturating_add(max_size).min(stream.len());
+    let chunk = &stream[offset..end];
+    let mut response = vec![0x63, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.push((end >= stream.len()) as u8);
+    response.extend_from_slice(&(chunk.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    response.extend_from_slice(chunk);
+    response
+}
+
+pub(in crate::mapi) fn rop_write_per_user_information_response(request: &RopRequest) -> Vec<u8> {
+    let mut response = vec![0x64, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response
+}
+
 fn stale_special_folder_object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
     if long_term_id.len() != 24 || long_term_id[22..24] != [0, 0] {
         return None;
@@ -3701,6 +3731,41 @@ impl RopRequest {
 
     pub(in crate::mapi) fn long_term_id(&self) -> Option<&[u8]> {
         self.payload.get(..24)
+    }
+
+    pub(in crate::mapi) fn per_user_folder_object_id(&self) -> Option<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::ReadPerUserInformation | RopId::WritePerUserInformation)
+        ) {
+            return None;
+        }
+        crate::mapi::identity::object_id_from_long_term_id(self.payload.get(..24)?)
+    }
+
+    pub(in crate::mapi) fn per_user_data_offset(&self) -> u32 {
+        self.payload
+            .get(25..29)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u32::from_le_bytes)
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn per_user_max_data_size(&self) -> u16 {
+        self.payload
+            .get(29..31)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(u16::from_le_bytes)
+            .unwrap_or(0)
+    }
+
+    pub(in crate::mapi) fn per_user_has_finished(&self) -> bool {
+        self.payload.get(24).copied().unwrap_or(0) != 0
+    }
+
+    pub(in crate::mapi) fn per_user_write_data(&self) -> &[u8] {
+        let size = self.per_user_max_data_size() as usize;
+        self.payload.get(31..31 + size).unwrap_or_default()
     }
 
     pub(in crate::mapi) fn message_ids(&self) -> Vec<u64> {

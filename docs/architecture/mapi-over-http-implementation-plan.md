@@ -423,7 +423,7 @@ not by itself authorize broad client publication.
 
 | Surface | Status |
 | --- | --- |
-| Public folders | Public-folder logon and replica/per-user state are deferred. The server must return parseable unsupported responses without creating protocol-local public-folder state. The target canonical SQL/API/replay design is documented in `docs/architecture/public-folders-mapi-mvp.md`; no public-folder ROP should be enabled before that canonical layer exists. |
+| Public folders | Public-folder logon, hierarchy/content projections, post create/update/delete/copy/move, ACL read/write, read-state ROPs, and bounded LPE-owned per-user information stream round-trip are implemented over the canonical public-folder layer documented in `docs/architecture/public-folders-mapi-mvp.md`. Replica topology, recipient-bearing item conversion, and arbitrary Exchange-compatible per-user binary blobs remain deferred and must return parseable errors without creating protocol-local public-folder state. |
 | Outlook Anywhere / RPC over HTTP | Deferred legacy compatibility shim. `EXPR` publication requires a real `/rpc/rpcproxy.dll` path and separate evidence. |
 | Cross-process MAPI session replay and load-balanced failover | Deferred production hardening. First lab gate may use single-node sticky sessions. |
 | Client SMTP in core LPE | Forbidden. Submission must use canonical LPE submission, not a client SMTP endpoint in the core server. |
