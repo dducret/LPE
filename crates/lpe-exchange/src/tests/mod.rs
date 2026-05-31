@@ -361,6 +361,8 @@ struct FakeStore {
     saved_drafts: Arc<Mutex<Vec<SubmitMessageInput>>>,
     imported_emails: Arc<Mutex<Vec<JmapImportedEmailInput>>>,
     emails: Arc<Mutex<Vec<JmapEmail>>>,
+    public_folder_items: Arc<Mutex<Vec<PublicFolderItem>>>,
+    deleted_public_folder_items: Arc<Mutex<Vec<Uuid>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
     calendar_attachments: Arc<Mutex<HashMap<Uuid, Vec<CalendarEventAttachment>>>>,
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
@@ -675,6 +677,28 @@ impl FakeStore {
         }
     }
 
+    fn public_folder_item(id: &str, folder_id: &str, subject: &str) -> PublicFolderItem {
+        let account = Self::account();
+        PublicFolderItem {
+            id: Uuid::parse_str(id).unwrap(),
+            public_folder_id: Uuid::parse_str(folder_id).unwrap(),
+            message_id: None,
+            item_kind: "post".to_string(),
+            message_class: "IPM.Post".to_string(),
+            subject: subject.to_string(),
+            body_text: "Public body".to_string(),
+            body_html_sanitized: None,
+            source_payload_json: "{}".to_string(),
+            lifecycle_state: "active".to_string(),
+            change_counter: 1,
+            created_by_account_id: account.account_id,
+            updated_by_account_id: account.account_id,
+            is_read: false,
+            created_at: "2026-05-07T12:00:00Z".to_string(),
+            updated_at: "2026-05-07T12:00:00Z".to_string(),
+        }
+    }
+
     fn email_addresses(recipients: &[SubmittedRecipientInput]) -> Vec<JmapEmailAddress> {
         recipients
             .iter()
@@ -938,17 +962,106 @@ impl ExchangeStore for FakeStore {
     fn fetch_public_folder_items<'a>(
         &'a self,
         _principal_account_id: Uuid,
-        _folder_id: Uuid,
+        folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        let items = self
+            .public_folder_items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|item| item.public_folder_id == folder_id && item.lifecycle_state == "active")
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(items) })
+    }
+
+    fn fetch_public_folder_items_by_ids<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        item_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        let items = self
+            .public_folder_items
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|item| item_ids.contains(&item.id) && item.lifecycle_state == "active")
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(items) })
     }
 
     fn upsert_public_folder_item<'a>(
         &'a self,
-        _input: UpsertPublicFolderItemInput,
+        input: UpsertPublicFolderItemInput,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, PublicFolderItem> {
-        Box::pin(async move { Err(anyhow::anyhow!("public folder not found")) })
+        let mut items = self.public_folder_items.lock().unwrap();
+        let item_id = input
+            .id
+            .unwrap_or_else(|| Uuid::parse_str("efefefef-efef-efef-efef-efefefefefef").unwrap());
+        if let Some(item) = items.iter_mut().find(|item| item.id == item_id) {
+            item.subject = input.subject;
+            item.body_text = input.body_text;
+            item.body_html_sanitized = input.body_html_sanitized;
+            item.message_class = input.message_class;
+            item.item_kind = input.item_kind;
+            item.source_payload_json = input.source_payload_json;
+            item.updated_by_account_id = input.account_id;
+            item.change_counter += 1;
+            let item = item.clone();
+            return Box::pin(async move { Ok(item) });
+        }
+        let item = PublicFolderItem {
+            id: item_id,
+            public_folder_id: input.public_folder_id,
+            message_id: None,
+            item_kind: input.item_kind,
+            message_class: input.message_class,
+            subject: input.subject,
+            body_text: input.body_text,
+            body_html_sanitized: input.body_html_sanitized,
+            source_payload_json: input.source_payload_json,
+            lifecycle_state: "active".to_string(),
+            change_counter: 1,
+            created_by_account_id: input.account_id,
+            updated_by_account_id: input.account_id,
+            is_read: false,
+            created_at: "2026-05-07T12:00:00Z".to_string(),
+            updated_at: "2026-05-07T12:00:00Z".to_string(),
+        };
+        items.push(item.clone());
+        Box::pin(async move { Ok(item) })
+    }
+
+    fn delete_public_folder_item<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        folder_id: Uuid,
+        item_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let deleted = {
+            let mut items = self.public_folder_items.lock().unwrap();
+            if let Some(item) = items
+                .iter_mut()
+                .find(|item| item.id == item_id && item.public_folder_id == folder_id)
+            {
+                item.lifecycle_state = "deleted".to_string();
+                true
+            } else {
+                false
+            }
+        };
+        if deleted {
+            self.deleted_public_folder_items
+                .lock()
+                .unwrap()
+                .push(item_id);
+            Box::pin(async move { Ok(()) })
+        } else {
+            Box::pin(async move { Err(anyhow::anyhow!("public folder item not found")) })
+        }
     }
 
     fn fetch_mapi_identities_by_object_ids<'a>(

@@ -58,18 +58,18 @@ use crate::{
     workspace::{
         client_workspace, create_public_folder_child, create_public_folder_tree,
         delete_client_contact, delete_client_event, delete_client_note, delete_client_task,
-        delete_draft_message, delete_journal_entry, delete_public_folder_item,
-        delete_public_folder_permission, delete_search_folder, get_client_note, get_client_task,
-        get_journal_entry, get_public_folder, get_search_folder, list_client_notes,
-        list_client_task_lists, list_client_tasks, list_journal_entries,
+        delete_draft_message, delete_journal_entry, delete_public_folder,
+        delete_public_folder_item, delete_public_folder_permission, delete_search_folder,
+        get_client_note, get_client_task, get_journal_entry, get_public_folder, get_search_folder,
+        list_client_notes, list_client_task_lists, list_client_tasks, list_journal_entries,
         list_public_folder_children, list_public_folder_items, list_public_folder_per_user_state,
         list_public_folder_permissions, list_public_folder_trees, list_recoverable_items,
         list_search_folders, outlook_profile_state, patch_public_folder_item,
         patch_public_folder_per_user_state, post_public_folder_item, purge_recoverable_item,
         put_public_folder_permission, query_client_reminders, restore_recoverable_item,
-        save_draft_message, submit_message, update_message_flag, upsert_client_contact,
-        upsert_client_event, upsert_client_note, upsert_client_task, upsert_journal_entry,
-        upsert_search_folder,
+        save_draft_message, submit_message, update_message_flag, update_public_folder,
+        upsert_client_contact, upsert_client_event, upsert_client_note, upsert_client_task,
+        upsert_journal_entry, upsert_search_folder,
     },
 };
 
@@ -185,7 +185,12 @@ pub fn router(storage: Storage) -> Router {
             "/mail/public-folders/trees",
             get(list_public_folder_trees).post(create_public_folder_tree),
         )
-        .route("/mail/public-folders/{folder_id}", get(get_public_folder))
+        .route(
+            "/mail/public-folders/{folder_id}",
+            get(get_public_folder)
+                .patch(update_public_folder)
+                .delete(delete_public_folder),
+        )
         .route(
             "/mail/public-folders/{folder_id}/children",
             get(list_public_folder_children).post(create_public_folder_child),

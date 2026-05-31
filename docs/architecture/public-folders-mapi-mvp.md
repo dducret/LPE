@@ -5,9 +5,9 @@
 Public folders now have canonical `LPE` storage, authenticated mail APIs,
 permission rows, per-user read/unread rows, replay facts, and tombstones.
 MAPI/HTTP public-folder logon and replica ROPs remain guarded protocol work;
-they must not create protocol-local public-folder state. Bounded EWS folder and
-item projection may expose public-folder data only through the canonical tables
-described here.
+they must not create protocol-local public-folder state. Bounded EWS folder,
+item projection, item lookup, post creation, and item deletion may expose or
+mutate public-folder data only through the canonical tables described here.
 
 ## Implementation/Usage
 
@@ -41,6 +41,8 @@ The API layer should come before protocol support:
 - `GET /api/mail/public-folders/trees`
 - `POST /api/mail/public-folders/trees`
 - `GET /api/mail/public-folders/{folderId}`
+- `PATCH /api/mail/public-folders/{folderId}`
+- `DELETE /api/mail/public-folders/{folderId}`
 - `GET /api/mail/public-folders/{folderId}/children`
 - `POST /api/mail/public-folders/{folderId}/children`
 - `GET /api/mail/public-folders/{folderId}/items`
@@ -59,6 +61,8 @@ principals with share rights may manage grants. Read rights allow listing and
 reading visible items. Write rights allow creating and updating items. Delete
 rights allow item deletion. Share rights allow grant mutation. Owner/admin
 rights are required for folder deletion and structural tree mutation.
+Initial folder deletion is conservative: root folders cannot be deleted, and a
+folder with active child folders or active items must be emptied first.
 
 Per-user read/unread is private to the authenticated account unless an explicit
 future administrative audit/export flow is documented. It must never be modeled

@@ -467,11 +467,25 @@ pub trait ExchangeStore: AccountAuthStore {
         folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderItem>>;
 
+    fn fetch_public_folder_items_by_ids<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        item_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>>;
+
     fn upsert_public_folder_item<'a>(
         &'a self,
         input: UpsertPublicFolderItemInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, PublicFolderItem>;
+
+    fn delete_public_folder_item<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        item_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
@@ -1989,12 +2003,41 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_public_folder_items_by_ids<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        item_ids: &'a [Uuid],
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async move {
+            Storage::fetch_public_folder_items_by_ids(self, principal_account_id, item_ids).await
+        })
+    }
+
     fn upsert_public_folder_item<'a>(
         &'a self,
         input: UpsertPublicFolderItemInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, PublicFolderItem> {
         Box::pin(async move { Storage::upsert_public_folder_item(self, input, audit).await })
+    }
+
+    fn delete_public_folder_item<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        item_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            Storage::delete_public_folder_item(
+                self,
+                principal_account_id,
+                folder_id,
+                item_id,
+                audit,
+            )
+            .await
+        })
     }
 
     fn poll_mapi_notifications<'a>(

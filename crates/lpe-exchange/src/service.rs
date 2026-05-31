@@ -1333,16 +1333,12 @@ where
                 include_mime_content.then_some(attachment_contents.as_slice()),
             ));
         }
-        for folder_id in requested_public_folder_ids(request) {
-            for item in self
-                .store
-                .fetch_public_folder_items(principal.account_id, folder_id)
-                .await?
-                .into_iter()
-                .filter(|item| public_folder_item_ids.contains(&item.id))
-            {
-                items.push_str(&public_folder_item_xml(&item));
-            }
+        for item in self
+            .store
+            .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+            .await?
+        {
+            items.push_str(&public_folder_item_xml(&item));
         }
 
         if !ids.is_empty()
@@ -2293,15 +2289,24 @@ where
                 .filter_map(|id| id.strip_prefix("message:"))
                 .map(Uuid::parse_str)
                 .collect::<std::result::Result<Vec<_>, _>>()?;
+            let public_folder_item_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("public-folder-item:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
             if ids.is_empty()
-                || contact_ids.len() + event_ids.len() + task_ids.len() + message_ids.len()
+                || contact_ids.len()
+                    + event_ids.len()
+                    + task_ids.len()
+                    + message_ids.len()
+                    + public_folder_item_ids.len()
                     != ids.len()
             {
                 return Ok(operation_error_response(
                     "DeleteItem",
                     "ErrorInvalidOperation",
-                    "DeleteItem currently supports only contact, calendar, task, and message ids.",
+                    "DeleteItem currently supports only contact, calendar, task, message, and public folder item ids.",
                 ));
             }
             for contact_id in contact_ids {
@@ -2392,6 +2397,31 @@ where
                         .await?;
                 }
                 record_pull_notification(principal.account_id, deleted_event);
+            }
+            let public_folder_items = self
+                .store
+                .fetch_public_folder_items_by_ids(principal.account_id, &public_folder_item_ids)
+                .await?;
+            if public_folder_items.len() != public_folder_item_ids.len() {
+                return Ok(operation_error_response(
+                    "DeleteItem",
+                    "ErrorItemNotFound",
+                    "public folder item not found",
+                ));
+            }
+            for item in public_folder_items {
+                self.store
+                    .delete_public_folder_item(
+                        principal.account_id,
+                        item.public_folder_id,
+                        item.id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-delete-public-folder-item".to_string(),
+                            subject: item.id.to_string(),
+                        },
+                    )
+                    .await?;
             }
 
             Ok(delete_item_success_response())

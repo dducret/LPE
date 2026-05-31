@@ -148,7 +148,10 @@ fn public_folder_schema_uses_canonical_tables_permissions_and_replay() {
         &[
             "public_folder_access",
             "fetch_public_folder_trees",
+            "update_public_folder",
+            "delete_public_folder",
             "upsert_public_folder_item",
+            "fetch_public_folder_items_by_ids",
             "fetch_public_folder_per_user_state",
             "patch_public_folder_per_user_state",
             "insert_mail_change_log_in_tx",

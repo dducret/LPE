@@ -11,8 +11,8 @@ use lpe_storage::{
     PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
     PublicFolderPermissionInput, PublicFolderTree, RecoverableItem, ReminderQuery,
     SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
     UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use tracing::info;
@@ -26,9 +26,9 @@ use crate::{
         PublicFolderPerUserStatePatchBatchRequest, PublicFolderPermissionRequest,
         RecoverableItemsQueryRequest, ReminderQueryRequest, RestoreRecoverableItemRequest,
         SubmitMessageRequest, SubmitRecipientRequest, UpdateMessageFlagRequest,
-        UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientNoteRequest,
-        UpsertClientTaskRequest, UpsertJournalEntryRequest, UpsertPublicFolderItemRequest,
-        UpsertSearchFolderRequest,
+        UpdatePublicFolderRequest, UpsertClientContactRequest, UpsertClientEventRequest,
+        UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
+        UpsertPublicFolderItemRequest, UpsertSearchFolderRequest,
     },
 };
 
@@ -568,6 +568,58 @@ pub(crate) async fn get_public_folder(
             .await
             .map_err(bad_request_error)?,
     ))
+}
+
+pub(crate) async fn update_public_folder(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+    Json(request): Json<UpdatePublicFolderRequest>,
+) -> ApiResult<PublicFolder> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .update_public_folder(
+                UpdatePublicFolderInput {
+                    account_id: account.account_id,
+                    folder_id,
+                    display_name: request.display_name,
+                    folder_class: request.folder_class,
+                    sort_order: request.sort_order,
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "update-public-folder".to_string(),
+                    subject: folder_id.to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn delete_public_folder(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_public_folder(
+            account.account_id,
+            folder_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "delete-public-folder".to_string(),
+                subject: folder_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
 }
 
 pub(crate) async fn list_public_folder_children(

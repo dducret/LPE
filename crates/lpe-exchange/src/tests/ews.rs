@@ -794,6 +794,45 @@ async fn delete_item_deletes_canonical_task() {
 }
 
 #[tokio::test]
+async fn delete_item_deletes_public_folder_item() {
+    let folder_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let item_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            folder_id,
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let deleted_public_folder_items = store.deleted_public_folder_items.clone();
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        deleted_public_folder_items.lock().unwrap().as_slice(),
+        &[item_id]
+    );
+    assert_eq!(
+        public_folder_items.lock().unwrap()[0].lifecycle_state,
+        "deleted"
+    );
+}
+
+#[tokio::test]
 async fn create_update_task_round_trips_through_sync_folder_items() {
     let task_list_id = Uuid::parse_str("aaaaaaaa-0000-0000-0000-000000000001").unwrap();
     let collection =
@@ -1011,6 +1050,52 @@ async fn create_item_saveonly_stores_message_as_canonical_draft() {
     assert_eq!(recorded[0].from_address, "alice@example.test");
     assert_eq!(recorded[0].to[0].address, "bob@example.test");
     assert_eq!(recorded[0].to[0].display_name.as_deref(), Some("Bob"));
+}
+
+#[tokio::test]
+async fn create_item_saveonly_stores_public_folder_post() {
+    let public_folder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SaveOnly">
+                  <m:SavedItemFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>Public post from EWS</t:Subject>
+                      <t:Body BodyType="Text">Visible in public folders</t:Body>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("public-folder-item:efefefef-efef-efef-efef-efefefefefef"));
+    assert!(body.contains("public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
+    let recorded = public_folder_items.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].public_folder_id, public_folder_id);
+    assert_eq!(recorded[0].subject, "Public post from EWS");
+    assert_eq!(recorded[0].body_text, "Visible in public folders");
+    assert_eq!(recorded[0].message_class, "IPM.Post");
 }
 
 #[tokio::test]
@@ -2946,6 +3031,39 @@ async fn get_item_returns_system_mailbox_message_body() {
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:Subject>Inbox message</t:Subject>"));
     assert!(body.contains("<t:Body BodyType=\"Text\">Hello</t:Body>"));
+}
+
+#[tokio::test]
+async fn get_item_returns_public_folder_item_body() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(
+        body.contains("<t:ItemId Id=\"public-folder-item:abababab-abab-abab-abab-abababababab\"")
+    );
+    assert!(body
+        .contains("<t:ParentFolderId Id=\"public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"/>"));
+    assert!(body.contains("<t:Subject>Public post</t:Subject>"));
+    assert!(body.contains("<t:Body BodyType=\"Text\">Public body</t:Body>"));
 }
 
 #[tokio::test]

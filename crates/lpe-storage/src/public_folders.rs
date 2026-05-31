@@ -64,6 +64,15 @@ pub struct CreatePublicFolderInput {
     pub sort_order: i32,
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdatePublicFolderInput {
+    pub account_id: Uuid,
+    pub folder_id: Uuid,
+    pub display_name: Option<String>,
+    pub folder_class: Option<String>,
+    pub sort_order: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicFolderItem {
@@ -375,6 +384,229 @@ impl Storage {
         Ok(rows.into_iter().map(map_public_folder).collect())
     }
 
+    pub async fn update_public_folder(
+        &self,
+        input: UpdatePublicFolderInput,
+        audit: AuditEntryInput,
+    ) -> Result<PublicFolder> {
+        let access = self
+            .public_folder_access(input.account_id, input.folder_id)
+            .await?;
+        ensure_tree_admin(input.account_id, access)?;
+        let current = self
+            .fetch_public_folder_row(input.account_id, input.folder_id)
+            .await?;
+        let display_name = input
+            .display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&current.display_name);
+        let folder_class = input
+            .folder_class
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(&current.folder_class);
+        let sort_order = input.sort_order.unwrap_or(current.sort_order);
+        let display_name_changed = display_name != current.display_name;
+        if display_name_changed {
+            let has_children = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT 1::bigint
+                FROM public_folders
+                WHERE tenant_id = $1
+                  AND parent_folder_id = $2
+                  AND lifecycle_state <> 'deleted'
+                LIMIT 1
+                "#,
+            )
+            .bind(&access.tenant_id)
+            .bind(input.folder_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .is_some();
+            if has_children {
+                bail!("public folder with active children cannot be renamed");
+            }
+        }
+        let parent_path = if display_name_changed {
+            match current.parent_folder_id {
+                Some(parent_folder_id) => Some(
+                    self.fetch_public_folder_row(input.account_id, parent_folder_id)
+                        .await?
+                        .path,
+                ),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let path = if display_name_changed {
+            parent_path
+                .map(|path| format!("{}/{}", path.trim_end_matches('/'), display_name))
+                .unwrap_or_else(|| format!("/{display_name}"))
+        } else {
+            current.path.clone()
+        };
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            UPDATE public_folders
+            SET display_name = $3,
+                folder_class = $4,
+                path = $5,
+                sort_order = $6,
+                change_counter = change_counter + 1,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND id = $2
+              AND lifecycle_state <> 'deleted'
+            "#,
+        )
+        .bind(&access.tenant_id)
+        .bind(input.folder_id)
+        .bind(display_name)
+        .bind(folder_class)
+        .bind(&path)
+        .bind(sort_order)
+        .execute(&mut *tx)
+        .await?;
+        if current.parent_folder_id.is_none() && display_name_changed {
+            sqlx::query(
+                r#"
+                UPDATE public_folder_trees
+                SET display_name = $3,
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND id = $2
+                "#,
+            )
+            .bind(&access.tenant_id)
+            .bind(current.tree_id)
+            .bind(display_name)
+            .execute(&mut *tx)
+            .await?;
+        }
+        self.record_public_folder_change(
+            &mut tx,
+            &access,
+            input.account_id,
+            input.folder_id,
+            "public_folder",
+            input.folder_id,
+            "updated",
+            json!({"folderId": input.folder_id, "treeId": current.tree_id}),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
+        tx.commit().await?;
+        self.fetch_public_folder(input.account_id, input.folder_id)
+            .await
+    }
+
+    pub async fn delete_public_folder(
+        &self,
+        account_id: Uuid,
+        folder_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let access = self.public_folder_access(account_id, folder_id).await?;
+        ensure_tree_admin(account_id, access)?;
+        let folder = self.fetch_public_folder_row(account_id, folder_id).await?;
+        if folder.parent_folder_id.is_none() {
+            bail!("public folder tree root cannot be deleted");
+        }
+        let has_children = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT 1::bigint
+            FROM public_folders
+            WHERE tenant_id = $1
+              AND parent_folder_id = $2
+              AND lifecycle_state <> 'deleted'
+            LIMIT 1
+            "#,
+        )
+        .bind(&access.tenant_id)
+        .bind(folder_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .is_some();
+        if has_children {
+            bail!("public folder with active children cannot be deleted");
+        }
+        let has_items = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT 1::bigint
+            FROM public_folder_items
+            WHERE tenant_id = $1
+              AND public_folder_id = $2
+              AND lifecycle_state = 'active'
+            LIMIT 1
+            "#,
+        )
+        .bind(&access.tenant_id)
+        .bind(folder_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .is_some();
+        if has_items {
+            bail!("public folder with active items cannot be deleted");
+        }
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query_scalar::<_, i64>(
+            r#"
+            UPDATE public_folders
+            SET lifecycle_state = 'deleted',
+                change_counter = change_counter + 1,
+                updated_at = NOW()
+            WHERE tenant_id = $1
+              AND id = $2
+              AND lifecycle_state <> 'deleted'
+            RETURNING change_counter
+            "#,
+        )
+        .bind(&access.tenant_id)
+        .bind(folder_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(deleted_modseq) = deleted else {
+            bail!("public folder not found");
+        };
+        let cursor = self
+            .record_public_folder_change(
+                &mut tx,
+                &access,
+                account_id,
+                folder_id,
+                "public_folder",
+                folder_id,
+                "destroyed",
+                json!({"folderId": folder_id, "treeId": folder.tree_id}),
+            )
+            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, collection_id, object_kind, object_id,
+                deleted_modseq, change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, 'public_folder', $5, $6, $7, 'delete')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&access.tenant_id)
+        .bind(access.tree_admin_owner_account_id)
+        .bind(folder.parent_folder_id)
+        .bind(folder_id)
+        .bind(deleted_modseq)
+        .bind(cursor)
+        .execute(&mut *tx)
+        .await?;
+        self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn fetch_public_folder_items(
         &self,
         account_id: Uuid,
@@ -387,6 +619,46 @@ impl Storage {
         ))
         .bind(&access.tenant_id)
         .bind(folder_id)
+        .bind(account_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(map_public_folder_item).collect())
+    }
+
+    pub async fn fetch_public_folder_items_by_ids(
+        &self,
+        account_id: Uuid,
+        item_ids: &[Uuid],
+    ) -> Result<Vec<PublicFolderItem>> {
+        if item_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let rows = sqlx::query_as::<_, PublicFolderItemRow>(&public_folder_item_select_sql(
+            r#"
+            WHERE i.tenant_id = $1
+              AND i.id = ANY($2)
+              AND i.lifecycle_state = 'active'
+              AND EXISTS (
+                  SELECT 1
+                  FROM public_folders f
+                  JOIN public_folder_trees t
+                    ON t.tenant_id = f.tenant_id
+                   AND t.id = f.tree_id
+                   AND t.lifecycle_state = 'active'
+                  LEFT JOIN public_folder_permissions p
+                    ON p.tenant_id = f.tenant_id
+                   AND p.public_folder_id = f.id
+                   AND p.principal_account_id = $3
+                  WHERE f.tenant_id = i.tenant_id
+                    AND f.id = i.public_folder_id
+                    AND f.lifecycle_state <> 'deleted'
+                    AND (t.admin_owner_account_id = $3 OR COALESCE(p.may_read, FALSE))
+              )
+            "#,
+        ))
+        .bind(&tenant_id)
+        .bind(item_ids)
         .bind(account_id)
         .fetch_all(&self.pool)
         .await?;
