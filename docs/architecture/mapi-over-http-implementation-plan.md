@@ -675,10 +675,15 @@ projected to MAPI with a minimum one-minute appointment window while leaving the
 canonical event unchanged. Bounded MAPI calendar writes update only existing
 canonical `calendar_events` columns: subject/display name, body, HTML body,
 start/end, location, all-day, busy-status-derived canonical status, organizer,
-and display attendees. Binary recurrence and meeting payloads remain unsupported
-until they have a parser-backed canonical mapping; the server rejects them with a
-deterministic parseable error instead of storing opaque MAPI blobs. Calendar
-attachments are projected only through canonical `calendar_event_attachments`:
+and display attendees. `PidLidAppointmentRecur` has a parser-backed bounded
+mapping for Gregorian daily, weekly, monthly-by-day, yearly-by-day, and
+yearly-nth recurrence patterns into canonical `recurrence_rule`,
+`recurrence_json`, and deleted-instance `recurrence_exceptions_json` fields.
+Modified exception payloads, month-end recurrence, Hijri recurrence, malformed
+recurrence blobs, and other binary meeting payloads remain unsupported and are
+rejected with deterministic parseable errors instead of being stored as opaque
+MAPI blobs. Calendar attachments are projected only through canonical
+`calendar_event_attachments`:
 `PidTagHasAttachments`, `RopGetAttachmentTable`, and `RopOpenAttachment` read
 that table, while bounded `RopCreateAttachment`/`RopSaveChangesAttachment`
 writes validated attachment blobs into the same canonical event attachment
