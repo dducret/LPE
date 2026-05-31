@@ -717,6 +717,17 @@ pub(crate) struct PublicFolderPermissionRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct PublicFolderReplicaRow {
+    pub(crate) id: Uuid,
+    pub(crate) public_folder_id: Uuid,
+    pub(crate) server_name: String,
+    pub(crate) lifecycle_state: String,
+    pub(crate) sort_order: i32,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct PublicFolderPerUserStateRow {
     pub(crate) public_folder_id: Uuid,
     pub(crate) item_id: Uuid,

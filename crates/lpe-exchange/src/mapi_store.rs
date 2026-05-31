@@ -3,7 +3,7 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
     ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
     DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule, PublicFolder,
-    PublicFolderItem, PublicFolderPermission, RecoverableItem, ReminderQuery,
+    PublicFolderItem, PublicFolderPermission, PublicFolderReplica, RecoverableItem, ReminderQuery,
     SearchFolderDefinition,
 };
 use sha2::{Digest, Sha256};
@@ -21,6 +21,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
     public_folders: Vec<MapiPublicFolder>,
     public_folder_items: Vec<MapiPublicFolderItem>,
+    public_folder_replicas: Vec<MapiPublicFolderReplica>,
     collaboration_folders: Vec<MapiCollaborationFolder>,
     messages: Vec<MapiMessage>,
     contacts: Vec<MapiContact>,
@@ -60,6 +61,12 @@ pub(crate) struct MapiPublicFolderItem {
     pub(crate) id: u64,
     pub(crate) folder_id: u64,
     pub(crate) item: PublicFolderItem,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapiPublicFolderReplica {
+    pub(crate) folder_id: u64,
+    pub(crate) replica: PublicFolderReplica,
 }
 
 #[derive(Debug, Clone)]
@@ -381,6 +388,7 @@ impl MapiMailStoreSnapshot {
             folders,
             public_folders: Vec::new(),
             public_folder_items: Vec::new(),
+            public_folder_replicas: Vec::new(),
             collaboration_folders,
             messages,
             contacts,
@@ -561,6 +569,21 @@ impl MapiMailStoreSnapshot {
         self
     }
 
+    pub(crate) fn with_public_folder_replicas(
+        mut self,
+        replicas: Vec<PublicFolderReplica>,
+    ) -> Self {
+        self.public_folder_replicas = replicas
+            .into_iter()
+            .filter_map(|replica| {
+                let folder_id =
+                    crate::mapi::identity::mapped_mapi_object_id(&replica.public_folder_id)?;
+                Some(MapiPublicFolderReplica { folder_id, replica })
+            })
+            .collect();
+        self
+    }
+
     pub(crate) fn with_notes_and_journal(
         mut self,
         notes: Vec<ClientNote>,
@@ -709,6 +732,16 @@ impl MapiMailStoreSnapshot {
         self.public_folders
             .iter()
             .find(|folder| folder.id == folder_id)
+    }
+
+    pub(crate) fn public_folder_replica_server_names(&self, folder_id: u64) -> Vec<String> {
+        self.public_folder_replicas
+            .iter()
+            .filter(|replica| {
+                replica.folder_id == folder_id && replica.replica.lifecycle_state == "active"
+            })
+            .map(|replica| replica.replica.server_name.clone())
+            .collect()
     }
 
     pub(crate) fn public_folder_items_for_folder(
@@ -1235,6 +1268,7 @@ impl<T: ExchangeStore> MapiStore for T {
             }
             let mut public_folder_items = Vec::new();
             let mut public_folder_permissions = Vec::new();
+            let mut public_folder_replicas = Vec::new();
             for folder in &public_folders {
                 public_folder_items.extend(
                     self.fetch_public_folder_items(account_id, folder.id)
@@ -1242,6 +1276,10 @@ impl<T: ExchangeStore> MapiStore for T {
                 );
                 public_folder_permissions.extend(
                     self.fetch_public_folder_permissions(account_id, folder.id)
+                        .await?,
+                );
+                public_folder_replicas.extend(
+                    self.fetch_public_folder_replicas(account_id, folder.id)
                         .await?,
                 );
             }
@@ -1323,6 +1361,7 @@ impl<T: ExchangeStore> MapiStore for T {
                     public_folder_permissions,
                 )
             })
+            .map(|snapshot| snapshot.with_public_folder_replicas(public_folder_replicas))
         })
     }
 }

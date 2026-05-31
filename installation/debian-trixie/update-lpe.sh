@@ -369,6 +369,22 @@ CREATE TABLE IF NOT EXISTS public.public_folder_permissions (
 CREATE INDEX IF NOT EXISTS public_folder_permissions_principal_idx
     ON public.public_folder_permissions (tenant_id, principal_account_id, public_folder_id);
 
+CREATE TABLE IF NOT EXISTS public.public_folder_replicas (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    public_folder_id UUID NOT NULL,
+    server_name TEXT NOT NULL CHECK (btrim(server_name) <> ''),
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'inactive', 'deleted')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, public_folder_id, server_name),
+    FOREIGN KEY (tenant_id, public_folder_id) REFERENCES public.public_folders (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS public_folder_replicas_folder_idx
+    ON public.public_folder_replicas (tenant_id, public_folder_id, lifecycle_state, sort_order, server_name, id);
+
 CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state (
     tenant_id UUID NOT NULL,
     public_folder_id UUID NOT NULL,
@@ -400,7 +416,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%object_kind%'
           AND pg_get_constraintdef(oid) LIKE '%conversation_action%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -439,6 +455,7 @@ BEGIN
                 'public_folder',
                 'public_folder_item',
                 'public_folder_permission',
+                'public_folder_replica',
                 'public_folder_per_user_state'
             ));
     END IF;
@@ -450,7 +467,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%summary_json%'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -537,6 +554,7 @@ BEGIN
                         'public_folder',
                         'public_folder_item',
                         'public_folder_permission',
+                        'public_folder_replica',
                         'public_folder_per_user_state'
                     )
                     AND account_id IS NOT NULL
@@ -552,7 +570,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%object_kind%'
           AND pg_get_constraintdef(oid) LIKE '%sieve_script%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
     LOOP
         EXECUTE format('ALTER TABLE public.tombstones DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -588,6 +606,7 @@ BEGIN
                 'public_folder',
                 'public_folder_item',
                 'public_folder_permission',
+                'public_folder_replica',
                 'public_folder_per_user_state'
             ));
     END IF;
@@ -599,7 +618,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message_id%'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
     LOOP
         EXECUTE format('ALTER TABLE public.tombstones DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -667,6 +686,7 @@ BEGIN
                         'public_folder',
                         'public_folder_item',
                         'public_folder_permission',
+                        'public_folder_replica',
                         'public_folder_per_user_state'
                     )
                     AND account_id IS NOT NULL
@@ -698,9 +718,9 @@ if [[ "${recoverable_table}" != "recoverable_items" || "${recoverable_account_co
   echo "LPE 0.4 schema compatibility update did not produce the expected recoverable-items shape." >&2
   exit 1
 fi
-public_folder_table_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_per_user_state');")"
-public_folder_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_item%';")"
-if [[ "${public_folder_table_count}" != "5" || "${public_folder_change_constraint_count}" -lt "4" ]]; then
+public_folder_table_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_replicas', 'public_folder_per_user_state');")"
+public_folder_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_replica%';")"
+if [[ "${public_folder_table_count}" != "6" || "${public_folder_change_constraint_count}" -lt "4" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected public-folder shape." >&2
   exit 1
 fi

@@ -3,8 +3,8 @@
 ## Current State/Functionality Overview
 
 Public folders now have canonical `LPE` storage, authenticated mail APIs,
-permission rows, per-user read/unread rows, replay facts, and tombstones.
-MAPI/HTTP public-folder replica, recipient-bearing item conversion, and
+permission rows, replica rows, per-user read/unread rows, replay facts, and tombstones.
+MAPI/HTTP public-folder cross-server replication, recipient-bearing item conversion, and
 arbitrary Exchange-compatible per-user-information blob import remain guarded
 protocol work; they must not create protocol-local public-folder state. The first bounded MAPI steps are
 enabled: public-folder `RopLogon` now creates a
@@ -52,11 +52,14 @@ public-folder storage and APIs before enabling any public-folder ROP:
   as opaque MAPI messages.
 - `public_folder_permissions`: same-tenant account/group grants for folder
   visibility and mutation.
+- `public_folder_replicas`: active public-folder owner server names used by
+  MAPI replica probes. These rows are topology metadata only; they do not imply
+  Exchange-compatible cross-server content replication.
 - `public_folder_per_user_state`: per-account state keyed by
   `(tenant_id, public_folder_id, item_id, account_id)` for read/unread,
   last-seen change, and other explicitly documented user-private facts.
-- `public_folder_change_log`: replay rows for folder, item, permission, and
-  per-user-state changes. This may be a public-folder-specific category in
+- `public_folder_change_log`: replay rows for folder, item, permission,
+  replica, and per-user-state changes. This may be a public-folder-specific category in
   `mail_change_log` only if replay can preserve folder tree scope, per-user
   visibility, and permission revocation without ambiguity.
 - `public_folder_tombstones`: deletion rows for folders, items, permissions, and
@@ -79,6 +82,9 @@ The API layer should come before protocol support:
 - `GET /api/mail/public-folders/{folderId}/permissions`
 - `PUT /api/mail/public-folders/{folderId}/permissions/{principalId}`
 - `DELETE /api/mail/public-folders/{folderId}/permissions/{principalId}`
+- `GET /api/mail/public-folders/{folderId}/replicas`
+- `PUT /api/mail/public-folders/{folderId}/replicas`
+- `DELETE /api/mail/public-folders/{folderId}/replicas/{replicaId}`
 - `GET /api/mail/public-folders/{folderId}/per-user-state`
 - `PATCH /api/mail/public-folders/{folderId}/per-user-state`
 
@@ -87,7 +93,8 @@ Administrators may create trees and top-level folders. Folder owners or
 principals with share rights may manage grants. Read rights allow listing and
 reading visible items. Write rights allow creating and updating items. Delete
 rights allow item deletion. Share rights allow grant mutation. Owner/admin
-rights are required for folder deletion and structural tree mutation.
+rights are required for folder deletion and structural tree mutation. Share
+rights are also required to manage public-folder replica topology rows.
 Initial folder deletion is conservative: root folders cannot be deleted, and a
 folder with active child folders or active items must be emptied first.
 
@@ -119,6 +126,12 @@ canonical `public_folder_permissions` grants plus reserved `Default` and
 `Anonymous` compatibility rows. `RopModifyPermissions` supports bounded add,
 modify, and remove rows for same-tenant account members and writes only the
 canonical public-folder grant path.
+Canonical public-folder permission, replica, and per-user-state upserts record
+`created` for first materialization and `updated` for existing-row changes so
+replay consumers can distinguish new ACL/topology/private-state rows from later
+modifications. Public-folder item, permission, and replica deletes emit
+canonical tombstones joined to their destroyed change rows so clients can replay
+deletions without depending on protocol-local state.
 It also covers canonical read-state mutation through `RopSetReadFlags` and
 `RopSetMessageReadFlag`, mapped to `public_folder_per_user_state` for the
 authenticated account without shared item mutation. `RopGetPerUserLongTermIds`
@@ -147,10 +160,14 @@ single-chunk LPE-owned stream derived from canonical
 `public_folder_per_user_state`; `WritePerUserInformation` only accepts that
 stream shape back into canonical read-state patches. Arbitrary
 Exchange-compatible binary per-user blobs remain unsupported and must not be
-stored as protocol-local state. `RopPublicFolderIsGhosted` validates the target
-against the canonical public-folder container and returns `IsGhosted = false`
-for known folders because LPE currently has one canonical active folder store.
-`RopGetOwningServers` remains guarded until canonical replica topology exists.
+stored as protocol-local state. `RopOpenFolder` and
+`RopPublicFolderIsGhosted` validate the target against the canonical
+public-folder container and return `IsGhosted = false` when the folder has at
+least one active `public_folder_replicas` owner row. Folders with no active
+owner row are reported as ghosted. `RopGetOwningServers` returns the active
+canonical replica server names for the requested public folder, ordered by
+`sort_order` and server name. This is a topology projection, not a full
+Exchange-compatible public-folder replication engine.
 
 ## Reference Table/List
 
@@ -159,8 +176,9 @@ for known folders because LPE currently has one canonical active folder store.
 | Public-folder tree | `public_folder_trees`, `public_folders` | Public-folder logon, hierarchy tables, and opened-folder property reads may expose only canonical root and child folder rows/properties. |
 | Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | Contents tables, item open/read, content sync export, bounded MAPI post creation, existing-item `SetProperties` updates, existing-item body stream writes, soft/hard item deletion, public-folder-to-public-folder copy/move, and sync-import create/update may project or mutate post-like items; recipient-bearing conversion remains gated; no opaque Exchange message blobs. |
 | Permissions | `public_folder_permissions` | `RopGetPermissionsTable` may project same-tenant grants plus reserved compatibility rows; `RopModifyPermissions` may add, modify, and remove same-tenant account grants through the canonical public-folder grant path; no MAPI-local ACLs. |
+| Replicas | `public_folder_replicas` | `RopOpenFolder`, `RopGetOwningServers`, and `RopPublicFolderIsGhosted` use the same active owner set; no MAPI-local replica topology or content replication state. |
 | Per-user read/unread | `public_folder_per_user_state` | Content sync may export read/unread state from canonical item rows, bounded MAPI read-flag ROPs may update it for the authenticated account, per-user LongTermID/GUID lookup may expose canonical public-folder identity only, and per-user information ROPs may round-trip the bounded LPE stream shape into canonical read-state patches; user-private state only; item content change log is separate. |
-| Replay | `public_folder_change_log` and public-folder tombstones, or proven generic equivalents | Must support permission revocation, item deletion, and per-user-state deltas. |
+| Replay | `public_folder_change_log` and public-folder tombstones, or proven generic equivalents | Must support permission revocation, item deletion, replica deletion, and per-user-state deltas. |
 | Rules | none for public folders | `RopGetRulesTable` returns an empty table for public-folder handles; no MAPI-local rules or Sieve rules are attached to public folders. |
 | Message status | session-local MAPI compatibility state | `RopGetMessageStatus` and `RopSetMessageStatus` validate public-folder item IDs against canonical items but do not persist item status state. |
 | ROP enablement | Architecture, SQL, API, replay tests, then ROP tests | Do not implement public-folder ROPs before the canonical layer exists. |

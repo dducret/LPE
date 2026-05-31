@@ -4822,6 +4822,10 @@ where
                     ));
                     continue;
                 }
+                let is_public_folder_ghosted = public_folder_found
+                    && snapshot
+                        .public_folder_replica_server_names(folder_id)
+                        .is_empty();
                 session.record_opened_folder(folder_id);
                 let properties =
                     folder_properties_for_open(store, principal, session, folder_id).await;
@@ -4833,7 +4837,10 @@ where
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_open_folder_response(&request));
+                responses.extend_from_slice(&rop_open_folder_response(
+                    &request,
+                    is_public_folder_ghosted,
+                ));
                 output_handles.push(handle);
             }
             Some(RopId::OpenMessage) => {
@@ -11333,6 +11340,28 @@ where
                 }
                 responses.extend_from_slice(&rop_write_per_user_information_response(&request));
             }
+            Some(RopId::GetOwningServers) => {
+                let Some(folder_id) = request.public_folder_probe_object_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x42,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                };
+                if folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
+                    && snapshot.public_folder_for_id(folder_id).is_none()
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x42,
+                        request.response_handle_index(),
+                        EC_RULE_NOT_FOUND,
+                    ));
+                    continue;
+                }
+                let servers = snapshot.public_folder_replica_server_names(folder_id);
+                responses.extend_from_slice(&rop_get_owning_servers_response(&request, &servers))
+            }
             Some(RopId::PublicFolderIsGhosted) => {
                 let Some(folder_id) = request.public_folder_probe_object_id() else {
                     responses.extend_from_slice(&rop_error_response(
@@ -11352,7 +11381,12 @@ where
                     ));
                     continue;
                 }
-                responses.extend_from_slice(&rop_public_folder_is_ghosted_response(&request))
+                let is_ghosted = folder_id != PUBLIC_FOLDERS_ROOT_FOLDER_ID
+                    && snapshot
+                        .public_folder_replica_server_names(folder_id)
+                        .is_empty();
+                responses
+                    .extend_from_slice(&rop_public_folder_is_ghosted_response(&request, is_ghosted))
             }
             Some(RopId::GetAddressTypes) => {
                 echo_input_handle_table = true;
@@ -12787,7 +12821,8 @@ mod tests {
             output_handle_index: Some(1),
             payload: Vec::new(),
         };
-        let response_buffer = rop_buffer_with_response(rop_open_folder_response(&request), &[42]);
+        let response_buffer =
+            rop_buffer_with_response(rop_open_folder_response(&request, false), &[42]);
         let response_summary =
             summarize_response_rop_buffer(&response_buffer, &request_summary.ids);
 
@@ -13220,7 +13255,7 @@ mod tests {
             output_handle_index: Some(1),
             payload: Vec::new(),
         };
-        let mut responses = rop_open_folder_response(&open_folder_request);
+        let mut responses = rop_open_folder_response(&open_folder_request, false);
         responses.extend_from_slice(&[0x07, 0x01]);
         responses.extend_from_slice(&0u32.to_le_bytes());
         responses.push(0);

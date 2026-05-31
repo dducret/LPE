@@ -8,11 +8,12 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule,
     PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderTree, RecoverableItem,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument,
+    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -496,6 +497,12 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderPermission>>;
+
+    fn fetch_public_folder_replicas<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderReplica>>;
 
     fn upsert_public_folder_permission<'a>(
         &'a self,
@@ -2090,6 +2097,16 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Vec<PublicFolderPermission>> {
         Box::pin(async move {
             Storage::fetch_public_folder_permissions(self, principal_account_id, folder_id).await
+        })
+    }
+
+    fn fetch_public_folder_replicas<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderReplica>> {
+        Box::pin(async move {
+            Storage::fetch_public_folder_replicas(self, principal_account_id, folder_id).await
         })
     }
 

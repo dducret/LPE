@@ -13,8 +13,8 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
     PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderRights, PublicFolderTree, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
     StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
@@ -367,6 +367,7 @@ struct FakeStore {
     deleted_public_folders: Arc<Mutex<Vec<Uuid>>>,
     public_folder_items: Arc<Mutex<Vec<PublicFolderItem>>>,
     public_folder_permissions: Arc<Mutex<Vec<PublicFolderPermission>>>,
+    public_folder_replicas: Arc<Mutex<Vec<PublicFolderReplica>>>,
     deleted_public_folder_items: Arc<Mutex<Vec<Uuid>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
     calendar_attachments: Arc<Mutex<HashMap<Uuid, Vec<CalendarEventAttachment>>>>,
@@ -722,6 +723,18 @@ impl FakeStore {
                 may_delete: true,
                 may_share: true,
             },
+            created_at: "2026-05-07T12:00:00Z".to_string(),
+            updated_at: "2026-05-07T12:00:00Z".to_string(),
+        }
+    }
+
+    fn public_folder_replica(id: &str, folder_id: &str, server_name: &str) -> PublicFolderReplica {
+        PublicFolderReplica {
+            id: Uuid::parse_str(id).unwrap(),
+            public_folder_id: Uuid::parse_str(folder_id).unwrap(),
+            server_name: server_name.to_string(),
+            lifecycle_state: "active".to_string(),
+            sort_order: 0,
             created_at: "2026-05-07T12:00:00Z".to_string(),
             updated_at: "2026-05-07T12:00:00Z".to_string(),
         }
@@ -1117,6 +1130,24 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(permissions) })
+    }
+
+    fn fetch_public_folder_replicas<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderReplica>> {
+        let replicas = self
+            .public_folder_replicas
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|replica| {
+                replica.public_folder_id == folder_id && replica.lifecycle_state == "active"
+            })
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(replicas) })
     }
 
     fn upsert_public_folder_permission<'a>(

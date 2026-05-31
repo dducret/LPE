@@ -1,12 +1,13 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::{
     collaboration::validate_collaboration_rights, AuditEntryInput, CanonicalChangeCategory,
-    PublicFolderItemRow, PublicFolderPerUserStateRow, PublicFolderPermissionRow, PublicFolderRow,
-    PublicFolderTreeRow, Storage,
+    PublicFolderItemRow, PublicFolderPerUserStateRow, PublicFolderPermissionRow,
+    PublicFolderReplicaRow, PublicFolderRow, PublicFolderTreeRow, Storage,
 };
 
 #[derive(Debug, Clone, Serialize)]
@@ -129,6 +130,27 @@ pub struct PublicFolderPermissionInput {
     pub may_write: bool,
     pub may_delete: bool,
     pub may_share: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFolderReplica {
+    pub id: Uuid,
+    pub public_folder_id: Uuid,
+    pub server_name: String,
+    pub lifecycle_state: String,
+    pub sort_order: i32,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFolderReplicaInput {
+    pub account_id: Uuid,
+    pub public_folder_id: Uuid,
+    pub server_name: String,
+    pub sort_order: Option<i32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -907,7 +929,7 @@ impl Storage {
             bail!("public folder permission principal not found");
         }
         let mut tx = self.pool.begin().await?;
-        let permission_id = sqlx::query_scalar::<_, Uuid>(
+        let permission = sqlx::query(
             r#"
             INSERT INTO public_folder_permissions (
                 id, tenant_id, public_folder_id, principal_account_id,
@@ -921,7 +943,7 @@ impl Storage {
                 may_delete = EXCLUDED.may_delete,
                 may_share = EXCLUDED.may_share,
                 updated_at = NOW()
-            RETURNING id
+            RETURNING id, (xmax = 0) AS inserted
             "#,
         )
         .bind(Uuid::new_v4())
@@ -934,6 +956,12 @@ impl Storage {
         .bind(input.may_share)
         .fetch_one(&mut *tx)
         .await?;
+        let permission_id = permission.try_get::<Uuid, _>("id")?;
+        let change_kind = if permission.try_get::<bool, _>("inserted")? {
+            "created"
+        } else {
+            "updated"
+        };
         self.record_public_folder_change(
             &mut tx,
             &access,
@@ -941,7 +969,7 @@ impl Storage {
             input.public_folder_id,
             "public_folder_permission",
             permission_id,
-            "updated",
+            change_kind,
             json!({
                 "folderId": input.public_folder_id,
                 "principalAccountId": input.principal_account_id
@@ -983,16 +1011,200 @@ impl Storage {
         .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| anyhow::anyhow!("public folder permission not found"))?;
+        let cursor = self
+            .record_public_folder_change(
+                &mut tx,
+                &access,
+                account_id,
+                folder_id,
+                "public_folder_permission",
+                permission_id,
+                "destroyed",
+                json!({"folderId": folder_id, "principalAccountId": principal_account_id}),
+            )
+            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, collection_id, object_kind, object_id,
+                deleted_modseq, change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, 'public_folder_permission', $5, $6, $7, 'delete')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&access.tenant_id)
+        .bind(access.tree_admin_owner_account_id)
+        .bind(folder_id)
+        .bind(permission_id)
+        .bind(cursor)
+        .bind(cursor)
+        .execute(&mut *tx)
+        .await?;
+        self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn fetch_public_folder_replicas(
+        &self,
+        account_id: Uuid,
+        folder_id: Uuid,
+    ) -> Result<Vec<PublicFolderReplica>> {
+        let access = self.public_folder_access(account_id, folder_id).await?;
+        ensure_read(access)?;
+        let rows = sqlx::query_as::<_, PublicFolderReplicaRow>(
+            r#"
+            SELECT
+                id,
+                public_folder_id,
+                server_name,
+                lifecycle_state,
+                sort_order,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+            FROM public_folder_replicas
+            WHERE tenant_id = $1
+              AND public_folder_id = $2
+              AND lifecycle_state = 'active'
+            ORDER BY sort_order ASC, server_name ASC, id ASC
+            "#,
+        )
+        .bind(&access.tenant_id)
+        .bind(folder_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(map_public_folder_replica).collect())
+    }
+
+    pub async fn upsert_public_folder_replica(
+        &self,
+        input: PublicFolderReplicaInput,
+        audit: AuditEntryInput,
+    ) -> Result<PublicFolderReplica> {
+        let server_name = input.server_name.trim();
+        if server_name.is_empty() {
+            bail!("public folder replica server name is required");
+        }
+        let access = self
+            .public_folder_access(input.account_id, input.public_folder_id)
+            .await?;
+        ensure_share(access)?;
+        let mut tx = self.pool.begin().await?;
+        let replica = sqlx::query(
+            r#"
+            INSERT INTO public_folder_replicas (
+                id, tenant_id, public_folder_id, server_name, lifecycle_state, sort_order
+            )
+            VALUES ($1, $2, $3, $4, 'active', $5)
+            ON CONFLICT (tenant_id, public_folder_id, server_name)
+            DO UPDATE SET
+                lifecycle_state = 'active',
+                sort_order = EXCLUDED.sort_order,
+                updated_at = NOW()
+            RETURNING
+                id,
+                public_folder_id,
+                server_name,
+                lifecycle_state,
+                sort_order,
+                to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at,
+                to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at,
+                (xmax = 0) AS inserted
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&access.tenant_id)
+        .bind(input.public_folder_id)
+        .bind(server_name)
+        .bind(input.sort_order.unwrap_or(0))
+        .fetch_one(&mut *tx)
+        .await?;
+        let inserted = replica.try_get::<bool, _>("inserted")?;
+        let replica = PublicFolderReplicaRow {
+            id: replica.try_get("id")?,
+            public_folder_id: replica.try_get("public_folder_id")?,
+            server_name: replica.try_get("server_name")?,
+            lifecycle_state: replica.try_get("lifecycle_state")?,
+            sort_order: replica.try_get("sort_order")?,
+            created_at: replica.try_get("created_at")?,
+            updated_at: replica.try_get("updated_at")?,
+        };
+        let change_kind = if inserted { "created" } else { "updated" };
         self.record_public_folder_change(
             &mut tx,
             &access,
-            account_id,
-            folder_id,
-            "public_folder_permission",
-            permission_id,
-            "destroyed",
-            json!({"folderId": folder_id, "principalAccountId": principal_account_id}),
+            input.account_id,
+            input.public_folder_id,
+            "public_folder_replica",
+            replica.id,
+            change_kind,
+            json!({"folderId": input.public_folder_id, "serverName": server_name}),
         )
+        .await?;
+        self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
+        tx.commit().await?;
+        Ok(map_public_folder_replica(replica))
+    }
+
+    pub async fn delete_public_folder_replica(
+        &self,
+        account_id: Uuid,
+        folder_id: Uuid,
+        replica_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let access = self.public_folder_access(account_id, folder_id).await?;
+        ensure_share(access)?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query_scalar::<_, String>(
+            r#"
+            UPDATE public_folder_replicas
+            SET lifecycle_state = 'deleted', updated_at = NOW()
+            WHERE tenant_id = $1
+              AND public_folder_id = $2
+              AND id = $3
+              AND lifecycle_state <> 'deleted'
+            RETURNING server_name
+            "#,
+        )
+        .bind(&access.tenant_id)
+        .bind(folder_id)
+        .bind(replica_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(server_name) = deleted else {
+            bail!("public folder replica not found");
+        };
+        let cursor = self
+            .record_public_folder_change(
+                &mut tx,
+                &access,
+                account_id,
+                folder_id,
+                "public_folder_replica",
+                replica_id,
+                "destroyed",
+                json!({"folderId": folder_id, "serverName": server_name}),
+            )
+            .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO tombstones (
+                id, tenant_id, account_id, collection_id, object_kind, object_id,
+                deleted_modseq, change_cursor, reason
+            )
+            VALUES ($1, $2, $3, $4, 'public_folder_replica', $5, $6, $7, 'delete')
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&access.tenant_id)
+        .bind(access.tree_admin_owner_account_id)
+        .bind(folder_id)
+        .bind(replica_id)
+        .bind(cursor)
+        .bind(cursor)
+        .execute(&mut *tx)
         .await?;
         self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
         tx.commit().await?;
@@ -1066,7 +1278,7 @@ impl Storage {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .unwrap_or("{}");
-            sqlx::query(
+            let state = sqlx::query(
                 r#"
                 INSERT INTO public_folder_per_user_state (
                     tenant_id, public_folder_id, item_id, account_id,
@@ -1079,6 +1291,7 @@ impl Storage {
                     last_seen_change = EXCLUDED.last_seen_change,
                     private_json = EXCLUDED.private_json,
                     updated_at = NOW()
+                RETURNING (xmax = 0) AS inserted
                 "#,
             )
             .bind(&access.tenant_id)
@@ -1088,8 +1301,13 @@ impl Storage {
             .bind(patch.is_read)
             .bind(last_seen_change)
             .bind(private_json)
-            .execute(&mut *tx)
+            .fetch_one(&mut *tx)
             .await?;
+            let change_kind = if state.try_get::<bool, _>("inserted")? {
+                "created"
+            } else {
+                "updated"
+            };
             self.record_public_folder_change(
                 &mut tx,
                 &access,
@@ -1097,7 +1315,7 @@ impl Storage {
                 folder_id,
                 "public_folder_per_user_state",
                 patch.item_id,
-                "updated",
+                change_kind,
                 json!({"folderId": folder_id, "itemId": patch.item_id}),
             )
             .await?;
@@ -1447,6 +1665,18 @@ fn map_public_folder_permission(row: PublicFolderPermissionRow) -> PublicFolderP
             may_delete: row.may_delete,
             may_share: row.may_share,
         },
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+    }
+}
+
+fn map_public_folder_replica(row: PublicFolderReplicaRow) -> PublicFolderReplica {
+    PublicFolderReplica {
+        id: row.id,
+        public_folder_id: row.public_folder_id,
+        server_name: row.server_name,
+        lifecycle_state: row.lifecycle_state,
+        sort_order: row.sort_order,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }

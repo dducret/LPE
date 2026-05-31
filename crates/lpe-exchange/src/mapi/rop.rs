@@ -166,11 +166,11 @@ pub(in crate::mapi) fn civil_from_unix_days(days: i64) -> (i32, u8, u8) {
     (year as i32, month as u8, day as u8)
 }
 
-pub(in crate::mapi) fn rop_open_folder_response(request: &RopRequest) -> Vec<u8> {
+pub(in crate::mapi) fn rop_open_folder_response(request: &RopRequest, is_ghosted: bool) -> Vec<u8> {
     let mut response = vec![0x02, request.output_handle_index.unwrap_or(0)];
     write_u32(&mut response, 0);
     response.push(0);
-    response.push(0);
+    response.push(u8::from(is_ghosted));
     response
 }
 
@@ -2682,10 +2682,27 @@ pub(in crate::mapi) fn rop_get_store_state_response(request: &RopRequest) -> Vec
     response
 }
 
-pub(in crate::mapi) fn rop_public_folder_is_ghosted_response(request: &RopRequest) -> Vec<u8> {
+pub(in crate::mapi) fn rop_get_owning_servers_response(
+    request: &RopRequest,
+    servers: &[String],
+) -> Vec<u8> {
+    let mut response = vec![0x42, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    write_u16(&mut response, servers.len().min(u16::MAX as usize) as u16);
+    for server in servers.iter().take(u16::MAX as usize) {
+        response.extend_from_slice(server.as_bytes());
+        response.push(0);
+    }
+    response
+}
+
+pub(in crate::mapi) fn rop_public_folder_is_ghosted_response(
+    request: &RopRequest,
+    is_ghosted: bool,
+) -> Vec<u8> {
     let mut response = vec![0x45, request.response_handle_index()];
     write_u32(&mut response, 0);
-    response.push(0);
+    response.push(u8::from(is_ghosted));
     response
 }
 

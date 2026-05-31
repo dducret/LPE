@@ -1368,6 +1368,7 @@ CREATE TABLE mail_change_log (
         'public_folder',
         'public_folder_item',
         'public_folder_permission',
+        'public_folder_replica',
         'public_folder_per_user_state'
     )),
     object_id UUID NOT NULL,
@@ -1458,6 +1459,7 @@ CREATE TABLE mail_change_log (
                 'public_folder',
                 'public_folder_item',
                 'public_folder_permission',
+                'public_folder_replica',
                 'public_folder_per_user_state'
             )
             AND account_id IS NOT NULL
@@ -1502,6 +1504,7 @@ CREATE INDEX mail_change_log_collaboration_idx
         'public_folder',
         'public_folder_item',
         'public_folder_permission',
+        'public_folder_replica',
         'public_folder_per_user_state'
     );
 
@@ -1560,6 +1563,7 @@ CREATE TABLE tombstones (
         'public_folder',
         'public_folder_item',
         'public_folder_permission',
+        'public_folder_replica',
         'public_folder_per_user_state'
     )),
     object_id UUID NOT NULL,
@@ -1634,6 +1638,21 @@ CREATE TABLE tombstones (
             AND mailbox_message_id IS NULL
             AND imap_uid IS NULL
         )
+        OR (
+            object_kind IN (
+                'public_folder_tree',
+                'public_folder',
+                'public_folder_item',
+                'public_folder_permission',
+                'public_folder_replica',
+                'public_folder_per_user_state'
+            )
+            AND account_id IS NOT NULL
+            AND mailbox_id IS NULL
+            AND message_id IS NULL
+            AND mailbox_message_id IS NULL
+            AND imap_uid IS NULL
+        )
     ),
     CHECK (retained_until IS NULL OR retained_until >= created_at),
     FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
@@ -1675,6 +1694,7 @@ CREATE INDEX tombstones_collaboration_idx
         'public_folder',
         'public_folder_item',
         'public_folder_permission',
+        'public_folder_replica',
         'public_folder_per_user_state'
     );
 
@@ -2543,6 +2563,22 @@ CREATE TABLE public_folder_permissions (
 
 CREATE INDEX public_folder_permissions_principal_idx
     ON public_folder_permissions (tenant_id, principal_account_id, public_folder_id);
+
+CREATE TABLE public_folder_replicas (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    public_folder_id UUID NOT NULL,
+    server_name TEXT NOT NULL CHECK (btrim(server_name) <> ''),
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'inactive', 'deleted')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, public_folder_id, server_name),
+    FOREIGN KEY (tenant_id, public_folder_id) REFERENCES public_folders (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX public_folder_replicas_folder_idx
+    ON public_folder_replicas (tenant_id, public_folder_id, lifecycle_state, sort_order, server_name, id);
 
 CREATE TABLE public_folder_per_user_state (
     tenant_id UUID NOT NULL,

@@ -9,11 +9,11 @@ use lpe_storage::{
     CreatePublicFolderTreeInput, HealthResponse, JmapEmail, JmapEmailFollowupUpdate, JournalEntry,
     MailboxAccountAccess, OutlookProfileState, PublicFolder, PublicFolderItem,
     PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderTree, RecoverableItem, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
-    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderReplicaInput, PublicFolderTree,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -24,11 +24,11 @@ use crate::{
     types::{
         ApiResult, CreatePublicFolderRequest, CreatePublicFolderTreeRequest,
         PublicFolderPerUserStatePatchBatchRequest, PublicFolderPermissionRequest,
-        RecoverableItemsQueryRequest, ReminderQueryRequest, RestoreRecoverableItemRequest,
-        SubmitMessageRequest, SubmitRecipientRequest, UpdateMessageFlagRequest,
-        UpdatePublicFolderRequest, UpsertClientContactRequest, UpsertClientEventRequest,
-        UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
-        UpsertPublicFolderItemRequest, UpsertSearchFolderRequest,
+        PublicFolderReplicaRequest, RecoverableItemsQueryRequest, ReminderQueryRequest,
+        RestoreRecoverableItemRequest, SubmitMessageRequest, SubmitRecipientRequest,
+        UpdateMessageFlagRequest, UpdatePublicFolderRequest, UpsertClientContactRequest,
+        UpsertClientEventRequest, UpsertClientNoteRequest, UpsertClientTaskRequest,
+        UpsertJournalEntryRequest, UpsertPublicFolderItemRequest, UpsertSearchFolderRequest,
     },
 };
 
@@ -809,6 +809,72 @@ pub(crate) async fn delete_public_folder_permission(
                 actor: account.email,
                 action: "delete-public-folder-permission".to_string(),
                 subject: principal_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn list_public_folder_replicas(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<Vec<PublicFolderReplica>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder_replicas(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn put_public_folder_replica(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+    Json(request): Json<PublicFolderReplicaRequest>,
+) -> ApiResult<PublicFolderReplica> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_public_folder_replica(
+                PublicFolderReplicaInput {
+                    account_id: account.account_id,
+                    public_folder_id: folder_id,
+                    server_name: request.server_name,
+                    sort_order: request.sort_order,
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "upsert-public-folder-replica".to_string(),
+                    subject: folder_id.to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn delete_public_folder_replica(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((folder_id, replica_id)): AxumPath<(Uuid, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_public_folder_replica(
+            account.account_id,
+            folder_id,
+            replica_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "delete-public-folder-replica".to_string(),
+                subject: replica_id.to_string(),
             },
         )
         .await

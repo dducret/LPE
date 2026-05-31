@@ -2,11 +2,12 @@ use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, JmapImportedEmailInput,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, NewAccount, NewDomain, NewMailbox,
-    NewPstTransferJob, ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput,
-    UpsertJournalEntryInput, UpsertSearchFolderInput,
+    AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CreatePublicFolderTreeInput,
+    JmapImportedEmailInput, JmapMailboxCreateInput, JmapMailboxUpdateInput, NewAccount, NewDomain,
+    NewMailbox, NewPstTransferJob, PublicFolderPerUserStatePatch, PublicFolderPermissionInput,
+    PublicFolderReplicaInput, ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight,
+    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -165,6 +166,24 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "canonical search-folder and rule replay",
             exercise_canonical_search_folder_and_rule_replay(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "public-folder replica topology SQL path",
+            exercise_public_folder_replica_path(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "public-folder permission replay SQL path",
+            exercise_public_folder_permission_replay_path(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "public-folder per-user replay SQL path",
+            exercise_public_folder_per_user_replay_path(&storage, pool, &fixture).await,
         );
 
         collect(
@@ -3325,6 +3344,486 @@ if header :contains "Subject" "runtime-rule" {
         tombstone_count == 1,
         "Sieve rule deletion must write a canonical tombstone joined to its change row"
     );
+
+    Ok(())
+}
+
+async fn exercise_public_folder_replica_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let root = storage
+        .create_public_folder_tree(
+            CreatePublicFolderTreeInput {
+                account_id: fixture.account_id,
+                display_name: format!("Runtime PF {}", Uuid::new_v4().simple()),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-tree.create",
+                "runtime public folder tree",
+            ),
+        )
+        .await
+        .context("create public folder tree for replica runtime path")?;
+
+    let initial = storage
+        .fetch_public_folder_replicas(fixture.account_id, root.id)
+        .await
+        .context("fetch empty public folder replica set")?;
+    anyhow::ensure!(
+        initial.is_empty(),
+        "new public folder tree must not have implicit replica rows"
+    );
+
+    let mbx02 = storage
+        .upsert_public_folder_replica(
+            PublicFolderReplicaInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                server_name: "LPE-MBX-02".to_string(),
+                sort_order: Some(20),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-replica.upsert",
+                "runtime public folder replica",
+            ),
+        )
+        .await
+        .context("create second public folder replica")?;
+    storage
+        .upsert_public_folder_replica(
+            PublicFolderReplicaInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                server_name: "LPE-MBX-01".to_string(),
+                sort_order: Some(10),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-replica.upsert",
+                "runtime public folder replica",
+            ),
+        )
+        .await
+        .context("create first public folder replica")?;
+
+    let ordered = storage
+        .fetch_public_folder_replicas(fixture.account_id, root.id)
+        .await
+        .context("fetch ordered public folder replica set")?;
+    let ordered_names = ordered
+        .iter()
+        .map(|replica| replica.server_name.as_str())
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        ordered_names == ["LPE-MBX-01", "LPE-MBX-02"],
+        "public folder replicas must be ordered by sort order then server name"
+    );
+
+    let reordered = storage
+        .upsert_public_folder_replica(
+            PublicFolderReplicaInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                server_name: "LPE-MBX-02".to_string(),
+                sort_order: Some(5),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-replica.upsert",
+                "runtime public folder replica reorder",
+            ),
+        )
+        .await
+        .context("update public folder replica sort order")?;
+    anyhow::ensure!(
+        reordered.id == mbx02.id,
+        "upserting an existing replica server must update the canonical row"
+    );
+
+    let reordered_set = storage
+        .fetch_public_folder_replicas(fixture.account_id, root.id)
+        .await
+        .context("fetch reordered public folder replica set")?;
+    let reordered_names = reordered_set
+        .iter()
+        .map(|replica| replica.server_name.as_str())
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        reordered_names == ["LPE-MBX-02", "LPE-MBX-01"],
+        "updated public folder replica sort order must affect canonical reads"
+    );
+
+    let blank_server = storage
+        .upsert_public_folder_replica(
+            PublicFolderReplicaInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                server_name: "  ".to_string(),
+                sort_order: Some(0),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-replica.upsert",
+                "runtime blank public folder replica",
+            ),
+        )
+        .await;
+    anyhow::ensure!(
+        blank_server.is_err(),
+        "blank public folder replica server name must be rejected"
+    );
+
+    storage
+        .delete_public_folder_replica(
+            fixture.account_id,
+            root.id,
+            mbx02.id,
+            audit(
+                &fixture.account_email,
+                "public-folder-replica.delete",
+                "runtime public folder replica",
+            ),
+        )
+        .await
+        .context("delete public folder replica")?;
+
+    let after_delete = storage
+        .fetch_public_folder_replicas(fixture.account_id, root.id)
+        .await
+        .context("fetch public folder replicas after delete")?;
+    anyhow::ensure!(
+        after_delete.len() == 1 && after_delete[0].server_name == "LPE-MBX-01",
+        "deleted public folder replica must be hidden from active replica reads"
+    );
+
+    let deleted_state = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT lifecycle_state
+        FROM public_folder_replicas
+        WHERE tenant_id = $1 AND public_folder_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(root.id)
+    .bind(mbx02.id)
+    .fetch_one(pool)
+    .await
+    .context("load deleted public folder replica row state")?;
+    anyhow::ensure!(
+        deleted_state == "deleted",
+        "deleted public folder replica must remain as a lifecycle tombstone row"
+    );
+
+    let replica_change_counts = sqlx::query(
+        r#"
+        SELECT change_kind, COUNT(*) AS change_count
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'public_folder_replica'
+          AND summary_json ->> 'folderId' = $3
+        GROUP BY change_kind
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id.to_string())
+    .fetch_all(pool)
+    .await
+    .context("count public folder replica change rows")?;
+    for (expected_kind, expected_count) in [("created", 2), ("updated", 1), ("destroyed", 1)] {
+        let mut count = 0;
+        for row in &replica_change_counts {
+            if row.try_get::<String, _>("change_kind")? == expected_kind {
+                count = row.try_get::<i64, _>("change_count")?;
+            }
+        }
+        anyhow::ensure!(
+            count == expected_count,
+            "public folder replica {expected_kind} replay count must be {expected_count}"
+        );
+    }
+
+    let replica_tombstone_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM tombstones tombstone
+        JOIN mail_change_log log
+          ON log.tenant_id = tombstone.tenant_id
+         AND log.cursor = tombstone.change_cursor
+         AND log.object_kind = tombstone.object_kind
+         AND log.object_id = tombstone.object_id
+        WHERE tombstone.tenant_id = $1
+          AND tombstone.account_id = $2
+          AND tombstone.collection_id = $3
+          AND tombstone.object_kind = 'public_folder_replica'
+          AND tombstone.object_id = $4
+          AND log.change_kind = 'destroyed'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id)
+    .bind(mbx02.id)
+    .fetch_one(pool)
+    .await
+    .context("count public folder replica tombstones")?;
+    anyhow::ensure!(
+        replica_tombstone_count == 1,
+        "public folder replica deletion must write a canonical tombstone"
+    );
+
+    Ok(())
+}
+
+async fn exercise_public_folder_permission_replay_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let root = storage
+        .create_public_folder_tree(
+            CreatePublicFolderTreeInput {
+                account_id: fixture.account_id,
+                display_name: format!("Runtime ACL PF {}", Uuid::new_v4().simple()),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-tree.create",
+                "runtime public folder permission tree",
+            ),
+        )
+        .await
+        .context("create public folder tree for permission replay path")?;
+
+    storage
+        .upsert_public_folder_permission(
+            PublicFolderPermissionInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                principal_account_id: fixture.account_id,
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-permission.upsert",
+                "runtime public folder permission",
+            ),
+        )
+        .await
+        .context("create public folder permission")?;
+    storage
+        .upsert_public_folder_permission(
+            PublicFolderPermissionInput {
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                principal_account_id: fixture.account_id,
+                may_read: true,
+                may_write: true,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-permission.upsert",
+                "runtime public folder permission update",
+            ),
+        )
+        .await
+        .context("update public folder permission")?;
+    storage
+        .delete_public_folder_permission(
+            fixture.account_id,
+            root.id,
+            fixture.account_id,
+            audit(
+                &fixture.account_email,
+                "public-folder-permission.delete",
+                "runtime public folder permission",
+            ),
+        )
+        .await
+        .context("delete public folder permission")?;
+
+    let permission_change_counts = sqlx::query(
+        r#"
+        SELECT change_kind, COUNT(*) AS change_count
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'public_folder_permission'
+          AND summary_json ->> 'folderId' = $3
+        GROUP BY change_kind
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id.to_string())
+    .fetch_all(pool)
+    .await
+    .context("count public folder permission change rows")?;
+    for (expected_kind, expected_count) in [("created", 1), ("updated", 1), ("destroyed", 1)] {
+        let mut count = 0;
+        for row in &permission_change_counts {
+            if row.try_get::<String, _>("change_kind")? == expected_kind {
+                count = row.try_get::<i64, _>("change_count")?;
+            }
+        }
+        anyhow::ensure!(
+            count == expected_count,
+            "public folder permission {expected_kind} replay count must be {expected_count}"
+        );
+    }
+
+    let permission_tombstone_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM tombstones tombstone
+        JOIN mail_change_log log
+          ON log.tenant_id = tombstone.tenant_id
+         AND log.cursor = tombstone.change_cursor
+         AND log.object_kind = tombstone.object_kind
+         AND log.object_id = tombstone.object_id
+        WHERE tombstone.tenant_id = $1
+          AND tombstone.account_id = $2
+          AND tombstone.collection_id = $3
+          AND tombstone.object_kind = 'public_folder_permission'
+          AND log.change_kind = 'destroyed'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id)
+    .fetch_one(pool)
+    .await
+    .context("count public folder permission tombstones")?;
+    anyhow::ensure!(
+        permission_tombstone_count == 1,
+        "public folder permission deletion must write a canonical tombstone"
+    );
+
+    Ok(())
+}
+
+async fn exercise_public_folder_per_user_replay_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let root = storage
+        .create_public_folder_tree(
+            CreatePublicFolderTreeInput {
+                account_id: fixture.account_id,
+                display_name: format!("Runtime PerUser PF {}", Uuid::new_v4().simple()),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-tree.create",
+                "runtime public folder per-user tree",
+            ),
+        )
+        .await
+        .context("create public folder tree for per-user replay path")?;
+    let item = storage
+        .upsert_public_folder_item(
+            UpsertPublicFolderItemInput {
+                id: None,
+                account_id: fixture.account_id,
+                public_folder_id: root.id,
+                item_kind: "post".to_string(),
+                message_class: "IPM.Post".to_string(),
+                subject: "Runtime read-state post".to_string(),
+                body_text: "Runtime read-state body".to_string(),
+                body_html_sanitized: None,
+                source_payload_json: "{}".to_string(),
+            },
+            audit(
+                &fixture.account_email,
+                "public-folder-item.create",
+                "runtime public folder per-user item",
+            ),
+        )
+        .await
+        .context("create public folder item for per-user replay path")?;
+
+    storage
+        .patch_public_folder_per_user_state(
+            fixture.account_id,
+            root.id,
+            &[PublicFolderPerUserStatePatch {
+                item_id: item.id,
+                is_read: true,
+                last_seen_change: Some(item.change_counter),
+                private_json: Some(r#"{"source":"runtime"}"#.to_string()),
+            }],
+        )
+        .await
+        .context("create public folder per-user read state")?;
+    storage
+        .patch_public_folder_per_user_state(
+            fixture.account_id,
+            root.id,
+            &[PublicFolderPerUserStatePatch {
+                item_id: item.id,
+                is_read: false,
+                last_seen_change: Some(item.change_counter),
+                private_json: Some(r#"{"source":"runtime","read":false}"#.to_string()),
+            }],
+        )
+        .await
+        .context("update public folder per-user read state")?;
+
+    let states = storage
+        .fetch_public_folder_per_user_state(fixture.account_id, root.id)
+        .await
+        .context("fetch public folder per-user state after patches")?;
+    let state = states
+        .iter()
+        .find(|state| state.item_id == item.id)
+        .context("patched public folder per-user state is readable")?;
+    anyhow::ensure!(
+        !state.is_read && state.private_json.contains(r#""read": false"#),
+        "updated public folder per-user state must expose the latest private facts"
+    );
+
+    let state_change_counts = sqlx::query(
+        r#"
+        SELECT change_kind, COUNT(*) AS change_count
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'public_folder_per_user_state'
+          AND summary_json ->> 'folderId' = $3
+          AND summary_json ->> 'itemId' = $4
+        GROUP BY change_kind
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(root.id.to_string())
+    .bind(item.id.to_string())
+    .fetch_all(pool)
+    .await
+    .context("count public folder per-user state change rows")?;
+    for (expected_kind, expected_count) in [("created", 1), ("updated", 1)] {
+        let mut count = 0;
+        for row in &state_change_counts {
+            if row.try_get::<String, _>("change_kind")? == expected_kind {
+                count = row.try_get::<i64, _>("change_count")?;
+            }
+        }
+        anyhow::ensure!(
+            count == expected_count,
+            "public folder per-user state {expected_kind} replay count must be {expected_count}"
+        );
+    }
 
     Ok(())
 }

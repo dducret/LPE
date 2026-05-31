@@ -98,6 +98,6 @@
 | `/api/mail/search-folders` | canonical Outlook Search Folder definition API |
 | `/api/mail/recoverable-items` | canonical recoverable message browse, restore, and purge API |
 | `/api/mail/public-folders/trees` | canonical public-folder tree discovery API |
-| `/api/mail/public-folders/{folderId}` | canonical public-folder folder, item, permission, and per-user state API root |
+| `/api/mail/public-folders/{folderId}` | canonical public-folder folder, item, permission, replica topology, and per-user state API root |
 | `/api/mail/rules` | read-only Outlook-compatible mailbox rule projection backed by Sieve scripts |
 | `/api/mail/outlook-profile` | read-only server-side Outlook profile state summary derived from canonical tables |

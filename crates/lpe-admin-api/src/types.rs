@@ -56,6 +56,13 @@ pub struct PublicFolderPermissionRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PublicFolderReplicaRequest {
+    pub server_name: String,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicFolderPerUserStatePatchRequest {
     pub item_id: Uuid,
     pub is_read: bool,

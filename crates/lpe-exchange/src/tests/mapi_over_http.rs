@@ -19613,7 +19613,7 @@ async fn mapi_over_http_empty_folder_rejects_unsupported_and_permission_denied_t
 }
 
 #[tokio::test]
-async fn mapi_over_http_public_folder_replica_rops_return_rop_specific_protocol_errors() {
+async fn mapi_over_http_public_folder_replica_rops_validate_canonical_folder_ids() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -19648,7 +19648,7 @@ async fn mapi_over_http_public_folder_replica_rops_return_rop_specific_protocol_
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(
         &response_rops,
-        &[0x42, 0x00, 0x02, 0x01, 0x04, 0x80]
+        &[0x42, 0x00, 0x0F, 0x01, 0x04, 0x80]
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -26666,6 +26666,11 @@ async fn mapi_over_http_public_folder_is_ghosted_validates_canonical_folder() {
             None,
             "Public Root",
         )])),
+        public_folder_replicas: Arc::new(Mutex::new(vec![FakeStore::public_folder_replica(
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+            root_id,
+            "LPE-MBX-01",
+        )])),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -26717,7 +26722,11 @@ async fn mapi_over_http_public_folder_is_ghosted_validates_canonical_folder() {
 
     let root_mapi_id =
         crate::mapi::identity::mapped_mapi_object_id(&Uuid::parse_str(root_id).unwrap()).unwrap();
-    let mut rops = vec![0x45, 0x00, 0x00];
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, root_mapi_id);
+    rops.extend_from_slice(&[0x42, 0x00, 0x00]);
+    append_mapi_wire_id(&mut rops, root_mapi_id);
+    rops.extend_from_slice(&[0x45, 0x00, 0x00]);
     append_mapi_wire_id(&mut rops, root_mapi_id);
     rops.extend_from_slice(&[0x45, 0x00, 0x00]);
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(0x7fff));
@@ -26728,13 +26737,22 @@ async fn mapi_over_http_public_folder_is_ghosted_validates_canonical_folder() {
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1])),
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x42, 0x00, 0, 0, 0, 0, 1, 0]
+    ));
+    assert!(contains_bytes(&response_rops, b"LPE-MBX-01\0"));
     assert!(contains_bytes(&response_rops, &[0x45, 0x00, 0, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,

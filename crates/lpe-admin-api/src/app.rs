@@ -59,17 +59,18 @@ use crate::{
         client_workspace, create_public_folder_child, create_public_folder_tree,
         delete_client_contact, delete_client_event, delete_client_note, delete_client_task,
         delete_draft_message, delete_journal_entry, delete_public_folder,
-        delete_public_folder_item, delete_public_folder_permission, delete_search_folder,
-        get_client_note, get_client_task, get_journal_entry, get_public_folder, get_search_folder,
-        list_client_notes, list_client_task_lists, list_client_tasks, list_journal_entries,
-        list_public_folder_children, list_public_folder_items, list_public_folder_per_user_state,
-        list_public_folder_permissions, list_public_folder_trees, list_recoverable_items,
-        list_search_folders, outlook_profile_state, patch_public_folder_item,
-        patch_public_folder_per_user_state, post_public_folder_item, purge_recoverable_item,
-        put_public_folder_permission, query_client_reminders, restore_recoverable_item,
-        save_draft_message, submit_message, update_message_flag, update_public_folder,
-        upsert_client_contact, upsert_client_event, upsert_client_note, upsert_client_task,
-        upsert_journal_entry, upsert_search_folder,
+        delete_public_folder_item, delete_public_folder_permission, delete_public_folder_replica,
+        delete_search_folder, get_client_note, get_client_task, get_journal_entry,
+        get_public_folder, get_search_folder, list_client_notes, list_client_task_lists,
+        list_client_tasks, list_journal_entries, list_public_folder_children,
+        list_public_folder_items, list_public_folder_per_user_state,
+        list_public_folder_permissions, list_public_folder_replicas, list_public_folder_trees,
+        list_recoverable_items, list_search_folders, outlook_profile_state,
+        patch_public_folder_item, patch_public_folder_per_user_state, post_public_folder_item,
+        purge_recoverable_item, put_public_folder_permission, put_public_folder_replica,
+        query_client_reminders, restore_recoverable_item, save_draft_message, submit_message,
+        update_message_flag, update_public_folder, upsert_client_contact, upsert_client_event,
+        upsert_client_note, upsert_client_task, upsert_journal_entry, upsert_search_folder,
     },
 };
 
@@ -210,6 +211,14 @@ pub fn router(storage: Storage) -> Router {
         .route(
             "/mail/public-folders/{folder_id}/permissions/{principal_id}",
             put(put_public_folder_permission).delete(delete_public_folder_permission),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/replicas",
+            get(list_public_folder_replicas).put(put_public_folder_replica),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/replicas/{replica_id}",
+            delete(delete_public_folder_replica),
         )
         .route(
             "/mail/public-folders/{folder_id}/per-user-state",
@@ -600,6 +609,8 @@ mod tests {
             "/mail/public-folders/{folder_id}/items/{item_id}",
             "/mail/public-folders/{folder_id}/permissions",
             "/mail/public-folders/{folder_id}/permissions/{principal_id}",
+            "/mail/public-folders/{folder_id}/replicas",
+            "/mail/public-folders/{folder_id}/replicas/{replica_id}",
             "/mail/public-folders/{folder_id}/per-user-state",
         ] {
             assert!(

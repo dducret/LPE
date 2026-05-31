@@ -25,6 +25,7 @@ const JMAP_TESTS: &str = include_str!("../../lpe-jmap/src/tests.rs");
 const IMAP_TESTS: &str = include_str!("../../lpe-imap/src/tests.rs");
 const ACTIVESYNC_TESTS: &str = include_str!("../../lpe-activesync/src/tests.rs");
 const UPDATE_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/update-lpe.sh");
+const CHECK_LPE_SCRIPT: &str = include_str!("../../../installation/debian-trixie/check-lpe.sh");
 
 fn assert_schema_contains_all(needles: &[&str]) {
     for needle in needles {
@@ -133,14 +134,20 @@ fn public_folder_schema_uses_canonical_tables_permissions_and_replay() {
         "CREATE TABLE public_folders",
         "CREATE TABLE public_folder_items",
         "CREATE TABLE public_folder_permissions",
+        "CREATE TABLE public_folder_replicas",
         "CREATE TABLE public_folder_per_user_state",
         "public_folder_trees_root_folder_fk",
         "public_folder_items_folder_idx",
         "public_folder_permissions_principal_idx",
+        "public_folder_replicas_folder_idx",
         "public_folder_per_user_state_account_idx",
         "'public_folder_tree'",
+        "'public_folder'",
         "'public_folder_item'",
+        "'public_folder_permission'",
+        "'public_folder_replica'",
         "'public_folder_per_user_state'",
+        "object_kind IN (\n                'public_folder_tree'",
     ]);
     assert_source_contains_all(
         "public_folders.rs",
@@ -152,6 +159,8 @@ fn public_folder_schema_uses_canonical_tables_permissions_and_replay() {
             "delete_public_folder",
             "upsert_public_folder_item",
             "fetch_public_folder_items_by_ids",
+            "fetch_public_folder_replicas",
+            "upsert_public_folder_replica",
             "fetch_public_folder_per_user_state",
             "patch_public_folder_per_user_state",
             "insert_mail_change_log_in_tx",
@@ -779,8 +788,19 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "CREATE TABLE IF NOT EXISTS public.public_folders",
             "CREATE TABLE IF NOT EXISTS public.public_folder_items",
             "CREATE TABLE IF NOT EXISTS public.public_folder_permissions",
+            "CREATE TABLE IF NOT EXISTS public.public_folder_replicas",
             "CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state",
             "public_folder_change_constraint_count",
+            "public_folder_replica",
+        ],
+    );
+    assert_source_contains_all(
+        "check-lpe.sh public-folder compatibility check",
+        CHECK_LPE_SCRIPT,
+        &[
+            "public_folder_replicas",
+            "public_folder_replica",
+            "[[ \"$public_folder_table_count\" == \"6\" ]]",
         ],
     );
 }
