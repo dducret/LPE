@@ -11,6 +11,7 @@ const NOTES_JOURNAL_STORAGE: &str = include_str!("notes_journal.rs");
 const OUTBOUND_STORAGE: &str = include_str!("outbound.rs");
 const PROTOCOLS_STORAGE: &str = include_str!("protocols.rs");
 const PST_STORAGE: &str = include_str!("pst.rs");
+const PUBLIC_FOLDERS_STORAGE: &str = include_str!("public_folders.rs");
 const RECOVERABLE_ITEMS_STORAGE: &str = include_str!("recoverable_items.rs");
 const SHARED_STORAGE: &str = include_str!("shared.rs");
 const SUBMISSION_STORAGE: &str = include_str!("submission.rs");
@@ -123,6 +124,37 @@ fn collaboration_objects_have_canonical_projection_fields() {
         "message_class TEXT NOT NULL DEFAULT 'IPM.Activity'",
         "entry_type TEXT NOT NULL DEFAULT ''",
     ]);
+}
+
+#[test]
+fn public_folder_schema_uses_canonical_tables_permissions_and_replay() {
+    assert_schema_contains_all(&[
+        "CREATE TABLE public_folder_trees",
+        "CREATE TABLE public_folders",
+        "CREATE TABLE public_folder_items",
+        "CREATE TABLE public_folder_permissions",
+        "CREATE TABLE public_folder_per_user_state",
+        "public_folder_trees_root_folder_fk",
+        "public_folder_items_folder_idx",
+        "public_folder_permissions_principal_idx",
+        "public_folder_per_user_state_account_idx",
+        "'public_folder_tree'",
+        "'public_folder_item'",
+        "'public_folder_per_user_state'",
+    ]);
+    assert_source_contains_all(
+        "public_folders.rs",
+        PUBLIC_FOLDERS_STORAGE,
+        &[
+            "public_folder_access",
+            "fetch_public_folder_trees",
+            "upsert_public_folder_item",
+            "fetch_public_folder_per_user_state",
+            "patch_public_folder_per_user_state",
+            "insert_mail_change_log_in_tx",
+            "CanonicalChangeCategory::PublicFolders",
+        ],
+    );
 }
 
 #[test]

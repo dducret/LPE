@@ -6,11 +6,13 @@ use axum::{
 use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
     ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JmapEmail,
-    JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, OutlookProfileState,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
-    UpsertSearchFolderInput,
+    JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, OutlookProfileState, PublicFolder,
+    PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
+    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use tracing::info;
 use uuid::Uuid;
@@ -19,10 +21,11 @@ use crate::{
     http::{bad_request_error, internal_error},
     observability, require_account,
     types::{
-        ApiResult, RecoverableItemsQueryRequest, ReminderQueryRequest,
-        RestoreRecoverableItemRequest, SubmitMessageRequest, SubmitRecipientRequest,
-        UpdateMessageFlagRequest, UpsertClientContactRequest, UpsertClientEventRequest,
-        UpsertClientNoteRequest, UpsertClientTaskRequest, UpsertJournalEntryRequest,
+        ApiResult, PublicFolderPerUserStatePatchBatchRequest, PublicFolderPermissionRequest,
+        RecoverableItemsQueryRequest, ReminderQueryRequest, RestoreRecoverableItemRequest,
+        SubmitMessageRequest, SubmitRecipientRequest, UpdateMessageFlagRequest,
+        UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientNoteRequest,
+        UpsertClientTaskRequest, UpsertJournalEntryRequest, UpsertPublicFolderItemRequest,
         UpsertSearchFolderRequest,
     },
 };
@@ -512,6 +515,261 @@ pub(crate) async fn purge_recoverable_item(
         service: "lpe-admin-api",
         status: "ok",
     }))
+}
+
+pub(crate) async fn list_public_folder_trees(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+) -> ApiResult<Vec<PublicFolderTree>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder_trees(account.account_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn get_public_folder(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<PublicFolder> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn list_public_folder_children(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<Vec<PublicFolder>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder_children(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn list_public_folder_items(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<Vec<PublicFolderItem>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder_items(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn post_public_folder_item(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+    Json(request): Json<UpsertPublicFolderItemRequest>,
+) -> ApiResult<PublicFolderItem> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_public_folder_item(
+                map_public_folder_item_request(account.account_id, folder_id, request),
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "upsert-public-folder-item".to_string(),
+                    subject: folder_id.to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn patch_public_folder_item(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((folder_id, item_id)): AxumPath<(Uuid, Uuid)>,
+    Json(mut request): Json<UpsertPublicFolderItemRequest>,
+) -> ApiResult<PublicFolderItem> {
+    let account = require_account(&storage, &headers).await?;
+    request.id = Some(item_id);
+    Ok(Json(
+        storage
+            .upsert_public_folder_item(
+                map_public_folder_item_request(account.account_id, folder_id, request),
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "update-public-folder-item".to_string(),
+                    subject: item_id.to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn delete_public_folder_item(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((folder_id, item_id)): AxumPath<(Uuid, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_public_folder_item(
+            account.account_id,
+            folder_id,
+            item_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "delete-public-folder-item".to_string(),
+                subject: item_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn list_public_folder_permissions(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<Vec<PublicFolderPermission>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder_permissions(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn put_public_folder_permission(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((folder_id, principal_id)): AxumPath<(Uuid, Uuid)>,
+    Json(request): Json<PublicFolderPermissionRequest>,
+) -> ApiResult<PublicFolderPermission> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .upsert_public_folder_permission(
+                PublicFolderPermissionInput {
+                    account_id: account.account_id,
+                    public_folder_id: folder_id,
+                    principal_account_id: principal_id,
+                    may_read: request.may_read,
+                    may_write: request.may_write,
+                    may_delete: request.may_delete,
+                    may_share: request.may_share,
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "upsert-public-folder-permission".to_string(),
+                    subject: principal_id.to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn delete_public_folder_permission(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((folder_id, principal_id)): AxumPath<(Uuid, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_public_folder_permission(
+            account.account_id,
+            folder_id,
+            principal_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "delete-public-folder-permission".to_string(),
+                subject: principal_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn list_public_folder_per_user_state(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+) -> ApiResult<Vec<PublicFolderPerUserState>> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .fetch_public_folder_per_user_state(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn patch_public_folder_per_user_state(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+    Json(request): Json<PublicFolderPerUserStatePatchBatchRequest>,
+) -> ApiResult<Vec<PublicFolderPerUserState>> {
+    let account = require_account(&storage, &headers).await?;
+    let patches = request
+        .updates
+        .into_iter()
+        .map(|update| PublicFolderPerUserStatePatch {
+            item_id: update.item_id,
+            is_read: update.is_read,
+            last_seen_change: update.last_seen_change,
+            private_json: update.private_json,
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(
+        storage
+            .patch_public_folder_per_user_state(account.account_id, folder_id, &patches)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+fn map_public_folder_item_request(
+    account_id: Uuid,
+    public_folder_id: Uuid,
+    request: UpsertPublicFolderItemRequest,
+) -> UpsertPublicFolderItemInput {
+    UpsertPublicFolderItemInput {
+        id: request.id,
+        account_id,
+        public_folder_id,
+        item_kind: request.item_kind.unwrap_or_else(|| "post".to_string()),
+        message_class: request
+            .message_class
+            .unwrap_or_else(|| "IPM.Post".to_string()),
+        subject: request.subject,
+        body_text: request.body_text,
+        body_html_sanitized: request.body_html_sanitized,
+        source_payload_json: request
+            .source_payload_json
+            .unwrap_or_else(|| "{}".to_string()),
+    }
 }
 
 pub(crate) async fn upsert_client_contact(

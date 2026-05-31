@@ -6,11 +6,11 @@ use lpe_storage::{
     ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
     JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule, RecoverableItem, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
-    UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
-    UpsertSearchFolderInput,
+    JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule, PublicFolder, PublicFolderItem,
+    PublicFolderTree, RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -442,6 +442,29 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<DelegateFreeBusyMessageObject>>;
+
+    fn fetch_public_folder_trees<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderTree>>;
+
+    fn fetch_public_folder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, PublicFolder>;
+
+    fn fetch_public_folder_children<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolder>>;
+
+    fn fetch_public_folder_items<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>>;
 
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
@@ -1917,6 +1940,45 @@ impl ExchangeStore for Storage {
             .fetch_one(self.pool())
             .await
             .map_err(Into::into)
+        })
+    }
+
+    fn fetch_public_folder_trees<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderTree>> {
+        Box::pin(
+            async move { Storage::fetch_public_folder_trees(self, principal_account_id).await },
+        )
+    }
+
+    fn fetch_public_folder<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, PublicFolder> {
+        Box::pin(async move {
+            Storage::fetch_public_folder(self, principal_account_id, folder_id).await
+        })
+    }
+
+    fn fetch_public_folder_children<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolder>> {
+        Box::pin(async move {
+            Storage::fetch_public_folder_children(self, principal_account_id, folder_id).await
+        })
+    }
+
+    fn fetch_public_folder_items<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async move {
+            Storage::fetch_public_folder_items(self, principal_account_id, folder_id).await
         })
     }
 

@@ -23,8 +23,9 @@ use lpe_storage::{
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
     ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress, JmapImportedEmailInput,
-    JmapMailbox, JmapMailboxCreateInput, Storage, SubmitMessageInput, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    JmapMailbox, JmapMailboxCreateInput, PublicFolder, PublicFolderItem, Storage,
+    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -862,6 +863,19 @@ where
         {
             folders.push_str(&folder_xml(&collection, TASKS_FOLDER_ID, "Task"));
         }
+        for tree in self
+            .store
+            .fetch_public_folder_trees(principal.account_id)
+            .await?
+        {
+            if let Some(root_folder_id) = tree.root_folder_id {
+                let folder = self
+                    .store
+                    .fetch_public_folder(principal.account_id, root_folder_id)
+                    .await?;
+                folders.push_str(&public_folder_xml(&folder, None, 0, 0));
+            }
+        }
 
         Ok(format!(
             concat!(
@@ -924,6 +938,22 @@ where
             changes.push_str("</t:Create>");
             count += 1;
         }
+        for tree in self
+            .store
+            .fetch_public_folder_trees(principal.account_id)
+            .await?
+        {
+            if let Some(root_folder_id) = tree.root_folder_id {
+                let folder = self
+                    .store
+                    .fetch_public_folder(principal.account_id, root_folder_id)
+                    .await?;
+                changes.push_str("<t:Create>");
+                changes.push_str(&public_folder_xml(&folder, None, 0, 0));
+                changes.push_str("</t:Create>");
+                count += 1;
+            }
+        }
         let sync_state = format!("folder-hierarchy:{count}");
 
         Ok(format!(
@@ -965,6 +995,44 @@ where
                 folders.push_str(&mailbox_folder_xml(mailbox));
             }
 
+            return Ok(format!(
+                concat!(
+                    "<m:GetFolderResponse>",
+                    "<m:ResponseMessages>",
+                    "<m:GetFolderResponseMessage ResponseClass=\"Success\">",
+                    "<m:ResponseCode>NoError</m:ResponseCode>",
+                    "<m:Folders>{folders}</m:Folders>",
+                    "</m:GetFolderResponseMessage>",
+                    "</m:ResponseMessages>",
+                    "</m:GetFolderResponse>"
+                ),
+                folders = folders,
+            ));
+        }
+
+        let public_folder_ids = requested_public_folder_ids(request);
+        if !public_folder_ids.is_empty() {
+            let mut folders = String::new();
+            for folder_id in public_folder_ids {
+                let folder = self
+                    .store
+                    .fetch_public_folder(principal.account_id, folder_id)
+                    .await?;
+                let children = self
+                    .store
+                    .fetch_public_folder_children(principal.account_id, folder_id)
+                    .await?;
+                let items = self
+                    .store
+                    .fetch_public_folder_items(principal.account_id, folder_id)
+                    .await?;
+                folders.push_str(&public_folder_xml(
+                    &folder,
+                    folder.parent_folder_id,
+                    children.len(),
+                    items.len(),
+                ));
+            }
             return Ok(format!(
                 concat!(
                     "<m:GetFolderResponse>",
@@ -1045,6 +1113,28 @@ where
                         mailbox_ids.is_empty() || mailbox_ids.contains(&mailbox.id)
                     }) {
                         folders.push_str(&mailbox_folder_xml(&mailbox));
+                    }
+                }
+                FolderKind::PublicFolders => {
+                    for folder_id in requested_public_folder_ids(request) {
+                        let folder = self
+                            .store
+                            .fetch_public_folder(principal.account_id, folder_id)
+                            .await?;
+                        let children = self
+                            .store
+                            .fetch_public_folder_children(principal.account_id, folder_id)
+                            .await?;
+                        let items = self
+                            .store
+                            .fetch_public_folder_items(principal.account_id, folder_id)
+                            .await?;
+                        folders.push_str(&public_folder_xml(
+                            &folder,
+                            folder.parent_folder_id,
+                            children.len(),
+                            items.len(),
+                        ));
                     }
                 }
             }
@@ -1136,6 +1226,19 @@ where
                         .collect(),
                 ))
             }
+            FolderKind::PublicFolders => {
+                let Some(folder_id) = requested_public_folder_ids(request).into_iter().next()
+                else {
+                    return Ok(find_item_response(String::new()));
+                };
+                let items = self
+                    .store
+                    .fetch_public_folder_items(principal.account_id, folder_id)
+                    .await?;
+                Ok(find_item_response(
+                    items.iter().map(public_folder_item_summary_xml).collect(),
+                ))
+            }
         }
     }
 
@@ -1162,8 +1265,16 @@ where
             .filter_map(|id| id.strip_prefix("message:"))
             .filter_map(|id| Uuid::parse_str(id).ok())
             .collect::<Vec<_>>();
-        let supported_id_count =
-            contact_ids.len() + event_ids.len() + task_ids.len() + message_ids.len();
+        let public_folder_item_ids = ids
+            .iter()
+            .filter_map(|id| id.strip_prefix("public-folder-item:"))
+            .filter_map(|id| Uuid::parse_str(id).ok())
+            .collect::<Vec<_>>();
+        let supported_id_count = contact_ids.len()
+            + event_ids.len()
+            + task_ids.len()
+            + message_ids.len()
+            + public_folder_item_ids.len();
 
         let mut items = String::new();
         for contact in self
@@ -1221,6 +1332,17 @@ where
                 &attachments,
                 include_mime_content.then_some(attachment_contents.as_slice()),
             ));
+        }
+        for folder_id in requested_public_folder_ids(request) {
+            for item in self
+                .store
+                .fetch_public_folder_items(principal.account_id, folder_id)
+                .await?
+                .into_iter()
+                .filter(|item| public_folder_item_ids.contains(&item.id))
+            {
+                items.push_str(&public_folder_item_xml(&item));
+            }
         }
 
         if !ids.is_empty()
@@ -1560,7 +1682,14 @@ where
                 .store
                 .fetch_jmap_mailboxes(principal.account_id)
                 .await?
-                .len())
+                .len()
+            + self
+                .store
+                .fetch_public_folder_trees(principal.account_id)
+                .await?
+                .into_iter()
+                .filter(|tree| tree.root_folder_id.is_some())
+                .count())
     }
 
     async fn sync_folder_items(
@@ -1855,6 +1984,26 @@ where
                     }
                 }
                 mailbox_sync_state(mailbox_id, &current_ids)
+            }
+            FolderKind::PublicFolders => {
+                let Some(folder_id) = requested_public_folder_ids(request).into_iter().next()
+                else {
+                    return Ok(sync_folder_items_response("public-folder:0", String::new()));
+                };
+                let items = self
+                    .store
+                    .fetch_public_folder_items(principal.account_id, folder_id)
+                    .await?;
+                let current_items = items
+                    .iter()
+                    .map(|item| (item.id, public_folder_item_change_key(item)))
+                    .collect::<Vec<_>>();
+                for item in &items {
+                    changes.push_str("<t:Create>");
+                    changes.push_str(&public_folder_item_summary_xml(item));
+                    changes.push_str("</t:Create>");
+                }
+                collaboration_sync_state("public-folder", &folder_id.to_string(), &current_items)
             }
         };
 
@@ -3719,6 +3868,7 @@ enum FolderKind {
     Calendar,
     Tasks,
     Mailbox,
+    PublicFolders,
 }
 
 fn operation_name(body: &str) -> Option<String> {
@@ -3796,6 +3946,9 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
     {
         return Some(FolderKind::Tasks);
     }
+    if request.contains("public-folder:") {
+        return Some(FolderKind::PublicFolders);
+    }
     if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
         return Some(FolderKind::Mailbox);
     }
@@ -3809,6 +3962,8 @@ fn requested_folder_kind(request: &str) -> Option<FolderKind> {
             Some(FolderKind::Contacts)
         } else if id.starts_with("shared-tasks-") {
             Some(FolderKind::Tasks)
+        } else if id.starts_with("public-folder:") {
+            Some(FolderKind::PublicFolders)
         } else if id.starts_with("mailbox:") || Uuid::parse_str(id).is_ok() {
             Some(FolderKind::Mailbox)
         } else if id == "msgfolderroot" || id == "root" {
@@ -3828,6 +3983,8 @@ fn sync_state_folder_kind(sync_state: &str) -> Option<FolderKind> {
         Some(FolderKind::Tasks)
     } else if sync_state.starts_with("mailbox:") {
         Some(FolderKind::Mailbox)
+    } else if sync_state.starts_with("public-folder:") {
+        Some(FolderKind::PublicFolders)
     } else if sync_state.starts_with("root:") {
         Some(FolderKind::Root)
     } else {
@@ -3872,6 +4029,9 @@ fn requested_folder_kinds(request: &str) -> Vec<FolderKind> {
     {
         kinds.push(FolderKind::Tasks);
     }
+    if request.contains("public-folder:") {
+        kinds.push(FolderKind::PublicFolders);
+    }
     if request.contains("mailbox:") || !requested_mailbox_folder_ids(request).is_empty() {
         kinds.push(FolderKind::Mailbox);
     }
@@ -3908,6 +4068,14 @@ fn requested_collection_id_in<'a>(request: &'a str, wrapper: &str) -> Option<&'a
             "contacts" | "calendar" | "tasks" => DEFAULT_COLLECTION_ID,
             other => other,
         })
+}
+
+fn requested_public_folder_ids(request: &str) -> Vec<Uuid> {
+    attribute_values_for_tag(request, "FolderId", "Id")
+        .into_iter()
+        .filter_map(|value| value.strip_prefix("public-folder:"))
+        .filter_map(|value| Uuid::parse_str(value).ok())
+        .collect()
 }
 
 fn requested_sync_collection_id(request: &str, kind: &str, default_id: &str) -> String {
@@ -4315,6 +4483,58 @@ fn message_summary_xml(email: &JmapEmail) -> String {
         has_attachments = email.has_attachments,
         is_read = !email.unread,
     )
+}
+
+fn public_folder_item_change_key(item: &PublicFolderItem) -> String {
+    stable_change_key(&[
+        "public-folder-item",
+        &item.id.to_string(),
+        &item.public_folder_id.to_string(),
+        &item.change_counter.to_string(),
+        &item.updated_at,
+    ])
+}
+
+fn public_folder_item_summary_xml(item: &PublicFolderItem) -> String {
+    format!(
+        concat!(
+            "<t:Message>",
+            "<t:ItemId Id=\"public-folder-item:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"public-folder:{folder_id}\"/>",
+            "<t:ItemClass>{message_class}</t:ItemClass>",
+            "<t:Subject>{subject}</t:Subject>",
+            "<t:DateTimeReceived>{updated_at}</t:DateTimeReceived>",
+            "<t:Size>{size}</t:Size>",
+            "<t:HasAttachments>false</t:HasAttachments>",
+            "<t:IsRead>{is_read}</t:IsRead>",
+            "</t:Message>"
+        ),
+        id = item.id,
+        change_key = escape_xml(&public_folder_item_change_key(item)),
+        folder_id = item.public_folder_id,
+        message_class = escape_xml(&item.message_class),
+        subject = escape_xml(&item.subject),
+        updated_at = escape_xml(&item.updated_at),
+        size = item.body_text.len(),
+        is_read = item.is_read,
+    )
+}
+
+fn public_folder_item_xml(item: &PublicFolderItem) -> String {
+    let mut xml = public_folder_item_summary_xml(item);
+    let body = item
+        .body_html_sanitized
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|html| format!("<t:Body BodyType=\"HTML\">{}</t:Body>", escape_xml(html)))
+        .unwrap_or_else(|| {
+            format!(
+                "<t:Body BodyType=\"Text\">{}</t:Body>",
+                escape_xml(&item.body_text)
+            )
+        });
+    xml.insert_str(xml.len() - "</t:Message>".len(), &body);
+    xml
 }
 
 fn message_item_xml(email: &JmapEmail) -> String {
@@ -5777,6 +5997,54 @@ fn mailbox_folder_xml(mailbox: &JmapMailbox) -> String {
         display = escape_xml(&mailbox.name),
         total_count = mailbox.total_emails,
         unread_count = mailbox.unread_emails,
+    )
+}
+
+fn public_folder_xml(
+    folder: &PublicFolder,
+    parent_folder_id: Option<Uuid>,
+    child_folder_count: usize,
+    item_count: usize,
+) -> String {
+    let parent_id = parent_folder_id
+        .map(|id| format!("public-folder:{id}"))
+        .unwrap_or_else(|| "msgfolderroot".to_string());
+    let parent_change_key = parent_folder_id
+        .map(|id| folder_change_key(&format!("public-folder:{id}")))
+        .unwrap_or_else(|| "root".to_string());
+    format!(
+        concat!(
+            "<t:Folder>",
+            "<t:FolderId Id=\"public-folder:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"{parent_id}\" ChangeKey=\"{parent_change_key}\"/>",
+            "<t:FolderClass>{class}</t:FolderClass>",
+            "<t:DisplayName>{display}</t:DisplayName>",
+            "<t:TotalCount>{item_count}</t:TotalCount>",
+            "<t:ChildFolderCount>{child_folder_count}</t:ChildFolderCount>",
+            "<t:EffectiveRights>",
+            "<t:CreateAssociated>false</t:CreateAssociated>",
+            "<t:CreateContents>{may_write}</t:CreateContents>",
+            "<t:CreateHierarchy>{may_share}</t:CreateHierarchy>",
+            "<t:Delete>{may_delete}</t:Delete>",
+            "<t:Modify>{may_write}</t:Modify>",
+            "<t:Read>{may_read}</t:Read>",
+            "<t:ViewPrivateItems>false</t:ViewPrivateItems>",
+            "</t:EffectiveRights>",
+            "<t:UnreadCount>0</t:UnreadCount>",
+            "</t:Folder>"
+        ),
+        id = folder.id,
+        change_key = folder_change_key(&format!("public-folder:{}", folder.id)),
+        parent_id = escape_xml(&parent_id),
+        parent_change_key = escape_xml(&parent_change_key),
+        class = escape_xml(&folder.folder_class),
+        display = escape_xml(&folder.display_name),
+        item_count = item_count,
+        child_folder_count = child_folder_count,
+        may_read = folder.rights.may_read,
+        may_write = folder.rights.may_write,
+        may_delete = folder.rights.may_delete,
+        may_share = folder.rights.may_share,
     )
 }
 

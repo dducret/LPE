@@ -18,6 +18,7 @@ pub enum CanonicalChangeCategory {
     Search,
     Rules,
     ConversationActions,
+    PublicFolders,
 }
 
 impl CanonicalChangeCategory {
@@ -33,6 +34,7 @@ impl CanonicalChangeCategory {
             Self::Search => "search",
             Self::Rules => "rules",
             Self::ConversationActions => "conversation_actions",
+            Self::PublicFolders => "public_folders",
         }
     }
 
@@ -48,6 +50,7 @@ impl CanonicalChangeCategory {
             "search" => Some(Self::Search),
             "rules" => Some(Self::Rules),
             "conversation_actions" => Some(Self::ConversationActions),
+            "public_folders" => Some(Self::PublicFolders),
             _ => None,
         }
     }
@@ -695,6 +698,10 @@ mod tests {
             "conversation_actions"
         );
         assert_eq!(
+            CanonicalChangeCategory::PublicFolders.as_str(),
+            "public_folders"
+        );
+        assert_eq!(
             CanonicalChangeCategory::from_str("rights"),
             Some(CanonicalChangeCategory::Rights)
         );
@@ -709,6 +716,10 @@ mod tests {
         assert_eq!(
             CanonicalChangeCategory::from_str("conversation_actions"),
             Some(CanonicalChangeCategory::ConversationActions)
+        );
+        assert_eq!(
+            CanonicalChangeCategory::from_str("public_folders"),
+            Some(CanonicalChangeCategory::PublicFolders)
         );
     }
 

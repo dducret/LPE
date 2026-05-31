@@ -11,11 +11,12 @@ use lpe_storage::{
     CollaborationCollection, CollaborationRights, ConversationAction,
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JournalEntry, MailboxRule, ReminderQuery, SavedDraftMessage,
-    SearchFolderDefinition, SieveScriptDocument, Storage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
+    JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
+    PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -909,6 +910,37 @@ impl ExchangeStore for FakeStore {
             }
             Ok(records)
         })
+    }
+
+    fn fetch_public_folder_trees<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderTree>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn fetch_public_folder<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        _folder_id: Uuid,
+    ) -> StoreFuture<'a, PublicFolder> {
+        Box::pin(async move { Err(anyhow::anyhow!("public folder not found")) })
+    }
+
+    fn fetch_public_folder_children<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        _folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolder>> {
+        Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn fetch_public_folder_items<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        _folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
+        Box::pin(async move { Ok(Vec::new()) })
     }
 
     fn fetch_mapi_identities_by_object_ids<'a>(

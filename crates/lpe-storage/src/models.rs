@@ -650,6 +650,84 @@ pub(crate) struct ClientReminderRow {
 }
 
 #[derive(Debug, FromRow)]
+pub(crate) struct PublicFolderTreeRow {
+    pub(crate) id: Uuid,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) display_name: String,
+    pub(crate) lifecycle_state: String,
+    pub(crate) admin_owner_account_id: Uuid,
+    pub(crate) root_folder_id: Option<Uuid>,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct PublicFolderRow {
+    pub(crate) id: Uuid,
+    pub(crate) tree_id: Uuid,
+    pub(crate) parent_folder_id: Option<Uuid>,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) display_name: String,
+    pub(crate) folder_class: String,
+    pub(crate) path: String,
+    pub(crate) sort_order: i32,
+    pub(crate) lifecycle_state: String,
+    pub(crate) change_counter: i64,
+    pub(crate) may_read: bool,
+    pub(crate) may_write: bool,
+    pub(crate) may_delete: bool,
+    pub(crate) may_share: bool,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct PublicFolderItemRow {
+    pub(crate) id: Uuid,
+    pub(crate) public_folder_id: Uuid,
+    pub(crate) message_id: Option<Uuid>,
+    pub(crate) item_kind: String,
+    pub(crate) message_class: String,
+    pub(crate) subject: String,
+    pub(crate) body_text: String,
+    pub(crate) body_html_sanitized: Option<String>,
+    pub(crate) source_payload_json: String,
+    pub(crate) lifecycle_state: String,
+    pub(crate) change_counter: i64,
+    pub(crate) created_by_account_id: Uuid,
+    pub(crate) updated_by_account_id: Uuid,
+    pub(crate) is_read: bool,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct PublicFolderPermissionRow {
+    pub(crate) id: Uuid,
+    pub(crate) public_folder_id: Uuid,
+    pub(crate) principal_account_id: Uuid,
+    pub(crate) principal_email: String,
+    pub(crate) principal_display_name: String,
+    pub(crate) may_read: bool,
+    pub(crate) may_write: bool,
+    pub(crate) may_delete: bool,
+    pub(crate) may_share: bool,
+    pub(crate) created_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
+pub(crate) struct PublicFolderPerUserStateRow {
+    pub(crate) public_folder_id: Uuid,
+    pub(crate) item_id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) is_read: bool,
+    pub(crate) last_seen_change: i64,
+    pub(crate) private_json: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, FromRow)]
 pub(crate) struct DavTaskRow {
     pub(crate) id: Uuid,
     pub(crate) owner_account_id: Uuid,

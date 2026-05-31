@@ -2,12 +2,12 @@
 
 ## Current State/Functionality Overview
 
-Public folders are not implemented in `LPE` yet. MAPI/HTTP public-folder logon,
-replica, and per-user read/unread ROPs must continue to return parseable
-unsupported responses until canonical public-folder state, permissions, and
-replay semantics are implemented.
-
-This document defines the target architecture only. It does not add ROP support.
+Public folders now have canonical `LPE` storage, authenticated mail APIs,
+permission rows, per-user read/unread rows, replay facts, and tombstones.
+MAPI/HTTP public-folder logon and replica ROPs remain guarded protocol work;
+they must not create protocol-local public-folder state. Bounded EWS folder and
+item projection may expose public-folder data only through the canonical tables
+described here.
 
 ## Implementation/Usage
 
@@ -64,8 +64,8 @@ as a shared item mutation. Public-folder item changes and per-user read-state
 changes therefore need separate replay facts so MAPI, JMAP, DAV, ActiveSync, and
 future web clients can sync item content and user-private state independently.
 
-MAPI/HTTP support can begin only after the canonical API and replay model above
-exist. The first ROP mapping should be read-only tree discovery and item sync.
+MAPI/HTTP support can begin from the canonical API and replay model above. The
+first ROP mapping should be read-only tree discovery and item sync.
 `RopGetPerUserLongTermIds`, `RopGetPerUserGuid`,
 `RopReadPerUserInformation`, and `RopWritePerUserInformation` may map only to
 `public_folder_per_user_state`; they must not create Exchange-compatible binary

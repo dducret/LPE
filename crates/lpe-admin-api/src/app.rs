@@ -1,7 +1,7 @@
 use axum::{
     extract::DefaultBodyLimit,
     middleware,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use lpe_storage::Storage;
@@ -57,13 +57,18 @@ use crate::{
     },
     workspace::{
         client_workspace, delete_client_contact, delete_client_event, delete_client_note,
-        delete_client_task, delete_draft_message, delete_journal_entry, delete_search_folder,
-        get_client_note, get_client_task, get_journal_entry, get_search_folder, list_client_notes,
-        list_client_task_lists, list_client_tasks, list_journal_entries, list_recoverable_items,
-        list_search_folders, outlook_profile_state, purge_recoverable_item, query_client_reminders,
-        restore_recoverable_item, save_draft_message, submit_message, update_message_flag,
-        upsert_client_contact, upsert_client_event, upsert_client_note, upsert_client_task,
-        upsert_journal_entry, upsert_search_folder,
+        delete_client_task, delete_draft_message, delete_journal_entry, delete_public_folder_item,
+        delete_public_folder_permission, delete_search_folder, get_client_note, get_client_task,
+        get_journal_entry, get_public_folder, get_search_folder, list_client_notes,
+        list_client_task_lists, list_client_tasks, list_journal_entries,
+        list_public_folder_children, list_public_folder_items, list_public_folder_per_user_state,
+        list_public_folder_permissions, list_public_folder_trees, list_recoverable_items,
+        list_search_folders, outlook_profile_state, patch_public_folder_item,
+        patch_public_folder_per_user_state, post_public_folder_item, purge_recoverable_item,
+        put_public_folder_permission, query_client_reminders, restore_recoverable_item,
+        save_draft_message, submit_message, update_message_flag, upsert_client_contact,
+        upsert_client_event, upsert_client_note, upsert_client_task, upsert_journal_entry,
+        upsert_search_folder,
     },
 };
 
@@ -175,6 +180,32 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/messages/draft", post(save_draft_message))
         .route("/mail/messages/{message_id}/flag", put(update_message_flag))
         .route("/mail/recoverable-items", get(list_recoverable_items))
+        .route("/mail/public-folders/trees", get(list_public_folder_trees))
+        .route("/mail/public-folders/{folder_id}", get(get_public_folder))
+        .route(
+            "/mail/public-folders/{folder_id}/children",
+            get(list_public_folder_children),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/items",
+            get(list_public_folder_items).post(post_public_folder_item),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/items/{item_id}",
+            patch(patch_public_folder_item).delete(delete_public_folder_item),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/permissions",
+            get(list_public_folder_permissions),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/permissions/{principal_id}",
+            put(put_public_folder_permission).delete(delete_public_folder_permission),
+        )
+        .route(
+            "/mail/public-folders/{folder_id}/per-user-state",
+            get(list_public_folder_per_user_state).patch(patch_public_folder_per_user_state),
+        )
         .route(
             "/mail/recoverable-items/{recoverable_item_id}/restore",
             post(restore_recoverable_item),
@@ -553,6 +584,14 @@ mod tests {
             "/mail/search-folders/{search_folder_id}",
             "/mail/rules",
             "/mail/outlook-profile",
+            "/mail/public-folders/trees",
+            "/mail/public-folders/{folder_id}",
+            "/mail/public-folders/{folder_id}/children",
+            "/mail/public-folders/{folder_id}/items",
+            "/mail/public-folders/{folder_id}/items/{item_id}",
+            "/mail/public-folders/{folder_id}/permissions",
+            "/mail/public-folders/{folder_id}/permissions/{principal_id}",
+            "/mail/public-folders/{folder_id}/per-user-state",
         ] {
             assert!(
                 app_source.contains(route),

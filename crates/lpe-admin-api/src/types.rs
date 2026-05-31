@@ -11,6 +11,42 @@ use uuid::Uuid;
 
 pub type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertPublicFolderItemRequest {
+    pub id: Option<Uuid>,
+    pub item_kind: Option<String>,
+    pub message_class: Option<String>,
+    pub subject: String,
+    pub body_text: String,
+    pub body_html_sanitized: Option<String>,
+    pub source_payload_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFolderPermissionRequest {
+    pub may_read: bool,
+    pub may_write: bool,
+    pub may_delete: bool,
+    pub may_share: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFolderPerUserStatePatchRequest {
+    pub item_id: Uuid,
+    pub is_read: bool,
+    pub last_seen_change: Option<i64>,
+    pub private_json: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicFolderPerUserStatePatchBatchRequest {
+    pub updates: Vec<PublicFolderPerUserStatePatchRequest>,
+}
+
 #[derive(Debug, Clone)]
 pub struct BootstrapAdminRequest {
     pub email: String,

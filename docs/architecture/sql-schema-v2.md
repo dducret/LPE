@@ -696,19 +696,20 @@ collaboration, rights, or user-visible state.
 - `tasks`
 - `notes`
 - `journal_entries`
+- `public_folder_trees`
+- `public_folders`
+- `public_folder_items`
+- `public_folder_permissions`
+- `public_folder_per_user_state`
 - `contact_book_grants`
 - `calendar_grants`
 - `task_list_grants`
 - `mailbox_delegation_grants`
 - `sender_rights`
 
-Public folders are intentionally absent from schema v2. When they become
-in-scope, add the canonical tables described in
-`docs/architecture/public-folders-mapi-mvp.md` before enabling MAPI/HTTP
-public-folder or per-user read/unread ROPs. Public-folder state must include
-folder tree rows, item rows, same-tenant permissions, per-user read/unread rows,
-and replay/tombstone state; it must not be stored as MAPI-local public-folder
-blobs.
+Public folders use canonical core tables for folder tree rows, item rows,
+same-tenant permissions, per-user read/unread rows, and replay/tombstone state.
+They are not stored as MAPI-local public-folder blobs.
 
 ### Search and AI Projections
 
