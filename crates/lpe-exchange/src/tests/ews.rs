@@ -1212,11 +1212,8 @@ async fn update_item_rejects_public_folder_item_without_write_access() {
         display_name: "Public Delegate".to_string(),
         expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
-    let mut public_folder = FakeStore::public_folder(
-        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-        None,
-        "Public Root",
-    );
+    let mut public_folder =
+        FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root");
     public_folder.rights.may_write = false;
     public_folder.rights.may_delete = false;
     public_folder.rights.may_share = false;
@@ -4457,6 +4454,65 @@ async fn move_item_moves_public_folder_item_to_target_public_folder() {
 }
 
 #[tokio::test]
+async fn move_item_rejects_public_folder_target_without_write_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let source = FakeStore::public_folder(
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        None,
+        "Source Public",
+    );
+    let mut target = FakeStore::public_folder(
+        "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        None,
+        "Target Public",
+    );
+    target.rights.may_write = false;
+    target.rights.may_delete = false;
+    target.rights.may_share = false;
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![source, target])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let deleted_public_folder_items = store.deleted_public_folder_items.clone();
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:MoveItem><m:ToFolderId><t:FolderId Id="public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff"/></m:ToFolderId><m:ItemIds><t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/></m:ItemIds></m:MoveItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MoveItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(body.contains("public folder write access is not granted"));
+    assert!(deleted_public_folder_items.lock().unwrap().is_empty());
+    let stored = public_folder_items.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].lifecycle_state, "active");
+    assert_eq!(
+        stored[0].public_folder_id,
+        Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap()
+    );
+}
+
+#[tokio::test]
 async fn move_item_rejects_non_message_ids() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -4570,6 +4626,62 @@ async fn copy_item_copies_public_folder_item_to_target_public_folder() {
         Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap()
     );
     assert_eq!(stored[1].subject, "Public post");
+}
+
+#[tokio::test]
+async fn copy_item_rejects_public_folder_target_without_write_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let source = FakeStore::public_folder(
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        None,
+        "Source Public",
+    );
+    let mut target = FakeStore::public_folder(
+        "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        None,
+        "Target Public",
+    );
+    target.rights.may_write = false;
+    target.rights.may_delete = false;
+    target.rights.may_share = false;
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![source, target])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CopyItem><m:ToFolderId><t:FolderId Id="public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff"/></m:ToFolderId><m:ItemIds><t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/></m:ItemIds></m:CopyItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CopyItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(body.contains("public folder write access is not granted"));
+    let stored = public_folder_items.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(
+        stored[0].public_folder_id,
+        Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap()
+    );
 }
 
 #[tokio::test]

@@ -108,9 +108,10 @@ state, MIME blobs, ACLs, or read-state facts. Public-folder copy and move are
 currently bounded to post-like public-folder items between canonical public
 folders. EWS folder deletion inherits the canonical conservative delete rule:
 root folders, folders with active child folders, and folders with active items
-must not be removed through EWS. EWS public-folder read operations must surface
-canonical read-denial failures as `ErrorAccessDenied` SOAP responses rather
-than leaking transport-level handler failures.
+must not be removed through EWS. EWS public-folder operations must surface
+canonical access-denial failures as `ErrorAccessDenied` SOAP responses rather
+than leaking transport-level handler failures or recasting permission failures
+as missing items.
 
 Per-user read/unread is private to the authenticated account unless an explicit
 future administrative audit/export flow is documented. It must never be modeled
