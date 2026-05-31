@@ -66,6 +66,33 @@ fn test_collapse_state(folder_id: u64, row_id: u64, position: u32, category_id: 
     state
 }
 
+fn test_daily_calendar_recur_blob() -> Vec<u8> {
+    let mut value = Vec::new();
+    value.extend_from_slice(&0x3004u16.to_le_bytes());
+    value.extend_from_slice(&0x3004u16.to_le_bytes());
+    value.extend_from_slice(&0x200Au16.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&223701060u32.to_le_bytes());
+    value.extend_from_slice(&(1440u32).to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0x0000_2022u32.to_le_bytes());
+    value.extend_from_slice(&3u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&223729860u32.to_le_bytes());
+    value.extend_from_slice(&223735620u32.to_le_bytes());
+    value.extend_from_slice(&0x0000_3006u32.to_le_bytes());
+    value.extend_from_slice(&0x0000_3009u32.to_le_bytes());
+    value.extend_from_slice(&(9 * 60u32).to_le_bytes());
+    value.extend_from_slice(&(10 * 60u32).to_le_bytes());
+    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value.extend_from_slice(&0u32.to_le_bytes());
+    value
+}
+
 #[tokio::test]
 async fn mapi_over_http_contact_crud_uses_canonical_contacts() {
     let store = FakeStore {
@@ -744,7 +771,14 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
     );
     append_mapi_utf16_property(&mut property_values, 0x3FFB_001F, "Room 1");
     append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Agenda");
+    append_mapi_utf16_property(&mut property_values, 0x1013_001F, "<p>Agenda</p>");
     append_mapi_i32_property(&mut property_values, 0x8205_0003, 1);
+    append_mapi_bool_property(&mut property_values, 0x8215_000B, true);
+    append_mapi_binary_property(
+        &mut property_values,
+        0x8216_0102,
+        &test_daily_calendar_recur_blob(),
+    );
     append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, "Alice Organizer");
     append_mapi_utf16_property(
         &mut property_values,
@@ -754,7 +788,7 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
     append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Attendee");
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_set_properties(&mut rops, 1, 9, &property_values);
+    append_rop_set_properties(&mut rops, 1, 12, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     append_rop_get_properties_specific(&mut rops, 1, &[0x0037_001F, 0x0060_0040, 0x0061_0040]);
     let mut execute_headers = mapi_headers("Execute");
@@ -777,19 +811,35 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         assert_eq!(stored[0].duration_minutes, 45);
         assert_eq!(stored[0].location, "Room 1");
         assert_eq!(stored[0].notes, "Agenda");
+        assert_eq!(stored[0].body_html, "<p>Agenda</p>");
+        assert!(stored[0].all_day);
         assert_eq!(stored[0].status, "tentative");
         assert_eq!(stored[0].attendees, "Bob Attendee");
         assert!(stored[0]
             .organizer_json
             .contains("alice.organizer@example.test"));
         assert!(stored[0].attendees_json.contains("Bob Attendee"));
-        assert!(stored[0].recurrence_rule.is_empty());
+        assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
+        assert_eq!(
+            stored[0].recurrence_json,
+            r#"{"frequency":"daily","count":3}"#
+        );
     }
 
     let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
     let mut update_values = Vec::new();
     append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated RCA Calendar");
     append_mapi_utf16_property(&mut update_values, 0x3FFB_001F, "Room 2");
+    append_mapi_utf16_property(&mut update_values, 0x1013_001F, "<p>Updated</p>");
+    append_mapi_i32_property(&mut update_values, 0x8205_0003, 2);
+    append_mapi_bool_property(&mut update_values, 0x8215_000B, false);
+    append_mapi_utf16_property(&mut update_values, 0x0C1A_001F, "Updated Organizer");
+    append_mapi_utf16_property(
+        &mut update_values,
+        0x0C1F_001F,
+        "Updated.Organizer@Example.Test",
+    );
+    append_mapi_utf16_property(&mut update_values, 0x0E04_001F, "Carol Attendee");
     let mut update_rops = Vec::new();
     append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
     append_rop_open_message(
@@ -799,7 +849,7 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         test_mapi_folder_id(16),
         test_mapi_uuid_id(&event_id),
     );
-    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    append_rop_set_properties(&mut update_rops, 2, 8, &update_values);
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -817,6 +867,15 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         let stored = events.lock().unwrap();
         assert_eq!(stored[0].title, "Updated RCA Calendar");
         assert_eq!(stored[0].location, "Room 2");
+        assert_eq!(stored[0].body_html, "<p>Updated</p>");
+        assert!(!stored[0].all_day);
+        assert_eq!(stored[0].status, "confirmed");
+        assert_eq!(stored[0].attendees, "Carol Attendee");
+        assert!(stored[0]
+            .organizer_json
+            .contains("updated.organizer@example.test"));
+        assert!(stored[0].attendees_json.contains("Carol Attendee"));
+        assert_eq!(stored[0].recurrence_rule, "FREQ=DAILY;COUNT=3");
     }
 
     let mut read_rops = Vec::new();
@@ -828,7 +887,21 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         test_mapi_folder_id(16),
         test_mapi_uuid_id(&event_id),
     );
-    append_rop_get_properties_specific(&mut read_rops, 2, &[0x0037_001F, 0x3FFB_001F]);
+    append_rop_get_properties_specific(
+        &mut read_rops,
+        2,
+        &[
+            0x0037_001F,
+            0x3FFB_001F,
+            0x1013_001F,
+            0x0C1A_001F,
+            0x0C1F_001F,
+            0x0E04_001F,
+            0x8238_001F,
+            0x823B_001F,
+            0x823C_001F,
+        ],
+    );
     renew_mapi_request_id(&mut execute_headers);
     let response = service
         .handle_mapi(
@@ -844,6 +917,13 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         &utf16z("Updated RCA Calendar")
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Room 2")));
+    assert!(contains_bytes(&response_rops, &utf16z("<p>Updated</p>")));
+    assert!(contains_bytes(&response_rops, &utf16z("Updated Organizer")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("updated.organizer@example.test")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Carol Attendee")));
 
     let mut delete_rops = Vec::new();
     append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(16));
@@ -863,6 +943,128 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
         .any(|window| window == 0x8004_0102u32.to_le_bytes()));
     assert!(events.lock().unwrap().is_empty());
     assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_event() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Rejected recurrence");
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0060_0040,
+        test_filetime("2026-05-04", "09:30"),
+    );
+    append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_set_properties(&mut rops, 1, 3, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_create_rejects_meeting_message_class_without_event() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Schedule.Meeting.Request",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Meeting request");
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0060_0040,
+        test_filetime("2026-05-04", "09:30"),
+    );
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_set_properties(&mut rops, 1, 3, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    assert!(events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -13282,11 +13484,36 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
         stream.message_changes[0].subject,
         "PostgreSQL calendar appointment"
     );
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&0x8216_0102u32));
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("Room 420")));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("Canonical body text")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("<p>Canonical body text</p>")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("alice@example.test")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8238_001Fu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x823B_001Fu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x823C_001Fu32.to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -13310,6 +13537,10 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
     assert!(contains_bytes(
         &response_rops,
         &0x8002_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8216_0102u32.to_le_bytes()
     ));
     assert!(contains_bytes(
         &response_rops,
@@ -13355,9 +13586,9 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
             organizer_json: r#"{"email":"alice@example.test","common_name":"Alice Calendar"}"#
                 .to_string(),
             attendees: String::new(),
-            attendees_json: "{}".to_string(),
+            attendees_json: r#"{"organizer":{"email":"alice@example.test","common_name":"Alice Calendar"},"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false}]}"#.to_string(),
             notes: "Contents table body".to_string(),
-            body_html: String::new(),
+            body_html: "<p>Contents table body</p>".to_string(),
         })
         .await?;
 
@@ -13381,6 +13612,13 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
         0x001A_001Fu32, // PidTagMessageClass
         0x0037_001Fu32, // PidTagSubject
         0x1000_001Fu32, // PidTagBody
+        0x1013_001Fu32, // PidTagBodyHtml
+        0x0C1A_001Fu32, // PidTagSenderName
+        0x0C1F_001Fu32, // PidTagSenderEmailAddress
+        0x0E04_001Fu32, // PidTagDisplayTo
+        0x8238_001Fu32, // PidLidAllAttendeesString
+        0x823B_001Fu32, // PidLidToAttendeesString
+        0x823C_001Fu32, // PidLidCcAttendeesString
         0x820D_0040u32, // PidLidAppointmentStartWhole
         0x820E_0040u32, // PidLidAppointmentEndWhole
         0x8205_0003u32, // PidLidBusyStatus
@@ -13419,6 +13657,16 @@ async fn mapi_over_http_calendar_contents_table_projects_postgresql_canonical_ev
         &response_rops,
         &utf16z("Contents table body")
     ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("<p>Contents table body</p>")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Alice Calendar")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("alice@example.test")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
     assert!(contains_bytes(&response_rops, &utf16z("Room 421")));
     assert!(contains_bytes(&response_rops, &2i32.to_le_bytes()));
     assert!(contains_bytes(&response_rops, &[0]));

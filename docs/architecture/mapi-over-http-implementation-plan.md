@@ -675,14 +675,23 @@ projected to MAPI with a minimum one-minute appointment window while leaving the
 canonical event unchanged. Bounded MAPI calendar writes update only existing
 canonical `calendar_events` columns: subject/display name, body, HTML body,
 start/end, location, all-day, busy-status-derived canonical status, organizer,
-and display attendees. `PidLidAppointmentRecur` has a parser-backed bounded
-mapping for Gregorian daily, weekly, monthly-by-day, yearly-by-day, and
+and display attendees. Calendar reads project those canonical body,
+organizer, and attendee fields through direct properties, requested contents
+columns, and FastTransfer/ICS message properties, including the bounded
+`PidLidAllAttendeesString`, `PidLidToAttendeesString`, and
+`PidLidCcAttendeesString` projections from canonical attendee metadata.
+`PidLidAppointmentRecur` has a parser-backed bounded read/write mapping for
+Gregorian daily, weekly, monthly-by-day, monthly-nth, yearly-by-day, and
 yearly-nth recurrence patterns into canonical `recurrence_rule`,
 `recurrence_json`, and deleted-instance `recurrence_exceptions_json` fields.
-Modified exception payloads, month-end recurrence, Hijri recurrence, malformed
-recurrence blobs, and other binary meeting payloads remain unsupported and are
+Direct property reads, contents rows that request the property, and
+FastTransfer/ICS calendar sync can project the bounded recurrence blob back
+from canonical event state. Modified exception payloads, month-end recurrence,
+Hijri recurrence, malformed recurrence blobs, meeting request/response/cancel
+message classes, and other binary meeting payloads remain unsupported and are
 rejected with deterministic parseable errors instead of being stored as opaque
-MAPI blobs. Calendar attachments are projected only through canonical
+MAPI blobs.
+Calendar attachments are projected only through canonical
 `calendar_event_attachments`:
 `PidTagHasAttachments`, `RopGetAttachmentTable`, and `RopOpenAttachment` read
 that table, while bounded `RopCreateAttachment`/`RopSaveChangesAttachment`

@@ -2330,8 +2330,8 @@ impl ExchangeStore for FakeStore {
             status: input.status,
             sequence: input.sequence,
             recurrence_rule: input.recurrence_rule,
-            recurrence_json: "{}".to_string(),
-            recurrence_exceptions_json: "[]".to_string(),
+            recurrence_json: input.recurrence_json,
+            recurrence_exceptions_json: input.recurrence_exceptions_json,
             title: input.title,
             location: input.location,
             organizer_json: input.organizer_json,
@@ -2360,12 +2360,19 @@ impl ExchangeStore for FakeStore {
         event.time = input.time;
         event.time_zone = input.time_zone;
         event.duration_minutes = input.duration_minutes;
+        event.all_day = input.all_day;
+        event.status = input.status;
+        event.sequence = input.sequence;
         event.recurrence_rule = input.recurrence_rule;
+        event.recurrence_json = input.recurrence_json;
+        event.recurrence_exceptions_json = input.recurrence_exceptions_json;
         event.title = input.title;
         event.location = input.location;
+        event.organizer_json = input.organizer_json;
         event.attendees = input.attendees;
         event.attendees_json = input.attendees_json;
         event.notes = input.notes;
+        event.body_html = input.body_html;
         let mut versions = self.event_versions.lock().unwrap();
         let version = versions
             .get(&event_id)
@@ -5903,6 +5910,11 @@ fn append_mapi_binary_property(values: &mut Vec<u8>, property_tag: u32, value: &
     values.extend_from_slice(&property_tag.to_le_bytes());
     values.extend_from_slice(&(value.len() as u16).to_le_bytes());
     values.extend_from_slice(value);
+}
+
+fn append_mapi_bool_property(values: &mut Vec<u8>, property_tag: u32, value: bool) {
+    values.extend_from_slice(&property_tag.to_le_bytes());
+    values.push(value as u8);
 }
 
 fn append_mapi_guid_property(values: &mut Vec<u8>, property_tag: u32, value: [u8; 16]) {
