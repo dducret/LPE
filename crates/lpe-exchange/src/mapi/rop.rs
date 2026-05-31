@@ -3072,6 +3072,23 @@ impl RopRequest {
         crate::mapi::identity::object_id_from_wire_id(bytes)
     }
 
+    pub(in crate::mapi) fn abort_submit_folder_id(&self) -> Option<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::AbortSubmit)) {
+            return None;
+        }
+        let bytes = self.payload.get(..8)?;
+        crate::mapi::identity::object_id_from_wire_id(bytes)
+    }
+
+    pub(in crate::mapi) fn abort_submit_message_id(&self) -> Option<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::AbortSubmit)) {
+            return None;
+        }
+        let bytes = self.payload.get(8..16)?;
+        crate::mapi::identity::object_id_from_wire_id(bytes)
+            .or_else(|| bytes.try_into().ok().map(u64::from_le_bytes))
+    }
+
     pub(in crate::mapi) fn long_term_source_object_id(&self) -> Option<u64> {
         if !matches!(RopId::from_u8(self.rop_id), Some(RopId::LongTermIdFromId)) {
             return None;

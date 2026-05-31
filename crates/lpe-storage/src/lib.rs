@@ -71,7 +71,7 @@ pub use crate::protocols::{
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::recoverable_items::RecoverableItem;
 pub use crate::submission::{
-    AttachmentUploadInput, MailboxAccountAccess, MailboxDelegationGrant,
+    AttachmentUploadInput, CancelSubmissionResult, MailboxAccountAccess, MailboxDelegationGrant,
     MailboxDelegationGrantInput, MailboxDelegationOverview, MailboxFolderDelegationGrantInput,
     SavedDraftMessage, SenderAuthorizationKind, SenderDelegationGrant, SenderDelegationGrantInput,
     SenderDelegationRight, SenderIdentity, SubmissionAccountIdentity, SubmitMessageInput,

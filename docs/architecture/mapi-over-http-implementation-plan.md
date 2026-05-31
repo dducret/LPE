@@ -140,8 +140,7 @@ non-canonical LPE state.
   visible in canonical `Sent`. Cross-protocol checks must agree through JMAP,
   IMAP where applicable, and the MAPI projection.
 - MAPI submission cancellation is canonical queue cancellation, not message
-  deletion and not a client-spooler side channel. When implemented,
-  `RopAbortSubmit` resolves the requested folder/message identifiers to the
+  deletion and not a client-spooler side channel. `RopAbortSubmit` resolves the requested folder/message identifiers to the
   authenticated account's canonical `Sent` membership and then to the matching
   `submission_queue` row. It may transition only `queued`, `ready`, or
   `deferred` rows to terminal `cancelled`, set `terminal_at`, append a

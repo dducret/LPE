@@ -549,7 +549,6 @@ impl RopId {
     #[allow(dead_code)]
     pub(in crate::mapi) fn known_unsupported_name(value: u8) -> Option<&'static str> {
         match value {
-            0x34 => Some("RopAbortSubmit"),
             0x39 => Some("RopCopyTo"),
             0x46 => Some("RopOpenEmbeddedMessage"),
             0x47 => Some("RopSetSpooler"),
@@ -981,7 +980,7 @@ mod tests {
         assert_eq!(RopId::from_u8(0xAA), None);
         assert!(RopId::is_reserved(0x28));
         assert!(!RopId::is_reserved(0x70));
-        assert_eq!(RopId::known_unsupported_name(0x34), Some("RopAbortSubmit"));
+        assert_eq!(RopId::known_unsupported_name(0x34), None);
         assert_eq!(RopId::known_unsupported_name(0x39), Some("RopCopyTo"));
         assert_eq!(
             RopId::known_unsupported_name(0x51),

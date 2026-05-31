@@ -2,11 +2,11 @@ use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, JmapImportedEmailInput, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob, ReminderQuery,
-    SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput, UpsertJournalEntryInput,
-    UpsertSearchFolderInput,
+    AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, JmapImportedEmailInput,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, NewAccount, NewDomain, NewMailbox,
+    NewPstTransferJob, ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight, Storage,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput,
+    UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -134,6 +134,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "JMAP query SQL path",
             exercise_jmap_path(&storage, &fixture, submitted.as_ref()).await,
+        );
+        collect(
+            &mut failures,
+            "submission cancellation SQL path",
+            exercise_submission_cancellation_path(&storage, pool, &fixture).await,
         );
 
         if let Some(submitted) = submitted.as_ref() {
@@ -1652,6 +1657,121 @@ async fn exercise_submission_path(
         )
         .await
         .context("submit_message")
+}
+
+async fn exercise_submission_cancellation_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let submitted = exercise_submission_path(storage, fixture).await?;
+    let cancelled = storage
+        .cancel_queued_submission(
+            fixture.account_id,
+            submitted.message_id,
+            audit(
+                "alice@example.test",
+                "mapi-abort-submit",
+                "runtime cancellation",
+            ),
+        )
+        .await
+        .context("cancel queued submission")?;
+    anyhow::ensure!(
+        cancelled == CancelSubmissionResult::Cancelled,
+        "queued submission cancellation did not report Cancelled"
+    );
+
+    let status = sqlx::query_scalar::<_, String>(
+        "SELECT status FROM submission_queue WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(fixture.tenant_id)
+    .bind(submitted.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("fetch cancelled submission status")?;
+    anyhow::ensure!(status == "cancelled", "submission queue was not cancelled");
+
+    let event_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM submission_events
+        WHERE tenant_id = $1
+          AND submission_queue_id = $2
+          AND event_kind = 'cancelled'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(submitted.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("count cancellation event rows")?;
+    anyhow::ensure!(
+        event_count == 1,
+        "submission cancellation event was not written"
+    );
+
+    let change_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'submission'
+          AND object_id = $3
+          AND change_kind = 'updated'
+          AND summary_json ->> 'messageId' = $4
+          AND summary_json ->> 'status' = 'cancelled'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(submitted.outbound_queue_id)
+    .bind(submitted.message_id.to_string())
+    .fetch_one(pool)
+    .await
+    .context("count cancellation change-log rows")?;
+    anyhow::ensure!(
+        change_count == 1,
+        "submission cancellation change-log row was not written"
+    );
+
+    let duplicate = storage
+        .cancel_queued_submission(
+            fixture.account_id,
+            submitted.message_id,
+            audit(
+                "alice@example.test",
+                "mapi-abort-submit",
+                "runtime cancellation duplicate",
+            ),
+        )
+        .await
+        .context("cancel already cancelled submission")?;
+    anyhow::ensure!(
+        duplicate == CancelSubmissionResult::AlreadyCancelled,
+        "duplicate cancellation was not idempotent"
+    );
+    let duplicate_event_count = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM submission_events
+        WHERE tenant_id = $1
+          AND submission_queue_id = $2
+          AND event_kind = 'cancelled'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(submitted.outbound_queue_id)
+    .fetch_one(pool)
+    .await
+    .context("count duplicate cancellation events")?;
+    anyhow::ensure!(
+        duplicate_event_count == 1,
+        "idempotent cancellation wrote duplicate event rows"
+    );
+
+    Ok(())
 }
 
 async fn exercise_jmap_path(

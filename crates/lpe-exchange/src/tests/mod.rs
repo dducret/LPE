@@ -7,13 +7,14 @@ use lpe_storage::RecoverableItem;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
-    CalendarEventAttachment, ClientNote, ClientReminder, ClientTask, CollaborationCollection,
-    CollaborationRights, ConversationAction, DelegateFreeBusyMessageObject, JmapEmail,
-    JmapEmailAddress, JmapEmailMailboxState, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JournalEntry, MailboxRule, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
-    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    CalendarEventAttachment, CancelSubmissionResult, ClientNote, ClientReminder, ClientTask,
+    CollaborationCollection, CollaborationRights, ConversationAction,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JournalEntry, MailboxRule, ReminderQuery, SavedDraftMessage,
+    SearchFolderDefinition, SieveScriptDocument, Storage, StoredAccountAppPassword,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -364,6 +365,8 @@ struct FakeStore {
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
     created_attachments: Arc<Mutex<Vec<AttachmentUploadInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    cancelled_submissions: Arc<Mutex<Vec<Uuid>>>,
+    submission_cancel_results: Arc<Mutex<HashMap<Uuid, CancelSubmissionResult>>>,
     deleted_emails: Arc<Mutex<Vec<Uuid>>>,
     moved_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
     copied_emails: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
@@ -3095,6 +3098,38 @@ impl ExchangeStore for FakeStore {
         emails.push(sent);
 
         Box::pin(async move { Ok(submitted) })
+    }
+
+    fn cancel_queued_submission<'a>(
+        &'a self,
+        _account_id: Uuid,
+        message_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, CancelSubmissionResult> {
+        self.cancelled_submissions.lock().unwrap().push(message_id);
+        let result = self
+            .submission_cancel_results
+            .lock()
+            .unwrap()
+            .get(&message_id)
+            .copied()
+            .unwrap_or_else(|| {
+                self.emails
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .find(|email| email.id == message_id)
+                    .map(|email| match email.delivery_status.as_str() {
+                        "queued" | "ready" | "deferred" => CancelSubmissionResult::Cancelled,
+                        "cancelled" => CancelSubmissionResult::AlreadyCancelled,
+                        "handed_off" | "relayed" | "bounced" | "failed" => {
+                            CancelSubmissionResult::NotCancellable
+                        }
+                        _ => CancelSubmissionResult::NotFound,
+                    })
+                    .unwrap_or(CancelSubmissionResult::NotFound)
+            });
+        Box::pin(async move { Ok(result) })
     }
 }
 

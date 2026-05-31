@@ -1104,7 +1104,28 @@ async fn mapi_over_http_task_contents_table_lists_canonical_tasks() {
         .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
         .await
         .unwrap();
-    let cookie = mapi_cookie_header(&connect);
+    let mut cookie = mapi_cookie_header(&connect);
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x01];
+    let legacy_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}\0",
+        FakeStore::account().email
+    );
+    logon_rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    logon_rops.extend_from_slice(legacy_dn.as_bytes());
+    let mut logon_headers = mapi_headers("Execute");
+    logon_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &logon_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    cookie = mapi_cookie_header(&logon_response);
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
@@ -3566,7 +3587,7 @@ async fn mapi_over_http_query_columns_all_reports_canonical_table_columns() {
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
     ];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
     rops.push(0);
     rops.extend_from_slice(&[
         0x05, 0x00, 0x01, 0x02, 0x00, // RopGetContentsTable
@@ -8385,7 +8406,10 @@ async fn mapi_over_http_hard_delete_messages_reports_partial_when_retention_bloc
     rops.push(0);
     rops.extend_from_slice(&[0x59, 0x00, 0x01]);
     rops.extend_from_slice(&1u16.to_le_bytes());
-    append_mapi_wire_id(&mut rops, test_mapi_message_id(&message_id.to_string()));
+    append_mapi_wire_id(
+        &mut rops,
+        crate::mapi::identity::legacy_migration_object_id(&message_id),
+    );
 
     let response = service
         .handle_mapi(
@@ -23236,7 +23260,7 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
     let mut rops = Vec::new();
     rops.extend_from_slice(&[0x34, 0x00, 0x00]); // RopAbortSubmit.
     append_mapi_wire_id(&mut rops, folder_id);
-    rops.extend_from_slice(&message_id.to_le_bytes());
+    append_mapi_wire_id(&mut rops, message_id);
     rops.extend_from_slice(&[0x47, 0x00, 0x00]); // RopSetSpooler.
     rops.extend_from_slice(&[0x48, 0x00, 0x00]); // RopSpoolerLockMessage.
     rops.extend_from_slice(&message_id.to_le_bytes());
@@ -23259,7 +23283,11 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    for rop_id in [0x34, 0x47, 0x48, 0x51] {
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x34, 0x00, 0x0F, 0x01, 0x04, 0x80]
+    ));
+    for rop_id in [0x47, 0x48, 0x51] {
         assert!(contains_bytes(
             &response_rops,
             &[rop_id, 0x00, 0x02, 0x01, 0x04, 0x80]
@@ -23272,6 +23300,77 @@ async fn mapi_over_http_transport_spooler_rops_return_parseable_errors_without_c
     assert!(submitted_messages.lock().unwrap().is_empty());
     assert!(saved_drafts.lock().unwrap().is_empty());
     assert!(imported_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_abort_submit_cancels_pre_handoff_submission() {
+    for status in ["queued", "ready", "deferred", "cancelled"] {
+        let (response_rops, cancelled) = abort_submit_response(status).await;
+        assert_eq!(cancelled.len(), 1);
+        assert!(
+            contains_bytes(&response_rops, &[0x34, 0x00, 0, 0, 0, 0]),
+            "{response_rops:02x?}; cancelled={cancelled:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn mapi_over_http_abort_submit_rejects_handed_off_and_terminal_submissions() {
+    for status in ["handed_off", "relayed", "bounced", "failed"] {
+        let (response_rops, cancelled) = abort_submit_response(status).await;
+        assert_eq!(cancelled.len(), 1);
+        assert!(
+            contains_bytes(&response_rops, &[0x34, 0x00, 0x02, 0x01, 0x04, 0x80]),
+            "{response_rops:02x?}; cancelled={cancelled:?}"
+        );
+    }
+}
+
+async fn abort_submit_response(status: &str) -> (Vec<u8>, Vec<Uuid>) {
+    let sent_mailbox = FakeStore::mailbox("22222222-2222-2222-2222-222222222222", "sent", "Sent");
+    let message_id = Uuid::parse_str("87878787-8787-8787-8787-878787878787").unwrap();
+    let mapi_message_id = crate::mapi::identity::legacy_migration_object_id(&message_id);
+    crate::mapi::identity::remember_mapi_identity(message_id, mapi_message_id);
+    let mut email = FakeStore::email(
+        &message_id.to_string(),
+        &sent_mailbox.id.to_string(),
+        "sent",
+        "Abort submit",
+    );
+    email.delivery_status = status.to_string();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![sent_mailbox])),
+        emails: Arc::new(Mutex::new(vec![email])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(message_id, mapi_message_id)]))),
+        ..Default::default()
+    };
+    let cancelled_submissions = store.cancelled_submissions.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let mut rops = Vec::new();
+    rops.extend_from_slice(&[0x34, 0x00, 0x00]);
+    append_mapi_wire_id(&mut rops, test_mapi_folder_id(7));
+    append_mapi_wire_id(&mut rops, mapi_message_id);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    let cancelled = cancelled_submissions.lock().unwrap().clone();
+    (response_rops, cancelled)
 }
 
 #[tokio::test]

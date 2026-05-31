@@ -2,11 +2,11 @@ use anyhow::Result;
 use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
-    AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, ClientNote, ClientReminder,
-    ClientTask, CollaborationCollection, ConversationAction, DelegateFreeBusyMessageObject,
-    JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, JournalEntry,
-    MailboxFolderDelegationGrantInput, MailboxRule, RecoverableItem, ReminderQuery,
+    AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CancelSubmissionResult,
+    ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule, RecoverableItem, ReminderQuery,
     SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
     SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
     UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
@@ -920,6 +920,13 @@ pub trait ExchangeStore: AccountAuthStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage>;
+
+    fn cancel_queued_submission<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, CancelSubmissionResult>;
 }
 
 impl ExchangeStore for Storage {
@@ -3092,6 +3099,18 @@ impl ExchangeStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SubmittedMessage> {
         Box::pin(async move { self.submit_message(input, audit).await })
+    }
+
+    fn cancel_queued_submission<'a>(
+        &'a self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, CancelSubmissionResult> {
+        Box::pin(async move {
+            self.cancel_queued_submission(account_id, message_id, audit)
+                .await
+        })
     }
 }
 

@@ -15,8 +15,8 @@ use crate::store::{
     MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiNavigationShortcutInput,
 };
 use lpe_storage::{
-    AuditEntryInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    UpsertSearchFolderInput,
+    AuditEntryInput, CancelSubmissionResult, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
 
@@ -6448,10 +6448,12 @@ where
                     snapshot,
                 ))
             }
-            Some(RopId::ExpandRow) if !matches!(
-                input_object(session, &handle_slots, &request),
-                Some(MapiObject::Folder { .. })
-            ) => {
+            Some(RopId::ExpandRow)
+                if !matches!(
+                    input_object(session, &handle_slots, &request),
+                    Some(MapiObject::Folder { .. })
+                ) =>
+            {
                 responses.extend_from_slice(&rop_expand_row_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -7775,6 +7777,95 @@ where
                         request.response_handle_index(),
                         0x8004_010F,
                     )),
+                }
+            }
+            Some(RopId::AbortSubmit) => {
+                let Some(folder_id) = request.abort_submit_folder_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x34,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                };
+                let Some(message_id) = request.abort_submit_message_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x34,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                };
+                let email = message_for_id(folder_id, message_id, mailboxes, emails);
+                let canonical_message_id = if let Some(email) = email {
+                    if email.mailbox_role != "sent"
+                        && !email
+                            .mailbox_states
+                            .iter()
+                            .any(|state| state.role == "sent")
+                    {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x34,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
+                    Some(email.id)
+                } else {
+                    match store
+                        .fetch_mapi_identities_by_object_ids(principal.account_id, &[message_id])
+                        .await
+                    {
+                        Ok(identities) => identities
+                            .into_iter()
+                            .find(|identity| {
+                                identity.object_kind == MapiIdentityObjectKind::Message
+                            })
+                            .map(|identity| identity.canonical_id),
+                        Err(_) => None,
+                    }
+                };
+                let Some(canonical_message_id) = canonical_message_id else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x34,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
+                match store
+                    .cancel_queued_submission(
+                        principal.account_id,
+                        canonical_message_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-abort-submit".to_string(),
+                            subject: format!("message:{canonical_message_id}"),
+                        },
+                    )
+                    .await
+                {
+                    Ok(
+                        CancelSubmissionResult::Cancelled
+                        | CancelSubmissionResult::AlreadyCancelled,
+                    ) => {
+                        responses.extend_from_slice(&rop_simple_success_response(&request));
+                    }
+                    Ok(CancelSubmissionResult::NotFound) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x34,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                    }
+                    Ok(CancelSubmissionResult::NotCancellable) | Err(_) => {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x34,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                    }
                 }
             }
             Some(RopId::MoveCopyMessages) => {

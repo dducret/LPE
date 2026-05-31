@@ -66,6 +66,14 @@ pub struct SubmittedMessage {
     pub delivery_status: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelSubmissionResult {
+    Cancelled,
+    AlreadyCancelled,
+    NotCancellable,
+    NotFound,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SavedDraftMessage {
     pub message_id: Uuid,
@@ -1859,6 +1867,115 @@ impl Storage {
             audit,
         )
         .await
+    }
+
+    pub async fn cancel_queued_submission(
+        &self,
+        account_id: Uuid,
+        message_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<CancelSubmissionResult> {
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            r#"
+            SELECT q.id, q.status
+            FROM submission_queue q
+            JOIN mailbox_messages mm
+              ON mm.tenant_id = q.tenant_id
+             AND mm.account_id = q.account_id
+             AND mm.id = q.sent_mailbox_message_id
+            JOIN mailboxes mb
+              ON mb.tenant_id = mm.tenant_id
+             AND mb.account_id = mm.account_id
+             AND mb.id = mm.mailbox_id
+            WHERE q.tenant_id = $1
+              AND q.account_id = $2
+              AND mm.message_id = $3
+              AND mb.role = 'sent'
+            ORDER BY q.created_at DESC
+            LIMIT 1
+            FOR UPDATE OF q
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(message_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(CancelSubmissionResult::NotFound);
+        };
+        let queue_id: Uuid = row.try_get("id")?;
+        let status: String = row.try_get("status")?;
+
+        if status == "cancelled" {
+            return Ok(CancelSubmissionResult::AlreadyCancelled);
+        }
+        if !matches!(status.as_str(), "queued" | "ready" | "deferred") {
+            return Ok(CancelSubmissionResult::NotCancellable);
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE submission_queue
+            SET status = 'cancelled',
+                terminal_at = NOW(),
+                updated_at = NOW()
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(queue_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let trace_id = format!("mapi-abort-submit-{queue_id}");
+        sqlx::query(
+            r#"
+            INSERT INTO submission_events (
+                id, tenant_id, submission_queue_id, trace_id, event_kind, technical_json
+            )
+            VALUES (
+                $1, $2, $3, $4, 'cancelled',
+                jsonb_build_object('source', 'RopAbortSubmit')
+            )
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(&tenant_id)
+        .bind(queue_id)
+        .bind(trace_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, account_id)
+            .await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "submission",
+            queue_id,
+            "updated",
+            modseq,
+            &principals,
+            serde_json::json!({
+                "messageId": message_id,
+                "status": "cancelled"
+            }),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, account_id).await?;
+        tx.commit().await?;
+
+        Ok(CancelSubmissionResult::Cancelled)
     }
 
     pub async fn delete_draft_message(
