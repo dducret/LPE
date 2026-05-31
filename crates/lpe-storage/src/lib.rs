@@ -71,9 +71,9 @@ pub use crate::protocols::{
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::public_folders::{
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderRights, PublicFolderTree,
-    UpsertPublicFolderItemInput,
+    CreatePublicFolderInput, CreatePublicFolderTreeInput, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderRights, PublicFolderTree, UpsertPublicFolderItemInput,
 };
 pub use crate::recoverable_items::RecoverableItem;
 pub use crate::submission::{

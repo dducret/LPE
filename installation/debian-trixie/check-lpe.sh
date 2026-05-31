@@ -139,6 +139,18 @@ recoverable_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -
   || fail "Recoverable-item change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Recoverable-item change-log constraints are present"
 
+public_folder_table_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_per_user_state');")" \
+  || fail "Unable to inspect public-folder tables"
+[[ "$public_folder_table_count" == "5" ]] \
+  || fail "Public-folder canonical tables are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Public-folder canonical tables are present"
+
+public_folder_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_item%';")" \
+  || fail "Unable to inspect public-folder change-log constraints"
+[[ "$public_folder_change_constraint_count" -ge "4" ]] \
+  || fail "Public-folder change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Public-folder change-log constraints are present"
+
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 expected_schema_version="$(

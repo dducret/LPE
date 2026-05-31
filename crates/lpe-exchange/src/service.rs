@@ -25,7 +25,7 @@ use lpe_storage::{
     ClientTask, CollaborationCollection, JmapEmail, JmapEmailAddress, JmapImportedEmailInput,
     JmapMailbox, JmapMailboxCreateInput, PublicFolder, PublicFolderItem, Storage,
     SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput,
+    UpsertClientTaskInput, UpsertPublicFolderItemInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -2054,6 +2054,32 @@ where
 
             match disposition {
                 "SaveOnly" => {
+                    if let Some(public_folder_id) =
+                        requested_public_folder_ids(request).into_iter().next()
+                    {
+                        let item = self
+                            .store
+                            .upsert_public_folder_item(
+                                UpsertPublicFolderItemInput {
+                                    id: None,
+                                    account_id: principal.account_id,
+                                    public_folder_id,
+                                    item_kind: "post".to_string(),
+                                    message_class: "IPM.Post".to_string(),
+                                    subject: input.subject,
+                                    body_text: input.body_text,
+                                    body_html_sanitized: input.body_html_sanitized,
+                                    source_payload_json: "{}".to_string(),
+                                },
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-create-public-folder-item".to_string(),
+                                    subject: subject_for_audit,
+                                },
+                            )
+                            .await?;
+                        return Ok(create_public_folder_item_success_response(&item));
+                    }
                     if let Some(mailbox_id) = self
                         .requested_mailbox_folder_ids(principal, request)
                         .await?
@@ -4857,6 +4883,29 @@ fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> Stri
         ),
         message_id = message_id,
         delivery_status = escape_xml(delivery_status),
+    )
+}
+
+fn create_public_folder_item_success_response(item: &PublicFolderItem) -> String {
+    format!(
+        concat!(
+            "<m:CreateItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>",
+            "<t:Message>",
+            "<t:ItemId Id=\"public-folder-item:{id}\" ChangeKey=\"{change_key}\"/>",
+            "<t:ParentFolderId Id=\"public-folder:{folder_id}\"/>",
+            "</t:Message>",
+            "</m:Items>",
+            "</m:CreateItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateItemResponse>"
+        ),
+        id = item.id,
+        folder_id = item.public_folder_id,
+        change_key = escape_xml(&public_folder_item_change_key(item)),
     )
 }
 

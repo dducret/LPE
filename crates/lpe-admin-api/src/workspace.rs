@@ -5,12 +5,13 @@ use axum::{
 };
 use lpe_storage::{
     AuditEntryInput, AuthenticatedAccount, ClientContact, ClientEvent, ClientNote, ClientReminder,
-    ClientTask, ClientTaskList, ClientWorkspace, HealthResponse, JmapEmail,
-    JmapEmailFollowupUpdate, JournalEntry, MailboxAccountAccess, OutlookProfileState, PublicFolder,
-    PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderTree, RecoverableItem,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    ClientTask, ClientTaskList, ClientWorkspace, CreatePublicFolderInput,
+    CreatePublicFolderTreeInput, HealthResponse, JmapEmail, JmapEmailFollowupUpdate, JournalEntry,
+    MailboxAccountAccess, OutlookProfileState, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderTree, RecoverableItem, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, Storage, SubmitMessageInput, SubmittedMessage,
+    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientNoteInput, UpsertClientTaskInput, UpsertJournalEntryInput,
     UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
@@ -21,7 +22,8 @@ use crate::{
     http::{bad_request_error, internal_error},
     observability, require_account,
     types::{
-        ApiResult, PublicFolderPerUserStatePatchBatchRequest, PublicFolderPermissionRequest,
+        ApiResult, CreatePublicFolderRequest, CreatePublicFolderTreeRequest,
+        PublicFolderPerUserStatePatchBatchRequest, PublicFolderPermissionRequest,
         RecoverableItemsQueryRequest, ReminderQueryRequest, RestoreRecoverableItemRequest,
         SubmitMessageRequest, SubmitRecipientRequest, UpdateMessageFlagRequest,
         UpsertClientContactRequest, UpsertClientEventRequest, UpsertClientNoteRequest,
@@ -530,6 +532,30 @@ pub(crate) async fn list_public_folder_trees(
     ))
 }
 
+pub(crate) async fn create_public_folder_tree(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    Json(request): Json<CreatePublicFolderTreeRequest>,
+) -> ApiResult<PublicFolder> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .create_public_folder_tree(
+                CreatePublicFolderTreeInput {
+                    account_id: account.account_id,
+                    display_name: request.display_name,
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "create-public-folder-tree".to_string(),
+                    subject: "public-folder-tree".to_string(),
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
 pub(crate) async fn get_public_folder(
     State(storage): State<Storage>,
     headers: HeaderMap,
@@ -553,6 +579,36 @@ pub(crate) async fn list_public_folder_children(
     Ok(Json(
         storage
             .fetch_public_folder_children(account.account_id, folder_id)
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn create_public_folder_child(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(folder_id): AxumPath<Uuid>,
+    Json(request): Json<CreatePublicFolderRequest>,
+) -> ApiResult<PublicFolder> {
+    let account = require_account(&storage, &headers).await?;
+    Ok(Json(
+        storage
+            .create_public_folder_child(
+                CreatePublicFolderInput {
+                    account_id: account.account_id,
+                    parent_folder_id: folder_id,
+                    display_name: request.display_name,
+                    folder_class: request
+                        .folder_class
+                        .unwrap_or_else(|| "IPF.Note".to_string()),
+                    sort_order: request.sort_order.unwrap_or(0),
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "create-public-folder".to_string(),
+                    subject: folder_id.to_string(),
+                },
+            )
             .await
             .map_err(bad_request_error)?,
     ))

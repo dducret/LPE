@@ -39,8 +39,10 @@ public-folder storage and APIs before enabling any public-folder ROP:
 The API layer should come before protocol support:
 
 - `GET /api/mail/public-folders/trees`
+- `POST /api/mail/public-folders/trees`
 - `GET /api/mail/public-folders/{folderId}`
 - `GET /api/mail/public-folders/{folderId}/children`
+- `POST /api/mail/public-folders/{folderId}/children`
 - `GET /api/mail/public-folders/{folderId}/items`
 - `POST /api/mail/public-folders/{folderId}/items`
 - `PATCH /api/mail/public-folders/{folderId}/items/{itemId}`

@@ -25,6 +25,20 @@ pub struct UpsertPublicFolderItemRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreatePublicFolderTreeRequest {
+    pub display_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePublicFolderRequest {
+    pub display_name: String,
+    pub folder_class: Option<String>,
+    pub sort_order: Option<i32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicFolderPermissionRequest {
     pub may_read: bool,
     pub may_write: bool,

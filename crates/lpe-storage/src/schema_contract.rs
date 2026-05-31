@@ -767,6 +767,19 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx",
         ],
     );
+
+    assert_source_contains_all(
+        "update-lpe.sh public-folder compatibility patch",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "CREATE TABLE IF NOT EXISTS public.public_folder_trees",
+            "CREATE TABLE IF NOT EXISTS public.public_folders",
+            "CREATE TABLE IF NOT EXISTS public.public_folder_items",
+            "CREATE TABLE IF NOT EXISTS public.public_folder_permissions",
+            "CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state",
+            "public_folder_change_constraint_count",
+        ],
+    );
 }
 
 #[test]

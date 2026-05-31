@@ -56,8 +56,9 @@ use crate::{
         update_tenant_storage_policy,
     },
     workspace::{
-        client_workspace, delete_client_contact, delete_client_event, delete_client_note,
-        delete_client_task, delete_draft_message, delete_journal_entry, delete_public_folder_item,
+        client_workspace, create_public_folder_child, create_public_folder_tree,
+        delete_client_contact, delete_client_event, delete_client_note, delete_client_task,
+        delete_draft_message, delete_journal_entry, delete_public_folder_item,
         delete_public_folder_permission, delete_search_folder, get_client_note, get_client_task,
         get_journal_entry, get_public_folder, get_search_folder, list_client_notes,
         list_client_task_lists, list_client_tasks, list_journal_entries,
@@ -180,11 +181,14 @@ pub fn router(storage: Storage) -> Router {
         .route("/mail/messages/draft", post(save_draft_message))
         .route("/mail/messages/{message_id}/flag", put(update_message_flag))
         .route("/mail/recoverable-items", get(list_recoverable_items))
-        .route("/mail/public-folders/trees", get(list_public_folder_trees))
+        .route(
+            "/mail/public-folders/trees",
+            get(list_public_folder_trees).post(create_public_folder_tree),
+        )
         .route("/mail/public-folders/{folder_id}", get(get_public_folder))
         .route(
             "/mail/public-folders/{folder_id}/children",
-            get(list_public_folder_children),
+            get(list_public_folder_children).post(create_public_folder_child),
         )
         .route(
             "/mail/public-folders/{folder_id}/items",

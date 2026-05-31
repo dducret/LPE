@@ -262,6 +262,133 @@ CREATE INDEX IF NOT EXISTS recoverable_items_cleanup_idx
 CREATE INDEX IF NOT EXISTS recoverable_items_message_idx
     ON public.recoverable_items (tenant_id, message_id);
 
+CREATE TABLE IF NOT EXISTS public.public_folder_trees (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    canonical_id UUID NOT NULL,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'disabled', 'deleted')),
+    admin_owner_account_id UUID NOT NULL,
+    root_folder_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, canonical_id),
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, admin_owner_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS public_folder_trees_tenant_state_idx
+    ON public.public_folder_trees (tenant_id, lifecycle_state, display_name, id);
+
+CREATE TABLE IF NOT EXISTS public.public_folders (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    tree_id UUID NOT NULL,
+    parent_folder_id UUID,
+    canonical_id UUID NOT NULL,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    folder_class TEXT NOT NULL DEFAULT 'IPF.Note' CHECK (btrim(folder_class) <> ''),
+    path TEXT NOT NULL CHECK (btrim(path) <> ''),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'hidden', 'deleted')),
+    change_counter BIGINT NOT NULL DEFAULT 1 CHECK (change_counter > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, canonical_id),
+    UNIQUE (tenant_id, tree_id, parent_folder_id, display_name),
+    FOREIGN KEY (tenant_id, tree_id) REFERENCES public.public_folder_trees (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, parent_folder_id) REFERENCES public.public_folders (tenant_id, id) ON DELETE CASCADE
+);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.public_folder_trees'::regclass
+          AND conname = 'public_folder_trees_root_folder_fk'
+    ) THEN
+        ALTER TABLE public.public_folder_trees
+            ADD CONSTRAINT public_folder_trees_root_folder_fk
+            FOREIGN KEY (tenant_id, root_folder_id) REFERENCES public.public_folders (tenant_id, id) ON DELETE RESTRICT;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS public_folders_tree_parent_idx
+    ON public.public_folders (tenant_id, tree_id, parent_folder_id, lifecycle_state, sort_order, display_name, id);
+
+CREATE TABLE IF NOT EXISTS public.public_folder_items (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    public_folder_id UUID NOT NULL,
+    message_id UUID,
+    item_kind TEXT NOT NULL DEFAULT 'post' CHECK (item_kind IN ('post', 'message', 'contact', 'calendar', 'task', 'note', 'journal')),
+    message_class TEXT NOT NULL DEFAULT 'IPM.Post' CHECK (btrim(message_class) <> ''),
+    subject TEXT NOT NULL DEFAULT '',
+    body_text TEXT NOT NULL DEFAULT '',
+    body_html_sanitized TEXT,
+    source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'deleted')),
+    change_counter BIGINT NOT NULL DEFAULT 1 CHECK (change_counter > 0),
+    created_by_account_id UUID NOT NULL,
+    updated_by_account_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (jsonb_typeof(source_payload_json) = 'object'),
+    FOREIGN KEY (tenant_id, public_folder_id) REFERENCES public.public_folders (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, message_id) REFERENCES public.messages (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, updated_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS public_folder_items_folder_idx
+    ON public.public_folder_items (tenant_id, public_folder_id, lifecycle_state, updated_at DESC, id);
+
+CREATE TABLE IF NOT EXISTS public.public_folder_permissions (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    public_folder_id UUID NOT NULL,
+    principal_account_id UUID NOT NULL,
+    may_read BOOLEAN NOT NULL DEFAULT TRUE,
+    may_write BOOLEAN NOT NULL DEFAULT FALSE,
+    may_delete BOOLEAN NOT NULL DEFAULT FALSE,
+    may_share BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, public_folder_id, principal_account_id),
+    CHECK (may_read OR (NOT may_write AND NOT may_delete AND NOT may_share)),
+    CHECK ((NOT may_delete) OR may_write),
+    CHECK ((NOT may_share) OR may_write),
+    FOREIGN KEY (tenant_id, public_folder_id) REFERENCES public.public_folders (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, principal_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS public_folder_permissions_principal_idx
+    ON public.public_folder_permissions (tenant_id, principal_account_id, public_folder_id);
+
+CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state (
+    tenant_id UUID NOT NULL,
+    public_folder_id UUID NOT NULL,
+    item_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    last_seen_change BIGINT NOT NULL DEFAULT 0 CHECK (last_seen_change >= 0),
+    private_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, public_folder_id, item_id, account_id),
+    CHECK (jsonb_typeof(private_json) = 'object'),
+    FOREIGN KEY (tenant_id, public_folder_id) REFERENCES public.public_folders (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, item_id) REFERENCES public.public_folder_items (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS public_folder_per_user_state_account_idx
+    ON public.public_folder_per_user_state (tenant_id, account_id, public_folder_id, updated_at DESC);
+
 DO $$
 DECLARE
     existing_constraint TEXT;
@@ -273,7 +400,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%object_kind%'
           AND pg_get_constraintdef(oid) LIKE '%conversation_action%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%recoverable_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -307,7 +434,12 @@ BEGIN
                 'search_folder_definition',
                 'sieve_script',
                 'conversation_action',
-                'recoverable_item'
+                'recoverable_item',
+                'public_folder_tree',
+                'public_folder',
+                'public_folder_item',
+                'public_folder_permission',
+                'public_folder_per_user_state'
             ));
     END IF;
 
@@ -318,7 +450,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%summary_json%'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%recoverable_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -400,7 +532,12 @@ BEGIN
                         'sender_right',
                         'search_folder_definition',
                         'sieve_script',
-                        'conversation_action'
+                        'conversation_action',
+                        'public_folder_tree',
+                        'public_folder',
+                        'public_folder_item',
+                        'public_folder_permission',
+                        'public_folder_per_user_state'
                     )
                     AND account_id IS NOT NULL
                     AND mailbox_id IS NULL
@@ -415,7 +552,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%object_kind%'
           AND pg_get_constraintdef(oid) LIKE '%sieve_script%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%recoverable_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
     LOOP
         EXECUTE format('ALTER TABLE public.tombstones DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -446,7 +583,12 @@ BEGIN
                 'sender_right',
                 'search_folder_definition',
                 'sieve_script',
-                'recoverable_item'
+                'recoverable_item',
+                'public_folder_tree',
+                'public_folder',
+                'public_folder_item',
+                'public_folder_permission',
+                'public_folder_per_user_state'
             ));
     END IF;
 
@@ -457,7 +599,7 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message_id%'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%recoverable_item%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_item%'
     LOOP
         EXECUTE format('ALTER TABLE public.tombstones DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -520,7 +662,12 @@ BEGIN
                         'mailbox_delegation_grant',
                         'sender_right',
                         'search_folder_definition',
-                        'sieve_script'
+                        'sieve_script',
+                        'public_folder_tree',
+                        'public_folder',
+                        'public_folder_item',
+                        'public_folder_permission',
+                        'public_folder_per_user_state'
                     )
                     AND account_id IS NOT NULL
                     AND mailbox_id IS NULL
@@ -549,6 +696,12 @@ recoverable_mailbox_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -t
 recoverable_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%recoverable_item%';")"
 if [[ "${recoverable_table}" != "recoverable_items" || "${recoverable_account_column_count}" != "3" || "${recoverable_mailbox_column_count}" != "1" || "${recoverable_change_constraint_count}" -lt "4" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected recoverable-items shape." >&2
+  exit 1
+fi
+public_folder_table_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_per_user_state');")"
+public_folder_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_item%';")"
+if [[ "${public_folder_table_count}" != "5" || "${public_folder_change_constraint_count}" -lt "4" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce the expected public-folder shape." >&2
   exit 1
 fi
 echo "Applied idempotent LPE 0.4 schema compatibility updates."

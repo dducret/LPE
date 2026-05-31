@@ -31,6 +31,12 @@ pub struct PublicFolderTree {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct CreatePublicFolderTreeInput {
+    pub account_id: Uuid,
+    pub display_name: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicFolder {
@@ -47,6 +53,15 @@ pub struct PublicFolder {
     pub rights: PublicFolderRights,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CreatePublicFolderInput {
+    pub account_id: Uuid,
+    pub parent_folder_id: Uuid,
+    pub display_name: String,
+    pub folder_class: String,
+    pub sort_order: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,6 +153,162 @@ struct PublicFolderAccess {
 }
 
 impl Storage {
+    pub async fn create_public_folder_tree(
+        &self,
+        input: CreatePublicFolderTreeInput,
+        audit: AuditEntryInput,
+    ) -> Result<PublicFolder> {
+        let display_name = input.display_name.trim();
+        if display_name.is_empty() {
+            bail!("public folder tree display name is required");
+        }
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let tree_id = Uuid::new_v4();
+        let root_folder_id = Uuid::new_v4();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO public_folder_trees (
+                id, tenant_id, canonical_id, display_name, admin_owner_account_id
+            )
+            VALUES ($1, $2, $1, $3, $4)
+            "#,
+        )
+        .bind(tree_id)
+        .bind(&tenant_id)
+        .bind(display_name)
+        .bind(input.account_id)
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO public_folders (
+                id, tenant_id, tree_id, canonical_id, display_name, folder_class, path, sort_order
+            )
+            VALUES ($1, $2, $3, $1, $4, 'IPF.Note', $5, 0)
+            "#,
+        )
+        .bind(root_folder_id)
+        .bind(&tenant_id)
+        .bind(tree_id)
+        .bind(display_name)
+        .bind(format!("/{display_name}"))
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"
+            UPDATE public_folder_trees
+            SET root_folder_id = $3, updated_at = NOW()
+            WHERE tenant_id = $1 AND id = $2
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(tree_id)
+        .bind(root_folder_id)
+        .execute(&mut *tx)
+        .await?;
+        let access = PublicFolderAccess {
+            tenant_id,
+            tree_admin_owner_account_id: input.account_id,
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        };
+        self.record_public_folder_change(
+            &mut tx,
+            &access,
+            input.account_id,
+            root_folder_id,
+            "public_folder_tree",
+            tree_id,
+            "created",
+            json!({"rootFolderId": root_folder_id}),
+        )
+        .await?;
+        self.record_public_folder_change(
+            &mut tx,
+            &access,
+            input.account_id,
+            root_folder_id,
+            "public_folder",
+            root_folder_id,
+            "created",
+            json!({"folderId": root_folder_id, "treeId": tree_id}),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
+        tx.commit().await?;
+        self.fetch_public_folder(input.account_id, root_folder_id)
+            .await
+    }
+
+    pub async fn create_public_folder_child(
+        &self,
+        input: CreatePublicFolderInput,
+        audit: AuditEntryInput,
+    ) -> Result<PublicFolder> {
+        let display_name = input.display_name.trim();
+        if display_name.is_empty() {
+            bail!("public folder display name is required");
+        }
+        let access = self
+            .public_folder_access(input.account_id, input.parent_folder_id)
+            .await?;
+        ensure_tree_admin(input.account_id, access)?;
+        let parent = self
+            .fetch_public_folder_row(input.account_id, input.parent_folder_id)
+            .await?;
+        let folder_id = Uuid::new_v4();
+        let folder_class = if input.folder_class.trim().is_empty() {
+            "IPF.Note"
+        } else {
+            input.folder_class.trim()
+        };
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            r#"
+            INSERT INTO public_folders (
+                id, tenant_id, tree_id, parent_folder_id, canonical_id, display_name,
+                folder_class, path, sort_order
+            )
+            VALUES ($1, $2, $3, $4, $1, $5, $6, $7, $8)
+            "#,
+        )
+        .bind(folder_id)
+        .bind(&access.tenant_id)
+        .bind(parent.tree_id)
+        .bind(input.parent_folder_id)
+        .bind(display_name)
+        .bind(folder_class)
+        .bind(format!(
+            "{}/{}",
+            parent.path.trim_end_matches('/'),
+            display_name
+        ))
+        .bind(input.sort_order)
+        .execute(&mut *tx)
+        .await?;
+        self.record_public_folder_change(
+            &mut tx,
+            &access,
+            input.account_id,
+            input.parent_folder_id,
+            "public_folder",
+            folder_id,
+            "created",
+            json!({
+                "folderId": folder_id,
+                "parentFolderId": input.parent_folder_id,
+                "treeId": parent.tree_id,
+            }),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &access.tenant_id, audit).await?;
+        tx.commit().await?;
+        self.fetch_public_folder(input.account_id, folder_id).await
+    }
+
     pub async fn fetch_public_folder_trees(
         &self,
         account_id: Uuid,
@@ -855,6 +1026,14 @@ fn ensure_share(access: PublicFolderAccess) -> Result<()> {
         Ok(())
     } else {
         bail!("public folder share access is not granted")
+    }
+}
+
+fn ensure_tree_admin(account_id: Uuid, access: PublicFolderAccess) -> Result<()> {
+    if account_id == access.tree_admin_owner_account_id {
+        Ok(())
+    } else {
+        bail!("public folder structural changes require tree owner access")
     }
 }
 

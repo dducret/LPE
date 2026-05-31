@@ -10,7 +10,8 @@ use lpe_storage::{
     PublicFolderTree, RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
     SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
     UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertSearchFolderInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -465,6 +466,12 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderItem>>;
+
+    fn upsert_public_folder_item<'a>(
+        &'a self,
+        input: UpsertPublicFolderItemInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolderItem>;
 
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
@@ -1980,6 +1987,14 @@ impl ExchangeStore for Storage {
         Box::pin(async move {
             Storage::fetch_public_folder_items(self, principal_account_id, folder_id).await
         })
+    }
+
+    fn upsert_public_folder_item<'a>(
+        &'a self,
+        input: UpsertPublicFolderItemInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolderItem> {
+        Box::pin(async move { Storage::upsert_public_folder_item(self, input, audit).await })
     }
 
     fn poll_mapi_notifications<'a>(

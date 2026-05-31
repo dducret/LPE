@@ -16,7 +16,7 @@ use lpe_storage::{
     SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
     SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
     UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertSearchFolderInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -941,6 +941,14 @@ impl ExchangeStore for FakeStore {
         _folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
         Box::pin(async move { Ok(Vec::new()) })
+    }
+
+    fn upsert_public_folder_item<'a>(
+        &'a self,
+        _input: UpsertPublicFolderItemInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolderItem> {
+        Box::pin(async move { Err(anyhow::anyhow!("public folder not found")) })
     }
 
     fn fetch_mapi_identities_by_object_ids<'a>(
