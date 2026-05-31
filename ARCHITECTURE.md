@@ -90,6 +90,7 @@ The important non-negotiable rules are:
 - `docs/architecture/activesync-mvp.md`
 - `docs/architecture/ews-mapi-mvp.md`
 - `docs/architecture/mapi-over-http-implementation-plan.md`
+- `docs/architecture/public-folders-mapi-mvp.md`
 - `docs/architecture/outlook-cached-mode-gate-evidence-template.md`
 - `docs/architecture/mapi-full-object-support-execution.md`
 - `docs/architecture/nspi-support-matrix.md`

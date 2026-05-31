@@ -351,7 +351,7 @@ fn bounded_search_property_clause(
             "field": "body",
             "equals": value.clone().into_text().ok_or(EC_SEARCH_UNSUPPORTED)?
         })),
-        PID_TAG_CLIENT_SUBMIT_TIME => {
+        PID_TAG_CLIENT_SUBMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => {
             let value = filetime_to_rfc3339_utc(value.as_i64().ok_or(EC_SEARCH_UNSUPPORTED)?)
                 .ok_or(EC_SEARCH_UNSUPPORTED)?;
             match relop {
@@ -520,7 +520,7 @@ fn property_tag_for_search_field(field: &str) -> Result<u32, u32> {
         "unread" => Ok(PID_TAG_READ),
         "flagged" => Ok(PID_TAG_FLAG_STATUS),
         "hasAttachment" => Ok(PID_TAG_HAS_ATTACHMENTS),
-        "receivedAt" => Ok(PID_TAG_CLIENT_SUBMIT_TIME),
+        "receivedAt" => Ok(PID_TAG_MESSAGE_DELIVERY_TIME),
         _ => Err(EC_SEARCH_UNSUPPORTED),
     }
 }

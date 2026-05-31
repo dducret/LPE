@@ -702,6 +702,14 @@ collaboration, rights, or user-visible state.
 - `mailbox_delegation_grants`
 - `sender_rights`
 
+Public folders are intentionally absent from schema v2. When they become
+in-scope, add the canonical tables described in
+`docs/architecture/public-folders-mapi-mvp.md` before enabling MAPI/HTTP
+public-folder or per-user read/unread ROPs. Public-folder state must include
+folder tree rows, item rows, same-tenant permissions, per-user read/unread rows,
+and replay/tombstone state; it must not be stored as MAPI-local public-folder
+blobs.
+
 ### Search and AI Projections
 
 - `document_projections`

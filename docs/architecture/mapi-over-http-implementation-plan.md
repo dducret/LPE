@@ -254,8 +254,10 @@ non-canonical LPE state.
   `search_folders` rows. The supported criteria subset is folder scope,
   unread/read predicates, follow-up flagged predicates, category keywords,
   attachment-presence predicates, sender display or address text, subject/body
-  text, and received-date equality or inclusive bounds. `RopSetSearchCriteria`
-  updates only existing
+  text, and received-date equality or inclusive bounds. Received-date criteria
+  accept Outlook delivery-time restrictions and map them to canonical
+  `receivedAt` JSON instead of storing an Exchange search-folder blob.
+  `RopSetSearchCriteria` updates only existing
   user-saved search folders by translating that subset into canonical
   `scope_json` and `restriction_json` with `kind = "mapi_bounded"`.
   Built-in search folders remain read-only. Unsupported restriction operators,
@@ -421,7 +423,7 @@ not by itself authorize broad client publication.
 
 | Surface | Status |
 | --- | --- |
-| Public folders | Public-folder logon and replica/per-user state are deferred. The server must return parseable unsupported responses without creating protocol-local public-folder state. |
+| Public folders | Public-folder logon and replica/per-user state are deferred. The server must return parseable unsupported responses without creating protocol-local public-folder state. The target canonical SQL/API/replay design is documented in `docs/architecture/public-folders-mapi-mvp.md`; no public-folder ROP should be enabled before that canonical layer exists. |
 | Outlook Anywhere / RPC over HTTP | Deferred legacy compatibility shim. `EXPR` publication requires a real `/rpc/rpcproxy.dll` path and separate evidence. |
 | Cross-process MAPI session replay and load-balanced failover | Deferred production hardening. First lab gate may use single-node sticky sessions. |
 | Client SMTP in core LPE | Forbidden. Submission must use canonical LPE submission, not a client SMTP endpoint in the core server. |
@@ -637,6 +639,14 @@ Success criteria for each version:
 7. Evidence records the Outlook version/build, Windows build, LPE commit/build,
    account and tenant used, public host, endpoint flags, autodiscover response,
    RCA result, local harness result, and relevant server/client logs.
+
+The 2026-05-31 Outlook 16.0.20026 cached-mode audit in
+`docs/audits/mapi-http-outlook-cached-mode-audit-2026-05-31.md` records partial
+real-client evidence for autodiscover, NSPI bootstrap, EMSMDB profile/sync ROPs,
+session cookies, and checkpoint storage. It does not include Microsoft RCA
+exported output, does not identify separate Outlook 2016 and Outlook 2019 runs,
+and does not prove close/reopen-twice or canonical send/`Sent` behavior. Treat it
+as implementation evidence only, not a publication-gate pass.
 
 Calendar troubleshooting diagnostics log the Calendar default folder contract,
 projected canonical calendar counts, and hierarchy-sync `PidTagParentSourceKey`
