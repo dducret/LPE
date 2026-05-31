@@ -937,6 +937,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::JournalEntry => "journal_entry",
         MapiIdentityObjectKind::DelegateFreeBusyMessage => "delegate_freebusy_message",
         MapiIdentityObjectKind::PublicFolder => "public_folder",
+        MapiIdentityObjectKind::PublicFolderItem => "public_folder_item",
     }
 }
 
@@ -1414,6 +1415,10 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *message_id);
         }
         MapiObject::RecoverableItem { folder_id, item_id } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *item_id);
+        }
+        MapiObject::PublicFolderItem { folder_id, item_id } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *item_id);
         }

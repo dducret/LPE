@@ -4,15 +4,20 @@
 
 Public folders now have canonical `LPE` storage, authenticated mail APIs,
 permission rows, per-user read/unread rows, replay facts, and tombstones.
-MAPI/HTTP public-folder replica, item, and per-user-state ROPs remain guarded
-protocol work; they must not create protocol-local public-folder state. The
+MAPI/HTTP public-folder replica, item mutation, item sync, and per-user-state
+ROPs remain guarded protocol work; they must not create protocol-local
+public-folder state. The
 first bounded MAPI steps are enabled: public-folder `RopLogon` now creates a
 distinct public-folder store handle, an immediate root hierarchy probe returns
 an empty guarded hierarchy instead of leaking private mailbox folders, and a
 store-backed hierarchy probe can list canonical public-folder roots from
-`public_folders`. Bounded EWS folder, item projection, item lookup, post
-creation, item update, and item deletion may expose or mutate public-folder data
-only through the canonical tables described here.
+`public_folders`. Store-backed public-folder hierarchy tables can also traverse
+canonical child folders, and normal public-folder contents tables can project
+canonical post-like items as read-only MAPI rows. `RopOpenMessage` plus
+`RopGetPropertiesSpecific` can read the bounded canonical property projection
+for those public-folder posts. Bounded EWS folder, item projection, item lookup,
+post creation, item update, and item deletion may expose or mutate
+public-folder data only through the canonical tables described here.
 
 Current bounded EWS coverage includes public-folder `FindFolder`, `GetFolder`,
 `SyncFolderHierarchy`, `CreateFolder`, `DeleteFolder`, `FindItem`,
@@ -93,9 +98,11 @@ as a shared item mutation. Public-folder item changes and per-user read-state
 changes therefore need separate replay facts so MAPI, JMAP, DAV, ActiveSync, and
 future web clients can sync item content and user-private state independently.
 
-MAPI/HTTP support can begin from the canonical API and replay model above. The
-next ROP mapping after the enabled public-folder logon and root discovery should
-be child-folder hierarchy traversal and read-only item sync.
+MAPI/HTTP support can begin from the canonical API and replay model above.
+Current bounded support covers public-folder store logon, root hierarchy
+discovery, child-folder hierarchy traversal, and read-only contents-table row
+projection plus item open/read for canonical post-like items. The next ROP
+mapping should be sync export over canonical public-folder items.
 `RopGetPerUserLongTermIds`, `RopGetPerUserGuid`,
 `RopReadPerUserInformation`, and `RopWritePerUserInformation` may map only to
 `public_folder_per_user_state`; they must not create Exchange-compatible binary
@@ -107,8 +114,8 @@ state.
 
 | Area | Canonical source | MAPI/HTTP rule |
 | --- | --- | --- |
-| Public-folder tree | `public_folder_trees`, `public_folders` | No public-folder logon or hierarchy ROP until durable tree state exists. |
-| Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | No opaque Exchange message blobs. |
+| Public-folder tree | `public_folder_trees`, `public_folders` | Public-folder logon and hierarchy tables may expose only canonical root and child folder rows. |
+| Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | Contents tables and item open/read may project post-like items read-only; no opaque Exchange message blobs. |
 | Permissions | `public_folder_permissions` | Same-tenant grants only; no MAPI-local ACLs. |
 | Per-user read/unread | `public_folder_per_user_state` | User-private state only; item content change log is separate. |
 | Replay | `public_folder_change_log` and public-folder tombstones, or proven generic equivalents | Must support permission revocation, item deletion, and per-user-state deltas. |

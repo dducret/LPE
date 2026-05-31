@@ -18,6 +18,7 @@ use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest, MapiNavigationSh
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
     public_folders: Vec<MapiPublicFolder>,
+    public_folder_items: Vec<MapiPublicFolderItem>,
     collaboration_folders: Vec<MapiCollaborationFolder>,
     messages: Vec<MapiMessage>,
     contacts: Vec<MapiContact>,
@@ -49,6 +50,13 @@ pub(crate) struct MapiPublicFolder {
     pub(crate) folder: PublicFolder,
     pub(crate) item_count: u32,
     pub(crate) child_count: u32,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapiPublicFolderItem {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) item: PublicFolderItem,
 }
 
 #[derive(Debug, Clone)]
@@ -369,6 +377,7 @@ impl MapiMailStoreSnapshot {
         Self {
             folders,
             public_folders: Vec::new(),
+            public_folder_items: Vec::new(),
             collaboration_folders,
             messages,
             contacts,
@@ -528,6 +537,18 @@ impl MapiMailStoreSnapshot {
                 }
             })
             .collect();
+        self.public_folder_items = items
+            .into_iter()
+            .filter_map(|item| {
+                let folder_id =
+                    crate::mapi::identity::mapped_mapi_object_id(&item.public_folder_id)?;
+                Some(MapiPublicFolderItem {
+                    id: mapi_item_id(&item.id),
+                    folder_id,
+                    item,
+                })
+            })
+            .collect();
         self
     }
 
@@ -679,6 +700,26 @@ impl MapiMailStoreSnapshot {
         self.public_folders
             .iter()
             .find(|folder| folder.id == folder_id)
+    }
+
+    pub(crate) fn public_folder_items_for_folder(
+        &self,
+        folder_id: u64,
+    ) -> Vec<&MapiPublicFolderItem> {
+        self.public_folder_items
+            .iter()
+            .filter(|item| item.folder_id == folder_id)
+            .collect()
+    }
+
+    pub(crate) fn public_folder_item_for_id(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> Option<&MapiPublicFolderItem> {
+        self.public_folder_items
+            .iter()
+            .find(|item| item.folder_id == folder_id && item.id == item_id)
     }
 
     pub(crate) fn collaboration_folder_for_id(
@@ -1208,6 +1249,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &conversation_actions,
                 &delegate_freebusy_messages,
                 &public_folders,
+                &public_folder_items,
             );
             for identity in self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
@@ -1268,6 +1310,7 @@ fn mapi_identity_requests(
     conversation_actions: &[ConversationAction],
     delegate_freebusy_messages: &[DelegateFreeBusyMessageObject],
     public_folders: &[PublicFolder],
+    public_folder_items: &[PublicFolderItem],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
     requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
@@ -1369,6 +1412,12 @@ fn mapi_identity_requests(
     requests.extend(public_folders.iter().map(|folder| MapiIdentityRequest {
         object_kind: MapiIdentityObjectKind::PublicFolder,
         canonical_id: folder.id,
+        reserved_global_counter: None,
+        source_key: None,
+    }));
+    requests.extend(public_folder_items.iter().map(|item| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::PublicFolderItem,
+        canonical_id: item.id,
         reserved_global_counter: None,
         source_key: None,
     }));

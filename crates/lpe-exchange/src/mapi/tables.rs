@@ -11,7 +11,8 @@ use crate::mapi::identity::{
 };
 use crate::mapi_store::{
     MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
-    MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder, MapiRule, MapiTask,
+    MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder, MapiPublicFolderItem, MapiRule,
+    MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -19,7 +20,7 @@ pub(in crate::mapi) fn hierarchy_row_count(
     mailboxes: &[JmapMailbox],
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
-    if is_root_hierarchy_folder(folder_id) {
+    if is_root_hierarchy_folder(folder_id) || snapshot.public_folder_for_id(folder_id).is_some() {
         hierarchy_rows(folder_id, mailboxes, snapshot, None, &[])
             .len()
             .min(u32::MAX as usize) as u32
@@ -35,6 +36,9 @@ pub(in crate::mapi) fn folder_message_count(
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
+        return folder.item_count;
+    }
+    if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
         return folder.item_count;
     }
     if folder_id == REMINDERS_FOLDER_ID {
@@ -926,7 +930,9 @@ pub(in crate::mapi) fn rop_query_rows_response(
             restriction,
             position: table_position,
             ..
-        }) if is_root_hierarchy_folder(*folder_id) => {
+        }) if is_root_hierarchy_folder(*folder_id)
+            || snapshot.public_folder_for_id(*folder_id).is_some() =>
+        {
             start_position = *table_position;
             let columns = if columns.is_empty() {
                 default_hierarchy_columns()
@@ -1002,6 +1008,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 } else {
                     Vec::new()
                 }
+            } else if snapshot.public_folder_for_id(*folder_id).is_some() {
+                snapshot
+                    .public_folder_items_for_folder(*folder_id)
+                    .into_iter()
+                    .map(|item| serialize_public_folder_item_row(item, &columns))
+                    .collect::<Vec<_>>()
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {
                     MapiCollaborationFolderKind::Contacts => {
@@ -4050,6 +4062,67 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_public_folder_item_row(
+    item: &MapiPublicFolderItem,
+    columns: &[u32],
+) -> Vec<u8> {
+    let change_number = mapi_mailstore::change_number_for_store_id(item.id);
+    let message_class = if item.item.message_class.trim().is_empty() {
+        "IPM.Post"
+    } else {
+        item.item.message_class.as_str()
+    };
+    let body_text = item.item.body_text.as_str();
+    let mut row = Vec::new();
+    for column in columns {
+        match canonical_property_storage_tag(*column) {
+            PID_TAG_MID => write_object_id(&mut row, item.id),
+            PID_TAG_INST_ID => write_u64(&mut row, item.id),
+            PID_TAG_INSTANCE_NUM => write_u32(&mut row, 0),
+            PID_TAG_ROW_TYPE => write_u32(&mut row, 0),
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                write_utf16z(&mut row, &item.item.subject)
+            }
+            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, message_class),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
+            PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, 0),
+            PID_TAG_READ => row.push(item.item.is_read as u8),
+            PID_TAG_MESSAGE_SIZE => write_u32(
+                &mut row,
+                body_text
+                    .len()
+                    .saturating_add(item.item.subject.len())
+                    .min(u32::MAX as usize) as u32,
+            ),
+            PID_TAG_HAS_ATTACHMENTS => row.push(0),
+            PID_TAG_BODY_W => write_utf16z(&mut row, body_text),
+            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &crate::mapi::identity::instance_key_for_object_id(item.id),
+            ),
+            PID_TAG_PARENT_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(item.folder_id),
+            ),
+            PID_TAG_SOURCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::source_key_for_store_id(item.id),
+            ),
+            PID_TAG_CHANGE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::change_key_for_change_number(change_number),
+            ),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => write_u16_prefixed_bytes(
+                &mut row,
+                &mapi_mailstore::predecessor_change_list(change_number),
+            ),
+            PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
+            _ => write_property_default(&mut row, *column),
         }
     }
     row

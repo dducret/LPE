@@ -160,6 +160,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         item_id: u64,
     },
+    PublicFolderItem {
+        folder_id: u64,
+        item_id: u64,
+    },
     PendingMessage {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -958,6 +962,7 @@ impl MapiObject {
             | MapiObject::NavigationShortcut { folder_id, .. }
             | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
             | MapiObject::RecoverableItem { folder_id, .. }
+            | MapiObject::PublicFolderItem { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
             | MapiObject::PendingContact { folder_id, .. }
             | MapiObject::PendingEvent { folder_id, .. }

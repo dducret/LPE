@@ -1661,6 +1661,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
         Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
         Some(MapiObject::RecoverableItem { .. }) => "recoverable_item",
+        Some(MapiObject::PublicFolderItem { .. }) => "public_folder_item",
         Some(MapiObject::PendingMessage { .. }) => "pending_message",
         Some(MapiObject::PendingContact { .. }) => "pending_contact",
         Some(MapiObject::PendingEvent { .. }) => "pending_event",
@@ -4884,6 +4885,29 @@ where
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::RecoverableItem {
+                                folder_id,
+                                item_id: message_id,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_open_message_response(
+                            &request,
+                            &item.item.subject,
+                            0,
+                        ));
+                        output_handles.push(handle);
+                    } else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x03,
+                            request.output_handle_index.unwrap_or(0),
+                            0x8004_010F,
+                        ));
+                    }
+                } else if snapshot.public_folder_for_id(folder_id).is_some() {
+                    if let Some(item) = snapshot.public_folder_item_for_id(folder_id, message_id) {
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::PublicFolderItem {
                                 folder_id,
                                 item_id: message_id,
                             },

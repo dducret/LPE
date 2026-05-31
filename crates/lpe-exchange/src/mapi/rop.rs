@@ -806,9 +806,9 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
         | Some(MapiObject::PendingConversationAction { .. }) => {
             default_conversation_action_property_tags()
         }
-        Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
-            default_message_property_tags()
-        }
+        Some(MapiObject::Message { .. })
+        | Some(MapiObject::PublicFolderItem { .. })
+        | Some(MapiObject::PendingMessage { .. }) => default_message_property_tags(),
         _ => default_folder_property_tags(),
     };
     let mut response = vec![0x09, request.response_handle_index()];
@@ -1070,6 +1070,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 );
             };
             serialize_recoverable_item_row(item, &columns)
+        }
+        Some(MapiObject::PublicFolderItem { folder_id, item_id }) => {
+            let Some(item) = snapshot.public_folder_item_for_id(*folder_id, *item_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_public_folder_item_row(item, &columns)
         }
         Some(MapiObject::Folder {
             folder_id,
@@ -1866,6 +1876,11 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{item_id:#018x}"),
         ),
+        Some(MapiObject::PublicFolderItem { folder_id, item_id }) => (
+            "public_folder_item",
+            format!("{folder_id:#018x}"),
+            format!("{item_id:#018x}"),
+        ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
             format!("{folder_id:#018x}"),
@@ -2126,9 +2141,9 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
             | MapiObject::PendingAttachment { .. }
             | MapiObject::SavedAttachment { .. },
         ) => default_attachment_columns(),
-        Some(MapiObject::Message { .. }) | Some(MapiObject::PendingMessage { .. }) => {
-            default_message_property_tags()
-        }
+        Some(MapiObject::Message { .. })
+        | Some(MapiObject::PublicFolderItem { .. })
+        | Some(MapiObject::PendingMessage { .. }) => default_message_property_tags(),
         Some(MapiObject::Contact { .. }) | Some(MapiObject::PendingContact { .. }) => {
             default_contact_property_tags()
         }
@@ -2371,6 +2386,14 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::RecoverableItem { folder_id, item_id }) => snapshot
             .recoverable_item_for_id(*folder_id, *item_id)
             .map(|item| serialize_recoverable_item_row(item, &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::PublicFolderItem { folder_id, item_id }) => snapshot
+            .public_folder_item_for_id(*folder_id, *item_id)
+            .map(|item| serialize_public_folder_item_row(item, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

@@ -1112,6 +1112,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::NavigationShortcut { .. } => "navigation_shortcut",
         MapiObject::DelegateFreeBusyMessage { .. } => "delegate_freebusy_message",
         MapiObject::RecoverableItem { .. } => "recoverable_item",
+        MapiObject::PublicFolderItem { .. } => "public_folder_item",
         MapiObject::PendingMessage { .. } => "pending_message",
         MapiObject::PendingContact { .. } => "pending_contact",
         MapiObject::PendingEvent { .. } => "pending_event",
