@@ -26619,10 +26619,9 @@ async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical
     let cookie = mapi_cookie_header(&read_response);
     let read_response_rops = response_rops_from_execute_response(read_response).await;
     assert!(contains_bytes(&read_response_rops, b"LPEPFU1\0"));
-    assert!(contains_bytes(
-        &read_response_rops,
-        Uuid::parse_str(item_id).unwrap().as_bytes()
-    ));
+    let mut empty_per_user_stream = b"LPEPFU1\0".to_vec();
+    empty_per_user_stream.extend_from_slice(&0u16.to_le_bytes());
+    assert!(contains_bytes(&read_response_rops, &empty_per_user_stream));
 
     let mut per_user_stream = Vec::new();
     per_user_stream.extend_from_slice(b"LPEPFU1\0");
@@ -26648,12 +26647,38 @@ async fn mapi_over_http_public_folder_per_user_information_round_trips_canonical
         .unwrap();
 
     assert_eq!(write_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&write_response);
     let write_response_rops = response_rops_from_execute_response(write_response).await;
     assert!(contains_bytes(
         &write_response_rops,
         &[0x64, 0x00, 0, 0, 0, 0]
     ));
     assert!(items.lock().unwrap()[0].is_read);
+
+    let mut read_after_write_rops = vec![0x63, 0x00, 0x00];
+    read_after_write_rops.extend_from_slice(&root_long_term_id);
+    read_after_write_rops.push(0);
+    read_after_write_rops.extend_from_slice(&0u32.to_le_bytes());
+    read_after_write_rops.extend_from_slice(&1024u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let read_after_write_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&read_after_write_rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(read_after_write_response.status(), StatusCode::OK);
+    let cookie = mapi_cookie_header(&read_after_write_response);
+    let read_after_write_response_rops =
+        response_rops_from_execute_response(read_after_write_response).await;
+    assert!(contains_bytes(
+        &read_after_write_response_rops,
+        Uuid::parse_str(item_id).unwrap().as_bytes()
+    ));
 
     items.lock().unwrap()[0].lifecycle_state = "deleted".to_string();
     let mut write_deleted_rops = vec![0x64, 0x00, 0x00];

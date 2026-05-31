@@ -368,6 +368,7 @@ struct FakeStore {
     public_folder_items: Arc<Mutex<Vec<PublicFolderItem>>>,
     public_folder_permissions: Arc<Mutex<Vec<PublicFolderPermission>>>,
     public_folder_replicas: Arc<Mutex<Vec<PublicFolderReplica>>>,
+    public_folder_per_user_states: Arc<Mutex<Vec<PublicFolderPerUserState>>>,
     deleted_public_folder_items: Arc<Mutex<Vec<Uuid>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
     calendar_attachments: Arc<Mutex<HashMap<Uuid, Vec<CalendarEventAttachment>>>>,
@@ -728,6 +729,76 @@ impl FakeStore {
         }
     }
 
+    fn ensure_public_folder_tree_owner(account_id: Uuid) -> anyhow::Result<()> {
+        if account_id == Self::account().account_id {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "public folder structural changes require tree owner access"
+            ))
+        }
+    }
+
+    fn public_folder_rights_for(
+        &self,
+        account_id: Uuid,
+        folder_id: Uuid,
+    ) -> anyhow::Result<PublicFolderRights> {
+        let folder = self
+            .public_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|folder| folder.id == folder_id && folder.lifecycle_state == "active")
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("public folder not found"))?;
+        if account_id == Self::account().account_id {
+            Ok(PublicFolderRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            })
+        } else {
+            Ok(folder.rights)
+        }
+    }
+
+    fn ensure_public_folder_read(&self, account_id: Uuid, folder_id: Uuid) -> anyhow::Result<()> {
+        if self
+            .public_folder_rights_for(account_id, folder_id)?
+            .may_read
+        {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("public folder read access is not granted"))
+        }
+    }
+
+    fn ensure_public_folder_write(&self, account_id: Uuid, folder_id: Uuid) -> anyhow::Result<()> {
+        if self
+            .public_folder_rights_for(account_id, folder_id)?
+            .may_write
+        {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("public folder write access is not granted"))
+        }
+    }
+
+    fn ensure_public_folder_delete(&self, account_id: Uuid, folder_id: Uuid) -> anyhow::Result<()> {
+        if self
+            .public_folder_rights_for(account_id, folder_id)?
+            .may_delete
+        {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "public folder delete access is not granted"
+            ))
+        }
+    }
+
     fn public_folder_replica(id: &str, folder_id: &str, server_name: &str) -> PublicFolderReplica {
         PublicFolderReplica {
             id: Uuid::parse_str(id).unwrap(),
@@ -1049,11 +1120,26 @@ impl ExchangeStore for FakeStore {
         input: CreatePublicFolderInput,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, PublicFolder> {
+        let display_name = input.display_name.trim().to_string();
+        if display_name.is_empty() {
+            return Box::pin(async move {
+                Err(anyhow::anyhow!("public folder display name is required"))
+            });
+        }
+        let parent_exists = self.public_folders.lock().unwrap().iter().any(|folder| {
+            folder.id == input.parent_folder_id && folder.lifecycle_state == "active"
+        });
+        if !parent_exists {
+            return Box::pin(async move { Err(anyhow::anyhow!("public folder not found")) });
+        }
+        if let Err(error) = Self::ensure_public_folder_tree_owner(input.account_id) {
+            return Box::pin(async move { Err(error) });
+        }
         let folder_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
         let mut folder = FakeStore::public_folder(
             &folder_id.to_string(),
             Some(&input.parent_folder_id.to_string()),
-            &input.display_name,
+            &display_name,
         );
         folder.folder_class = input.folder_class;
         folder.sort_order = input.sort_order;
@@ -1063,13 +1149,45 @@ impl ExchangeStore for FakeStore {
 
     fn delete_public_folder<'a>(
         &'a self,
-        _principal_account_id: Uuid,
+        principal_account_id: Uuid,
         folder_id: Uuid,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         let deleted = {
             let mut folders = self.public_folders.lock().unwrap();
-            if let Some(folder) = folders.iter_mut().find(|folder| folder.id == folder_id) {
+            let has_children = folders.iter().any(|folder| {
+                folder.parent_folder_id == Some(folder_id) && folder.lifecycle_state == "active"
+            });
+            let has_items =
+                self.public_folder_items.lock().unwrap().iter().any(|item| {
+                    item.public_folder_id == folder_id && item.lifecycle_state == "active"
+                });
+            if let Some(folder) = folders
+                .iter_mut()
+                .find(|folder| folder.id == folder_id && folder.lifecycle_state == "active")
+            {
+                if let Err(error) = Self::ensure_public_folder_tree_owner(principal_account_id) {
+                    return Box::pin(async move { Err(error) });
+                }
+                if folder.parent_folder_id.is_none() {
+                    return Box::pin(async move {
+                        Err(anyhow::anyhow!("public folder tree root cannot be deleted"))
+                    });
+                }
+                if has_children {
+                    return Box::pin(async move {
+                        Err(anyhow::anyhow!(
+                            "public folder with active children cannot be deleted"
+                        ))
+                    });
+                }
+                if has_items {
+                    return Box::pin(async move {
+                        Err(anyhow::anyhow!(
+                            "public folder with active items cannot be deleted"
+                        ))
+                    });
+                }
                 folder.lifecycle_state = "deleted".to_string();
                 true
             } else {
@@ -1086,10 +1204,13 @@ impl ExchangeStore for FakeStore {
 
     fn fetch_public_folder_items<'a>(
         &'a self,
-        _principal_account_id: Uuid,
+        principal_account_id: Uuid,
         folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
-        let items = self
+        if let Err(error) = self.ensure_public_folder_read(principal_account_id, folder_id) {
+            return Box::pin(async move { Err(error) });
+        }
+        let items: Vec<PublicFolderItem> = self
             .public_folder_items
             .lock()
             .unwrap()
@@ -1102,10 +1223,10 @@ impl ExchangeStore for FakeStore {
 
     fn fetch_public_folder_items_by_ids<'a>(
         &'a self,
-        _principal_account_id: Uuid,
+        principal_account_id: Uuid,
         item_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
-        let items = self
+        let items: Vec<PublicFolderItem> = self
             .public_folder_items
             .lock()
             .unwrap()
@@ -1113,6 +1234,13 @@ impl ExchangeStore for FakeStore {
             .filter(|item| item_ids.contains(&item.id) && item.lifecycle_state == "active")
             .cloned()
             .collect();
+        for item in &items {
+            if let Err(error) =
+                self.ensure_public_folder_read(principal_account_id, item.public_folder_id)
+            {
+                return Box::pin(async move { Err(error) });
+            }
+        }
         Box::pin(async move { Ok(items) })
     }
 
@@ -1155,6 +1283,23 @@ impl ExchangeStore for FakeStore {
         input: PublicFolderPermissionInput,
         audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, PublicFolderPermission> {
+        if !input.may_read && (input.may_write || input.may_delete || input.may_share) {
+            return Box::pin(async move {
+                Err(anyhow::anyhow!(
+                    "read access is required when granting write, delete, or share"
+                ))
+            });
+        }
+        if input.may_delete && !input.may_write {
+            return Box::pin(
+                async move { Err(anyhow::anyhow!("delete access requires write access")) },
+            );
+        }
+        if input.may_share && !input.may_write {
+            return Box::pin(
+                async move { Err(anyhow::anyhow!("share access requires write access")) },
+            );
+        }
         let Some(principal) = self
             .directory_accounts
             .lock()
@@ -1241,6 +1386,11 @@ impl ExchangeStore for FakeStore {
         input: UpsertPublicFolderItemInput,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, PublicFolderItem> {
+        if let Err(error) =
+            self.ensure_public_folder_write(input.account_id, input.public_folder_id)
+        {
+            return Box::pin(async move { Err(error) });
+        }
         let mut items = self.public_folder_items.lock().unwrap();
         let item_id = input
             .id
@@ -1288,11 +1438,14 @@ impl ExchangeStore for FakeStore {
 
     fn delete_public_folder_item<'a>(
         &'a self,
-        _principal_account_id: Uuid,
+        principal_account_id: Uuid,
         folder_id: Uuid,
         item_id: Uuid,
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
+        if let Err(error) = self.ensure_public_folder_delete(principal_account_id, folder_id) {
+            return Box::pin(async move { Err(error) });
+        }
         let deleted = {
             let mut items = self.public_folder_items.lock().unwrap();
             if let Some(item) = items.iter_mut().find(|item| {
@@ -1322,21 +1475,20 @@ impl ExchangeStore for FakeStore {
         principal_account_id: Uuid,
         folder_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>> {
-        let states = self
-            .public_folder_items
-            .lock()
-            .unwrap()
+        let items = self.public_folder_items.lock().unwrap();
+        let states = self.public_folder_per_user_states.lock().unwrap();
+        let states = states
             .iter()
-            .filter(|item| item.public_folder_id == folder_id && item.lifecycle_state == "active")
-            .map(|item| PublicFolderPerUserState {
-                public_folder_id: folder_id,
-                item_id: item.id,
-                account_id: principal_account_id,
-                is_read: item.is_read,
-                last_seen_change: item.change_counter,
-                private_json: "{}".to_string(),
-                updated_at: "2026-05-07T12:00:00Z".to_string(),
+            .filter(|state| {
+                state.public_folder_id == folder_id
+                    && state.account_id == principal_account_id
+                    && items.iter().any(|item| {
+                        item.public_folder_id == folder_id
+                            && item.id == state.item_id
+                            && item.lifecycle_state == "active"
+                    })
             })
+            .cloned()
             .collect();
         Box::pin(async move { Ok(states) })
     }
@@ -1348,6 +1500,7 @@ impl ExchangeStore for FakeStore {
         patches: &'a [PublicFolderPerUserStatePatch],
     ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>> {
         let mut items = self.public_folder_items.lock().unwrap();
+        let mut stored_states = self.public_folder_per_user_states.lock().unwrap();
         let mut states = Vec::new();
         for patch in patches {
             let Some(item) = items.iter_mut().find(|item| {
@@ -1360,7 +1513,7 @@ impl ExchangeStore for FakeStore {
                 );
             };
             item.is_read = patch.is_read;
-            states.push(PublicFolderPerUserState {
+            let state = PublicFolderPerUserState {
                 public_folder_id: folder_id,
                 item_id: patch.item_id,
                 account_id: principal_account_id,
@@ -1371,7 +1524,17 @@ impl ExchangeStore for FakeStore {
                     .clone()
                     .unwrap_or_else(|| "{}".to_string()),
                 updated_at: "2026-05-07T12:00:00Z".to_string(),
-            });
+            };
+            if let Some(stored) = stored_states.iter_mut().find(|stored| {
+                stored.public_folder_id == folder_id
+                    && stored.item_id == patch.item_id
+                    && stored.account_id == principal_account_id
+            }) {
+                *stored = state.clone();
+            } else {
+                stored_states.push(state.clone());
+            }
+            states.push(state);
         }
         Box::pin(async move { Ok(states) })
     }
@@ -6334,6 +6497,75 @@ fn hex_nibble(byte: u8) -> u8 {
         b'A'..=b'F' => byte - b'A' + 10,
         _ => panic!("invalid hex byte"),
     }
+}
+
+#[tokio::test]
+async fn fake_store_rejects_invalid_public_folder_permission_rights() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
+        ..Default::default()
+    };
+    let folder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+    let audit = lpe_storage::AuditEntryInput {
+        actor: "alice@example.test".to_string(),
+        action: "mapi-modify-public-folder-permissions".to_string(),
+        subject: folder_id.to_string(),
+    };
+
+    for (may_read, may_write, may_delete, may_share, expected) in [
+        (
+            false,
+            true,
+            false,
+            false,
+            "read access is required when granting write, delete, or share",
+        ),
+        (
+            true,
+            false,
+            true,
+            false,
+            "delete access requires write access",
+        ),
+        (
+            true,
+            false,
+            false,
+            true,
+            "share access requires write access",
+        ),
+    ] {
+        let error = store
+            .upsert_public_folder_permission(
+                PublicFolderPermissionInput {
+                    account_id: FakeStore::account().account_id,
+                    public_folder_id: folder_id,
+                    principal_account_id: delegate.account_id,
+                    may_read,
+                    may_write,
+                    may_delete,
+                    may_share,
+                },
+                audit.clone(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), expected);
+    }
+
+    assert!(store.public_folder_permissions.lock().unwrap().is_empty());
+    assert!(store
+        .mapi_folder_permission_audits
+        .lock()
+        .unwrap()
+        .is_empty());
 }
 
 mod ews;

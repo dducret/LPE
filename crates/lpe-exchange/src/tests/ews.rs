@@ -302,7 +302,171 @@ async fn delete_folder_uses_canonical_mailbox_destroy() {
 }
 
 #[tokio::test]
+async fn create_folder_rejects_missing_public_folder_parent() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateFolder>
+                  <m:ParentFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:ParentFolderId>
+                  <m:Folders><t:Folder><t:DisplayName>Team Posts</t:DisplayName></t:Folder></m:Folders>
+                </m:CreateFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("public folder not found"));
+}
+
+#[tokio::test]
+async fn create_folder_rejects_blank_public_folder_display_name() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateFolder>
+                  <m:ParentFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:ParentFolderId>
+                  <m:Folders><t:Folder><t:DisplayName>   </t:DisplayName></t:Folder></m:Folders>
+                </m:CreateFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("public folder display name is required"));
+}
+
+#[tokio::test]
+async fn create_folder_rejects_non_owner_public_folder_structural_change() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateFolder>
+                  <m:ParentFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:ParentFolderId>
+                  <m:Folders><t:Folder><t:DisplayName>Team Posts</t:DisplayName></t:Folder></m:Folders>
+                </m:CreateFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("public folder structural changes require tree owner access"));
+}
+
+#[tokio::test]
 async fn delete_folder_uses_canonical_public_folder_store() {
+    let folder_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root"),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                "Public Child",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let deleted_public_folders = store.deleted_public_folders.clone();
+    let public_folders = store.public_folders.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteFolder DeleteType="HardDelete">
+                  <m:FolderIds><t:FolderId Id="public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff"/></m:FolderIds>
+                </m:DeleteFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        deleted_public_folders.lock().unwrap().as_slice(),
+        &[folder_id]
+    );
+    let folders = public_folders.lock().unwrap();
+    let deleted = folders
+        .iter()
+        .find(|folder| folder.id == folder_id)
+        .expect("child public folder should still exist as a lifecycle row");
+    assert_eq!(deleted.lifecycle_state, "deleted");
+}
+
+#[tokio::test]
+async fn delete_folder_rejects_public_folder_tree_root() {
     let folder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -336,12 +500,179 @@ async fn delete_folder_uses_canonical_public_folder_store() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:DeleteFolderResponse>"));
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert_eq!(
-        deleted_public_folders.lock().unwrap().as_slice(),
-        &[folder_id]
-    );
-    assert_eq!(public_folders.lock().unwrap()[0].lifecycle_state, "deleted");
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(body.contains("public folder tree root cannot be deleted"));
+    assert!(deleted_public_folders.lock().unwrap().is_empty());
+    let folders = public_folders.lock().unwrap();
+    let root = folders
+        .iter()
+        .find(|folder| folder.id == folder_id)
+        .expect("root public folder should remain active");
+    assert_eq!(root.lifecycle_state, "active");
+}
+
+#[tokio::test]
+async fn delete_folder_rejects_non_owner_public_folder_structural_change() {
+    let folder_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root"),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                "Public Child",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let deleted_public_folders = store.deleted_public_folders.clone();
+    let public_folders = store.public_folders.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteFolder DeleteType="HardDelete">
+                  <m:FolderIds><t:FolderId Id="public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff"/></m:FolderIds>
+                </m:DeleteFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(body.contains("public folder structural changes require tree owner access"));
+    assert!(deleted_public_folders.lock().unwrap().is_empty());
+    let folders = public_folders.lock().unwrap();
+    let folder = folders
+        .iter()
+        .find(|folder| folder.id == folder_id)
+        .expect("public folder should remain active");
+    assert_eq!(folder.lifecycle_state, "active");
+}
+
+#[tokio::test]
+async fn delete_folder_rejects_public_folder_with_active_children() {
+    let parent_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root"),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                "Public Parent",
+            ),
+            FakeStore::public_folder(
+                "cccccccc-dddd-eeee-ffff-000000000000",
+                Some("bbbbbbbb-cccc-dddd-eeee-ffffffffffff"),
+                "Public Child",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let deleted_public_folders = store.deleted_public_folders.clone();
+    let public_folders = store.public_folders.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteFolder DeleteType="HardDelete">
+                  <m:FolderIds><t:FolderId Id="public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff"/></m:FolderIds>
+                </m:DeleteFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(body.contains("public folder with active children cannot be deleted"));
+    assert!(deleted_public_folders.lock().unwrap().is_empty());
+    let folders = public_folders.lock().unwrap();
+    let parent = folders
+        .iter()
+        .find(|folder| folder.id == parent_id)
+        .expect("parent public folder should remain active");
+    assert_eq!(parent.lifecycle_state, "active");
+}
+
+#[tokio::test]
+async fn delete_folder_rejects_public_folder_with_active_items() {
+    let folder_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root"),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                "Public Child",
+            ),
+        ])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "dddddddd-eeee-ffff-0000-111111111111",
+            "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+            "Active post",
+        )])),
+        ..Default::default()
+    };
+    let deleted_public_folders = store.deleted_public_folders.clone();
+    let public_folders = store.public_folders.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteFolder DeleteType="HardDelete">
+                  <m:FolderIds><t:FolderId Id="public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff"/></m:FolderIds>
+                </m:DeleteFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorFolderNotFound</m:ResponseCode>"));
+    assert!(body.contains("public folder with active items cannot be deleted"));
+    assert!(deleted_public_folders.lock().unwrap().is_empty());
+    let folders = public_folders.lock().unwrap();
+    let folder = folders
+        .iter()
+        .find(|folder| folder.id == folder_id)
+        .expect("public folder with active item should remain active");
+    assert_eq!(folder.lifecycle_state, "active");
 }
 
 #[tokio::test]
@@ -815,6 +1146,11 @@ async fn update_item_updates_message_read_and_flag_state() {
 async fn update_item_updates_public_folder_item() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -942,6 +1278,11 @@ async fn delete_item_deletes_public_folder_item() {
     let item_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            folder_id,
+            None,
+            "Public Root",
+        )])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             folder_id,
@@ -972,6 +1313,52 @@ async fn delete_item_deletes_public_folder_item() {
     assert_eq!(
         public_folder_items.lock().unwrap()[0].lifecycle_state,
         "deleted"
+    );
+}
+
+#[tokio::test]
+async fn delete_item_rejects_public_folder_item_without_delete_access() {
+    let folder_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder = FakeStore::public_folder(folder_id, None, "Public Root");
+    public_folder.rights.may_delete = false;
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            folder_id,
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let deleted_public_folder_items = store.deleted_public_folder_items.clone();
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DeleteItem><m:ItemIds><t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(body.contains("public folder delete access is not granted"));
+    assert!(deleted_public_folder_items.lock().unwrap().is_empty());
+    assert_eq!(
+        public_folder_items.lock().unwrap()[0].lifecycle_state,
+        "active"
     );
 }
 
@@ -1200,6 +1587,11 @@ async fn create_item_saveonly_stores_public_folder_post() {
     let public_folder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
         ..Default::default()
     };
     let public_folder_items = store.public_folder_items.clone();
@@ -1239,6 +1631,58 @@ async fn create_item_saveonly_stores_public_folder_post() {
     assert_eq!(recorded[0].subject, "Public post from EWS");
     assert_eq!(recorded[0].body_text, "Visible in public folders");
     assert_eq!(recorded[0].message_class, "IPM.Post");
+}
+
+#[tokio::test]
+async fn create_item_rejects_public_folder_post_without_write_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder =
+        FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root");
+    public_folder.rights.may_write = false;
+    public_folder.rights.may_delete = false;
+    public_folder.rights.may_share = false;
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        ..Default::default()
+    };
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem MessageDisposition="SaveOnly">
+                  <m:SavedItemFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:SavedItemFolderId>
+                  <m:Items>
+                    <t:Message>
+                      <t:Subject>Public post from EWS</t:Subject>
+                      <t:Body BodyType="Text">Visible in public folders</t:Body>
+                    </t:Message>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("public folder write access is not granted"));
+    assert!(public_folder_items.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -3123,6 +3567,11 @@ async fn sync_folder_items_reports_system_mailbox_messages() {
 async fn find_item_lists_public_folder_items() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -3153,6 +3602,11 @@ async fn find_item_lists_public_folder_items() {
 async fn sync_folder_items_reports_public_folder_items() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -3239,6 +3693,11 @@ async fn get_item_returns_system_mailbox_message_body() {
 async fn get_item_returns_public_folder_item_body() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![FakeStore::public_folder(
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            None,
+            "Public Root",
+        )])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -3751,6 +4210,18 @@ async fn move_item_moves_public_folder_item_to_target_public_folder() {
     let source_item_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder(
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                None,
+                "Source Public",
+            ),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                None,
+                "Target Public",
+            ),
+        ])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -3860,6 +4331,18 @@ async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
 async fn copy_item_copies_public_folder_item_to_target_public_folder() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder(
+                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                None,
+                "Source Public",
+            ),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                None,
+                "Target Public",
+            ),
+        ])),
         public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
             "abababab-abab-abab-abab-abababababab",
             "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
