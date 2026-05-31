@@ -3,17 +3,17 @@ use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CancelSubmissionResult,
-    ClientNote, ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
-    CreatePublicFolderInput, DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate,
-    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument,
-    Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    ClientNote, ClientReminder, ClientTask, CollaborationCollection, CollaborationGrantInput,
+    CollaborationResourceKind, ConversationAction, CreatePublicFolderInput,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -406,6 +406,17 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         owner_account_id: Uuid,
         mailbox_id: Uuid,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
+    fn set_mapi_calendar_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
         grantee_account_id: Uuid,
         may_read: bool,
         may_write: bool,
@@ -1996,6 +2007,59 @@ impl ExchangeStore for Storage {
                 audit,
             )
             .await
+        })
+    }
+
+    fn set_mapi_calendar_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            if !may_read {
+                return self
+                    .delete_collaboration_grant(
+                        owner_account_id,
+                        CollaborationResourceKind::Calendar,
+                        grantee_account_id,
+                        audit,
+                    )
+                    .await;
+            }
+            let tenant_id = mapi_tenant_id_for_account(self, owner_account_id).await?;
+            let grantee_email = sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT primary_email
+                FROM accounts
+                WHERE tenant_id = $1
+                  AND id = $2
+                LIMIT 1
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(grantee_account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("calendar permission grantee account not found"))?;
+            self.upsert_collaboration_grant(
+                CollaborationGrantInput {
+                    kind: CollaborationResourceKind::Calendar,
+                    owner_account_id,
+                    grantee_email,
+                    may_read,
+                    may_write,
+                    may_delete,
+                    may_share,
+                },
+                audit,
+            )
+            .await
+            .map(|_| ())
         })
     }
 

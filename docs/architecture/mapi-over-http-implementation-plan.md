@@ -438,7 +438,7 @@ not by itself authorize broad client publication.
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. Restore uses canonical recoverable restore, purge and empty-folder use canonical recoverable purge, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `OpenSoftDeleted`, complete Exchange dumpster folder parity, and any MAPI-local dumpster store remain unsupported. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` remain unsupported; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
-| Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants`, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
+| Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for the default Calendar folder, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
 | Full notification registration and delivery | Partially implemented through session-local pending events with bounded folder/message/table payloads and canonical change-cursor replay. Cross-process notification replay remains deferred; clients must re-register after reconnect or worker movement and use normal sync to converge. |
 | Outlook tolerance beyond the documented lab matrix | Unknown until captured through the release gates below. |
 
@@ -675,28 +675,34 @@ projected to MAPI with a minimum one-minute appointment window while leaving the
 canonical event unchanged. Bounded MAPI calendar writes update only existing
 canonical `calendar_events` columns: subject/display name, body, HTML body,
 start/end, location, all-day, busy-status-derived canonical status, organizer,
-and display attendees. Calendar reads project those canonical body,
+required attendees from display/To attendee properties, and optional attendees
+from `PidLidCcAttendeesString`. Calendar reads project those canonical body,
 organizer, and attendee fields through direct properties, requested contents
 columns, and FastTransfer/ICS message properties, including the bounded
 `PidLidAllAttendeesString`, `PidLidToAttendeesString`, and
 `PidLidCcAttendeesString` projections from canonical attendee metadata.
 `PidLidAppointmentRecur` has a parser-backed bounded read/write mapping for
-Gregorian daily, weekly, monthly-by-day, monthly-nth, yearly-by-day, and
-yearly-nth recurrence patterns into canonical `recurrence_rule`,
+Gregorian daily, weekly, monthly-by-day including month-end, monthly-nth,
+yearly-by-day, and yearly-nth recurrence patterns into canonical `recurrence_rule`,
 `recurrence_json`, and deleted-instance `recurrence_exceptions_json` fields.
 Direct property reads, contents rows that request the property, and
 FastTransfer/ICS calendar sync can project the bounded recurrence blob back
-from canonical event state. Modified exception payloads, month-end recurrence,
-Hijri recurrence, malformed recurrence blobs, meeting request/response/cancel
-message classes, and other binary meeting payloads remain unsupported and are
+from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
+payloads that contain only the bounded event property subset are canonicalized
+as `calendar_events`; bounded meeting responses update canonical attendee
+participation status on the existing event; and bounded cancellation payloads
+delete the existing canonical event. Modified exception payloads, Hijri
+recurrence, malformed recurrence blobs, unsupported meeting response/cancel
+properties, and other binary meeting payloads remain unsupported and are
 rejected with deterministic parseable errors instead of being stored as opaque
 MAPI blobs.
 Calendar attachments are projected only through canonical
 `calendar_event_attachments`:
-`PidTagHasAttachments`, `RopGetAttachmentTable`, and `RopOpenAttachment` read
-that table, while bounded `RopCreateAttachment`/`RopSaveChangesAttachment`
-writes validated attachment blobs into the same canonical event attachment
-state. Outlook-only attachment state is not stored.
+`PidTagHasAttachments`, `RopGetValidAttachments`, `RopGetAttachmentTable`, and
+`RopOpenAttachment` read that table, while bounded
+`RopCreateAttachment`/`RopSaveChangesAttachment` writes validated attachment
+blobs into the same canonical event attachment state. Outlook-only attachment
+state is not stored.
 
 Delegate/free-busy readiness additionally requires the canonical
 `/api/mail/delegation/free-busy` layer to return delegate access objects and

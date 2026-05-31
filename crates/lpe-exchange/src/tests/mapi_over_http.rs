@@ -1005,7 +1005,7 @@ async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_eve
 }
 
 #[tokio::test]
-async fn mapi_over_http_calendar_create_rejects_meeting_message_class_without_event() {
+async fn mapi_over_http_calendar_create_canonicalizes_bounded_meeting_request() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
@@ -1044,9 +1044,17 @@ async fn mapi_over_http_calendar_create_rejects_meeting_message_class_without_ev
         0x0060_0040,
         test_filetime("2026-05-04", "09:30"),
     );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0061_0040,
+        test_filetime("2026-05-04", "10:00"),
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, "Alice Organizer");
+    append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "alice@example.test");
+    append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Attendee");
     let mut rops = Vec::new();
     append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
-    append_rop_set_properties(&mut rops, 1, 3, &property_values);
+    append_rop_set_properties(&mut rops, 1, 7, &property_values);
     append_rop_save_changes_message(&mut rops, 1, 1);
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", cookie);
@@ -1060,11 +1068,197 @@ async fn mapi_over_http_calendar_create_rejects_meeting_message_class_without_ev
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].title, "Meeting request");
+    assert_eq!(stored[0].date, "2026-05-04");
+    assert_eq!(stored[0].time, "09:30");
+    assert_eq!(stored[0].duration_minutes, 30);
+    assert!(stored[0].organizer_json.contains("alice@example.test"));
+    assert!(stored[0].attendees_json.contains("Bob Attendee"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_meeting_cancel_deletes_existing_canonical_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececececece").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Meeting to cancel".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Schedule.Meeting.Canceled",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Cancelled meeting");
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
     ));
     assert!(events.lock().unwrap().is_empty());
+    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cfcfcfcf-cfcf-cfcf-cfcf-cfcfcfcfcfcf").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Meeting response".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: "Bob".to_string(),
+            attendees_json: r#"{"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}]}"#.to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Schedule.Meeting.Resp.Pos",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, "Bob");
+    append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "bob@example.test");
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 3, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].attendees, "Bob");
+    assert!(stored[0]
+        .attendees_json
+        .contains(r#""partstat":"accepted""#));
 }
 
 #[tokio::test]
@@ -1174,6 +1368,118 @@ async fn mapi_over_http_calendar_attachment_save_uses_canonical_event_attachment
     assert!(event_attachments[0]
         .file_reference
         .starts_with("calendar-attachment:"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_get_valid_attachments_lists_canonical_attachment_numbers() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
+    let first_attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadadadad").unwrap();
+    let second_attachment_id = Uuid::parse_str("bebebebe-bebe-bebe-bebe-bebebebebebe").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Calendar valid attachments".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        calendar_attachments: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            vec![
+                CalendarEventAttachment {
+                    id: first_attachment_id,
+                    event_id,
+                    file_reference: format!("calendar-attachment:{event_id}:{first_attachment_id}"),
+                    file_name: "first-agenda.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    size_octets: 11,
+                },
+                CalendarEventAttachment {
+                    id: second_attachment_id,
+                    event_id,
+                    file_reference: format!(
+                        "calendar-attachment:{event_id}:{second_attachment_id}"
+                    ),
+                    file_name: "second-agenda.pdf".to_string(),
+                    media_type: "application/pdf".to_string(),
+                    size_octets: 22,
+                },
+            ],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    rops.extend_from_slice(&[
+        0x52, 0x00, 0x02, // RopGetValidAttachments
+    ]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x52, 0x02, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0]
+    ));
 }
 
 #[tokio::test]
@@ -18528,6 +18834,77 @@ async fn mapi_over_http_modify_permissions_maps_acl_rows_to_canonical_grants() {
     );
     let audits = observed_audits.lock().unwrap();
     assert_eq!(audits[0].action, "mapi-modify-permissions");
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_modify_permissions_maps_acl_rows_to_calendar_grants() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(81);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            delegate.account_id,
+            delegate_member_id,
+        )]))),
+        ..Default::default()
+    };
+    let observed_permissions = store.mapi_calendar_permissions.clone();
+    let observed_audits = store.mapi_folder_permission_audits.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x6671_0014u32.to_le_bytes());
+    rops.extend_from_slice(&(delegate_member_id as i64).to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(
+        &(crate::mapi::permissions::rights_from_grant(true, true, true, false) as i32)
+            .to_le_bytes(),
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x40, 0x01, 0, 0, 0, 0]));
+    let permissions = observed_permissions.lock().unwrap();
+    let delegate_permission = permissions
+        .iter()
+        .find(|permission| permission.member_account_id == Some(delegate.account_id))
+        .expect("calendar delegate permission was not written");
+    assert_eq!(
+        delegate_permission.rights,
+        crate::mapi::permissions::rights_from_grant(true, true, true, false)
+    );
+    let audits = observed_audits.lock().unwrap();
+    assert_eq!(audits[0].action, "mapi-modify-calendar-permissions");
 }
 
 #[tokio::test]

@@ -11958,6 +11958,138 @@ async fn calendar_event_round_trips_schema_backed_fields() {
 }
 
 #[tokio::test]
+async fn calendar_event_get_projects_mapi_written_canonical_fields() {
+    let mut event = FakeStore::event();
+    event.uid = "mapi-created-event".to_string();
+    event.date = "2026-06-03".to_string();
+    event.time = "13:30".to_string();
+    event.time_zone = "Europe/Berlin".to_string();
+    event.duration_minutes = 75;
+    event.all_day = false;
+    event.status = "tentative".to_string();
+    event.sequence = 3;
+    event.recurrence_rule = "FREQ=DAILY;COUNT=3".to_string();
+    event.recurrence_json = r#"{"frequency":"daily","count":3}"#.to_string();
+    event.recurrence_exceptions_json =
+        r#"[{"recurrenceId":"2026-06-04","excluded":true}]"#.to_string();
+    event.title = "MAPI planning".to_string();
+    event.location = "Room 201".to_string();
+    event.organizer_json =
+        r#"{"email":"alice.organizer@example.test","name":"Alice Organizer"}"#.to_string();
+    event.attendees = "Bob Required, Cara Optional".to_string();
+    event.attendees_json =
+        serialize_calendar_participants_metadata(&CalendarParticipantsMetadata {
+            organizer: Some(CalendarOrganizerMetadata {
+                email: "alice.organizer@example.test".to_string(),
+                common_name: "Alice Organizer".to_string(),
+            }),
+            attendees: vec![
+                CalendarParticipantMetadata {
+                    email: "bob.required@example.test".to_string(),
+                    common_name: "Bob Required".to_string(),
+                    role: "REQ-PARTICIPANT".to_string(),
+                    partstat: "needs-action".to_string(),
+                    rsvp: false,
+                },
+                CalendarParticipantMetadata {
+                    email: "cara.optional@example.test".to_string(),
+                    common_name: "Cara Optional".to_string(),
+                    role: "OPT-PARTICIPANT".to_string(),
+                    partstat: "tentative".to_string(),
+                    rsvp: true,
+                },
+            ],
+        });
+    event.notes = "Plain MAPI body".to_string();
+    event.body_html = "<p>MAPI HTML body</p>".to_string();
+    let event_id = event.id.to_string();
+
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        events: Arc::new(Mutex::new(vec![event])),
+        ..Default::default()
+    };
+    let service = JmapService::new(store);
+
+    let response = service
+        .handle_api_request(
+            Some("Bearer token"),
+            JmapApiRequest {
+                using_capabilities: vec![JMAP_CALENDARS_CAPABILITY.to_string()],
+                method_calls: vec![JmapMethodCall(
+                    "CalendarEvent/get".to_string(),
+                    json!({
+                        "ids": [event_id],
+                        "properties": [
+                            "uid",
+                            "title",
+                            "start",
+                            "duration",
+                            "timeZone",
+                            "allDay",
+                            "status",
+                            "sequence",
+                            "recurrenceRule",
+                            "recurrence",
+                            "recurrenceOverrides",
+                            "locations",
+                            "organizer",
+                            "participants",
+                            "description",
+                            "bodyHtml",
+                            "calendarIds"
+                        ]
+                    }),
+                    "get".to_string(),
+                )],
+            },
+        )
+        .await
+        .unwrap();
+
+    let event = &response.method_responses[0].1["list"][0];
+    assert_eq!(event["uid"], "mapi-created-event");
+    assert_eq!(event["title"], "MAPI planning");
+    assert_eq!(event["start"], "2026-06-03T13:30:00");
+    assert_eq!(event["duration"], "PT75M");
+    assert_eq!(event["timeZone"], "Europe/Berlin");
+    assert_eq!(event["allDay"], false);
+    assert_eq!(event["status"], "tentative");
+    assert_eq!(event["sequence"], 3);
+    assert_eq!(event["recurrenceRule"], "FREQ=DAILY;COUNT=3");
+    assert_eq!(event["recurrence"]["frequency"], "daily");
+    assert_eq!(event["recurrence"]["count"], 3);
+    assert_eq!(
+        event["recurrenceOverrides"][0]["recurrenceId"],
+        "2026-06-04"
+    );
+    assert_eq!(event["locations"]["main"]["name"], "Room 201");
+    assert_eq!(event["organizer"]["email"], "alice.organizer@example.test");
+    assert_eq!(
+        event["participants"]["owner"]["email"],
+        "alice.organizer@example.test"
+    );
+    assert_eq!(
+        event["participants"]["p1"]["email"],
+        "bob.required@example.test"
+    );
+    assert_eq!(event["participants"]["p1"]["roles"]["attendee"], true);
+    assert_eq!(
+        event["participants"]["p1"]["participationStatus"],
+        "needs-action"
+    );
+    assert_eq!(
+        event["participants"]["p2"]["email"],
+        "cara.optional@example.test"
+    );
+    assert_eq!(event["participants"]["p2"]["roles"]["optional"], true);
+    assert_eq!(event["participants"]["p2"]["expectReply"], true);
+    assert_eq!(event["description"], "Plain MAPI body");
+    assert_eq!(event["bodyHtml"], "<p>MAPI HTML body</p>");
+    assert_eq!(event["calendarIds"]["default"], true);
+}
+
+#[tokio::test]
 async fn calendar_event_links_write_and_project_canonical_attachments() {
     let upload_id = Uuid::parse_str("7a7a7a7a-7a7a-7a7a-7a7a-7a7a7a7a7a7a").unwrap();
     let store = FakeStore {

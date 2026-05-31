@@ -2290,12 +2290,14 @@ fn merge_free_busy_rows(
 }
 
 fn free_busy_status(status: &str, can_read_details: bool) -> String {
+    if status.trim().eq_ignore_ascii_case("cancelled") {
+        return "free".to_string();
+    }
     if !can_read_details {
         return "busy".to_string();
     }
     match status.trim().to_ascii_lowercase().as_str() {
         "tentative" => "tentative".to_string(),
-        "cancelled" => "free".to_string(),
         _ => "busy".to_string(),
     }
 }
@@ -2450,6 +2452,23 @@ mod free_busy_tests {
         );
 
         assert_eq!(blocks[0].status, "busy");
+    }
+
+    #[test]
+    fn free_busy_cancelled_rows_stay_free_without_calendar_access() {
+        let owner_account_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let blocks = merge_free_busy_rows(
+            vec![crate::FreeBusyEventRow {
+                starts_at: "2026-05-26T08:00:00Z".to_string(),
+                ends_at: "2026-05-26T09:00:00Z".to_string(),
+                status: "cancelled".to_string(),
+            }],
+            owner_account_id,
+            "owner@example.test".to_string(),
+            false,
+        );
+
+        assert!(blocks.is_empty());
     }
 
     #[test]

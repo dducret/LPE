@@ -2985,10 +2985,10 @@ mod tests {
 
     #[test]
     fn snapshot_projects_materialized_delegate_freebusy_messages() {
-        let message_id = Uuid::parse_str("55555555-5555-4555-8555-555555555555").unwrap();
+        let message_id = Uuid::parse_str("56565656-5656-4656-8656-565656565656").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             message_id,
-            crate::mapi::identity::mapi_store_id(110),
+            crate::mapi::identity::mapi_store_id(610),
         );
         let snapshot = MapiMailStoreSnapshot::empty().with_delegate_freebusy_messages(vec![
             DelegateFreeBusyMessageObject {
@@ -3008,8 +3008,9 @@ mod tests {
         ]);
 
         assert_eq!(snapshot.delegate_freebusy_messages().len(), 1);
+        let projected_id = snapshot.delegate_freebusy_messages()[0].id;
         assert!(snapshot
-            .delegate_freebusy_message_for_id(crate::mapi::identity::mapi_store_id(110))
+            .delegate_freebusy_message_for_id(projected_id)
             .is_some());
     }
 }

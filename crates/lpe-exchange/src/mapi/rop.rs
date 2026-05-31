@@ -2236,15 +2236,19 @@ pub(in crate::mapi) fn rop_get_valid_attachments_response(
     object: Option<&MapiObject>,
     snapshot: &MapiMailStoreSnapshot,
 ) -> Vec<u8> {
-    let Some(MapiObject::Message {
-        folder_id,
-        message_id,
-    }) = object
-    else {
-        return rop_error_response(0x52, request.response_handle_index(), 0x0000_04B9);
+    let (folder_id, message_id) = match object {
+        Some(MapiObject::Message {
+            folder_id,
+            message_id,
+        })
+        | Some(MapiObject::Event {
+            folder_id,
+            event_id: message_id,
+        }) => (*folder_id, *message_id),
+        _ => return rop_error_response(0x52, request.response_handle_index(), 0x0000_04B9),
     };
     let attachments = snapshot
-        .attachments_for_message(*folder_id, *message_id)
+        .attachments_for_message(folder_id, message_id)
         .unwrap_or_default();
     let mut response = vec![0x52, request.response_handle_index()];
     write_u32(&mut response, 0);

@@ -3476,6 +3476,104 @@ pub(in crate::mapi) fn event_input_from_mapi(
     })
 }
 
+pub(in crate::mapi) fn meeting_response_event_input_from_mapi(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    existing: &AccessibleEvent,
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<Option<UpsertClientEventInput>> {
+    let Some(message_class) =
+        optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W])
+    else {
+        return Ok(None);
+    };
+    let partstat = match message_class.trim().to_ascii_lowercase().as_str() {
+        "ipm.schedule.meeting.resp.pos" => "accepted",
+        "ipm.schedule.meeting.resp.tent" => "tentative",
+        "ipm.schedule.meeting.resp.neg" => "declined",
+        _ => return Ok(None),
+    };
+    for (tag, value) in properties {
+        if matches!(value, MapiValue::Binary(_)) {
+            return Err(anyhow!(
+                "MAPI binary calendar recurrence or meeting payloads are not supported"
+            ));
+        }
+        let supported = matches!(
+            *tag,
+            PID_TAG_MESSAGE_CLASS_W
+                | PID_TAG_SENDER_NAME_W
+                | PID_TAG_SENDER_EMAIL_ADDRESS_W
+                | PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_BODY_W
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI meeting response property {tag:#010X} is outside the canonical calendar subset"
+            ));
+        }
+    }
+    let email = optional_pending_text_property(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
+        .map(|value| normalize_calendar_email(&value))
+        .unwrap_or_default();
+    let common_name = optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W])
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if email.is_empty() && common_name.is_empty() {
+        bail!("MAPI meeting response requires sender identity");
+    }
+
+    let mut metadata = parse_calendar_participants_metadata(&existing.attendees_json);
+    let mut matched = false;
+    for attendee in &mut metadata.attendees {
+        let email_matches = !email.is_empty()
+            && normalize_calendar_email(&attendee.email).eq_ignore_ascii_case(&email);
+        let name_matches = email.is_empty()
+            && !common_name.is_empty()
+            && attendee.common_name.eq_ignore_ascii_case(&common_name);
+        if email_matches || name_matches {
+            attendee.partstat = partstat.to_string();
+            matched = true;
+        }
+    }
+    if !matched {
+        metadata.attendees.push(CalendarParticipantMetadata {
+            email,
+            common_name,
+            role: "REQ-PARTICIPANT".to_string(),
+            partstat: partstat.to_string(),
+            rsvp: false,
+        });
+    }
+    let attendees_json = serialize_calendar_participants_metadata(&metadata);
+    let attendees = calendar_attendee_labels(&metadata);
+    Ok(Some(UpsertClientEventInput {
+        id,
+        account_id,
+        uid: existing.uid.clone(),
+        date: existing.date.clone(),
+        time: existing.time.clone(),
+        time_zone: existing.time_zone.clone(),
+        duration_minutes: existing.duration_minutes,
+        all_day: existing.all_day,
+        status: existing.status.clone(),
+        sequence: existing.sequence,
+        recurrence_rule: existing.recurrence_rule.clone(),
+        recurrence_json: existing.recurrence_json.clone(),
+        recurrence_exceptions_json: existing.recurrence_exceptions_json.clone(),
+        title: existing.title.clone(),
+        location: existing.location.clone(),
+        organizer_json: existing.organizer_json.clone(),
+        attendees,
+        attendees_json,
+        notes: existing.notes.clone(),
+        body_html: existing.body_html.clone(),
+    }))
+}
+
 struct MapiEventParticipants {
     organizer_json: String,
     attendees: String,
@@ -3521,32 +3619,50 @@ fn organizer_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<CalendarO
 fn attendees_from_mapi(
     properties: &HashMap<u32, MapiValue>,
 ) -> Option<Vec<CalendarParticipantMetadata>> {
-    let display_to = optional_pending_text_property(
+    let required = optional_pending_text_property(
         properties,
         &[
             PID_TAG_DISPLAY_TO_W,
             PID_LID_TO_ATTENDEES_STRING_W_TAG,
             PID_LID_ALL_ATTENDEES_STRING_W_TAG,
         ],
-    )?;
-    Some(
-        display_to
-            .split([',', ';'])
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| CalendarParticipantMetadata {
-                email: if value.contains('@') {
-                    normalize_calendar_email(value)
-                } else {
-                    String::new()
-                },
-                common_name: value.to_string(),
-                role: "REQ-PARTICIPANT".to_string(),
-                partstat: "needs-action".to_string(),
-                rsvp: false,
-            })
-            .collect(),
-    )
+    );
+    let optional = optional_pending_text_property(properties, &[PID_LID_CC_ATTENDEES_STRING_W_TAG]);
+    if required.is_none() && optional.is_none() {
+        return None;
+    }
+    let mut attendees = Vec::new();
+    attendees.extend(calendar_participants_from_display_string(
+        required.as_deref().unwrap_or_default(),
+        "REQ-PARTICIPANT",
+    ));
+    attendees.extend(calendar_participants_from_display_string(
+        optional.as_deref().unwrap_or_default(),
+        "OPT-PARTICIPANT",
+    ));
+    Some(attendees)
+}
+
+fn calendar_participants_from_display_string(
+    value: &str,
+    role: &str,
+) -> Vec<CalendarParticipantMetadata> {
+    value
+        .split([',', ';'])
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| CalendarParticipantMetadata {
+            email: if value.contains('@') {
+                normalize_calendar_email(value)
+            } else {
+                String::new()
+            },
+            common_name: value.to_string(),
+            role: role.to_string(),
+            partstat: "needs-action".to_string(),
+            rsvp: false,
+        })
+        .collect()
 }
 
 fn calendar_status_from_mapi_busy_status(value: i64) -> String {
@@ -3630,6 +3746,7 @@ fn recurrence_pattern_from_canonical(
             interval,
             vec![recurrence_day_mask(&by_day)?],
         ),
+        "MONTHLY" if by_month_day == Some(31) => (0x200Cu16, 0x0004u16, interval, vec![31]),
         "MONTHLY" if by_month_day.is_some() => {
             (0x200Cu16, 0x0002u16, interval, vec![by_month_day.unwrap()])
         }
@@ -3964,8 +4081,17 @@ fn read_recur_pattern(
             })
         }
         (0x200C, 0x0004) => {
-            let _day = read_recur_u32(value, offset)?;
-            bail!("MAPI month-end recurrence is not mapped yet")
+            let day = read_recur_u32(value, offset)?;
+            if day != 31 {
+                bail!("unsupported MAPI month-end recurrence day");
+            }
+            Ok(MapiRecurPattern {
+                frequency: "MONTHLY",
+                interval: period,
+                by_day: Vec::new(),
+                by_month_day: Some(31),
+                by_set_pos: None,
+            })
         }
         (0x200C, 0x0003) | (0x200D, 0x0003) => {
             let mask = read_recur_u32(value, offset)?;
@@ -4120,6 +4246,7 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
                 | PID_LID_APPOINTMENT_RECUR_TAG
                 | PID_LID_ALL_ATTENDEES_STRING_W_TAG
                 | PID_LID_TO_ATTENDEES_STRING_W_TAG
+                | PID_LID_CC_ATTENDEES_STRING_W_TAG
                 | PID_TAG_MESSAGE_CLASS_W
         );
         if !supported {
@@ -4131,6 +4258,45 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
     Ok(())
 }
 
+pub(in crate::mapi) fn bounded_meeting_cancellation_from_mapi(
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<bool> {
+    let Some(message_class) =
+        optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W])
+    else {
+        return Ok(false);
+    };
+    if !message_class
+        .trim()
+        .eq_ignore_ascii_case("IPM.Schedule.Meeting.Canceled")
+    {
+        return Ok(false);
+    }
+    for (tag, value) in properties {
+        if matches!(value, MapiValue::Binary(_)) {
+            return Err(anyhow!(
+                "MAPI binary calendar recurrence or meeting payloads are not supported"
+            ));
+        }
+        let supported = matches!(
+            *tag,
+            PID_TAG_MESSAGE_CLASS_W
+                | PID_TAG_SUBJECT_W
+                | PID_TAG_NORMALIZED_SUBJECT_W
+                | PID_TAG_DISPLAY_NAME_W
+                | PID_TAG_BODY_W
+                | PID_TAG_START_DATE
+                | PID_TAG_END_DATE
+        );
+        if !supported {
+            return Err(anyhow!(
+                "MAPI calendar cancellation property {tag:#010X} is outside the canonical calendar subset"
+            ));
+        }
+    }
+    Ok(true)
+}
+
 fn reject_unsupported_calendar_message_class(properties: &HashMap<u32, MapiValue>) -> Result<()> {
     let Some(message_class) =
         optional_pending_text_property(properties, &[PID_TAG_MESSAGE_CLASS_W])
@@ -4138,7 +4304,10 @@ fn reject_unsupported_calendar_message_class(properties: &HashMap<u32, MapiValue
         return Ok(());
     };
     let message_class = message_class.trim();
-    if message_class.is_empty() || message_class.eq_ignore_ascii_case("IPM.Appointment") {
+    if message_class.is_empty()
+        || message_class.eq_ignore_ascii_case("IPM.Appointment")
+        || message_class.eq_ignore_ascii_case("IPM.Schedule.Meeting.Request")
+    {
         return Ok(());
     }
     Err(anyhow!(
@@ -4790,6 +4959,23 @@ where
             .await?;
     }
     if properties.is_empty() {
+        return Ok(());
+    }
+    if bounded_meeting_cancellation_from_mapi(&properties)? {
+        store
+            .delete_accessible_event(principal.account_id, event.canonical_id)
+            .await?;
+        return Ok(());
+    }
+    if let Some(input) = meeting_response_event_input_from_mapi(
+        principal.account_id,
+        Some(event.canonical_id),
+        &event.event,
+        &properties,
+    )? {
+        store
+            .update_accessible_event(principal.account_id, event.canonical_id, input)
+            .await?;
         return Ok(());
     }
     let input = event_input_from_mapi(
@@ -6589,7 +6775,11 @@ mod tests {
         );
         properties.insert(
             PID_TAG_DISPLAY_TO_W,
-            MapiValue::String("Bob One; Cara Two".to_string()),
+            MapiValue::String("Bob One".to_string()),
+        );
+        properties.insert(
+            PID_LID_CC_ATTENDEES_STRING_W_TAG,
+            MapiValue::String("Cara Two".to_string()),
         );
         properties.insert(
             PID_TAG_BODY_HTML_W,
@@ -6625,6 +6815,7 @@ mod tests {
         assert_eq!(input.attendees, "Bob One, Cara Two");
         assert!(input.organizer_json.contains("alice@example.test"));
         assert!(input.attendees_json.contains("Bob One"));
+        assert!(input.attendees_json.contains("OPT-PARTICIPANT"));
     }
 
     #[test]
@@ -6642,7 +6833,6 @@ mod tests {
     #[test]
     fn mapi_over_http_calendar_meeting_classes_fail_explicitly() {
         for message_class in [
-            "IPM.Schedule.Meeting.Request",
             "IPM.Schedule.Meeting.Resp.Pos",
             "IPM.Schedule.Meeting.Canceled",
             "IPM.Note",
@@ -6670,10 +6860,54 @@ mod tests {
         );
 
         reject_unsupported_mapi_event_properties(&properties).unwrap();
+
+        properties.insert(
+            PID_TAG_MESSAGE_CLASS_W,
+            MapiValue::String("IPM.Schedule.Meeting.Request".to_string()),
+        );
+
+        reject_unsupported_mapi_event_properties(&properties).unwrap();
     }
 
     #[test]
-    fn mapi_over_http_calendar_recurrence_rejects_unsupported_shapes() {
+    fn mapi_over_http_calendar_meeting_response_classes_map_to_partstat() {
+        let mut existing = default_event_for_mapping(Uuid::nil(), "default");
+        existing.attendees = "Bob".to_string();
+        existing.attendees_json = r#"{"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}]}"#.to_string();
+
+        for (message_class, expected_partstat) in [
+            ("IPM.Schedule.Meeting.Resp.Pos", "accepted"),
+            ("IPM.Schedule.Meeting.Resp.Tent", "tentative"),
+            ("IPM.Schedule.Meeting.Resp.Neg", "declined"),
+        ] {
+            let mut properties = HashMap::new();
+            properties.insert(
+                PID_TAG_MESSAGE_CLASS_W,
+                MapiValue::String(message_class.to_string()),
+            );
+            properties.insert(
+                PID_TAG_SENDER_EMAIL_ADDRESS_W,
+                MapiValue::String("bob@example.test".to_string()),
+            );
+            properties.insert(PID_TAG_SENDER_NAME_W, MapiValue::String("Bob".to_string()));
+
+            let input = meeting_response_event_input_from_mapi(
+                Uuid::nil(),
+                Some(existing.id),
+                &existing,
+                &properties,
+            )
+            .unwrap()
+            .expect("meeting response should map");
+
+            assert!(input
+                .attendees_json
+                .contains(&format!(r#""partstat":"{expected_partstat}""#)));
+        }
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_recurrence_maps_month_end_rule() {
         let existing = default_event_for_mapping(Uuid::nil(), "default");
         let mut month_end = Vec::new();
         append_recur_header(&mut month_end, 0x200C, 0x0004, 1);
@@ -6691,18 +6925,24 @@ mod tests {
         let mut properties = HashMap::new();
         properties.insert(PID_LID_APPOINTMENT_RECUR_TAG, MapiValue::Binary(month_end));
 
-        let error = event_input_from_mapi(
+        let input = event_input_from_mapi(
             Uuid::nil(),
             Some(Uuid::from_u128(0x999E)),
             &existing,
             &properties,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(error
-            .to_string()
-            .contains("MAPI month-end recurrence is not mapped yet"));
+        assert_eq!(input.recurrence_rule, "FREQ=MONTHLY;COUNT=3;BYMONTHDAY=31");
+        assert_eq!(
+            input.recurrence_json,
+            r#"{"frequency":"monthly","count":3,"byMonthDay":31}"#
+        );
+    }
 
+    #[test]
+    fn mapi_over_http_calendar_recurrence_rejects_unsupported_shapes() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
         let mut modified_exception = Vec::new();
         append_recur_header(&mut modified_exception, 0x200B, 0x0001, 1);
         modified_exception.extend_from_slice(&0x0000_0002u32.to_le_bytes());
@@ -6880,6 +7120,29 @@ mod tests {
             recurrence.recurrence_exceptions_json,
             event.recurrence_exceptions_json
         );
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_month_end_recurrence_projects_back_to_mapi_binary() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "default");
+        event.date = "2026-05-31".to_string();
+        event.time = "09:00".to_string();
+        event.duration_minutes = 60;
+        event.recurrence_rule = "FREQ=MONTHLY;COUNT=3;BYMONTHDAY=31".to_string();
+        event.recurrence_json = r#"{"frequency":"monthly","count":3,"byMonthDay":31}"#.to_string();
+        event.recurrence_exceptions_json = "[]".to_string();
+
+        let Some(MapiValue::Binary(value)) =
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_RECUR_TAG)
+        else {
+            panic!("expected recurrence binary projection");
+        };
+
+        assert_eq!(u16::from_le_bytes([value[4], value[5]]), 0x200C);
+        assert_eq!(u16::from_le_bytes([value[6], value[7]]), 0x0004);
+        let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
+        assert_eq!(recurrence.recurrence_rule, event.recurrence_rule);
+        assert_eq!(recurrence.recurrence_json, event.recurrence_json);
     }
 
     fn test_daily_recur_blob(interval_days: u32, count: u32) -> Vec<u8> {

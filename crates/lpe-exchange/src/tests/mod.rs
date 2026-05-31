@@ -399,6 +399,7 @@ struct FakeStore {
     stale_protocol_local_folder_properties: Arc<Mutex<HashMap<(u64, u32), Vec<u8>>>>,
     mapi_sync_changes: Arc<Mutex<MapiSyncChangeSet>>,
     mapi_folder_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
+    mapi_calendar_permissions: Arc<Mutex<Vec<MapiFolderPermission>>>,
     mapi_folder_permission_audits: Arc<Mutex<Vec<lpe_storage::AuditEntryInput>>>,
     mapi_ipm_subtree_ost_id: Arc<Mutex<Option<Vec<u8>>>>,
     fail_mapi_ipm_subtree_ost_id_store: bool,
@@ -1917,6 +1918,63 @@ impl ExchangeStore for FakeStore {
             }) {
                 permissions.push(crate::mapi::permissions::owner_permission(
                     mailbox_id,
+                    &AccountPrincipal {
+                        tenant_id: principal.tenant_id,
+                        account_id: owner_account_id,
+                        email: principal.email,
+                        display_name: principal.display_name,
+                    },
+                ));
+            }
+            self.mapi_folder_permission_audits
+                .lock()
+                .unwrap()
+                .push(audit);
+            Ok(())
+        })
+    }
+
+    fn set_mapi_calendar_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let principal = self.session.clone().unwrap_or_else(FakeStore::account);
+        let grantee = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| account.account_id == grantee_account_id)
+            .cloned();
+        Box::pin(async move {
+            let Some(grantee) = grantee else {
+                anyhow::bail!("calendar grantee account not found")
+            };
+            let mut permissions = self.mapi_calendar_permissions.lock().unwrap();
+            permissions
+                .retain(|permission| permission.member_account_id != Some(grantee_account_id));
+            if may_read {
+                permissions.push(MapiFolderPermission {
+                    mailbox_id: Uuid::nil(),
+                    member_account_id: Some(grantee_account_id),
+                    member_name: grantee.display_name,
+                    rights: crate::mapi::permissions::rights_from_grant(
+                        may_read, may_write, may_delete, may_share,
+                    ),
+                });
+            }
+            if !permissions
+                .iter()
+                .any(|permission| permission.member_account_id == Some(owner_account_id))
+            {
+                permissions.push(crate::mapi::permissions::owner_permission(
+                    Uuid::nil(),
                     &AccountPrincipal {
                         tenant_id: principal.tenant_id,
                         account_id: owner_account_id,

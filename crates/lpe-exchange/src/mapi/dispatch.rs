@@ -11694,7 +11694,8 @@ where
                 };
                 let mailbox_folder = folder_row_for_id(folder_id, mailboxes);
                 let public_folder = snapshot.public_folder_for_id(folder_id);
-                if mailbox_folder.is_none() && public_folder.is_none() {
+                let default_calendar_folder = role_for_folder_id(folder_id) == Some("calendar");
+                if mailbox_folder.is_none() && public_folder.is_none() && !default_calendar_folder {
                     responses.extend_from_slice(&rop_error_response(
                         0x40,
                         request.response_handle_index(),
@@ -11702,7 +11703,9 @@ where
                     ));
                     continue;
                 };
-                let can_share = if let Some(public_folder) = public_folder {
+                let can_share = if default_calendar_folder {
+                    true
+                } else if let Some(public_folder) = public_folder {
                     public_folder.folder.rights.may_share
                 } else {
                     snapshot
@@ -11820,7 +11823,38 @@ where
                     continue;
                 }
                 let mut failed = false;
-                if let Some(folder) = mailbox_folder {
+                if default_calendar_folder {
+                    for (
+                        _row_kind,
+                        grantee_account_id,
+                        may_read,
+                        may_write,
+                        may_delete,
+                        may_share,
+                    ) in actions
+                    {
+                        if store
+                            .set_mapi_calendar_permission(
+                                principal.account_id,
+                                grantee_account_id,
+                                may_read,
+                                may_write,
+                                may_delete,
+                                may_share,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-modify-calendar-permissions".to_string(),
+                                    subject: format!("calendar {grantee_account_id}"),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            failed = true;
+                            break;
+                        }
+                    }
+                } else if let Some(folder) = mailbox_folder {
                     for (
                         _row_kind,
                         grantee_account_id,
