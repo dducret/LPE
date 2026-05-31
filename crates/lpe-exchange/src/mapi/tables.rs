@@ -1236,6 +1236,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 .collect::<Vec<_>>()
         }
         Some(MapiObject::RuleTable {
+            folder_id,
             columns,
             position: table_position,
             ..
@@ -1246,11 +1247,15 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            snapshot
-                .rules()
-                .iter()
-                .map(|rule| serialize_rule_row(rule, &columns))
-                .collect::<Vec<_>>()
+            if snapshot.public_folder_for_id(*folder_id).is_some() {
+                Vec::new()
+            } else {
+                snapshot
+                    .rules()
+                    .iter()
+                    .map(|rule| serialize_rule_row(rule, &columns))
+                    .collect::<Vec<_>>()
+            }
         }
         _ => Vec::new(),
     };
@@ -2780,7 +2785,18 @@ pub(in crate::mapi) fn table_position_and_count(
             position,
             ..
         }) => (*position, snapshot.permissions_for_folder(*folder_id).len()),
-        Some(MapiObject::RuleTable { position, .. }) => (*position, snapshot.rules().len()),
+        Some(MapiObject::RuleTable {
+            folder_id,
+            position,
+            ..
+        }) => (
+            *position,
+            if snapshot.public_folder_for_id(*folder_id).is_some() {
+                0
+            } else {
+                snapshot.rules().len()
+            },
+        ),
         _ => (0, 0),
     }
 }
@@ -2941,7 +2957,13 @@ pub(in crate::mapi) fn table_row_keys(
                     .unwrap_or(0)
             })
             .collect(),
-        MapiObject::RuleTable { .. } => snapshot.rules().iter().map(|rule| rule.id).collect(),
+        MapiObject::RuleTable { folder_id, .. } => {
+            if snapshot.public_folder_for_id(*folder_id).is_some() {
+                Vec::new()
+            } else {
+                snapshot.rules().iter().map(|rule| rule.id).collect()
+            }
+        }
         _ => Vec::new(),
     }
 }

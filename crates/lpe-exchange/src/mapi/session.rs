@@ -98,6 +98,7 @@ pub(in crate::mapi) enum PendingRecipientChange {
 pub(in crate::mapi) enum StreamWriteTarget {
     PendingAttachment(u32),
     PendingMessageProperty { handle: u32, property_tag: u32 },
+    PublicFolderItemProperty { handle: u32, property_tag: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -163,6 +164,7 @@ pub(in crate::mapi) enum MapiObject {
     PublicFolderItem {
         folder_id: u64,
         item_id: u64,
+        properties: HashMap<u32, MapiValue>,
     },
     PendingMessage {
         folder_id: u64,

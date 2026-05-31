@@ -1418,7 +1418,9 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *item_id);
         }
-        MapiObject::PublicFolderItem { folder_id, item_id } => {
+        MapiObject::PublicFolderItem {
+            folder_id, item_id, ..
+        } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *item_id);
         }

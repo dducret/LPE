@@ -2496,6 +2496,7 @@ pub(in crate::mapi) async fn open_stream_data<S: ExchangeStore>(
                 open_mode,
                 mailboxes,
                 emails,
+                snapshot,
             )
         }
         _ => None,
@@ -2509,6 +2510,7 @@ pub(in crate::mapi) fn message_body_stream_data(
     open_mode: u8,
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
     let (body_text, body_html) = match session.handles.get(&input_handle)? {
         MapiObject::Message {
@@ -2527,6 +2529,24 @@ pub(in crate::mapi) fn message_body_stream_data(
             2 => (String::new(), Some(String::new())),
             _ => return None,
         },
+        MapiObject::PublicFolderItem {
+            folder_id,
+            item_id,
+            properties,
+        } => match open_mode {
+            0 | 1 => {
+                let item = snapshot.public_folder_item_for_id(*folder_id, *item_id)?;
+                (
+                    optional_pending_text_property(properties, &[PID_TAG_BODY_W])
+                        .unwrap_or_else(|| item.item.body_text.clone()),
+                    optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
+                        .or_else(|| pending_html_binary_property(properties))
+                        .or_else(|| item.item.body_html_sanitized.clone()),
+                )
+            }
+            2 => (String::new(), Some(String::new())),
+            _ => return None,
+        },
         _ => return None,
     };
 
@@ -2541,6 +2561,12 @@ pub(in crate::mapi) fn message_body_stream_data(
     let target = match (session.handles.get(&input_handle), open_mode) {
         (Some(MapiObject::PendingMessage { .. }), 1 | 2) => {
             Some(StreamWriteTarget::PendingMessageProperty {
+                handle: input_handle,
+                property_tag,
+            })
+        }
+        (Some(MapiObject::PublicFolderItem { .. }), 1 | 2) => {
+            Some(StreamWriteTarget::PublicFolderItemProperty {
                 handle: input_handle,
                 property_tag,
             })
@@ -2683,6 +2709,20 @@ pub(in crate::mapi) fn sync_stream_target(
         } => {
             let value = stream_property_value(property_tag, data)?;
             if let Some(MapiObject::PendingMessage { properties, .. }) =
+                session.handles.get_mut(&handle)
+            {
+                properties.insert(canonical_property_storage_tag(property_tag), value);
+                Some(())
+            } else {
+                None
+            }
+        }
+        StreamWriteTarget::PublicFolderItemProperty {
+            handle,
+            property_tag,
+        } => {
+            let value = stream_property_value(property_tag, data)?;
+            if let Some(MapiObject::PublicFolderItem { properties, .. }) =
                 session.handles.get_mut(&handle)
             {
                 properties.insert(canonical_property_storage_tag(property_tag), value);

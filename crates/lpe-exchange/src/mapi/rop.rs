@@ -500,6 +500,29 @@ pub(in crate::mapi) fn rop_id_from_long_term_id_response(
     response
 }
 
+pub(in crate::mapi) fn rop_get_per_user_long_term_ids_response(
+    request: &RopRequest,
+    long_term_ids: &[[u8; 24]],
+) -> Vec<u8> {
+    let mut response = vec![0x60, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(&(long_term_ids.len().min(u16::MAX as usize) as u16).to_le_bytes());
+    for long_term_id in long_term_ids.iter().take(u16::MAX as usize) {
+        response.extend_from_slice(long_term_id);
+    }
+    response
+}
+
+pub(in crate::mapi) fn rop_get_per_user_guid_response(
+    request: &RopRequest,
+    database_guid: &[u8; 16],
+) -> Vec<u8> {
+    let mut response = vec![0x61, request.response_handle_index()];
+    write_u32(&mut response, 0);
+    response.extend_from_slice(database_guid);
+    response
+}
+
 fn stale_special_folder_object_id_from_long_term_id(long_term_id: &[u8]) -> Option<u64> {
     if long_term_id.len() != 24 || long_term_id[22..24] != [0, 0] {
         return None;
@@ -1071,7 +1094,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             };
             serialize_recoverable_item_row(item, &columns)
         }
-        Some(MapiObject::PublicFolderItem { folder_id, item_id }) => {
+        Some(MapiObject::PublicFolderItem {
+            folder_id, item_id, ..
+        }) => {
             let Some(item) = snapshot.public_folder_item_for_id(*folder_id, *item_id) else {
                 return rop_error_response(
                     0x07,
@@ -1876,7 +1901,9 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{item_id:#018x}"),
         ),
-        Some(MapiObject::PublicFolderItem { folder_id, item_id }) => (
+        Some(MapiObject::PublicFolderItem {
+            folder_id, item_id, ..
+        }) => (
             "public_folder_item",
             format!("{folder_id:#018x}"),
             format!("{item_id:#018x}"),
@@ -2391,7 +2418,9 @@ pub(in crate::mapi) fn serialize_object_property(
                 write_property_default(&mut value, tag);
                 value
             }),
-        Some(MapiObject::PublicFolderItem { folder_id, item_id }) => snapshot
+        Some(MapiObject::PublicFolderItem {
+            folder_id, item_id, ..
+        }) => snapshot
             .public_folder_item_for_id(*folder_id, *item_id)
             .map(|item| serialize_public_folder_item_row(item, &[tag]))
             .unwrap_or_else(|| {

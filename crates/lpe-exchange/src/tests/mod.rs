@@ -811,6 +811,13 @@ impl FakeStore {
             .iter()
             .find(|account| identities.get(&account.account_id).copied() == Some(object_id))
             .map(|account| (MapiIdentityObjectKind::Account, account.account_id));
+        let public_folder_match = self
+            .public_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|folder| identities.get(&folder.id).copied() == Some(object_id))
+            .map(|folder| (MapiIdentityObjectKind::PublicFolder, folder.id));
 
         let (object_kind, canonical_id) = mailbox_match
             .or(message_match)
@@ -818,7 +825,8 @@ impl FakeStore {
             .or(event_match)
             .or(task_match)
             .or(rule_match)
-            .or(account_match)?;
+            .or(account_match)
+            .or(public_folder_match)?;
         Some(MapiIdentityLookupRecord {
             object_kind,
             canonical_id,
