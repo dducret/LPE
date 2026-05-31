@@ -2977,6 +2977,65 @@ async fn sync_folder_items_reports_system_mailbox_messages() {
 }
 
 #[tokio::test]
+async fn find_item_lists_public_folder_items() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("public-folder-item:abababab-abab-abab-abab-abababababab"));
+    assert!(body
+        .contains("<t:ParentFolderId Id=\"public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"/>"));
+    assert!(body.contains("<t:Subject>Public post</t:Subject>"));
+}
+
+#[tokio::test]
+async fn sync_folder_items_reports_public_folder_items() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:Create><t:Message>"));
+    assert!(body.contains("public-folder-item:abababab-abab-abab-abab-abababababab"));
+    assert!(body.contains("<m:SyncState>public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:v2:abababab-abab-abab-abab-abababababab="));
+}
+
+#[tokio::test]
 async fn get_item_returns_custom_mailbox_message_body() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
