@@ -8,11 +8,11 @@ use lpe_storage::{
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule,
     PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderTree, RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -490,6 +490,26 @@ pub trait ExchangeStore: AccountAuthStore {
         principal_account_id: Uuid,
         item_ids: &'a [Uuid],
     ) -> StoreFuture<'a, Vec<PublicFolderItem>>;
+
+    fn fetch_public_folder_permissions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderPermission>>;
+
+    fn upsert_public_folder_permission<'a>(
+        &'a self,
+        input: PublicFolderPermissionInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolderPermission>;
+
+    fn delete_public_folder_permission<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
 
     fn upsert_public_folder_item<'a>(
         &'a self,
@@ -2054,6 +2074,43 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Vec<PublicFolderItem>> {
         Box::pin(async move {
             Storage::fetch_public_folder_items_by_ids(self, principal_account_id, item_ids).await
+        })
+    }
+
+    fn fetch_public_folder_permissions<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderPermission>> {
+        Box::pin(async move {
+            Storage::fetch_public_folder_permissions(self, principal_account_id, folder_id).await
+        })
+    }
+
+    fn upsert_public_folder_permission<'a>(
+        &'a self,
+        input: PublicFolderPermissionInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolderPermission> {
+        Box::pin(async move { Storage::upsert_public_folder_permission(self, input, audit).await })
+    }
+
+    fn delete_public_folder_permission<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            Storage::delete_public_folder_permission(
+                self,
+                principal_account_id,
+                folder_id,
+                grantee_account_id,
+                audit,
+            )
+            .await
         })
     }
 

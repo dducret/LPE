@@ -13,10 +13,12 @@ an empty guarded hierarchy instead of leaking private mailbox folders, and a
 store-backed hierarchy probe can list canonical public-folder roots from
 `public_folders`. Store-backed public-folder hierarchy tables can also traverse
 canonical child folders, and normal public-folder contents tables can project
-canonical post-like items as read-only MAPI rows. `RopOpenMessage` plus
-`RopGetPropertiesSpecific` can read the bounded canonical property projection
-for those public-folder posts, and content sync export can emit canonical
-public-folder post facts plus canonical per-user read/unread state. Bounded
+canonical post-like items as read-only MAPI rows. `RopOpenFolder` plus
+`RopGetPropertiesSpecific` can read bounded canonical public-folder folder
+properties, including display name, class, parent id, and counts. `RopOpenMessage`
+plus `RopGetPropertiesSpecific` can read the bounded canonical property
+projection for those public-folder posts, and content sync export can emit
+canonical public-folder post facts plus canonical per-user read/unread state. Bounded
 `RopSetReadFlags` and `RopSetMessageReadFlag` calls on public-folder item
 handles update only `public_folder_per_user_state` for the authenticated
 account. `RopGetPerUserLongTermIds` and `RopGetPerUserGuid` can perform bounded
@@ -110,6 +112,13 @@ Current bounded support covers public-folder store logon, root hierarchy
 discovery, child-folder hierarchy traversal, and read-only contents-table row
 projection plus item open/read and content sync export for canonical post-like
 items, including read-state sync export from canonical public-folder item state.
+Opened public-folder folders project bounded canonical folder properties through
+`RopGetPropertiesSpecific` instead of falling back to private-mailbox special
+folder defaults. `RopGetPermissionsTable` on public-folder handles projects
+canonical `public_folder_permissions` grants plus reserved `Default` and
+`Anonymous` compatibility rows. `RopModifyPermissions` supports bounded add,
+modify, and remove rows for same-tenant account members and writes only the
+canonical public-folder grant path.
 It also covers canonical read-state mutation through `RopSetReadFlags` and
 `RopSetMessageReadFlag`, mapped to `public_folder_per_user_state` for the
 authenticated account without shared item mutation. `RopGetPerUserLongTermIds`
@@ -144,9 +153,9 @@ cluster metadata that exists in canonical LPE state.
 
 | Area | Canonical source | MAPI/HTTP rule |
 | --- | --- | --- |
-| Public-folder tree | `public_folder_trees`, `public_folders` | Public-folder logon and hierarchy tables may expose only canonical root and child folder rows. |
+| Public-folder tree | `public_folder_trees`, `public_folders` | Public-folder logon, hierarchy tables, and opened-folder property reads may expose only canonical root and child folder rows/properties. |
 | Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | Contents tables, item open/read, content sync export, bounded MAPI post creation, existing-item `SetProperties` updates, existing-item body stream writes, soft/hard item deletion, public-folder-to-public-folder copy/move, and sync-import create/update may project or mutate post-like items; recipient-bearing conversion remains gated; no opaque Exchange message blobs. |
-| Permissions | `public_folder_permissions` | Same-tenant grants only; no MAPI-local ACLs. |
+| Permissions | `public_folder_permissions` | `RopGetPermissionsTable` may project same-tenant grants plus reserved compatibility rows; `RopModifyPermissions` may add, modify, and remove same-tenant account grants through the canonical public-folder grant path; no MAPI-local ACLs. |
 | Per-user read/unread | `public_folder_per_user_state` | Content sync may export read/unread state from canonical item rows, bounded MAPI read-flag ROPs may update it for the authenticated account, and per-user LongTermID/GUID lookup may expose canonical public-folder identity only; user-private state only; item content change log is separate. |
 | Replay | `public_folder_change_log` and public-folder tombstones, or proven generic equivalents | Must support permission revocation, item deletion, and per-user-state deltas. |
 | Rules | none for public folders | `RopGetRulesTable` returns an empty table for public-folder handles; no MAPI-local rules or Sieve rules are attached to public folders. |

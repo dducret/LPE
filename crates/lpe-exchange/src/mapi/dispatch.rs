@@ -16,7 +16,8 @@ use crate::store::{
 };
 use lpe_storage::{
     AuditEntryInput, CancelSubmissionResult, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    JmapMailboxUpdateInput, PublicFolderPermissionInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
 
@@ -11432,6 +11433,7 @@ where
                 };
                 if folder_row_for_id(folder_id, mailboxes).is_none()
                     && role_for_folder_id(folder_id).is_none()
+                    && snapshot.public_folder_for_id(folder_id).is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
                         0x3E,
@@ -11489,7 +11491,9 @@ where
                     responses.extend_from_slice(&rop_handle_index_error_response(&request));
                     continue;
                 };
-                let Some(folder) = folder_row_for_id(folder_id, mailboxes) else {
+                let mailbox_folder = folder_row_for_id(folder_id, mailboxes);
+                let public_folder = snapshot.public_folder_for_id(folder_id);
+                if mailbox_folder.is_none() && public_folder.is_none() {
                     responses.extend_from_slice(&rop_error_response(
                         0x40,
                         request.response_handle_index(),
@@ -11497,11 +11501,17 @@ where
                     ));
                     continue;
                 };
-                let can_share = snapshot
-                    .permissions_for_folder(folder_id)
-                    .iter()
-                    .find(|permission| permission.member_account_id == Some(principal.account_id))
-                    .is_some_and(|permission| may_share_from_rights(permission.rights));
+                let can_share = if let Some(public_folder) = public_folder {
+                    public_folder.folder.rights.may_share
+                } else {
+                    snapshot
+                        .permissions_for_folder(folder_id)
+                        .iter()
+                        .find(|permission| {
+                            permission.member_account_id == Some(principal.account_id)
+                        })
+                        .is_some_and(|permission| may_share_from_rights(permission.rights))
+                };
                 if !can_share {
                     responses.extend_from_slice(&rop_error_response(
                         0x40,
@@ -11592,6 +11602,7 @@ where
                         break;
                     }
                     actions.push((
+                        row_kind,
                         identity.canonical_id,
                         may_read,
                         may_write,
@@ -11608,27 +11619,90 @@ where
                     continue;
                 }
                 let mut failed = false;
-                for (grantee_account_id, may_read, may_write, may_delete, may_share) in actions {
-                    if store
-                        .set_mapi_folder_permission(
-                            principal.account_id,
-                            folder.id,
-                            grantee_account_id,
-                            may_read,
-                            may_write,
-                            may_delete,
-                            may_share,
-                            AuditEntryInput {
-                                actor: principal.email.clone(),
-                                action: "mapi-modify-permissions".to_string(),
-                                subject: format!("folder {} {}", folder.name, grantee_account_id),
-                            },
-                        )
-                        .await
-                        .is_err()
+                if let Some(folder) = mailbox_folder {
+                    for (
+                        _row_kind,
+                        grantee_account_id,
+                        may_read,
+                        may_write,
+                        may_delete,
+                        may_share,
+                    ) in actions
                     {
-                        failed = true;
-                        break;
+                        if store
+                            .set_mapi_folder_permission(
+                                principal.account_id,
+                                folder.id,
+                                grantee_account_id,
+                                may_read,
+                                may_write,
+                                may_delete,
+                                may_share,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-modify-permissions".to_string(),
+                                    subject: format!(
+                                        "folder {} {}",
+                                        folder.name, grantee_account_id
+                                    ),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            failed = true;
+                            break;
+                        }
+                    }
+                } else if let Some(folder) = public_folder {
+                    for (
+                        row_kind,
+                        grantee_account_id,
+                        may_read,
+                        may_write,
+                        may_delete,
+                        may_share,
+                    ) in actions
+                    {
+                        let audit = AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "mapi-modify-public-folder-permissions".to_string(),
+                            subject: format!(
+                                "public folder {} {}",
+                                folder.folder.display_name, grantee_account_id
+                            ),
+                        };
+                        let result = if row_kind == ROW_REMOVE {
+                            store
+                                .delete_public_folder_permission(
+                                    principal.account_id,
+                                    folder.folder.id,
+                                    grantee_account_id,
+                                    audit,
+                                )
+                                .await
+                                .map(|_| ())
+                        } else {
+                            store
+                                .upsert_public_folder_permission(
+                                    PublicFolderPermissionInput {
+                                        account_id: principal.account_id,
+                                        public_folder_id: folder.folder.id,
+                                        principal_account_id: grantee_account_id,
+                                        may_read,
+                                        may_write,
+                                        may_delete,
+                                        may_share,
+                                    },
+                                    audit,
+                                )
+                                .await
+                                .map(|_| ())
+                        };
+                        if result.is_err() {
+                            failed = true;
+                            break;
+                        }
                     }
                 }
                 if failed {

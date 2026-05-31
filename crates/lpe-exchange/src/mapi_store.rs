@@ -3,13 +3,15 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
     ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
     DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule, PublicFolder,
-    PublicFolderItem, RecoverableItem, ReminderQuery, SearchFolderDefinition,
+    PublicFolderItem, PublicFolderPermission, RecoverableItem, ReminderQuery,
+    SearchFolderDefinition,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::mapi::permissions::{
-    access_from_rights, reserved_permission_rows, MapiFolderAccess, MapiFolderPermission,
+    access_from_rights, reserved_permission_rows, rights_from_grant, MapiFolderAccess,
+    MapiFolderPermission,
 };
 use crate::store::ExchangeStore;
 use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest, MapiNavigationShortcutRecord};
@@ -34,6 +36,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     recoverable_items: Vec<MapiRecoverableItemMessage>,
     reminders: Vec<ClientReminder>,
     folder_permissions: Vec<MapiFolderPermission>,
+    public_folder_permissions: Vec<MapiFolderPermission>,
     content_windows: Vec<MapiContentTableWindow>,
 }
 
@@ -393,6 +396,7 @@ impl MapiMailStoreSnapshot {
             recoverable_items: Vec::new(),
             reminders: Vec::new(),
             folder_permissions,
+            public_folder_permissions: Vec::new(),
             content_windows: Vec::new(),
         }
     }
@@ -514,6 +518,7 @@ impl MapiMailStoreSnapshot {
         mut self,
         folders: Vec<PublicFolder>,
         items: Vec<PublicFolderItem>,
+        permissions: Vec<PublicFolderPermission>,
     ) -> Self {
         let all_folders = folders.clone();
         self.public_folders = folders
@@ -548,6 +553,10 @@ impl MapiMailStoreSnapshot {
                     item,
                 })
             })
+            .collect();
+        self.public_folder_permissions = permissions
+            .into_iter()
+            .map(mapi_public_folder_permission)
             .collect();
         self
     }
@@ -1063,17 +1072,31 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn permissions_for_folder(&self, folder_id: u64) -> Vec<MapiFolderPermission> {
-        let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) else {
-            return Vec::new();
-        };
-        let mut permissions = reserved_permission_rows(folder.canonical_id);
-        permissions.extend(
-            self.folder_permissions
-                .iter()
-                .filter(|permission| permission.mailbox_id == folder.canonical_id)
-                .cloned(),
-        );
-        permissions
+        if let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) {
+            let mut permissions = reserved_permission_rows(folder.canonical_id);
+            permissions.extend(
+                self.folder_permissions
+                    .iter()
+                    .filter(|permission| permission.mailbox_id == folder.canonical_id)
+                    .cloned(),
+            );
+            return permissions;
+        }
+        if let Some(folder) = self
+            .public_folders
+            .iter()
+            .find(|folder| folder.id == folder_id)
+        {
+            let mut permissions = reserved_permission_rows(folder.folder.id);
+            permissions.extend(
+                self.public_folder_permissions
+                    .iter()
+                    .filter(|permission| permission.mailbox_id == folder.folder.id)
+                    .cloned(),
+            );
+            return permissions;
+        }
+        Vec::new()
     }
 
     pub(crate) fn folder_access_for_principal(
@@ -1211,9 +1234,14 @@ impl<T: ExchangeStore> MapiStore for T {
                 public_folders.push(folder);
             }
             let mut public_folder_items = Vec::new();
+            let mut public_folder_permissions = Vec::new();
             for folder in &public_folders {
                 public_folder_items.extend(
                     self.fetch_public_folder_items(account_id, folder.id)
+                        .await?,
+                );
+                public_folder_permissions.extend(
+                    self.fetch_public_folder_permissions(account_id, folder.id)
                         .await?,
                 );
             }
@@ -1288,8 +1316,28 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
             .map(|snapshot| snapshot.with_recoverable_items(recoverable_items))
             .map(|snapshot| snapshot.with_reminders(reminders))
-            .map(|snapshot| snapshot.with_public_folders(public_folders, public_folder_items))
+            .map(|snapshot| {
+                snapshot.with_public_folders(
+                    public_folders,
+                    public_folder_items,
+                    public_folder_permissions,
+                )
+            })
         })
+    }
+}
+
+fn mapi_public_folder_permission(permission: PublicFolderPermission) -> MapiFolderPermission {
+    MapiFolderPermission {
+        mailbox_id: permission.public_folder_id,
+        member_account_id: Some(permission.principal_account_id),
+        member_name: permission.principal_display_name,
+        rights: rights_from_grant(
+            permission.rights.may_read,
+            permission.rights.may_write,
+            permission.rights.may_delete,
+            permission.rights.may_share,
+        ),
     }
 }
 

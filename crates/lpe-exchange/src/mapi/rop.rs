@@ -2534,6 +2534,11 @@ fn serialize_session_folder_row(
                     .collaboration_folder_for_id(folder_id)
                     .map(|folder| serialize_collaboration_folder_row(folder, &[*column]))
             })
+            .or_else(|| {
+                snapshot
+                    .public_folder_for_id(folder_id)
+                    .map(|folder| serialize_public_folder_row(folder, &[*column]))
+            })
             .unwrap_or_else(|| {
                 serialize_special_folder_row(folder_id, mailboxes, &[*column], Some(principal))
             });

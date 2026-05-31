@@ -12,7 +12,8 @@ use lpe_storage::{
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderTree, ReminderQuery,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderRights, PublicFolderTree, ReminderQuery,
     SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
     StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
@@ -365,6 +366,7 @@ struct FakeStore {
     public_folders: Arc<Mutex<Vec<PublicFolder>>>,
     deleted_public_folders: Arc<Mutex<Vec<Uuid>>>,
     public_folder_items: Arc<Mutex<Vec<PublicFolderItem>>>,
+    public_folder_permissions: Arc<Mutex<Vec<PublicFolderPermission>>>,
     deleted_public_folder_items: Arc<Mutex<Vec<Uuid>>>,
     attachments: Arc<Mutex<HashMap<Uuid, Vec<ActiveSyncAttachment>>>>,
     calendar_attachments: Arc<Mutex<HashMap<Uuid, Vec<CalendarEventAttachment>>>>,
@@ -1099,6 +1101,108 @@ impl ExchangeStore for FakeStore {
             .cloned()
             .collect();
         Box::pin(async move { Ok(items) })
+    }
+
+    fn fetch_public_folder_permissions<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        folder_id: Uuid,
+    ) -> StoreFuture<'a, Vec<PublicFolderPermission>> {
+        let permissions = self
+            .public_folder_permissions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|permission| permission.public_folder_id == folder_id)
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(permissions) })
+    }
+
+    fn upsert_public_folder_permission<'a>(
+        &'a self,
+        input: PublicFolderPermissionInput,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolderPermission> {
+        let Some(principal) = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| account.account_id == input.principal_account_id)
+            .cloned()
+        else {
+            return Box::pin(async move {
+                Err(anyhow::anyhow!(
+                    "public folder permission principal not found"
+                ))
+            });
+        };
+        let mut permissions = self.public_folder_permissions.lock().unwrap();
+        if let Some(permission) = permissions.iter_mut().find(|permission| {
+            permission.public_folder_id == input.public_folder_id
+                && permission.principal_account_id == input.principal_account_id
+        }) {
+            permission.rights = PublicFolderRights {
+                may_read: input.may_read,
+                may_write: input.may_write,
+                may_delete: input.may_delete,
+                may_share: input.may_share,
+            };
+            permission.updated_at = "2026-05-07T12:00:00Z".to_string();
+            let permission = permission.clone();
+            self.mapi_folder_permission_audits
+                .lock()
+                .unwrap()
+                .push(audit);
+            return Box::pin(async move { Ok(permission) });
+        }
+        let permission = PublicFolderPermission {
+            id: Uuid::parse_str("dededede-dede-dede-dede-dededededede").unwrap(),
+            public_folder_id: input.public_folder_id,
+            principal_account_id: input.principal_account_id,
+            principal_email: principal.email,
+            principal_display_name: principal.display_name,
+            rights: PublicFolderRights {
+                may_read: input.may_read,
+                may_write: input.may_write,
+                may_delete: input.may_delete,
+                may_share: input.may_share,
+            },
+            created_at: "2026-05-07T12:00:00Z".to_string(),
+            updated_at: "2026-05-07T12:00:00Z".to_string(),
+        };
+        permissions.push(permission.clone());
+        self.mapi_folder_permission_audits
+            .lock()
+            .unwrap()
+            .push(audit);
+        Box::pin(async move { Ok(permission) })
+    }
+
+    fn delete_public_folder_permission<'a>(
+        &'a self,
+        _principal_account_id: Uuid,
+        folder_id: Uuid,
+        grantee_account_id: Uuid,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let mut permissions = self.public_folder_permissions.lock().unwrap();
+        let before = permissions.len();
+        permissions.retain(|permission| {
+            !(permission.public_folder_id == folder_id
+                && permission.principal_account_id == grantee_account_id)
+        });
+        if permissions.len() == before {
+            return Box::pin(
+                async move { Err(anyhow::anyhow!("public folder permission not found")) },
+            );
+        }
+        self.mapi_folder_permission_audits
+            .lock()
+            .unwrap()
+            .push(audit);
+        Box::pin(async move { Ok(()) })
     }
 
     fn upsert_public_folder_item<'a>(
