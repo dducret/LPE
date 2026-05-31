@@ -109,6 +109,7 @@ pub(crate) struct SpecialMessageSyncFact {
     pub(crate) message_class: String,
     pub(crate) last_modified_filetime: u64,
     pub(crate) message_size: i64,
+    pub(crate) read_state: Option<bool>,
     pub(crate) named_properties: Vec<(u32, SpecialMessagePropertyValue)>,
 }
 
@@ -751,7 +752,7 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             .then(left.subject.cmp(&right.subject))
             .then(left.canonical_id.cmp(&right.canonical_id))
     });
-    for object in special_objects {
+    for object in &special_objects {
         let change_number = change_number_for_store_id(object.item_id);
         write_u32(&mut buffer, INCR_SYNC_CHG);
         write_binary_property(
@@ -863,16 +864,28 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
     }
 
     if sync_type == SYNC_TYPE_CONTENTS && sync_flags & 0x0008 != 0 {
-        let read_message_ids = emails
+        let mut read_message_ids = emails
             .iter()
             .filter(|email| !email.unread)
             .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
             .collect::<Vec<_>>();
-        let unread_message_ids = emails
+        read_message_ids.extend(
+            special_objects
+                .iter()
+                .filter(|object| object.read_state == Some(true))
+                .map(|object| object.item_id),
+        );
+        let mut unread_message_ids = emails
             .iter()
             .filter(|email| email.unread)
             .filter_map(|email| crate::mapi::identity::mapped_mapi_object_id(&email.id))
             .collect::<Vec<_>>();
+        unread_message_ids.extend(
+            special_objects
+                .iter()
+                .filter(|object| object.read_state == Some(false))
+                .map(|object| object.item_id),
+        );
         if !read_message_ids.is_empty() || !unread_message_ids.is_empty() {
             write_u32(&mut buffer, INCR_SYNC_READ);
             if !read_message_ids.is_empty() {
@@ -4631,6 +4644,7 @@ mod tests {
             message_class: "IPM.StickyNote".to_string(),
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 19,
+            read_state: None,
             named_properties: vec![(0x8B00_0003, SpecialMessagePropertyValue::I32(3))],
         };
         let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
@@ -4678,6 +4692,7 @@ mod tests {
             message_class: "IPM.Appointment".to_string(),
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 19,
+            read_state: None,
             named_properties: vec![(0x8205_0003, SpecialMessagePropertyValue::I32(2))],
         };
         let excluded_property_tags = [
@@ -4737,6 +4752,7 @@ mod tests {
             message_class: "IPM.Appointment".to_string(),
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 19,
+            read_state: None,
             named_properties: Vec::new(),
         };
         let associated_object = SpecialMessageSyncFact {
@@ -4749,6 +4765,7 @@ mod tests {
             message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
             last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
             message_size: 19,
+            read_state: None,
             named_properties: Vec::new(),
         };
         let email = test_email();

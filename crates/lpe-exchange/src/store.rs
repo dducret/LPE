@@ -7,11 +7,12 @@ use lpe_storage::{
     CreatePublicFolderInput, DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxFolderDelegationGrantInput, MailboxRule,
-    PublicFolder, PublicFolderItem, PublicFolderTree, RecoverableItem, ReminderQuery,
-    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage, SubmitMessageInput,
-    SubmittedMessage, UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput,
-    UpsertClientTaskInput, UpsertConversationActionInput, UpsertJournalEntryInput,
-    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderTree, RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -503,6 +504,13 @@ pub trait ExchangeStore: AccountAuthStore {
         item_id: Uuid,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
+
+    fn patch_public_folder_per_user_state<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        patches: &'a [PublicFolderPerUserStatePatch],
+    ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>>;
 
     fn fetch_accessible_contacts_in_collection<'a>(
         &'a self,
@@ -2071,6 +2079,23 @@ impl ExchangeStore for Storage {
                 folder_id,
                 item_id,
                 audit,
+            )
+            .await
+        })
+    }
+
+    fn patch_public_folder_per_user_state<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        patches: &'a [PublicFolderPerUserStatePatch],
+    ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>> {
+        Box::pin(async move {
+            Storage::patch_public_folder_per_user_state(
+                self,
+                principal_account_id,
+                folder_id,
+                patches,
             )
             .await
         })

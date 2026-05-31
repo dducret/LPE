@@ -4,10 +4,10 @@
 
 Public folders now have canonical `LPE` storage, authenticated mail APIs,
 permission rows, per-user read/unread rows, replay facts, and tombstones.
-MAPI/HTTP public-folder replica, item mutation, item sync, and per-user-state
-ROPs remain guarded protocol work; they must not create protocol-local
-public-folder state. The
-first bounded MAPI steps are enabled: public-folder `RopLogon` now creates a
+MAPI/HTTP public-folder replica, item mutation, item sync import, and
+per-user-information blob ROPs remain guarded protocol work; they must not
+create protocol-local public-folder state. The first bounded MAPI steps are
+enabled: public-folder `RopLogon` now creates a
 distinct public-folder store handle, an immediate root hierarchy probe returns
 an empty guarded hierarchy instead of leaking private mailbox folders, and a
 store-backed hierarchy probe can list canonical public-folder roots from
@@ -15,9 +15,11 @@ store-backed hierarchy probe can list canonical public-folder roots from
 canonical child folders, and normal public-folder contents tables can project
 canonical post-like items as read-only MAPI rows. `RopOpenMessage` plus
 `RopGetPropertiesSpecific` can read the bounded canonical property projection
-for those public-folder posts. Bounded EWS folder, item projection, item lookup,
-post creation, item update, and item deletion may expose or mutate
-public-folder data only through the canonical tables described here.
+for those public-folder posts, and content sync export can emit canonical
+public-folder post facts plus canonical per-user read/unread state. Bounded EWS
+folder, item projection, item lookup, post creation, item update, and item
+deletion may expose or mutate public-folder data only through the canonical
+tables described here.
 
 Current bounded EWS coverage includes public-folder `FindFolder`, `GetFolder`,
 `SyncFolderHierarchy`, `CreateFolder`, `DeleteFolder`, `FindItem`,
@@ -101,8 +103,10 @@ future web clients can sync item content and user-private state independently.
 MAPI/HTTP support can begin from the canonical API and replay model above.
 Current bounded support covers public-folder store logon, root hierarchy
 discovery, child-folder hierarchy traversal, and read-only contents-table row
-projection plus item open/read for canonical post-like items. The next ROP
-mapping should be sync export over canonical public-folder items.
+projection plus item open/read and content sync export for canonical post-like
+items, including read-state sync export from canonical public-folder item state.
+The next ROP mapping should be canonical per-user-state mutation or lookup,
+without Exchange-compatible private blob storage.
 `RopGetPerUserLongTermIds`, `RopGetPerUserGuid`,
 `RopReadPerUserInformation`, and `RopWritePerUserInformation` may map only to
 `public_folder_per_user_state`; they must not create Exchange-compatible binary
@@ -115,8 +119,8 @@ state.
 | Area | Canonical source | MAPI/HTTP rule |
 | --- | --- | --- |
 | Public-folder tree | `public_folder_trees`, `public_folders` | Public-folder logon and hierarchy tables may expose only canonical root and child folder rows. |
-| Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | Contents tables and item open/read may project post-like items read-only; no opaque Exchange message blobs. |
+| Public-folder items | `public_folder_items` plus canonical message/body/blob tables where applicable | Contents tables, item open/read, and content sync export may project post-like items read-only; no opaque Exchange message blobs. |
 | Permissions | `public_folder_permissions` | Same-tenant grants only; no MAPI-local ACLs. |
-| Per-user read/unread | `public_folder_per_user_state` | User-private state only; item content change log is separate. |
+| Per-user read/unread | `public_folder_per_user_state` | Content sync may export read/unread state from canonical item rows; user-private state only; item content change log is separate. |
 | Replay | `public_folder_change_log` and public-folder tombstones, or proven generic equivalents | Must support permission revocation, item deletion, and per-user-state deltas. |
 | ROP enablement | Architecture, SQL, API, replay tests, then ROP tests | Do not implement public-folder ROPs before the canonical layer exists. |

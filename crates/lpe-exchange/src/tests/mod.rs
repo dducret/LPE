@@ -12,11 +12,12 @@ use lpe_storage::{
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
-    PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SieveScriptDocument, Storage, StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage,
-    SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderTree, ReminderQuery,
+    SavedDraftMessage, SearchFolderDefinition, SieveScriptDocument, Storage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -1163,6 +1164,40 @@ impl ExchangeStore for FakeStore {
         } else {
             Box::pin(async move { Err(anyhow::anyhow!("public folder item not found")) })
         }
+    }
+
+    fn patch_public_folder_per_user_state<'a>(
+        &'a self,
+        principal_account_id: Uuid,
+        folder_id: Uuid,
+        patches: &'a [PublicFolderPerUserStatePatch],
+    ) -> StoreFuture<'a, Vec<PublicFolderPerUserState>> {
+        let mut items = self.public_folder_items.lock().unwrap();
+        let mut states = Vec::new();
+        for patch in patches {
+            let Some(item) = items
+                .iter_mut()
+                .find(|item| item.public_folder_id == folder_id && item.id == patch.item_id)
+            else {
+                return Box::pin(
+                    async move { Err(anyhow::anyhow!("public folder item not found")) },
+                );
+            };
+            item.is_read = patch.is_read;
+            states.push(PublicFolderPerUserState {
+                public_folder_id: folder_id,
+                item_id: patch.item_id,
+                account_id: principal_account_id,
+                is_read: patch.is_read,
+                last_seen_change: patch.last_seen_change.unwrap_or(item.change_counter),
+                private_json: patch
+                    .private_json
+                    .clone()
+                    .unwrap_or_else(|| "{}".to_string()),
+                updated_at: "2026-05-07T12:00:00Z".to_string(),
+            });
+        }
+        Box::pin(async move { Ok(states) })
     }
 
     fn fetch_mapi_identities_by_object_ids<'a>(

@@ -6264,10 +6264,62 @@ where
                 ))
             }
             Some(RopId::SetMessageReadFlag) => {
-                let Some(MapiObject::Message {
+                let Some(object) = input_object(session, &handle_slots, &request) else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x11,
+                        request.response_handle_index(),
+                        0x0000_04B9,
+                    ));
+                    continue;
+                };
+                if let MapiObject::PublicFolderItem { folder_id, item_id } = object {
+                    let Some(item) = snapshot.public_folder_item_for_id(*folder_id, *item_id)
+                    else {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x11,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                        continue;
+                    };
+                    let unread = unread_from_read_flags(request.read_flags());
+                    let changed = unread.is_some_and(|unread| unread == item.item.is_read);
+                    if let Some(unread) = unread {
+                        let patch = lpe_storage::PublicFolderPerUserStatePatch {
+                            item_id: item.item.id,
+                            is_read: !unread,
+                            last_seen_change: Some(item.item.change_counter),
+                            private_json: None,
+                        };
+                        if store
+                            .patch_public_folder_per_user_state(
+                                principal.account_id,
+                                item.item.public_folder_id,
+                                &[patch],
+                            )
+                            .await
+                            .is_err()
+                        {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x11,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            ));
+                            continue;
+                        }
+                    }
+                    if changed {
+                        session
+                            .record_notification(MapiNotificationEvent::content(*folder_id, None));
+                    }
+                    responses
+                        .extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
+                    continue;
+                }
+                let MapiObject::Message {
                     folder_id,
                     message_id,
-                }) = input_object(session, &handle_slots, &request)
+                } = object
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x11,
@@ -8296,7 +8348,47 @@ where
                 };
                 let unread = unread_from_read_flags(request.read_flags());
                 let mut partial_completion = false;
-                for message_id in request.message_ids() {
+                let message_ids = request.message_ids();
+                if snapshot.public_folder_for_id(folder_id).is_some() {
+                    if let Some(unread) = unread {
+                        let mut patches = Vec::new();
+                        for message_id in message_ids {
+                            let Some(item) =
+                                snapshot.public_folder_item_for_id(folder_id, message_id)
+                            else {
+                                partial_completion = true;
+                                continue;
+                            };
+                            patches.push(lpe_storage::PublicFolderPerUserStatePatch {
+                                item_id: item.item.id,
+                                is_read: !unread,
+                                last_seen_change: Some(item.item.change_counter),
+                                private_json: None,
+                            });
+                        }
+                        if !patches.is_empty()
+                            && store
+                                .patch_public_folder_per_user_state(
+                                    principal.account_id,
+                                    snapshot
+                                        .public_folder_for_id(folder_id)
+                                        .map(|folder| folder.folder.id)
+                                        .unwrap_or_default(),
+                                    &patches,
+                                )
+                                .await
+                                .is_err()
+                        {
+                            partial_completion = true;
+                        }
+                    }
+                    responses.extend_from_slice(&rop_set_read_flags_response(
+                        &request,
+                        partial_completion,
+                    ));
+                    continue;
+                }
+                for message_id in message_ids {
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                         .or_else(|| {
                             emails
@@ -11898,6 +11990,7 @@ mod tests {
             message_class: "IPM.Configuration.Calendar".to_string(),
             last_modified_filetime: 0,
             message_size: 0,
+            read_state: None,
             named_properties: vec![
                 (
                     PID_TAG_ROAMING_DATATYPES,

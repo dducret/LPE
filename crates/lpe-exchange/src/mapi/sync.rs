@@ -503,6 +503,13 @@ pub(in crate::mapi) fn special_sync_objects_for(
             })
             .collect();
     }
+    if snapshot.public_folder_for_id(folder_id).is_some() {
+        return snapshot
+            .public_folder_items_for_folder(folder_id)
+            .into_iter()
+            .map(public_folder_item_sync_object)
+            .collect();
+    }
     match folder_id {
         CONTACTS_SEARCH_FOLDER_ID => snapshot
             .contacts_search_results()
@@ -544,6 +551,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
                     &note.note.updated_at,
                 ),
                 message_size: note_size(&note.note),
+                read_state: None,
                 named_properties: vec![
                     (
                         PID_LID_NOTE_COLOR_TAG,
@@ -600,6 +608,49 @@ pub(in crate::mapi) fn special_sync_objects_for(
     }
 }
 
+fn public_folder_item_sync_object(
+    item: &crate::mapi_store::MapiPublicFolderItem,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let message_class = if item.item.message_class.trim().is_empty() {
+        "IPM.Post".to_string()
+    } else {
+        item.item.message_class.clone()
+    };
+    let message_size = item
+        .item
+        .subject
+        .len()
+        .saturating_add(item.item.body_text.len())
+        .min(i64::MAX as usize) as i64;
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: item.folder_id,
+        item_id: item.id,
+        canonical_id: item.item.id,
+        associated: false,
+        subject: item.item.subject.clone(),
+        body_text: item.item.body_text.clone(),
+        message_class,
+        last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&item.item.updated_at),
+        message_size,
+        read_state: Some(item.item.is_read),
+        named_properties: vec![
+            (
+                PID_TAG_ACCESS,
+                mapi_mailstore::SpecialMessagePropertyValue::U32(MAPI_MESSAGE_ACCESS),
+            ),
+            (
+                PID_TAG_HAS_ATTACHMENTS,
+                mapi_mailstore::SpecialMessagePropertyValue::Bool(false),
+            ),
+            (
+                PID_TAG_READ,
+                mapi_mailstore::SpecialMessagePropertyValue::Bool(item.item.is_read),
+            ),
+        ],
+    }
+}
+
 fn contact_sync_object(
     contact: &crate::mapi_store::MapiContact,
 ) -> mapi_mailstore::SpecialMessageSyncFact {
@@ -638,6 +689,7 @@ fn contact_sync_object(
         message_class: "IPM.Contact".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size: contact_size(&contact.contact),
+        read_state: None,
         named_properties: properties,
     }
 }
@@ -684,6 +736,7 @@ fn task_sync_object(
         message_class: "IPM.Task".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&task.task.updated_at),
         message_size: task_size(&task.task),
+        read_state: None,
         named_properties: properties,
     }
 }
@@ -788,6 +841,7 @@ fn journal_sync_object(
         message_class: entry.entry.message_class.clone(),
         last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(&entry.entry.updated_at),
         message_size: journal_entry_size(&entry.entry),
+        read_state: None,
         named_properties,
     }
 }
@@ -829,6 +883,7 @@ fn navigation_shortcut_sync_object(
         message_class: "IPM.Microsoft.WunderBar.Link".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size: 128,
+        read_state: None,
         named_properties,
     }
 }
@@ -882,6 +937,7 @@ fn conversation_action_sync_object(
         message_class: "IPM.ConversationAction".to_string(),
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
+        read_state: None,
         named_properties,
     }
 }
@@ -912,6 +968,7 @@ fn delegate_freebusy_sync_object(
         },
         last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
         message_size,
+        read_state: None,
         named_properties: Vec::new(),
     }
 }
@@ -994,6 +1051,7 @@ fn calendar_sync_object(
         message_class: "IPM.Appointment".to_string(),
         last_modified_filetime: event_start_filetime(&event.event),
         message_size: event_size(&event.event),
+        read_state: None,
         named_properties: properties,
     }
 }
