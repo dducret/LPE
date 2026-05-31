@@ -965,7 +965,26 @@ impl ExchangeStore for FakeStore {
         &'a self,
         _principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<PublicFolderTree>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        let trees = self
+            .public_folders
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|folder| {
+                folder.parent_folder_id.is_none() && folder.lifecycle_state == "active"
+            })
+            .map(|folder| PublicFolderTree {
+                id: folder.tree_id,
+                canonical_id: folder.tree_id,
+                display_name: folder.display_name.clone(),
+                lifecycle_state: "active".to_string(),
+                admin_owner_account_id: FakeStore::account().account_id,
+                root_folder_id: Some(folder.id),
+                created_at: folder.created_at.clone(),
+                updated_at: folder.updated_at.clone(),
+            })
+            .collect();
+        Box::pin(async move { Ok(trees) })
     }
 
     fn fetch_public_folder<'a>(

@@ -2,8 +2,8 @@ use lpe_mail_auth::StoreFuture;
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, CalendarEventAttachment, ClientNote,
     ClientReminder, ClientTask, CollaborationCollection, ConversationAction,
-    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule,
-    RecoverableItem, ReminderQuery, SearchFolderDefinition,
+    DelegateFreeBusyMessageObject, JmapEmail, JmapMailbox, JournalEntry, MailboxRule, PublicFolder,
+    PublicFolderItem, RecoverableItem, ReminderQuery, SearchFolderDefinition,
 };
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -17,6 +17,7 @@ use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest, MapiNavigationSh
 #[derive(Debug, Clone)]
 pub(crate) struct MapiMailStoreSnapshot {
     folders: Vec<MapiFolder>,
+    public_folders: Vec<MapiPublicFolder>,
     collaboration_folders: Vec<MapiCollaborationFolder>,
     messages: Vec<MapiMessage>,
     contacts: Vec<MapiContact>,
@@ -40,6 +41,14 @@ pub(crate) struct MapiFolder {
     pub(crate) id: u64,
     pub(crate) canonical_id: Uuid,
     pub(crate) mailbox: JmapMailbox,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MapiPublicFolder {
+    pub(crate) id: u64,
+    pub(crate) folder: PublicFolder,
+    pub(crate) item_count: u32,
+    pub(crate) child_count: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -359,6 +368,7 @@ impl MapiMailStoreSnapshot {
             .collect();
         Self {
             folders,
+            public_folders: Vec::new(),
             collaboration_folders,
             messages,
             contacts,
@@ -488,6 +498,36 @@ impl MapiMailStoreSnapshot {
 
     pub(crate) fn with_reminders(mut self, reminders: Vec<ClientReminder>) -> Self {
         self.reminders = reminders;
+        self
+    }
+
+    pub(crate) fn with_public_folders(
+        mut self,
+        folders: Vec<PublicFolder>,
+        items: Vec<PublicFolderItem>,
+    ) -> Self {
+        let all_folders = folders.clone();
+        self.public_folders = folders
+            .into_iter()
+            .map(|folder| {
+                let item_count = items
+                    .iter()
+                    .filter(|item| item.public_folder_id == folder.id)
+                    .count()
+                    .min(u32::MAX as usize) as u32;
+                let child_count = all_folders
+                    .iter()
+                    .filter(|candidate| candidate.parent_folder_id == Some(folder.id))
+                    .count()
+                    .min(u32::MAX as usize) as u32;
+                MapiPublicFolder {
+                    id: mapi_public_folder_id(&folder),
+                    folder,
+                    item_count,
+                    child_count,
+                }
+            })
+            .collect();
         self
     }
 
@@ -629,6 +669,16 @@ impl MapiMailStoreSnapshot {
 
     pub(crate) fn collaboration_folders(&self) -> &[MapiCollaborationFolder] {
         &self.collaboration_folders
+    }
+
+    pub(crate) fn public_folders(&self) -> &[MapiPublicFolder] {
+        &self.public_folders
+    }
+
+    pub(crate) fn public_folder_for_id(&self, folder_id: u64) -> Option<&MapiPublicFolder> {
+        self.public_folders
+            .iter()
+            .find(|folder| folder.id == folder_id)
     }
 
     pub(crate) fn collaboration_folder_for_id(
@@ -1103,6 +1153,29 @@ impl<T: ExchangeStore> MapiStore for T {
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let delegate_freebusy_messages =
                 self.fetch_delegate_freebusy_messages(account_id).await?;
+            let public_trees = self.fetch_public_folder_trees(account_id).await?;
+            let mut public_folders = Vec::new();
+            let mut pending_public_folder_ids = public_trees
+                .iter()
+                .filter_map(|tree| tree.root_folder_id)
+                .collect::<Vec<_>>();
+            while let Some(folder_id) = pending_public_folder_ids.pop() {
+                let folder = self.fetch_public_folder(account_id, folder_id).await?;
+                pending_public_folder_ids.extend(
+                    self.fetch_public_folder_children(account_id, folder_id)
+                        .await?
+                        .into_iter()
+                        .map(|child| child.id),
+                );
+                public_folders.push(folder);
+            }
+            let mut public_folder_items = Vec::new();
+            for folder in &public_folders {
+                public_folder_items.extend(
+                    self.fetch_public_folder_items(account_id, folder.id)
+                        .await?,
+                );
+            }
             let mut recoverable_items = Vec::new();
             for folder in ["deletions", "versions", "purges"] {
                 recoverable_items.extend(
@@ -1134,6 +1207,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &navigation_shortcuts,
                 &conversation_actions,
                 &delegate_freebusy_messages,
+                &public_folders,
             );
             for identity in self
                 .fetch_or_allocate_mapi_identities(account_id, &identity_requests)
@@ -1172,6 +1246,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
             .map(|snapshot| snapshot.with_recoverable_items(recoverable_items))
             .map(|snapshot| snapshot.with_reminders(reminders))
+            .map(|snapshot| snapshot.with_public_folders(public_folders, public_folder_items))
         })
     }
 }
@@ -1192,6 +1267,7 @@ fn mapi_identity_requests(
     navigation_shortcuts: &[MapiNavigationShortcutRecord],
     conversation_actions: &[ConversationAction],
     delegate_freebusy_messages: &[DelegateFreeBusyMessageObject],
+    public_folders: &[PublicFolder],
 ) -> Vec<MapiIdentityRequest> {
     let mut requests = Vec::new();
     requests.extend(mailboxes.iter().map(|mailbox| MapiIdentityRequest {
@@ -1290,6 +1366,12 @@ fn mapi_identity_requests(
                 source_key: None,
             }),
     );
+    requests.extend(public_folders.iter().map(|folder| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::PublicFolder,
+        canonical_id: folder.id,
+        reserved_global_counter: None,
+        source_key: None,
+    }));
     requests
 }
 
@@ -1371,6 +1453,11 @@ fn mapi_message_id(email: &JmapEmail) -> u64 {
 
 fn mapi_item_id(id: &Uuid) -> u64 {
     crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI item identity mapping missing")
+}
+
+fn mapi_public_folder_id(folder: &PublicFolder) -> u64 {
+    crate::mapi::identity::mapped_mapi_object_id(&folder.id)
+        .expect("MAPI public folder identity mapping missing")
 }
 
 pub(crate) fn mapi_recoverable_item_id(id: &Uuid) -> u64 {

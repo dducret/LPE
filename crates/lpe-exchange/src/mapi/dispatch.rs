@@ -1617,6 +1617,7 @@ fn summarize_root_logon_default_folder_getprops_requests(
                 } else {
                     match input_object(session, &input_handles, &request) {
                         Some(MapiObject::Logon) => Some("logon"),
+                        Some(MapiObject::PublicFolderLogon) => Some("public_folder_logon"),
                         Some(MapiObject::Folder { folder_id, .. })
                             if *folder_id == ROOT_FOLDER_ID =>
                         {
@@ -1648,6 +1649,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
     match object {
         None => "none",
         Some(MapiObject::Logon) => "logon",
+        Some(MapiObject::PublicFolderLogon) => "public_folder_logon",
         Some(MapiObject::Folder { .. }) => "folder",
         Some(MapiObject::Message { .. }) => "message",
         Some(MapiObject::Contact { .. }) => "contact",
@@ -4604,13 +4606,16 @@ where
                         remaining_after: remaining_before,
                         logon_before_content_sync: matches!(
                             released_object,
-                            Some(MapiObject::Logon)
+                            Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
                         ) && !session
                             .post_hierarchy_actions
                             .content_sync_configure_observed,
                     });
                 }
-                if matches!(released_object, Some(MapiObject::Logon)) {
+                if matches!(
+                    released_object,
+                    Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+                ) {
                     session.record_logoff_after_hierarchy_completion();
                 }
                 release_handle_slot(session, &mut handle_slots, &request);
@@ -4623,9 +4628,11 @@ where
                 let mailbox_folder_found = folder_row_for_id(folder_id, mailboxes).is_some();
                 let collaboration_folder_found =
                     snapshot.collaboration_folder_for_id(folder_id).is_some();
+                let public_folder_found = snapshot.public_folder_for_id(folder_id).is_some();
                 let advertised_special_folder = is_advertised_special_folder(folder_id);
                 let open_folder_result = if mailbox_folder_found
                     || collaboration_folder_found
+                    || public_folder_found
                     || advertised_special_folder
                 {
                     "success"
@@ -4646,6 +4653,7 @@ where
                     container_class = debug_container_class_for_folder_id(folder_id),
                     mailbox_folder_found = mailbox_folder_found,
                     collaboration_folder_found = collaboration_folder_found,
+                    public_folder_found = public_folder_found,
                     advertised_special_folder = advertised_special_folder,
                     result = open_folder_result,
                     message = "rca debug mapi open folder"
@@ -4927,10 +4935,24 @@ where
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                responses.extend_from_slice(&rop_get_hierarchy_table_response(
-                    &request,
-                    hierarchy_row_count(folder_id, mailboxes, snapshot),
-                ));
+                let row_count = if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID
+                    && snapshot.public_folders().is_empty()
+                {
+                    store
+                        .fetch_public_folder_trees(principal.account_id)
+                        .await
+                        .map(|trees| {
+                            trees
+                                .iter()
+                                .filter(|tree| tree.root_folder_id.is_some())
+                                .count()
+                                .min(u32::MAX as usize) as u32
+                        })
+                        .unwrap_or(0)
+                } else {
+                    hierarchy_row_count(folder_id, mailboxes, snapshot)
+                };
+                responses.extend_from_slice(&rop_get_hierarchy_table_response(&request, row_count));
                 output_handles.push(handle);
             }
             Some(RopId::GetContentsTable) => {
@@ -10600,7 +10622,7 @@ where
                 if properties.is_empty()
                     && matches!(
                         input_object(session, &handle_slots, &request),
-                        Some(MapiObject::Logon)
+                        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
                     )
                 {
                     if let Ok(mappings) = store
@@ -11103,29 +11125,38 @@ where
                 if let TypedRopRequest::Logon(logon_request) = &typed_request {
                     log_rop_logon_request_identity(principal, request_id, logon_request);
                 }
-                if request.payload.first().copied().unwrap_or(0) & 0x01 == 0 {
-                    responses.extend_from_slice(&unsupported_rop_response(
-                        0xFE,
-                        request.response_handle_index(),
-                    ));
-                    break;
-                }
+                let is_private_logon = request.payload.first().copied().unwrap_or(0) & 0x01 != 0;
+                let logon_object = if is_private_logon {
+                    MapiObject::Logon
+                } else {
+                    MapiObject::PublicFolderLogon
+                };
                 let handle =
-                    session.allocate_output_handle(request.output_handle_index, MapiObject::Logon);
+                    session.allocate_output_handle(request.output_handle_index, logon_object);
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                let special_folder_ids = PRIVATE_LOGON_SPECIAL_FOLDER_IDS
-                    .iter()
-                    .map(|folder_id| format!("{folder_id:#018x}"))
-                    .collect::<Vec<_>>()
-                    .join(",");
+                let special_folder_ids = if is_private_logon {
+                    PRIVATE_LOGON_SPECIAL_FOLDER_IDS.as_slice()
+                } else {
+                    PUBLIC_LOGON_SPECIAL_FOLDER_IDS.as_slice()
+                }
+                .iter()
+                .map(|folder_id| format!("{folder_id:#018x}"))
+                .collect::<Vec<_>>()
+                .join(",");
                 session.record_logon_identity(MapiLogonIdentityDebug {
                     mailbox_guid: principal.account_id.to_string(),
                     replid: STORE_REPLICA_ID.to_string(),
                     replica_guid: bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
-                    response_flags: "0x07".to_string(),
+                    response_flags: if is_private_logon { "0x07" } else { "0x00" }.to_string(),
                     special_folder_ids,
                 });
-                responses.extend_from_slice(&rop_logon_response_body(principal, &request));
+                if is_private_logon {
+                    responses.extend_from_slice(&rop_logon_response_body(principal, &request));
+                } else {
+                    responses.extend_from_slice(&rop_public_folder_logon_response_body(
+                        principal, &request,
+                    ));
+                }
                 output_handles.push(handle);
             }
             Some(rop_id) => responses.extend_from_slice(&unsupported_rop_response(

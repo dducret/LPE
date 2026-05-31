@@ -1100,6 +1100,7 @@ fn special_folder_contract_summary(session: &MapiSession) -> String {
 fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
     match object {
         MapiObject::Logon => "logon",
+        MapiObject::PublicFolderLogon => "public_folder_logon",
         MapiObject::Folder { .. } => "folder",
         MapiObject::Message { .. } => "message",
         MapiObject::Contact { .. } => "contact",

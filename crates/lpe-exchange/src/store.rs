@@ -36,6 +36,7 @@ pub(crate) enum MapiIdentityObjectKind {
     ConversationAction,
     NavigationShortcut,
     DelegateFreeBusyMessage,
+    PublicFolder,
     Rule,
 }
 
@@ -54,6 +55,7 @@ impl MapiIdentityObjectKind {
             Self::ConversationAction => "conversation_action",
             Self::NavigationShortcut => "navigation_shortcut",
             Self::DelegateFreeBusyMessage => "delegate_freebusy_message",
+            Self::PublicFolder => "public_folder",
             Self::Rule => "sieve_script",
         }
     }

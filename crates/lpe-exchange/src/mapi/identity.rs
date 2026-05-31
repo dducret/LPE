@@ -55,6 +55,7 @@ pub(crate) const RECOVERABLE_ITEMS_ROOT_FOLDER_COUNTER: u64 = 38;
 pub(crate) const RECOVERABLE_ITEMS_DELETIONS_FOLDER_COUNTER: u64 = 39;
 pub(crate) const RECOVERABLE_ITEMS_VERSIONS_FOLDER_COUNTER: u64 = 40;
 pub(crate) const RECOVERABLE_ITEMS_PURGES_FOLDER_COUNTER: u64 = 41;
+pub(crate) const PUBLIC_FOLDERS_ROOT_FOLDER_COUNTER: u64 = 0x7FFF_FFFF_FFFE;
 pub(crate) const FIRST_DYNAMIC_GLOBAL_COUNTER: u64 = RECOVERABLE_ITEMS_PURGES_FOLDER_COUNTER + 1;
 
 pub(crate) const ROOT_FOLDER_ID: u64 = mapi_store_id(ROOT_FOLDER_COUNTER);
@@ -107,6 +108,8 @@ pub(crate) const RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID: u64 =
     mapi_store_id(RECOVERABLE_ITEMS_VERSIONS_FOLDER_COUNTER);
 pub(crate) const RECOVERABLE_ITEMS_PURGES_FOLDER_ID: u64 =
     mapi_store_id(RECOVERABLE_ITEMS_PURGES_FOLDER_COUNTER);
+pub(crate) const PUBLIC_FOLDERS_ROOT_FOLDER_ID: u64 =
+    mapi_store_id(PUBLIC_FOLDERS_ROOT_FOLDER_COUNTER);
 
 pub(crate) const fn mapi_store_id(global_counter: u64) -> u64 {
     ((global_counter & 0x0000_FFFF_FFFF_FFFF) << 16) | STORE_REPLICA_ID
@@ -321,6 +324,7 @@ fn is_advertised_special_folder_id(object_id: u64) -> bool {
             | RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID
             | RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID
             | RECOVERABLE_ITEMS_PURGES_FOLDER_ID
+            | PUBLIC_FOLDERS_ROOT_FOLDER_ID
     )
 }
 

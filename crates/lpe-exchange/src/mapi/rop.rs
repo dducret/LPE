@@ -95,6 +95,31 @@ pub(in crate::mapi) fn rop_logon_response_body(
     response
 }
 
+pub(in crate::mapi) fn rop_public_folder_logon_response_body(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+) -> Vec<u8> {
+    let output_handle_index = request.output_handle_index.unwrap_or(0);
+    let logon_flags = request.payload.first().copied().unwrap_or(0) & 0x07 & !0x01;
+    let mut response = Vec::new();
+    response.push(0xFE);
+    response.push(output_handle_index);
+    write_u32(&mut response, 0);
+    response.push(logon_flags);
+    for folder_id in PUBLIC_LOGON_SPECIAL_FOLDER_IDS {
+        write_object_id(&mut response, folder_id);
+    }
+    response.push(0x00);
+    response.extend_from_slice(&principal.tenant_id.to_bytes_le());
+    response.extend_from_slice(&STORE_REPLICA_ID.to_le_bytes()[..2]);
+    response.extend_from_slice(&mapi_mailstore::STORE_REPLICA_GUID);
+    let now = SystemTime::now();
+    response.extend_from_slice(&logon_time_bytes(now));
+    write_u64(&mut response, gwart_time_marker(now));
+    write_u32(&mut response, 0);
+    response
+}
+
 pub(in crate::mapi) fn gwart_time_marker(now: SystemTime) -> u64 {
     now.duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or(Duration::ZERO)
@@ -1186,7 +1211,9 @@ fn fallback_default_specific_property(
 ) -> bool {
     if !matches!(
         object,
-        Some(MapiObject::Logon) | Some(MapiObject::Folder { .. }) | None
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon)
+            | Some(MapiObject::Folder { .. })
+            | None
     ) {
         return false;
     }
@@ -1349,6 +1376,7 @@ fn log_calendar_default_folder_lookup_debug(
             ..
         }) => "root_fallback",
         Some(MapiObject::Logon) => "store_logon",
+        Some(MapiObject::PublicFolderLogon) => "public_folder_logon",
         Some(MapiObject::Folder { .. }) => "other_folder",
         _ => "other_object",
     };
@@ -1603,6 +1631,7 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
     let storage_tag = canonical_property_storage_tag(tag);
     match object {
         Some(MapiObject::Logon) => matches!(tag, PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE),
+        Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
         Some(MapiObject::Folder { .. }) | None => matches!(
             storage_tag,
             PID_TAG_CONTENT_COUNT
@@ -1691,6 +1720,9 @@ fn semantic_property_shape_for_debug(
         Some(MapiObject::Logon) => logon_property_value(principal, tag)
             .as_ref()
             .map(mapi_value_shape_for_debug),
+        Some(MapiObject::PublicFolderLogon) => {
+            (tag == PID_TAG_PRIVATE).then(|| mapi_value_shape_for_debug(&MapiValue::Bool(false)))
+        }
         Some(MapiObject::Folder { .. }) => {
             special_folder_identification_property_value(principal.account_id, tag)
                 .as_ref()
@@ -1757,6 +1789,9 @@ fn hex_preview_for_debug(bytes: &[u8], max_bytes: usize) -> String {
 fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, String, String) {
     match object {
         Some(MapiObject::Logon) => ("logon", String::new(), String::new()),
+        Some(MapiObject::PublicFolderLogon) => {
+            ("public_folder_logon", String::new(), String::new())
+        }
         Some(MapiObject::Folder { folder_id, .. }) => {
             ("folder", format!("{folder_id:#018x}"), String::new())
         }
@@ -2202,6 +2237,11 @@ pub(in crate::mapi) fn serialize_object_property(
 ) -> Vec<u8> {
     match object {
         Some(MapiObject::Logon) => serialize_logon_row(principal, &[tag]),
+        Some(MapiObject::PublicFolderLogon) if tag == PID_TAG_PRIVATE => {
+            let mut row = Vec::new();
+            write_mapi_value(&mut row, tag, &MapiValue::Bool(false));
+            row
+        }
         Some(MapiObject::Message {
             folder_id,
             message_id,

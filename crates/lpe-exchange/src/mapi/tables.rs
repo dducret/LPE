@@ -11,7 +11,7 @@ use crate::mapi::identity::{
 };
 use crate::mapi_store::{
     MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
-    MapiMessage, MapiNavigationShortcutMessage, MapiRule, MapiTask,
+    MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder, MapiRule, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -428,6 +428,7 @@ pub(in crate::mapi) fn rop_get_rules_table_response(request: &RopRequest) -> Vec
 #[derive(Clone, Copy)]
 enum HierarchyRow<'a> {
     Mailbox(&'a JmapMailbox),
+    PublicFolder(&'a MapiPublicFolder),
     Collaboration(&'a MapiCollaborationFolder),
     Special(u64),
 }
@@ -445,6 +446,17 @@ fn hierarchy_rows<'a>(
     restriction: Option<&MapiRestriction>,
     sort_orders: &[MapiSortOrder],
 ) -> Vec<HierarchyRow<'a>> {
+    if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID {
+        let mut rows = snapshot
+            .public_folders()
+            .iter()
+            .filter(|folder| folder.folder.parent_folder_id.is_none())
+            .filter(|folder| restriction_matches_public_folder(restriction, folder))
+            .map(HierarchyRow::PublicFolder)
+            .collect::<Vec<_>>();
+        sort_hierarchy_rows(&mut rows, sort_orders);
+        return rows;
+    }
     let mut rows = mailboxes
         .iter()
         .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
@@ -475,6 +487,19 @@ fn hierarchy_rows<'a>(
                 rows.push(HierarchyRow::Special(*special_folder_id));
             }
         }
+    } else if snapshot.public_folder_for_id(folder_id).is_some() {
+        rows =
+            snapshot
+                .public_folders()
+                .iter()
+                .filter(|folder| {
+                    folder.folder.parent_folder_id.and_then(|parent_id| {
+                        crate::mapi::identity::mapped_mapi_object_id(&parent_id)
+                    }) == Some(folder_id)
+                })
+                .filter(|folder| restriction_matches_public_folder(restriction, folder))
+                .map(HierarchyRow::PublicFolder)
+                .collect::<Vec<_>>();
     }
     sort_hierarchy_rows(&mut rows, sort_orders);
     rows
@@ -554,6 +579,7 @@ fn sort_hierarchy_rows(rows: &mut [HierarchyRow<'_>], sort_orders: &[MapiSortOrd
 fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
     match row {
         HierarchyRow::Mailbox(mailbox) => &mailbox.name,
+        HierarchyRow::PublicFolder(folder) => &folder.folder.display_name,
         HierarchyRow::Collaboration(folder) => &folder.collection.display_name,
         HierarchyRow::Special(folder_id) => special_folder_metadata(*folder_id).0,
     }
@@ -562,6 +588,7 @@ fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
 fn hierarchy_row_content_count(row: &HierarchyRow<'_>) -> u32 {
     match row {
         HierarchyRow::Mailbox(mailbox) => mailbox.total_emails,
+        HierarchyRow::PublicFolder(folder) => folder.item_count,
         HierarchyRow::Collaboration(folder) => folder.item_count,
         HierarchyRow::Special(_) => 0,
     }
@@ -570,13 +597,16 @@ fn hierarchy_row_content_count(row: &HierarchyRow<'_>) -> u32 {
 fn hierarchy_row_unread_count(row: &HierarchyRow<'_>) -> u32 {
     match row {
         HierarchyRow::Mailbox(mailbox) => mailbox.unread_emails,
-        HierarchyRow::Collaboration(_) | HierarchyRow::Special(_) => 0,
+        HierarchyRow::PublicFolder(_)
+        | HierarchyRow::Collaboration(_)
+        | HierarchyRow::Special(_) => 0,
     }
 }
 
 fn hierarchy_row_id(row: &HierarchyRow<'_>) -> u64 {
     match row {
         HierarchyRow::Mailbox(mailbox) => mapi_folder_id(mailbox),
+        HierarchyRow::PublicFolder(folder) => folder.id,
         HierarchyRow::Collaboration(folder) => folder.id,
         HierarchyRow::Special(folder_id) => *folder_id,
     }
@@ -593,6 +623,9 @@ fn hierarchy_row_matches(
         }
         HierarchyRow::Collaboration(folder) => {
             restriction_matches_collaboration_folder(restriction, folder)
+        }
+        HierarchyRow::PublicFolder(folder) => {
+            restriction_matches_public_folder(restriction, folder)
         }
         HierarchyRow::Special(folder_id) => special_hierarchy_row_matches(*folder_id, restriction),
     }
@@ -660,6 +693,7 @@ fn serialize_hierarchy_row(
             serialize_folder_row_with_context(mailbox, mailboxes, columns)
         }
         HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
+        HierarchyRow::PublicFolder(folder) => serialize_public_folder_row(folder, columns),
         HierarchyRow::Special(folder_id) => {
             serialize_special_folder_row(folder_id, &[], columns, None)
         }
@@ -2901,7 +2935,10 @@ pub(in crate::mapi) fn table_row_keys(
 }
 
 pub(in crate::mapi) fn is_root_hierarchy_folder(folder_id: u64) -> bool {
-    matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID)
+    matches!(
+        folder_id,
+        ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID
+    )
 }
 
 pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
@@ -2921,6 +2958,7 @@ pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
             | RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID
             | RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID
             | RECOVERABLE_ITEMS_PURGES_FOLDER_ID
+            | PUBLIC_FOLDERS_ROOT_FOLDER_ID
     ) || role_for_folder_id(folder_id).is_some()
 }
 
@@ -2937,6 +2975,7 @@ pub(in crate::mapi) fn role_for_folder_id(folder_id: u64) -> Option<&'static str
         NOTES_FOLDER_ID => Some("notes"),
         TASKS_FOLDER_ID => Some("tasks"),
         REMINDERS_FOLDER_ID => Some("reminders"),
+        PUBLIC_FOLDERS_ROOT_FOLDER_ID => Some("public_folders_root"),
         SUGGESTED_CONTACTS_FOLDER_ID => Some("suggested_contacts"),
         QUICK_CONTACTS_FOLDER_ID => Some("quick_contacts"),
         IM_CONTACT_LIST_FOLDER_ID => Some("im_contact_list"),
@@ -3140,13 +3179,14 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             false,
         ),
         REMINDERS_FOLDER_ID => ("Reminders", ROOT_FOLDER_ID, "Outlook.Reminder", false),
+        PUBLIC_FOLDERS_ROOT_FOLDER_ID => ("Public Folders", 0, "IPF.Note", true),
         _ => ("Root", 0, "", true),
     }
 }
 
 fn special_folder_type(folder_id: u64) -> u32 {
     match folder_id {
-        ROOT_FOLDER_ID => FOLDER_ROOT,
+        ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID => FOLDER_ROOT,
         SEARCH_FOLDER_ID
         | CONTACTS_SEARCH_FOLDER_ID
         | REMINDERS_FOLDER_ID
@@ -3918,6 +3958,38 @@ pub(in crate::mapi) fn serialize_collaboration_folder_row(
                 write_utf16z(&mut row, collaboration_folder_message_class(folder.kind))
             }
             _ => match collaboration_folder_property_value(folder, *column) {
+                Some(value) => write_mapi_value(&mut row, *column, &value),
+                None => write_property_default(&mut row, *column),
+            },
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn serialize_public_folder_row(
+    folder: &MapiPublicFolder,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    let parent_folder_id = folder
+        .folder
+        .parent_folder_id
+        .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
+        .unwrap_or(PUBLIC_FOLDERS_ROOT_FOLDER_ID);
+    for column in columns {
+        match *column {
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &folder.folder.display_name),
+            PID_TAG_FOLDER_ID => write_object_id(&mut row, folder.id),
+            PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, parent_folder_id),
+            PID_TAG_CONTENT_COUNT => write_u32(&mut row, folder.item_count),
+            PID_TAG_CONTENT_UNREAD_COUNT => write_u32(&mut row, 0),
+            PID_TAG_SUBFOLDERS => row.push((folder.child_count > 0) as u8),
+            PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_GENERIC),
+            PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
+            PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
+                write_utf16z(&mut row, &folder.folder.folder_class)
+            }
+            _ => match public_folder_property_value(folder, *column) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },

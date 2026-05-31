@@ -2683,7 +2683,7 @@ async fn mapi_over_http_execute_returns_private_mailbox_logon() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_public_folder_logon_is_deferred_without_store_handle() {
+async fn mapi_over_http_public_folder_logon_allocates_public_folder_store_handle() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -2721,8 +2721,29 @@ async fn mapi_over_http_public_folder_logon_is_deferred_without_store_handle() {
     let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
     let response_rop = &rop_buffer[2..2 + response_rop_size];
 
-    assert_eq!(response_rop, &[0xFE, 0x00, 0x02, 0x01, 0x04, 0x80]);
-    assert_eq!(rop_buffer.len(), 2 + response_rop_size);
+    assert_eq!(response_rop[0], 0xFE);
+    assert_eq!(response_rop[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rop[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(response_rop[6], 0x00);
+    assert_eq!(response_rop.len(), 70);
+    assert_eq!(
+        &response_rop[7..15],
+        &crate::mapi::identity::wire_id_bytes_from_object_id(
+            crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        u32::from_le_bytes(
+            rop_buffer[2 + response_rop_size..6 + response_rop_size]
+                .try_into()
+                .unwrap()
+        ),
+        1
+    );
 }
 
 #[tokio::test]
@@ -3417,9 +3438,10 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
-    let rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let response_rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size =
+        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
 
     assert_eq!(response_rops[0], 0x02);
     assert_eq!(response_rops[1], 0x01);
@@ -3439,7 +3461,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
     );
     assert_eq!(
         u32::from_le_bytes(
-            rop_buffer[2 + response_rop_size..6 + response_rop_size]
+            response_rop_buffer[2 + response_rop_size..6 + response_rop_size]
                 .try_into()
                 .unwrap()
         ),
@@ -3447,7 +3469,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
     );
     assert_eq!(
         u32::from_le_bytes(
-            rop_buffer[6 + response_rop_size..10 + response_rop_size]
+            response_rop_buffer[6 + response_rop_size..10 + response_rop_size]
                 .try_into()
                 .unwrap()
         ),
@@ -3455,7 +3477,7 @@ async fn mapi_over_http_execute_opens_root_folder_and_gets_special_hierarchy_tab
     );
     assert_eq!(
         u32::from_le_bytes(
-            rop_buffer[10 + response_rop_size..14 + response_rop_size]
+            response_rop_buffer[10 + response_rop_size..14 + response_rop_size]
                 .try_into()
                 .unwrap()
         ),
@@ -3606,9 +3628,10 @@ async fn mapi_over_http_query_columns_all_reports_canonical_table_columns() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
-    let rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let response_rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size =
+        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
 
     let query_columns_offset = 18;
     assert_eq!(response_rops[query_columns_offset], 0x37);
@@ -3758,9 +3781,10 @@ async fn mapi_over_http_ipm_subtree_reports_distinct_folder_identity() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
-    let rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let response_rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size =
+        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
     let properties = &response_rops[8..];
 
     assert_eq!(properties[0], 0x07);
@@ -3904,9 +3928,10 @@ async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
-    let rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let response_rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size =
+        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
     let create = &response_rops[8..];
 
     assert_eq!(create[0], 0x1C);
@@ -3978,9 +4003,10 @@ async fn mapi_over_http_delete_folder_removes_custom_canonical_mailbox() {
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let body = response_bytes(response).await;
     let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
-    let rop_buffer = &body[16..16 + rop_buffer_size];
-    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
-    let response_rops = &rop_buffer[2..2 + response_rop_size];
+    let response_rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size =
+        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
     let delete = &response_rops[8..];
 
     assert_eq!(delete[0], 0x1D);
@@ -23927,16 +23953,129 @@ async fn mapi_over_http_unknown_fasttransfer_marker_terminates_current_buffer() 
 }
 
 #[tokio::test]
-async fn mapi_over_http_public_folder_logon_is_unsupported_and_terminal() {
+async fn mapi_over_http_public_folder_logon_is_supported_without_private_store_flag() {
     let mut rops = vec![0xFE, 0x00, 0x01, 0x00]; // Public-folder RopLogon.
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&0u32.to_le_bytes());
     rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(&[0x7B, 0x00, 0x00]); // Must not execute.
 
     let response_rops = execute_rops_response_rops(&rops, &[u32::MAX]).await;
 
-    assert_eq!(response_rops, vec![0xFE, 0x01, 0x02, 0x01, 0x04, 0x80]);
+    assert_eq!(response_rops[0], 0xFE);
+    assert_eq!(response_rops[1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(response_rops[6], 0x00);
+    assert_eq!(response_rops.len(), 70);
+}
+
+#[tokio::test]
+async fn mapi_over_http_public_folder_logon_exposes_empty_public_hierarchy_table() {
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[
+        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+    ]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX]).await;
+    let hierarchy_offset = 70;
+
+    assert_eq!(response_rops[0], 0xFE);
+    assert_eq!(response_rops[hierarchy_offset], 0x04);
+    assert_eq!(response_rops[hierarchy_offset + 1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[hierarchy_offset + 2..hierarchy_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[hierarchy_offset + 6..hierarchy_offset + 10]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_public_folder_hierarchy_table_lists_canonical_roots() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root"),
+            FakeStore::public_folder(
+                "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+                Some("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
+                "Team Posts",
+            ),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut logon_rops = vec![0xFE, 0x00, 0x00, 0x00]; // Public-folder RopLogon.
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u32.to_le_bytes());
+    logon_rops.extend_from_slice(&0u16.to_le_bytes());
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let logon_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&logon_rops, &[u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(logon_response.status(), StatusCode::OK);
+    let logon_cookie = mapi_cookie_header(&logon_response);
+
+    let hierarchy_rops = vec![
+        0x04, 0x00, 0x00, 0x01, 0x04, // RopGetHierarchyTable on public logon.
+    ];
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&logon_cookie).unwrap());
+    let hierarchy_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&hierarchy_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(hierarchy_response.status(), StatusCode::OK);
+    let hierarchy_cookie = mapi_cookie_header(&hierarchy_response);
+    let body = response_bytes(hierarchy_response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let response_rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size =
+        u16::from_le_bytes(response_rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &response_rop_buffer[2..2 + response_rop_size];
+
+    assert_eq!(response_rops[0], 0x04);
+    assert_eq!(response_rops[1], 0x01);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0
+    );
+    assert_eq!(
+        u32::from_le_bytes(response_rops[6..10].try_into().unwrap()),
+        1
+    );
+    drop(hierarchy_cookie);
 }
 
 #[tokio::test]

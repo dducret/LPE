@@ -115,6 +115,7 @@ pub(in crate::mapi) struct TableBookmark {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::mapi) enum MapiObject {
     Logon,
+    PublicFolderLogon,
     Folder {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -945,6 +946,7 @@ impl MapiObject {
                 None
             }
             MapiObject::Logon => Some(ROOT_FOLDER_ID),
+            MapiObject::PublicFolderLogon => Some(PUBLIC_FOLDERS_ROOT_FOLDER_ID),
             MapiObject::Folder { folder_id, .. }
             | MapiObject::Message { folder_id, .. }
             | MapiObject::Contact { folder_id, .. }

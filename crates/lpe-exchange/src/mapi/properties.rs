@@ -5,7 +5,7 @@ use super::tables::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi_store::{
-    MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage,
+    MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
 };
 use lpe_storage::{
     calendar_attendee_labels, normalize_calendar_email, parse_calendar_participants_metadata,
@@ -908,6 +908,15 @@ pub(in crate::mapi) fn restriction_matches_collaboration_folder(
     })
 }
 
+pub(in crate::mapi) fn restriction_matches_public_folder(
+    restriction: Option<&MapiRestriction>,
+    folder: &MapiPublicFolder,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        public_folder_property_value(folder, property_tag)
+    })
+}
+
 pub(in crate::mapi) fn restriction_matches_email(
     restriction: Option<&MapiRestriction>,
     email: &JmapEmail,
@@ -1164,6 +1173,57 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         ))),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_store_id(IPM_SUBTREE_FOLDER_ID),
+        )),
+        PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::change_key_for_change_number(change_number),
+        )),
+        PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+            mapi_mailstore::predecessor_change_list(change_number),
+        )),
+        PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+        _ => None,
+    }
+}
+
+pub(in crate::mapi) fn public_folder_property_value(
+    folder: &MapiPublicFolder,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    let change_number = mapi_mailstore::change_number_for_store_id(folder.id);
+    let parent_folder_id = folder
+        .folder
+        .parent_folder_id
+        .and_then(|parent_id| crate::mapi::identity::mapped_mapi_object_id(&parent_id))
+        .unwrap_or(PUBLIC_FOLDERS_ROOT_FOLDER_ID);
+    match property_tag {
+        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(folder.folder.display_name.clone())),
+        PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(folder.item_count)),
+        PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(0)),
+        PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(folder.child_count > 0)),
+        PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(FOLDER_GENERIC)),
+        PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
+        PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
+            Some(MapiValue::String(folder.folder.folder_class.clone()))
+        }
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
+        PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
+        PID_TAG_LAST_MODIFICATION_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME
+        | PID_TAG_LOCAL_COMMIT_TIME_MAX
+        | PID_TAG_HIER_REV => Some(MapiValue::U64(mapi_mailstore::filetime_from_change_number(
+            change_number,
+        ))),
+        PID_TAG_DELETED_COUNT_TOTAL => Some(MapiValue::U32(0)),
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
+        PID_TAG_HIERARCHY_CHANGE_NUMBER => {
+            Some(MapiValue::U32(change_number.min(u64::from(u32::MAX)) as u32))
+        }
+        PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            folder.id,
+        ))),
+        PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_store_id(parent_folder_id),
         )),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::change_key_for_change_number(change_number),
@@ -4201,7 +4261,7 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             }));
             Ok(())
         }
-        Some(MapiObject::Logon) => Ok(()),
+        Some(MapiObject::Logon | MapiObject::PublicFolderLogon) => Ok(()),
         _ => Err(anyhow!("MAPI object does not support property mutation")),
     }
 }

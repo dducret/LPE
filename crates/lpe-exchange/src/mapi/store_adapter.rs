@@ -936,6 +936,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::Note => "note",
         MapiIdentityObjectKind::JournalEntry => "journal_entry",
         MapiIdentityObjectKind::DelegateFreeBusyMessage => "delegate_freebusy_message",
+        MapiIdentityObjectKind::PublicFolder => "public_folder",
     }
 }
 
@@ -1415,6 +1416,9 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         MapiObject::RecoverableItem { folder_id, item_id } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *item_id);
+        }
+        MapiObject::PublicFolderLogon => {
+            plan.requires_full_snapshot = true;
         }
         MapiObject::AttachmentStream { .. }
         | MapiObject::NotificationSubscription { .. }
