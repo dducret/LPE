@@ -406,6 +406,75 @@ CREATE INDEX IF NOT EXISTS public_folder_per_user_state_account_idx
     ON public.public_folder_per_user_state (tenant_id, account_id, public_folder_id, updated_at DESC);
 
 DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.account_sync_state'::regclass
+          AND conname = 'account_sync_state_category_check'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folders%'
+    ) THEN
+        ALTER TABLE public.account_sync_state
+            DROP CONSTRAINT account_sync_state_category_check;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.account_sync_state'::regclass
+          AND conname = 'account_sync_state_category_check'
+    ) THEN
+        ALTER TABLE public.account_sync_state
+            ADD CONSTRAINT account_sync_state_category_check CHECK (category IN (
+                'mail',
+                'contacts',
+                'calendar',
+                'tasks',
+                'notes',
+                'journal',
+                'rights',
+                'search',
+                'rules',
+                'conversation_actions',
+                'public_folders'
+            ));
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.canonical_change_journal'::regclass
+          AND conname = 'canonical_change_journal_category_check'
+          AND pg_get_constraintdef(oid) NOT LIKE '%public_folders%'
+    ) THEN
+        ALTER TABLE public.canonical_change_journal
+            DROP CONSTRAINT canonical_change_journal_category_check;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'public.canonical_change_journal'::regclass
+          AND conname = 'canonical_change_journal_category_check'
+    ) THEN
+        ALTER TABLE public.canonical_change_journal
+            ADD CONSTRAINT canonical_change_journal_category_check CHECK (category IN (
+                'mail',
+                'contacts',
+                'calendar',
+                'tasks',
+                'notes',
+                'journal',
+                'rights',
+                'search',
+                'rules',
+                'conversation_actions',
+                'public_folders'
+            ));
+    END IF;
+END $$;
+
+DO $$
 DECLARE
     existing_constraint TEXT;
 BEGIN
@@ -720,7 +789,8 @@ if [[ "${recoverable_table}" != "recoverable_items" || "${recoverable_account_co
 fi
 public_folder_table_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_replicas', 'public_folder_per_user_state');")"
 public_folder_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_replica%';")"
-if [[ "${public_folder_table_count}" != "6" || "${public_folder_change_constraint_count}" -lt "4" ]]; then
+public_folder_sync_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.account_sync_state'::regclass, 'public.canonical_change_journal'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folders%';")"
+if [[ "${public_folder_table_count}" != "6" || "${public_folder_change_constraint_count}" -lt "4" || "${public_folder_sync_constraint_count}" != "2" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected public-folder shape." >&2
   exit 1
 fi

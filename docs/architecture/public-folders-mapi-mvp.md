@@ -4,6 +4,8 @@
 
 Public folders now have canonical `LPE` storage, authenticated mail APIs,
 permission rows, replica rows, per-user read/unread rows, replay facts, and tombstones.
+Public-folder mutations advance the canonical `public_folders` sync category
+in `account_sync_state` and `canonical_change_journal`.
 MAPI/HTTP public-folder cross-server replication, recipient-bearing item conversion, and
 arbitrary Exchange-compatible per-user-information blob import remain guarded
 protocol work; they must not create protocol-local public-folder state. The first bounded MAPI steps are

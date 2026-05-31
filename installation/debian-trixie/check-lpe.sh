@@ -151,6 +151,12 @@ public_folder_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1
   || fail "Public-folder change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Public-folder change-log constraints are present"
 
+public_folder_sync_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.account_sync_state'::regclass, 'public.canonical_change_journal'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folders%';")" \
+  || fail "Unable to inspect public-folder sync constraints"
+[[ "$public_folder_sync_constraint_count" == "2" ]] \
+  || fail "Public-folder sync constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Public-folder sync constraints are present"
+
 schema_version="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT schema_version FROM public.schema_metadata WHERE singleton = TRUE;")" \
   || fail "Schema metadata is missing. Run /opt/lpe/src/installation/debian-trixie/init-schema.sh"
 expected_schema_version="$(

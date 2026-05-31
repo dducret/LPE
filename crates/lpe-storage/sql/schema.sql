@@ -479,7 +479,7 @@ CREATE TABLE local_ai_settings (
 CREATE TABLE account_sync_state (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions')),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions', 'public_folders')),
     current_modseq BIGINT NOT NULL DEFAULT 1 CHECK (current_modseq > 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (tenant_id, account_id, category),
@@ -1710,7 +1710,7 @@ CREATE TRIGGER tombstones_append_only_update_guard
 CREATE TABLE canonical_change_journal (
     sequence BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     tenant_id UUID NOT NULL,
-    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions')),
+    category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions', 'public_folders')),
     principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[],
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

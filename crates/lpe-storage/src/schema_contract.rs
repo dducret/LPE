@@ -442,7 +442,7 @@ fn collaboration_changes_and_tombstones_are_object_level() {
         "'search_folder_definition'",
         "'sieve_script'",
         "'conversation_action'",
-        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions'))",
+        "category TEXT NOT NULL CHECK (category IN ('mail', 'contacts', 'calendar', 'tasks', 'notes', 'journal', 'rights', 'search', 'rules', 'conversation_actions', 'public_folders'))",
         "affected_principal_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
         "principal_account_ids UUID[] NOT NULL DEFAULT ARRAY[]::UUID[]",
     ]);
@@ -791,7 +791,10 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "CREATE TABLE IF NOT EXISTS public.public_folder_replicas",
             "CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state",
             "public_folder_change_constraint_count",
+            "public_folder_sync_constraint_count",
             "public_folder_replica",
+            "account_sync_state_category_check",
+            "canonical_change_journal_category_check",
         ],
     );
     assert_source_contains_all(
@@ -800,6 +803,7 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         &[
             "public_folder_replicas",
             "public_folder_replica",
+            "public_folder_sync_constraint_count",
             "[[ \"$public_folder_table_count\" == \"6\" ]]",
         ],
     );
