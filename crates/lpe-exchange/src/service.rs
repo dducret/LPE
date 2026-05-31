@@ -718,15 +718,32 @@ where
             "SyncFolderHierarchy" => self.sync_folder_hierarchy(&principal).await?,
             "FindFolder" => self.find_folder(&principal).await?,
             "GetFolder" => self.get_folder(&principal, &body).await?,
-            "FindItem" => self.find_item(&principal, &body).await?,
-            "GetItem" => self.get_item(&principal, &body).await?,
+            "FindItem" => self
+                .find_item(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "FindItem",
+                        ews_error_code_or(&error, "ErrorInvalidOperation"),
+                        &error.to_string(),
+                    )
+                }),
+            "GetItem" => self
+                .get_item(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    get_item_error_response(
+                        ews_error_code_or(&error, "ErrorInvalidOperation"),
+                        &error.to_string(),
+                    )
+                }),
             "SyncFolderItems" => self
                 .sync_folder_items(&principal, &body)
                 .await
                 .unwrap_or_else(|error| {
                     operation_error_response(
                         "SyncFolderItems",
-                        "ErrorInvalidOperation",
+                        ews_error_code_or(&error, "ErrorInvalidOperation"),
                         &error.to_string(),
                     )
                 }),
@@ -2136,7 +2153,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("CreateItem", "ErrorInvalidOperation", &error.to_string())
+            operation_error_response(
+                "CreateItem",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -2296,7 +2317,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("UpdateItem", "ErrorInvalidOperation", &error.to_string())
+            operation_error_response(
+                "UpdateItem",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -2463,7 +2488,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("DeleteItem", "ErrorItemNotFound", &error.to_string())
+            operation_error_response(
+                "DeleteItem",
+                ews_error_code_or(&error, "ErrorItemNotFound"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -2595,7 +2624,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("MoveItem", "ErrorItemNotFound", &error.to_string())
+            operation_error_response(
+                "MoveItem",
+                ews_error_code_or(&error, "ErrorItemNotFound"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -2715,7 +2748,11 @@ where
         .await;
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
-            operation_error_response("CopyItem", "ErrorItemNotFound", &error.to_string())
+            operation_error_response(
+                "CopyItem",
+                ews_error_code_or(&error, "ErrorItemNotFound"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -6226,6 +6263,14 @@ fn unsupported_operation_response(operation: &str) -> String {
         "ErrorInvalidOperation",
         &format!("{operation} is not implemented by the EWS MVP."),
     )
+}
+
+fn ews_error_code_or(error: &anyhow::Error, fallback: &'static str) -> &'static str {
+    if error.to_string().contains("access is not granted") {
+        "ErrorAccessDenied"
+    } else {
+        fallback
+    }
 }
 
 fn operation_error_response(operation: &str, code: &str, message: &str) -> String {

@@ -1204,6 +1204,75 @@ async fn update_item_updates_public_folder_item() {
 }
 
 #[tokio::test]
+async fn update_item_rejects_public_folder_item_without_write_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder = FakeStore::public_folder(
+        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        None,
+        "Public Root",
+    );
+    public_folder.rights.may_write = false;
+    public_folder.rights.may_delete = false;
+    public_folder.rights.may_share = false;
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let public_folder_items = store.public_folder_items.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:UpdateItem ConflictResolution="AlwaysOverwrite">
+                  <m:ItemChanges>
+                    <t:ItemChange>
+                      <t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/>
+                      <t:Updates>
+                        <t:SetItemField>
+                          <t:FieldURI FieldURI="item:Subject"/>
+                          <t:Message>
+                            <t:Subject>Updated public post</t:Subject>
+                            <t:Body BodyType="Text">Updated public body</t:Body>
+                          </t:Message>
+                        </t:SetItemField>
+                      </t:Updates>
+                    </t:ItemChange>
+                  </m:ItemChanges>
+                </m:UpdateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(body.contains("public folder write access is not granted"));
+    let item = public_folder_items.lock().unwrap()[0].clone();
+    assert_eq!(item.subject, "Public post");
+    assert_eq!(item.change_counter, 1);
+}
+
+#[tokio::test]
 async fn delete_item_hard_deletes_canonical_message() {
     let message_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
     let store = FakeStore {
@@ -1353,7 +1422,7 @@ async fn delete_item_rejects_public_folder_item_without_delete_access() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:DeleteItemResponse>"));
-    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
     assert!(body.contains("public folder delete access is not granted"));
     assert!(deleted_public_folder_items.lock().unwrap().is_empty());
     assert_eq!(
@@ -1680,7 +1749,7 @@ async fn create_item_rejects_public_folder_post_without_write_access() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateItemResponse>"));
-    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
     assert!(body.contains("public folder write access is not granted"));
     assert!(public_folder_items.lock().unwrap().is_empty());
 }
@@ -3599,6 +3668,50 @@ async fn find_item_lists_public_folder_items() {
 }
 
 #[tokio::test]
+async fn find_item_rejects_public_folder_without_read_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder =
+        FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root");
+    public_folder.rights = PublicFolderRights {
+        may_read: false,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindItem><m:ParentFolderIds><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:ParentFolderIds></m:FindItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(body.contains("public folder read access is not granted"));
+}
+
+#[tokio::test]
 async fn sync_folder_items_reports_public_folder_items() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -3630,6 +3743,45 @@ async fn sync_folder_items_reports_public_folder_items() {
     assert!(body.contains("<t:Create><t:Message>"));
     assert!(body.contains("public-folder-item:abababab-abab-abab-abab-abababababab"));
     assert!(body.contains("<m:SyncState>public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee:v2:abababab-abab-abab-abab-abababababab="));
+}
+
+#[tokio::test]
+async fn sync_folder_items_rejects_public_folder_without_read_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder =
+        FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root");
+    public_folder.rights = PublicFolderRights {
+        may_read: false,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderItems><m:SyncFolderId><t:FolderId Id="public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"/></m:SyncFolderId></m:SyncFolderItems></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SyncFolderItemsResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(body.contains("public folder read access is not granted"));
 }
 
 #[tokio::test]
@@ -3725,6 +3877,50 @@ async fn get_item_returns_public_folder_item_body() {
         .contains("<t:ParentFolderId Id=\"public-folder:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\"/>"));
     assert!(body.contains("<t:Subject>Public post</t:Subject>"));
     assert!(body.contains("<t:Body BodyType=\"Text\">Public body</t:Body>"));
+}
+
+#[tokio::test]
+async fn get_item_rejects_public_folder_item_without_read_access() {
+    let non_owner = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Public Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut public_folder =
+        FakeStore::public_folder("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", None, "Public Root");
+    public_folder.rights = PublicFolderRights {
+        may_read: false,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(non_owner),
+        public_folders: Arc::new(Mutex::new(vec![public_folder])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            "abababab-abab-abab-abab-abababababab",
+            "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "Public post",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetItem><m:ItemIds><t:ItemId Id="public-folder-item:abababab-abab-abab-abab-abababababab"/></m:ItemIds></m:GetItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>ErrorAccessDenied</m:ResponseCode>"));
+    assert!(body.contains("public folder read access is not granted"));
 }
 
 #[tokio::test]
