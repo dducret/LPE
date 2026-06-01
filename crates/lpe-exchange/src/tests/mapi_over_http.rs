@@ -6373,7 +6373,7 @@ async fn mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
     rops.extend_from_slice(&[0x44, 0x00, 0x01]); // RopIdFromLongTermId.
     rops.extend_from_slice(embedded_long_term_id);
     append_rop_open_folder(&mut rops, 1, 2, crate::mapi::identity::CALENDAR_FOLDER_ID);
-    append_rop_get_properties_specific(&mut rops, 2, &[0x3001_001F, 0x3613_001F]);
+    append_rop_get_properties_specific(&mut rops, 2, &[0x3001_001F, 0x3613_001F, 0x36E5_001F]);
 
     let response = service
         .handle_mapi(
@@ -6386,11 +6386,21 @@ async fn mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
+    let calendar_entry_id_offset = response_rops
+        .windows(calendar_entry_id.len())
+        .position(|window| window == calendar_entry_id.as_slice())
+        .expect("PidTagIpmAppointmentEntryId value missing");
+    assert_eq!(
+        crate::mapi::identity::object_id_from_folder_entry_id(
+            &response_rops
+                [calendar_entry_id_offset..calendar_entry_id_offset + calendar_entry_id.len()]
+        ),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
     let mut id_from_long_term_response = vec![0x44, 0x01, 0, 0, 0, 0];
     id_from_long_term_response.extend_from_slice(&mapi_wire_id_bytes(
         crate::mapi::identity::CALENDAR_FOLDER_ID,
     ));
-    assert!(contains_bytes(&response_rops, &calendar_entry_id));
     assert!(contains_bytes(&response_rops, &id_from_long_term_response));
     assert!(contains_bytes(
         &response_rops,
@@ -6398,6 +6408,7 @@ async fn mapi_over_http_calendar_default_entry_id_converts_to_openable_folder_id
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
 }
 
 #[tokio::test]
@@ -19527,10 +19538,14 @@ async fn mapi_over_http_custom_only_calendar_collections_keep_default_calendar_o
         0x04, 0x00, 0x01, 0x02, 0x04, // RopGetHierarchyTable
         0x12, 0x00, 0x02, 0x00, // RopSetColumns
     ]);
-    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&7u16.to_le_bytes());
     rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x0FF6_0102u32.to_le_bytes());
+    rops.extend_from_slice(&0x65E0_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x3613_001Fu32.to_le_bytes());
-    rops.extend_from_slice(&0x6748_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x36E5_001Eu32.to_le_bytes());
+    rops.extend_from_slice(&0x36E5_001Fu32.to_le_bytes());
     rops.extend_from_slice(&[
         0x15, 0x00, 0x02, 0x00, 0x01, // RopQueryRows
     ]);
@@ -19554,13 +19569,45 @@ async fn mapi_over_http_custom_only_calendar_collections_keep_default_calendar_o
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(&response_rops, &utf16z("Team Calendar")));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_wire_id_bytes(crate::mapi::identity::CALENDAR_FOLDER_ID)
-    ));
-    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    let rows = hierarchy_query_calendar_contract_rows(&response_rops, 8 + 10 + 7).unwrap();
+    let calendar = rows
+        .iter()
+        .find(|row| row.display_name == "Calendar")
+        .expect("default Calendar row missing from hierarchy table");
+    assert_eq!(
+        calendar.entry_id,
+        crate::mapi::identity::folder_entry_id_from_object_id(
+            account.account_id,
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        calendar.instance_key,
+        crate::mapi::identity::instance_key_for_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+    );
+    assert_eq!(
+        calendar.source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+    assert_eq!(calendar.container_class, "IPF.Appointment");
+    assert_eq!(calendar.default_post_message_class_a, "IPM.Appointment");
+    assert_eq!(calendar.default_post_message_class_w, "IPM.Appointment");
+    let team_calendar = rows
+        .iter()
+        .find(|row| row.display_name == "Team Calendar")
+        .expect("custom calendar row missing from hierarchy table");
+    assert_eq!(team_calendar.container_class, "IPF.Appointment");
+    assert_eq!(
+        team_calendar.default_post_message_class_a,
+        "IPM.Appointment"
+    );
+    assert_eq!(
+        team_calendar.default_post_message_class_w,
+        "IPM.Appointment"
+    );
     assert!(contains_bytes(
         &response_rops,
         &[0x02, 0x03, 0, 0, 0, 0, 0, 0]
@@ -19570,6 +19617,64 @@ async fn mapi_over_http_custom_only_calendar_collections_keep_default_calendar_o
         &[0x05, 0x04, 0, 0, 0, 0, 0, 0, 0, 0]
     ));
     assert_eq!(store.calendar_collections.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn mapi_over_http_get_receive_folder_calendar_fid_opens_default_calendar_with_custom_only_collections(
+) {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "team-calendar",
+            "calendar",
+            "Team Calendar",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x27, 0x00, 0x00]; // RopGetReceiveFolder.
+    rops.extend_from_slice(b"IPM.Appointment\0");
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x3613_001F, 0x36E5_001F]);
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable.
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops[0], 0x27);
+    assert_eq!(
+        crate::mapi::identity::object_id_from_wire_id(&response_rops[6..14]),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+    assert_eq!(&response_rops[14..30], b"IPM.Appointment\0");
+    assert_eq!(&response_rops[30..38], &[0x02, 0x01, 0, 0, 0, 0, 0, 0]);
+    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x05, 0x02, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
 }
 
 #[tokio::test]
@@ -32215,12 +32320,14 @@ async fn mapi_over_http_calendar_hierarchy_row_projects_entry_id_identity() {
     );
     rops.extend_from_slice(&[0x04, 0x00, 0x01, 0x02, 0x00]); // RopGetHierarchyTable
     rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
-    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&7u16.to_le_bytes());
     rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     rops.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x0FF6_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x65E0_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x3613_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x36E5_001Eu32.to_le_bytes());
+    rops.extend_from_slice(&0x36E5_001Fu32.to_le_bytes());
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
     rops.extend_from_slice(&50u16.to_le_bytes());
     let response = service
@@ -32239,13 +32346,26 @@ async fn mapi_over_http_calendar_hierarchy_row_projects_entry_id_identity() {
         crate::mapi::identity::CALENDAR_FOLDER_ID,
     )
     .unwrap();
-    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
-    assert!(contains_bytes(&response_rops, &calendar_entry_id));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
-    ));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    let rows = hierarchy_query_calendar_contract_rows(&response_rops, 8 + 10 + 7)
+        .expect("Calendar hierarchy table rows");
+    let calendar = rows
+        .iter()
+        .find(|row| row.display_name == "Calendar")
+        .expect("Calendar hierarchy table row");
+    assert_eq!(calendar.entry_id, calendar_entry_id);
+    assert_eq!(
+        calendar.instance_key,
+        crate::mapi::identity::instance_key_for_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID
+        )
+    );
+    assert_eq!(
+        calendar.source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+    assert_eq!(calendar.container_class, "IPF.Appointment");
+    assert_eq!(calendar.default_post_message_class_a, "IPM.Appointment");
+    assert_eq!(calendar.default_post_message_class_w, "IPM.Appointment");
     assert!(!contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
@@ -32302,12 +32422,14 @@ async fn mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_id
     );
     rops.extend_from_slice(&[0x04, 0x00, 0x01, 0x02, 0x00]); // RopGetHierarchyTable
     rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
-    rops.extend_from_slice(&5u16.to_le_bytes());
+    rops.extend_from_slice(&7u16.to_le_bytes());
     rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     rops.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x0FF6_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x65E0_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x3613_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x36E5_001Eu32.to_le_bytes());
+    rops.extend_from_slice(&0x36E5_001Fu32.to_le_bytes());
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]); // RopQueryRows
     rops.extend_from_slice(&50u16.to_le_bytes());
     append_rop_open_folder(&mut rops, 0, 3, custom_folder_id);
@@ -32340,13 +32462,35 @@ async fn mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_id
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &utf16z("Team Calendar")));
-    assert!(contains_bytes(&response_rops, &custom_folder_entry_id));
+    let rows = hierarchy_query_calendar_contract_rows(&response_rops, 8 + 10 + 7)
+        .expect("custom Calendar hierarchy table rows");
+    let team_calendar = rows
+        .iter()
+        .find(|row| row.display_name == "Team Calendar")
+        .expect("custom Calendar hierarchy table row");
+    assert_eq!(team_calendar.entry_id, custom_folder_entry_id);
+    assert_eq!(
+        team_calendar.instance_key,
+        crate::mapi::identity::instance_key_for_object_id(custom_folder_id)
+    );
+    assert_eq!(
+        team_calendar.source_key,
+        mapi_mailstore::source_key_for_store_id(custom_folder_id)
+    );
     assert!(!contains_bytes(&response_rops, &nil_folder_entry_id));
     assert!(contains_bytes(
         &response_rops,
         &mapi_mailstore::source_key_for_store_id(custom_folder_id)
     ));
-    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert_eq!(team_calendar.container_class, "IPF.Appointment");
+    assert_eq!(
+        team_calendar.default_post_message_class_a,
+        "IPM.Appointment"
+    );
+    assert_eq!(
+        team_calendar.default_post_message_class_w,
+        "IPM.Appointment"
+    );
     assert!(contains_bytes(&response_rops, b"IPM.Appointment\0"));
     assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
 }

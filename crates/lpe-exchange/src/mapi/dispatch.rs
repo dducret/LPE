@@ -9938,7 +9938,7 @@ where
                                     incremental_transfer_available = incremental_transfer_buffer.is_some(),
                                     transfer_buffer_bytes = transfer_buffer.len(),
                                     transfer_position = *transfer_position,
-                                    checkpoint_store_status = "skipped_partial_scope",
+                                    checkpoint_store_status = "not_stored_partial_scope",
                                     checkpoint_skip_reason = *checkpoint_skip_reason,
                                     "rca debug mapi sync checkpoint store"
                                 );
@@ -9948,7 +9948,7 @@ where
                                     debug_container_class_for_folder_id(checkpoint.5),
                                     checkpoint.1.as_str(),
                                     checkpoint.4,
-                                    "skipped_partial_scope",
+                                    "ok_partial_scope_no_checkpoint",
                                 );
                             } else {
                                 let checkpoint_result = store

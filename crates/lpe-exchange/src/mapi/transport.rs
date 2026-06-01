@@ -756,6 +756,10 @@ fn log_mapi_session_disconnect(
     let recent_execute_summaries = recent_execute_debug_summaries(session, 8);
     let special_folder_contract_summary = special_folder_contract_summary(session);
     let all_sync_sources_completed = sync_source_count == completed_sync_source_count;
+    let partial_scope_checkpoint_not_stored_count =
+        partial_scope_checkpoint_not_stored_count(&session.post_hierarchy_actions);
+    let partial_scope_checkpoint_not_stored_expected =
+        partial_scope_checkpoint_not_stored_count > 0 && all_sync_sources_completed;
     let clean_client_close_after_sync = endpoint == MapiEndpoint::Emsmdb
         && request_type == "Disconnect"
         && post_hierarchy_summary.content_sync_configure_observed
@@ -831,6 +835,8 @@ fn log_mapi_session_disconnect(
         live_handle_summaries = %live_handle_summaries,
         special_folder_contract_summary = %special_folder_contract_summary,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
+        partial_scope_checkpoint_not_stored_count,
+        partial_scope_checkpoint_not_stored_expected,
         recent_execute_summaries = %recent_execute_summaries,
         "rca debug mapi session disconnect"
     );
@@ -888,6 +894,8 @@ fn log_mapi_session_disconnect(
             %post_hierarchy_summary.last_successful_hierarchy_get_buffer_summary,
         special_folder_contract_summary = %special_folder_contract_summary,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
+        partial_scope_checkpoint_not_stored_count,
+        partial_scope_checkpoint_not_stored_expected,
         "rca debug mapi disconnect wire contract"
     );
     tracing::info!(
@@ -919,12 +927,16 @@ fn log_mapi_session_disconnect(
                 "outlook_reconnect_or_client_side_reason"
             } else if incomplete_sync_source_count > 0 {
                 "unfinished_sync_source"
+            } else if partial_scope_checkpoint_not_stored_count > 0 {
+                "partial_scope_checkpoint_not_stored_is_expected_when_sources_completed"
             } else {
                 "post_hierarchy_sequence"
             },
         recent_execute_summaries = %recent_execute_summaries,
         special_folder_contract_summary = %special_folder_contract_summary,
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
+        partial_scope_checkpoint_not_stored_count,
+        partial_scope_checkpoint_not_stored_expected,
         "rca debug mapi disconnect verdict"
     );
 
@@ -1191,6 +1203,14 @@ fn post_hierarchy_close_kind(
     } else {
         "post_hierarchy_no_close"
     }
+}
+
+fn partial_scope_checkpoint_not_stored_count(actions: &PostHierarchyActionState) -> usize {
+    actions
+        .completed_sync_checkpoint_summaries
+        .iter()
+        .filter(|summary| summary.contains("status=ok_partial_scope_no_checkpoint"))
+        .count()
 }
 
 fn format_rop_ids_for_debug(rop_ids: &[u8]) -> String {
@@ -2272,6 +2292,33 @@ mod tests {
         assert_eq!(
             summary.last_successful_hierarchy_get_buffer_summary,
             "folder=0x0000000000040001;status=0x0003"
+        );
+    }
+
+    #[test]
+    fn partial_scope_checkpoint_not_stored_count_counts_expected_partial_scope_summaries() {
+        let mut session = test_session(HashMap::new());
+
+        session.record_completed_sync_checkpoint(
+            crate::mapi::identity::TRASH_FOLDER_ID,
+            "trash",
+            "IPF.Note",
+            "content",
+            0x01,
+            "ok_partial_scope_no_checkpoint",
+        );
+        session.record_completed_sync_checkpoint(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            "calendar",
+            "IPF.Appointment",
+            "content",
+            0x01,
+            "ok",
+        );
+
+        assert_eq!(
+            partial_scope_checkpoint_not_stored_count(&session.post_hierarchy_actions),
+            1
         );
     }
 

@@ -5194,6 +5194,36 @@ fn read_rop_utf16z(bytes: &[u8], offset: &mut usize) -> Result<String, String> {
     Err("ROP row UTF-16 property is not null-terminated".into())
 }
 
+fn read_rop_ascii_z(bytes: &[u8], offset: &mut usize) -> Result<String, String> {
+    let start = *offset;
+    while *offset < bytes.len() {
+        if bytes[*offset] == 0 {
+            let value = String::from_utf8(bytes[start..*offset].to_vec())
+                .map_err(|_| "ROP row String8 property contains invalid UTF-8".to_string())?;
+            *offset += 1;
+            return Ok(value);
+        }
+        *offset += 1;
+    }
+    Err("ROP row String8 property is not null-terminated".into())
+}
+
+fn read_rop_binary_u16<'a>(bytes: &'a [u8], offset: &mut usize) -> Result<&'a [u8], String> {
+    let len = u16::from_le_bytes(
+        bytes
+            .get(*offset..offset.saturating_add(2))
+            .ok_or("ROP row binary property is missing its length")?
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    *offset += 2;
+    let value = bytes
+        .get(*offset..offset.saturating_add(len))
+        .ok_or("ROP row binary property overruns row data")?;
+    *offset += len;
+    Ok(value)
+}
+
 fn hierarchy_query_display_container_rows(
     response_rops: &[u8],
     query_offset: usize,
@@ -5216,6 +5246,56 @@ fn hierarchy_query_display_container_rows(
         let display_name = read_rop_utf16z(response_rops, &mut offset)?;
         let container_class = read_rop_utf16z(response_rops, &mut offset)?;
         rows.push((display_name, container_class));
+    }
+    Ok(rows)
+}
+
+#[derive(Debug)]
+struct HierarchyCalendarFolderRow {
+    display_name: String,
+    entry_id: Vec<u8>,
+    instance_key: Vec<u8>,
+    source_key: Vec<u8>,
+    container_class: String,
+    default_post_message_class_a: String,
+    default_post_message_class_w: String,
+}
+
+fn hierarchy_query_calendar_contract_rows(
+    response_rops: &[u8],
+    query_offset: usize,
+) -> Result<Vec<HierarchyCalendarFolderRow>, String> {
+    if response_rops.get(query_offset) != Some(&0x15) {
+        return Err("missing RopQueryRows response".into());
+    }
+    let row_count = u16::from_le_bytes(
+        response_rops[query_offset + 7..query_offset + 9]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let mut offset = query_offset + 9;
+    let mut rows = Vec::new();
+    for _ in 0..row_count {
+        if response_rops.get(offset) != Some(&0) {
+            return Err("standard property row did not start with success status".into());
+        }
+        offset += 1;
+        let display_name = read_rop_utf16z(response_rops, &mut offset)?;
+        let entry_id = read_rop_binary_u16(response_rops, &mut offset)?.to_vec();
+        let instance_key = read_rop_binary_u16(response_rops, &mut offset)?.to_vec();
+        let source_key = read_rop_binary_u16(response_rops, &mut offset)?.to_vec();
+        let container_class = read_rop_utf16z(response_rops, &mut offset)?;
+        let default_post_message_class_a = read_rop_ascii_z(response_rops, &mut offset)?;
+        let default_post_message_class_w = read_rop_utf16z(response_rops, &mut offset)?;
+        rows.push(HierarchyCalendarFolderRow {
+            display_name,
+            entry_id,
+            instance_key,
+            source_key,
+            container_class,
+            default_post_message_class_a,
+            default_post_message_class_w,
+        });
     }
     Ok(rows)
 }

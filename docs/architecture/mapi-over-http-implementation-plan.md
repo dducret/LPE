@@ -741,6 +741,28 @@ underlying folder fact instead of reintroducing it through the alternate wire
 type. Content ICS property include and exclude lists follow the same canonical
 string-property matching, including Calendar `IPM.Appointment` message-class
 rows, so String8 client filters and Unicode server projections remain aligned.
+Hierarchy table rows must keep Calendar identity and classification on the same
+row: `PidTagEntryId`, `PidTagInstanceKey`, `PidTagSourceKey`,
+`PidTagContainerClass = IPF.Appointment`, and both String8 and Unicode
+`PidTagDefaultPostMessageClass = IPM.Appointment` must describe the same
+canonical folder object.
+`RopGetReceiveFolder(IPM.Appointment)` must likewise resolve to the canonical
+default Calendar FID and that FID must be immediately openable as
+`IPF.Appointment`, even when canonical storage currently contains only custom
+calendar collections.
+`PidTagIpmAppointmentEntryId` must return an account-scoped EntryID whose
+embedded long-term ID converts back to the same canonical Calendar FID; reopening
+that FID must expose the same `IPF.Appointment`/`IPM.Appointment` folder
+classification.
+Outlook can issue FAI-only content sync (`syncFlags` normal content not
+requested) against Deleted Items. When canonical normal messages exist in
+Deleted Items, LPE completes the sync source but must not advance the normal
+content checkpoint because the client-requested scope suppressed those messages.
+Checkpoint storage diagnostics therefore report
+`checkpoint_store_status=not_stored_partial_scope`, while the completed sync
+summary reports `status=ok_partial_scope_no_checkpoint` together with
+`all_sync_sources_completed=true` and an expected partial-scope
+not-stored count. This is not a Calendar-folder lookup failure by itself.
 Custom and shared calendar hierarchy rows must use owner-scoped decodeable
 folder `PidTagEntryId` values rather than
 nil-mailbox placeholders so Outlook can reopen the advertised folder identity,
