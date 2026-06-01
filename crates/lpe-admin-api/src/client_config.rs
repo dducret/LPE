@@ -70,13 +70,14 @@ fn jmap_well_known_location(headers: &HeaderMap) -> String {
 }
 
 async fn outlook_autodiscover_get(uri: Uri, headers: HeaderMap) -> Response {
-    let response_body =
-        render_outlook_autodiscover(&PublishedEndpoints::from_headers(&headers, None), None);
+    let endpoints = PublishedEndpoints::from_headers(&headers, None);
+    let response_body = render_outlook_autodiscover(&endpoints, None);
     let response = xml_response(response_body.clone());
     log_autodiscover_connection(
         "GET",
         &uri,
         &headers,
+        &endpoints,
         None,
         "pox",
         0,
@@ -110,6 +111,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
                     "POST",
                     &uri,
                     &headers,
+                    &endpoints,
                     email.as_deref(),
                     response_kind,
                     body.len(),
@@ -130,6 +132,7 @@ async fn outlook_autodiscover_post(uri: Uri, headers: HeaderMap, body: Bytes) ->
         "POST",
         &uri,
         &headers,
+        &endpoints,
         email.as_deref(),
         response_kind,
         body.len(),
@@ -161,6 +164,7 @@ async fn outlook_autodiscover_json(
         "GET",
         &uri,
         &headers,
+        &endpoints,
         Some(&email),
         query.protocol.as_deref().unwrap_or("AutoDiscoverV1"),
         0,
@@ -932,6 +936,7 @@ fn log_autodiscover_connection(
     method: &str,
     uri: &Uri,
     headers: &HeaderMap,
+    endpoints: &PublishedEndpoints,
     email: Option<&str>,
     response_kind: &str,
     request_body_bytes: usize,
@@ -960,6 +965,16 @@ fn log_autodiscover_connection(
             client_request_id = %client_request_id,
             x_request_id = %x_request_id,
             x_mapi_http_capability = %x_mapi_http_capability,
+            mapi_enabled = endpoints.mapi_enabled,
+            outlook_interop_gate_passed = endpoints.outlook_interop_gate_passed,
+            mapi_http_requested = endpoints.mapi_http_requested,
+            mapi_autodiscover_enabled = endpoints.mapi_autodiscover_enabled(),
+            mapi_http_selected = endpoints.mapi_http_autodiscover_selected(),
+            legacy_exch_autodiscover_enabled = endpoints.exch_autodiscover_enabled(),
+            legacy_expr_autodiscover_enabled = endpoints.expr_autodiscover_enabled(),
+            soap_exchange_autodiscover_enabled = endpoints.soap_exchange_autodiscover_enabled(),
+            mapi_emsmdb_url = %endpoints.mapi_emsmdb_url,
+            mapi_nspi_url = %endpoints.mapi_nspi_url,
             http_status = status,
             request_body_bytes,
             response_body = %response_body.unwrap_or_default(),
@@ -979,6 +994,16 @@ fn log_autodiscover_connection(
             client_request_id = %client_request_id,
             x_request_id = %x_request_id,
             x_mapi_http_capability = %x_mapi_http_capability,
+            mapi_enabled = endpoints.mapi_enabled,
+            outlook_interop_gate_passed = endpoints.outlook_interop_gate_passed,
+            mapi_http_requested = endpoints.mapi_http_requested,
+            mapi_autodiscover_enabled = endpoints.mapi_autodiscover_enabled(),
+            mapi_http_selected = endpoints.mapi_http_autodiscover_selected(),
+            legacy_exch_autodiscover_enabled = endpoints.exch_autodiscover_enabled(),
+            legacy_expr_autodiscover_enabled = endpoints.expr_autodiscover_enabled(),
+            soap_exchange_autodiscover_enabled = endpoints.soap_exchange_autodiscover_enabled(),
+            mapi_emsmdb_url = %endpoints.mapi_emsmdb_url,
+            mapi_nspi_url = %endpoints.mapi_nspi_url,
             http_status = status,
             request_body_bytes,
             response_body = %response_body.unwrap_or_default(),

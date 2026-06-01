@@ -778,6 +778,22 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "ADD CONSTRAINT mail_change_log_object_shape_check",
             "ADD CONSTRAINT tombstones_object_shape_check",
             "CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx",
+            "pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'",
+            "pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'",
+            "(summary_json ->> 'sourceMailboxMessageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
+        ],
+    );
+    assert_source_contains_all(
+        "check-lpe.sh recoverable-items compatibility check",
+        CHECK_LPE_SCRIPT,
+        &[
+            "to_regclass('public.recoverable_items')",
+            "recoverable_items_retention_days",
+            "litigation_hold_enabled",
+            "recoverable_change_constraint_count",
+            "recoverable_shape_constraint_ok",
+            "pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'",
+            "recoverable_item",
         ],
     );
 
@@ -1735,6 +1751,10 @@ fn recoverable_items_are_canonical_lifecycle_state() {
             && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn list_recoverable_items")
             && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn restore_recoverable_item")
             && RECOVERABLE_ITEMS_STORAGE.contains("pub async fn purge_recoverable_item")
+            && RECOVERABLE_ITEMS_STORAGE.contains("sourceMailboxMessageId")
+            && RECOVERABLE_ITEMS_STORAGE.contains("restoredMailboxMessageId")
+            && RECOVERABLE_ITEMS_STORAGE.contains("sourceImapUid")
+            && RECOVERABLE_ITEMS_STORAGE.contains("let recoverable_folder")
             && PROTOCOLS_STORAGE.contains("\"recoverable_item\"")
             && PROTOCOLS_STORAGE.contains("\"recoverableFolder\": \"deletions\""),
         "hard delete must write canonical recoverable item state and replay rows"

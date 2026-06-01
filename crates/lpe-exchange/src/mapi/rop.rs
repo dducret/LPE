@@ -3730,10 +3730,14 @@ impl RopRequest {
         ) {
             return None;
         }
-        let message_id = crate::mapi::identity::object_id_from_wire_id(self.payload.get(..8)?)?;
-        let target_folder_id =
-            crate::mapi::identity::object_id_from_wire_id(self.payload.get(8..16)?)?;
-        Some((message_id, target_folder_id))
+        let mut cursor = Cursor::new(&self.payload);
+        let source_folder_id_size = cursor.read_u32().ok()? as usize;
+        let source_folder_id = cursor.read_bytes(source_folder_id_size).ok()?;
+        let source_folder_id = crate::mapi::identity::object_id_from_wire_id(source_folder_id)?;
+        let source_message_id_size = cursor.read_u32().ok()? as usize;
+        let source_message_id = cursor.read_bytes(source_message_id_size).ok()?;
+        let source_message_id = crate::mapi::identity::object_id_from_wire_id(source_message_id)?;
+        Some((source_folder_id, source_message_id))
     }
 
     pub(in crate::mapi) fn import_read_state_changes(&self) -> Vec<(u64, bool)> {
@@ -3905,16 +3909,11 @@ impl RopRequest {
     pub(in crate::mapi) fn message_ids(&self) -> Vec<u64> {
         if !matches!(
             RopId::from_u8(self.rop_id),
-            Some(
-                RopId::DeleteMessages
-                    | RopId::HardDeleteMessages
-                    | RopId::ExpandRow
-                    | RopId::SetReadFlags
-            )
+            Some(RopId::DeleteMessages | RopId::HardDeleteMessages | RopId::SetReadFlags)
         ) {
             return Vec::new();
         }
-        let (count_offset, ids_offset) = if self.rop_id == 0x59 { (0, 2) } else { (2, 4) };
+        let (count_offset, ids_offset) = (2, 4);
         let Some(count_bytes) = self.payload.get(count_offset..count_offset + 2) else {
             return Vec::new();
         };
@@ -5426,9 +5425,20 @@ pub(in crate::mapi) fn read_rop_request(cursor: &mut Cursor<'_>) -> Result<RopRe
         }
         Some(RopId::SynchronizationImportMessageMove) => {
             let input_handle_index = cursor.read_u8()?;
+            let start = cursor.position;
+            let source_folder_id_size = cursor.read_u32()? as usize;
+            cursor.read_bytes(source_folder_id_size)?;
+            let source_message_id_size = cursor.read_u32()? as usize;
+            cursor.read_bytes(source_message_id_size)?;
+            let predecessor_change_list_size = cursor.read_u32()? as usize;
+            cursor.read_bytes(predecessor_change_list_size)?;
+            let destination_message_id_size = cursor.read_u32()? as usize;
+            cursor.read_bytes(destination_message_id_size)?;
+            let change_number_size = cursor.read_u32()? as usize;
+            cursor.read_bytes(change_number_size)?;
+            let end = cursor.position;
             let mut payload = Vec::new();
-            payload.extend_from_slice(cursor.read_bytes(8)?);
-            payload.extend_from_slice(cursor.read_bytes(8)?);
+            payload.extend_from_slice(&cursor.bytes[start..end]);
             Ok(RopRequest {
                 rop_id,
                 input_handle_index: Some(input_handle_index),
@@ -6621,6 +6631,67 @@ mod tests {
         );
         assert_eq!(serialize_rop_request(&request).unwrap(), golden);
         assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn expand_row_payload_never_decodes_as_message_ids() {
+        let category_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0506);
+        let mut golden = vec![RopId::ExpandRow.as_u8(), 0x00, 0x00];
+        golden.extend_from_slice(&1u16.to_le_bytes());
+        golden.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(category_id).unwrap(),
+        );
+
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(RopId::from_u8(request.rop_id), Some(RopId::ExpandRow));
+        assert_eq!(request.message_ids(), Vec::<u64>::new());
+        assert_eq!(cursor.remaining(), 0);
+    }
+
+    #[test]
+    pub(in crate::mapi) fn sync_import_message_move_uses_length_prefixed_source_ids() {
+        let source_folder_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0507);
+        let source_message_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0508);
+        let destination_message_id = crate::mapi::identity::mapi_store_id(0x0102_0304_0509);
+        let change_number = crate::mapi::identity::mapi_store_id(0x0102_0304_0510);
+        let source_folder_wire =
+            crate::mapi::identity::wire_id_bytes_from_object_id(source_folder_id).unwrap();
+        let source_message_wire =
+            crate::mapi::identity::wire_id_bytes_from_object_id(source_message_id).unwrap();
+        let destination_message_wire =
+            crate::mapi::identity::wire_id_bytes_from_object_id(destination_message_id).unwrap();
+        let change_number_wire =
+            crate::mapi::identity::wire_id_bytes_from_object_id(change_number).unwrap();
+        let predecessor_change_list = [0x01, 0x02, 0x03, 0x04];
+        let mut golden = vec![RopId::SynchronizationImportMessageMove.as_u8(), 0x00, 0x00];
+        for field in [
+            source_folder_wire.as_slice(),
+            source_message_wire.as_slice(),
+            predecessor_change_list.as_slice(),
+            destination_message_wire.as_slice(),
+            change_number_wire.as_slice(),
+        ] {
+            golden.extend_from_slice(&(field.len() as u32).to_le_bytes());
+            golden.extend_from_slice(field);
+        }
+
+        let mut cursor = Cursor::new(&golden);
+        let request = read_rop_request(&mut cursor).unwrap();
+
+        assert_eq!(
+            RopId::from_u8(request.rop_id),
+            Some(RopId::SynchronizationImportMessageMove)
+        );
+        assert_eq!(
+            request.import_move(),
+            Some((source_folder_id, source_message_id))
+        );
+        assert_eq!(cursor.remaining(), 0);
+
+        let mut truncated = Cursor::new(&golden[..golden.len() - 1]);
+        assert!(read_rop_request(&mut truncated).is_err());
     }
 
     #[test]

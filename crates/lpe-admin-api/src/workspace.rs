@@ -119,6 +119,28 @@ trait ClientOutlookStore: ClientSessionStore {
     ) -> anyhow::Result<OutlookProfileState>;
 }
 
+#[allow(async_fn_in_trait)]
+trait ClientRecoverableStore: ClientSessionStore {
+    async fn list_recoverable_items(
+        &self,
+        account_id: Uuid,
+        recoverable_folder: Option<&str>,
+    ) -> anyhow::Result<Vec<RecoverableItem>>;
+    async fn restore_recoverable_item(
+        &self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        target_mailbox_id: Option<Uuid>,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<JmapEmail>;
+    async fn purge_recoverable_item(
+        &self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<()>;
+}
+
 impl ClientSubmissionStore for Storage {
     async fn fetch_accessible_mailbox_accounts(
         &self,
@@ -233,6 +255,42 @@ impl ClientOutlookStore for Storage {
         account_id: Uuid,
     ) -> anyhow::Result<OutlookProfileState> {
         Storage::fetch_outlook_profile_state(self, account_id).await
+    }
+}
+
+impl ClientRecoverableStore for Storage {
+    async fn list_recoverable_items(
+        &self,
+        account_id: Uuid,
+        recoverable_folder: Option<&str>,
+    ) -> anyhow::Result<Vec<RecoverableItem>> {
+        Storage::list_recoverable_items(self, account_id, recoverable_folder).await
+    }
+
+    async fn restore_recoverable_item(
+        &self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        target_mailbox_id: Option<Uuid>,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<JmapEmail> {
+        Storage::restore_recoverable_item(
+            self,
+            account_id,
+            recoverable_item_id,
+            target_mailbox_id,
+            audit,
+        )
+        .await
+    }
+
+    async fn purge_recoverable_item(
+        &self,
+        account_id: Uuid,
+        recoverable_item_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> anyhow::Result<()> {
+        Storage::purge_recoverable_item(self, account_id, recoverable_item_id, audit).await
     }
 }
 
@@ -462,7 +520,15 @@ pub(crate) async fn list_recoverable_items(
     headers: HeaderMap,
     Query(request): Query<RecoverableItemsQueryRequest>,
 ) -> ApiResult<Vec<RecoverableItem>> {
-    let account = require_account(&storage, &headers).await?;
+    list_recoverable_items_with_store(&storage, &headers, request).await
+}
+
+async fn list_recoverable_items_with_store<S: ClientRecoverableStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    request: RecoverableItemsQueryRequest,
+) -> ApiResult<Vec<RecoverableItem>> {
+    let account = require_account_from_store(storage, headers).await?;
     Ok(Json(
         storage
             .list_recoverable_items(account.account_id, request.folder.as_deref())
@@ -477,7 +543,16 @@ pub(crate) async fn restore_recoverable_item(
     AxumPath(recoverable_item_id): AxumPath<Uuid>,
     Json(request): Json<RestoreRecoverableItemRequest>,
 ) -> ApiResult<JmapEmail> {
-    let account = require_account(&storage, &headers).await?;
+    restore_recoverable_item_with_store(&storage, &headers, recoverable_item_id, request).await
+}
+
+async fn restore_recoverable_item_with_store<S: ClientRecoverableStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    recoverable_item_id: Uuid,
+    request: RestoreRecoverableItemRequest,
+) -> ApiResult<JmapEmail> {
+    let account = require_account_from_store(storage, headers).await?;
     Ok(Json(
         storage
             .restore_recoverable_item(
@@ -500,7 +575,15 @@ pub(crate) async fn purge_recoverable_item(
     headers: HeaderMap,
     AxumPath(recoverable_item_id): AxumPath<Uuid>,
 ) -> ApiResult<HealthResponse> {
-    let account = require_account(&storage, &headers).await?;
+    purge_recoverable_item_with_store(&storage, &headers, recoverable_item_id).await
+}
+
+async fn purge_recoverable_item_with_store<S: ClientRecoverableStore>(
+    storage: &S,
+    headers: &HeaderMap,
+    recoverable_item_id: Uuid,
+) -> ApiResult<HealthResponse> {
+    let account = require_account_from_store(storage, headers).await?;
     storage
         .purge_recoverable_item(
             account.account_id,
@@ -1677,23 +1760,26 @@ mod tests {
         delete_journal_entry_with_store, delete_search_folder_with_store,
         get_client_note_with_store, get_journal_entry_with_store, get_search_folder_with_store,
         list_client_notes_with_store, list_journal_entries_with_store,
-        list_search_folders_with_store, map_submit_message_request,
-        map_update_message_flag_request, outlook_profile_state_with_store,
-        query_client_reminders_with_store, resolve_client_sender_fields, submit_message_with_store,
+        list_recoverable_items_with_store, list_search_folders_with_store,
+        map_submit_message_request, map_update_message_flag_request,
+        outlook_profile_state_with_store, purge_recoverable_item_with_store,
+        query_client_reminders_with_store, resolve_client_sender_fields,
+        restore_recoverable_item_with_store, submit_message_with_store,
         update_message_flag_with_store, upsert_client_note_with_store,
         upsert_journal_entry_with_store, upsert_search_folder_with_store,
     };
     use crate::types::{
-        ReminderQueryRequest, SubmitMessageRequest, UpdateMessageFlagRequest,
-        UpsertClientNoteRequest, UpsertJournalEntryRequest, UpsertSearchFolderRequest,
+        RecoverableItemsQueryRequest, ReminderQueryRequest, RestoreRecoverableItemRequest,
+        SubmitMessageRequest, UpdateMessageFlagRequest, UpsertClientNoteRequest,
+        UpsertJournalEntryRequest, UpsertSearchFolderRequest,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use lpe_storage::{
         AuditEntryInput, AuthenticatedAccount, ClientNote, ClientReminder, JmapEmail,
         JmapEmailAddress, JmapEmailFollowupUpdate, JmapEmailMailboxState, JournalEntry,
-        MailboxAccountAccess, OutlookProfileState, ReminderQuery, SearchFolderDefinition,
-        SubmitMessageInput, SubmittedMessage, UpsertClientNoteInput, UpsertJournalEntryInput,
-        UpsertSearchFolderInput,
+        MailboxAccountAccess, OutlookProfileState, RecoverableItem, ReminderQuery,
+        SearchFolderDefinition, SubmitMessageInput, SubmittedMessage, UpsertClientNoteInput,
+        UpsertJournalEntryInput, UpsertSearchFolderInput,
     };
     use std::sync::{Arc, Mutex};
     use uuid::Uuid;
@@ -1722,6 +1808,7 @@ mod tests {
         journal_entries: Arc<Mutex<Vec<JournalEntry>>>,
         reminders: Arc<Mutex<Vec<ClientReminder>>>,
         search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
+        recoverable_items: Arc<Mutex<Vec<RecoverableItem>>>,
         note_inputs: Arc<Mutex<Vec<UpsertClientNoteInput>>>,
         journal_inputs: Arc<Mutex<Vec<UpsertJournalEntryInput>>>,
         search_folder_inputs: Arc<Mutex<Vec<UpsertSearchFolderInput>>>,
@@ -1729,6 +1816,9 @@ mod tests {
         deleted_journal_entries: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
         deleted_search_folders: Arc<Mutex<Vec<(Uuid, Uuid)>>>,
         reminder_queries: Arc<Mutex<Vec<(Uuid, bool)>>>,
+        recoverable_queries: Arc<Mutex<Vec<(Uuid, Option<String>)>>>,
+        restored_recoverable_items: Arc<Mutex<Vec<(Uuid, Uuid, Option<Uuid>, AuditEntryInput)>>>,
+        purged_recoverable_items: Arc<Mutex<Vec<(Uuid, Uuid, AuditEntryInput)>>>,
     }
 
     impl Default for FakeOutlookStore {
@@ -1739,6 +1829,7 @@ mod tests {
                 journal_entries: Arc::new(Mutex::new(vec![journal_entry()])),
                 reminders: Arc::new(Mutex::new(vec![reminder()])),
                 search_folders: Arc::new(Mutex::new(vec![search_folder()])),
+                recoverable_items: Arc::new(Mutex::new(vec![recoverable_item()])),
                 note_inputs: Arc::new(Mutex::new(Vec::new())),
                 journal_inputs: Arc::new(Mutex::new(Vec::new())),
                 search_folder_inputs: Arc::new(Mutex::new(Vec::new())),
@@ -1746,6 +1837,9 @@ mod tests {
                 deleted_journal_entries: Arc::new(Mutex::new(Vec::new())),
                 deleted_search_folders: Arc::new(Mutex::new(Vec::new())),
                 reminder_queries: Arc::new(Mutex::new(Vec::new())),
+                recoverable_queries: Arc::new(Mutex::new(Vec::new())),
+                restored_recoverable_items: Arc::new(Mutex::new(Vec::new())),
+                purged_recoverable_items: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -2035,6 +2129,63 @@ mod tests {
         }
     }
 
+    #[allow(async_fn_in_trait)]
+    impl super::ClientRecoverableStore for FakeOutlookStore {
+        async fn list_recoverable_items(
+            &self,
+            account_id: Uuid,
+            recoverable_folder: Option<&str>,
+        ) -> anyhow::Result<Vec<RecoverableItem>> {
+            self.recoverable_queries
+                .lock()
+                .unwrap()
+                .push((account_id, recoverable_folder.map(str::to_string)));
+            Ok(self
+                .recoverable_items
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|item| {
+                    account_id == account().account_id
+                        && recoverable_folder
+                            .map(|folder| item.recoverable_folder == folder)
+                            .unwrap_or(true)
+                })
+                .cloned()
+                .collect())
+        }
+
+        async fn restore_recoverable_item(
+            &self,
+            account_id: Uuid,
+            recoverable_item_id: Uuid,
+            target_mailbox_id: Option<Uuid>,
+            audit: AuditEntryInput,
+        ) -> anyhow::Result<JmapEmail> {
+            self.restored_recoverable_items.lock().unwrap().push((
+                account_id,
+                recoverable_item_id,
+                target_mailbox_id,
+                audit,
+            ));
+            Ok(jmap_email(recoverable_item_id, account_id, false))
+        }
+
+        async fn purge_recoverable_item(
+            &self,
+            account_id: Uuid,
+            recoverable_item_id: Uuid,
+            audit: AuditEntryInput,
+        ) -> anyhow::Result<()> {
+            self.purged_recoverable_items.lock().unwrap().push((
+                account_id,
+                recoverable_item_id,
+                audit,
+            ));
+            Ok(())
+        }
+    }
+
     fn account() -> AuthenticatedAccount {
         AuthenticatedAccount {
             tenant_id: Uuid::from_u128(0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa),
@@ -2059,6 +2210,10 @@ mod tests {
 
     fn search_folder_id() -> Uuid {
         Uuid::parse_str("dddddddd-1111-1111-1111-dddddddddddd").unwrap()
+    }
+
+    fn recoverable_item_id() -> Uuid {
+        Uuid::parse_str("eeeeeeee-1111-1111-1111-eeeeeeeeeeee").unwrap()
     }
 
     fn note() -> ClientNote {
@@ -2116,6 +2271,28 @@ mod tests {
             restriction_json: serde_json::json!({"kind": "text", "query": "follow"}),
             excluded_folder_roles: vec!["trash".to_string()],
             is_builtin: false,
+        }
+    }
+
+    fn recoverable_item() -> RecoverableItem {
+        RecoverableItem {
+            id: recoverable_item_id(),
+            message_id: Uuid::parse_str("11111111-2222-3333-4444-555555555555").unwrap(),
+            source_mailbox_message_id: Uuid::parse_str("22222222-3333-4444-5555-666666666666")
+                .unwrap(),
+            source_mailbox_id: Uuid::parse_str("33333333-4444-5555-6666-777777777777").unwrap(),
+            source_imap_uid: 42,
+            recoverable_folder: "deletions".to_string(),
+            delete_kind: "hard_delete".to_string(),
+            status: "active".to_string(),
+            deleted_at: "2026-05-20T10:00:00Z".to_string(),
+            retained_until: None,
+            legal_hold: false,
+            subject: "Deleted message".to_string(),
+            sender_address: "from@example.test".to_string(),
+            received_at: "2026-05-20T09:00:00Z".to_string(),
+            size_octets: 1024,
+            has_attachments: false,
         }
     }
 
@@ -2655,6 +2832,57 @@ mod tests {
             store.deleted_search_folders.lock().unwrap().as_slice(),
             &[(account_id(), search_folder_id())]
         );
+    }
+
+    #[tokio::test]
+    async fn recoverable_items_api_helpers_use_canonical_store_path() {
+        let store = FakeOutlookStore::default();
+        let headers = bearer_headers();
+        let target_mailbox_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+
+        let listed = list_recoverable_items_with_store(
+            &store,
+            &headers,
+            RecoverableItemsQueryRequest {
+                folder: Some("deletions".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, recoverable_item_id());
+        assert_eq!(
+            store.recoverable_queries.lock().unwrap().as_slice(),
+            &[(account_id(), Some("deletions".to_string()))]
+        );
+
+        let restored = restore_recoverable_item_with_store(
+            &store,
+            &headers,
+            recoverable_item_id(),
+            RestoreRecoverableItemRequest {
+                target_mailbox_id: Some(target_mailbox_id),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.id, recoverable_item_id());
+        let restored_records = store.restored_recoverable_items.lock().unwrap();
+        assert_eq!(restored_records.len(), 1);
+        assert_eq!(restored_records[0].0, account_id());
+        assert_eq!(restored_records[0].1, recoverable_item_id());
+        assert_eq!(restored_records[0].2, Some(target_mailbox_id));
+        assert_eq!(restored_records[0].3.action, "restore-recoverable-message");
+        drop(restored_records);
+
+        let _ = purge_recoverable_item_with_store(&store, &headers, recoverable_item_id())
+            .await
+            .unwrap();
+        let purged_records = store.purged_recoverable_items.lock().unwrap();
+        assert_eq!(purged_records.len(), 1);
+        assert_eq!(purged_records[0].0, account_id());
+        assert_eq!(purged_records[0].1, recoverable_item_id());
+        assert_eq!(purged_records[0].2.action, "purge-recoverable-message");
     }
 
     #[tokio::test]

@@ -115,11 +115,14 @@ Recoverable Items Root, Deletions, Versions, and Purges as virtual
 compatibility folders only when their protocol behavior is wired to this
 canonical table. MAPI currently projects those virtual folders for bounded
 browse, restore, and purge behavior while keeping recovery state out of normal
-mailbox hierarchy and content sync.
+mailbox hierarchy and content sync. Versions and Purges are compatibility
+projections over the canonical lifecycle row state; schema v2 does not claim
+full Exchange copy-on-write Versions storage or post-purge recovery parity.
 The canonical `/api/mail/recoverable-items` surface lists active recoverable
 items, restores an item by creating a fresh target mailbox membership with a
-new target UID, and purges only unheld items whose recoverable retention has
-expired.
+new target UID, records both the original source membership and restored
+membership in `mail_change_log`, and purges only unheld items whose recoverable
+retention has expired.
 
 `domains` owns domain defaults that affect mailbox runtime behavior, including
 `default_sieve_script` for newly created or defaulted mailbox filtering and
@@ -259,7 +262,10 @@ target.
 
 Recoverable item lifecycle events use `object_kind = 'recoverable_item'` change
 rows. These rows describe recovery state creation, restore, and purge for
-MAPI/EWS dumpster synchronization. They do not replace the normal
+MAPI/EWS dumpster synchronization. Restore rows preserve the original
+`sourceMailboxMessageId`/`sourceImapUid` and the new
+`restoredMailboxMessageId` so replay can distinguish the expunged source
+membership from the fresh visible membership. They do not replace the normal
 `mailbox_message` tombstone that tells JMAP, IMAP QRESYNC, ActiveSync, and MAPI
 content sync that the source folder membership disappeared.
 

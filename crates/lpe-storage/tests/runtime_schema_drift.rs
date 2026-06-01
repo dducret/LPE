@@ -4535,6 +4535,208 @@ async fn exercise_mapi_trash_purge_retention_guard(
     .fetch_one(pool)
     .await
     .context("load canonical Trash mailbox for retention guard")?;
+    let inbox_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM mailboxes
+        WHERE tenant_id = $1 AND account_id = $2 AND role = 'inbox'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .fetch_one(pool)
+    .await
+    .context("load canonical Inbox mailbox for recoverable restore")?;
+    let restore_imported = storage
+        .import_jmap_email(
+            JmapImportedEmailInput {
+                account_id: fixture.account_id,
+                submitted_by_account_id: fixture.account_id,
+                mailbox_id: trash_id,
+                source: "mapi-save-message".to_string(),
+                raw_message: None,
+                from_display: Some("Alice Trash".to_string()),
+                from_address: fixture.account_email.clone(),
+                sender_display: None,
+                sender_address: None,
+                to: Vec::new(),
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Runtime MAPI recoverable restore".to_string(),
+                body_text: "Recoverable restore body".to_string(),
+                body_html_sanitized: None,
+                internet_message_id: Some(format!(
+                    "<trash-restore-{}@example.test>",
+                    Uuid::new_v4()
+                )),
+                mime_blob_ref: String::new(),
+                size_octets: 64,
+                received_at: None,
+                thread_id: None,
+                attachments: Vec::new(),
+            },
+            audit(
+                "alice@example.test",
+                "mapi-save-message",
+                "runtime recoverable restore seed",
+            ),
+        )
+        .await
+        .context("seed recoverable restore Trash message")?;
+    let restore_source = sqlx::query(
+        r#"
+        SELECT id, imap_uid
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(trash_id)
+    .bind(restore_imported.id)
+    .fetch_one(pool)
+    .await
+    .context("load recoverable restore source membership")?;
+    let restore_source_membership_id: Uuid = restore_source.try_get("id")?;
+    let restore_source_imap_uid: i64 = restore_source.try_get("imap_uid")?;
+    storage
+        .delete_jmap_email_from_mailbox(
+            fixture.account_id,
+            trash_id,
+            restore_imported.id,
+            audit(
+                "alice@example.test",
+                "mapi-hard-delete-folder-contents",
+                "runtime recoverable restore hard delete",
+            ),
+        )
+        .await
+        .context("hard-delete restore seed into recoverable items")?;
+    let restore_recoverable_id = sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM recoverable_items
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND message_id = $3
+          AND source_mailbox_message_id = $4
+          AND status = 'active'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(restore_imported.id)
+    .bind(restore_source_membership_id)
+    .fetch_one(pool)
+    .await
+    .context("load active recoverable item for restore")?;
+    sqlx::query(
+        r#"
+        UPDATE recoverable_items
+        SET recoverable_folder = 'versions'
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(restore_recoverable_id)
+    .execute(pool)
+    .await
+    .context("move restore seed to bounded Versions projection")?;
+    storage
+        .restore_recoverable_item(
+            fixture.account_id,
+            restore_recoverable_id,
+            Some(inbox_id),
+            audit(
+                "alice@example.test",
+                "restore-recoverable-message",
+                "runtime recoverable restore",
+            ),
+        )
+        .await
+        .context("restore recoverable item through canonical path")?;
+    let restored_membership = sqlx::query(
+        r#"
+        SELECT id, imap_uid, visibility
+        FROM mailbox_messages
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND mailbox_id = $3
+          AND message_id = $4
+          AND visibility = 'visible'
+        LIMIT 1
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(inbox_id)
+    .bind(restore_imported.id)
+    .fetch_one(pool)
+    .await
+    .context("load restored visible Inbox membership")?;
+    let restored_membership_id: Uuid = restored_membership.try_get("id")?;
+    let restored_imap_uid: i64 = restored_membership.try_get("imap_uid")?;
+    anyhow::ensure!(
+        restored_membership_id != restore_source_membership_id
+            && restored_imap_uid != restore_source_imap_uid
+            && restored_membership.try_get::<String, _>("visibility")? == "visible",
+        "recoverable restore must create a fresh visible membership with a new UID"
+    );
+    let restore_status = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT status
+        FROM recoverable_items
+        WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(restore_recoverable_id)
+    .fetch_one(pool)
+    .await
+    .context("load recoverable status after restore")?;
+    anyhow::ensure!(
+        restore_status == "restored",
+        "recoverable restore must mark the canonical recoverable item restored"
+    );
+    let restore_replay_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM mail_change_log
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND object_kind = 'recoverable_item'
+          AND object_id = $3
+          AND change_kind = 'moved'
+          AND summary_json->>'sourceMailboxMessageId' = $4
+          AND summary_json->>'restoredMailboxMessageId' = $5
+          AND summary_json->>'sourceImapUid' = $6
+          AND summary_json->>'targetMailboxId' = $7
+          AND summary_json->>'recoverableFolder' = 'versions'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(restore_recoverable_id)
+    .bind(restore_source_membership_id.to_string())
+    .bind(restored_membership_id.to_string())
+    .bind(restore_source_imap_uid.to_string())
+    .bind(inbox_id.to_string())
+    .fetch_one(pool)
+    .await
+    .context("count recoverable restore replay rows")?;
+    anyhow::ensure!(
+        restore_replay_rows == 1,
+        "recoverable restore replay must preserve original source and restored membership ids"
+    );
+
     let imported = storage
         .import_jmap_email(
             JmapImportedEmailInput {
@@ -4758,6 +4960,35 @@ async fn exercise_mapi_trash_purge_retention_guard(
     anyhow::ensure!(
         purged_status == "purged",
         "expired unheld recoverable purge must mark the item purged"
+    );
+    let recoverable_purge_replay_rows = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COUNT(*)
+        FROM tombstones tombstone
+        JOIN mail_change_log log
+          ON log.tenant_id = tombstone.tenant_id
+         AND log.cursor = tombstone.change_cursor
+         AND log.object_kind = tombstone.object_kind
+         AND log.object_id = tombstone.object_id
+        WHERE tombstone.tenant_id = $1
+          AND tombstone.account_id = $2
+          AND tombstone.object_kind = 'recoverable_item'
+          AND tombstone.object_id = $3
+          AND tombstone.message_id = $4
+          AND tombstone.reason = 'purge'
+          AND log.change_kind = 'destroyed'
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(recoverable_id)
+    .bind(imported.id)
+    .fetch_one(pool)
+    .await
+    .context("count recoverable purge tombstone replay rows")?;
+    anyhow::ensure!(
+        recoverable_purge_replay_rows == 1,
+        "recoverable purge must write a canonical tombstone and destroyed change-log row"
     );
 
     Ok(())

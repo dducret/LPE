@@ -615,7 +615,7 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
-) -> Result<(bool, bool), u32> {
+) -> Result<(Vec<u64>, bool), u32> {
     let mailbox = role_for_folder_id(folder_id)
         .and_then(|role| mailboxes.iter().find(|mailbox| mailbox.role == role))
         .or_else(|| {
@@ -634,7 +634,7 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
     }
 
     let mut partial_completion = false;
-    let mut deleted_any = false;
+    let mut changed_folder_ids = Vec::new();
     let message_ids = emails
         .iter()
         .filter(|email| email_matches_folder(email, folder_id, mailboxes))
@@ -662,7 +662,9 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
             partial_completion = true;
             failed_count += 1;
         } else {
-            deleted_any = true;
+            if changed_folder_ids.is_empty() {
+                changed_folder_ids.push(folder_id);
+            }
             succeeded_count += 1;
         }
     }
@@ -684,7 +686,122 @@ async fn hard_delete_folder_contents<S: ExchangeStore>(
         failed_count,
         partial_completion,
     );
-    Ok((deleted_any, partial_completion))
+    Ok((changed_folder_ids, partial_completion))
+}
+
+async fn hard_delete_mailbox_tree_contents<S: ExchangeStore>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Result<(Vec<u64>, bool), u32> {
+    let root_mailbox = role_for_folder_id(folder_id)
+        .and_then(|role| mailboxes.iter().find(|mailbox| mailbox.role == role))
+        .or_else(|| {
+            mailboxes.iter().find(|mailbox| {
+                crate::mapi::identity::mapped_mapi_object_id(&mailbox.id) == Some(folder_id)
+            })
+        })
+        .ok_or(0x8004_010Fu32)?;
+
+    let mut target_mailboxes = Vec::new();
+    for mailbox in mailboxes {
+        let mut current = Some(mailbox.id);
+        let mut visited = HashSet::new();
+        while let Some(current_id) = current {
+            if current_id == root_mailbox.id {
+                target_mailboxes.push(mailbox);
+                break;
+            }
+            if !visited.insert(current_id) {
+                break;
+            }
+            current = mailboxes
+                .iter()
+                .find(|candidate| candidate.id == current_id)
+                .and_then(|candidate| candidate.parent_id);
+        }
+    }
+
+    let target_folder_ids = target_mailboxes
+        .iter()
+        .map(|mailbox| {
+            (
+                crate::mapi::identity::mapped_mapi_object_id(&mailbox.id)
+                    .unwrap_or_else(|| mapi_folder_id(mailbox)),
+                mailbox.id,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    for (target_folder_id, _) in &target_folder_ids {
+        if !snapshot
+            .folder_access_for_principal(*target_folder_id, principal.account_id)
+            .map(|access| access.may_delete)
+            .unwrap_or(true)
+        {
+            return Err(0x8007_0005);
+        }
+    }
+
+    let mut partial_completion = false;
+    let mut changed_folder_ids = Vec::new();
+    let mut attempted_count = 0usize;
+    let mut succeeded_count = 0usize;
+    let mut failed_count = 0usize;
+    for (target_folder_id, mailbox_id) in target_folder_ids {
+        let message_ids = emails
+            .iter()
+            .filter(|email| email_matches_folder(email, target_folder_id, mailboxes))
+            .map(|email| email.id)
+            .collect::<Vec<_>>();
+        attempted_count += message_ids.len();
+        for message_id in message_ids {
+            if store
+                .delete_jmap_email_from_mailbox(
+                    principal.account_id,
+                    mailbox_id,
+                    message_id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "mapi-hard-delete-folder-tree-contents".to_string(),
+                        subject: format!("folder:{mailbox_id} message:{message_id}"),
+                    },
+                )
+                .await
+                .is_err()
+            {
+                partial_completion = true;
+                failed_count += 1;
+            } else {
+                if !changed_folder_ids.contains(&target_folder_id) {
+                    changed_folder_ids.push(target_folder_id);
+                }
+                succeeded_count += 1;
+            }
+        }
+    }
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        mailbox = %principal.email,
+        folder_id = %format!("{folder_id:#018x}"),
+        folder_role = debug_role_for_folder_id(folder_id),
+        attempted_count,
+        succeeded_count,
+        failed_count,
+        partial_completion,
+        message = "rca debug mapi hard delete folder tree contents"
+    );
+    record_mapi_folder_purge_metrics(
+        attempted_count,
+        succeeded_count,
+        failed_count,
+        partial_completion,
+    );
+    Ok((changed_folder_ids, partial_completion))
 }
 
 async fn hard_delete_recoverable_folder_contents<S: ExchangeStore>(
@@ -692,13 +809,13 @@ async fn hard_delete_recoverable_folder_contents<S: ExchangeStore>(
     principal: &AccountPrincipal,
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
-) -> Result<(bool, bool), u32> {
+) -> Result<(Vec<u64>, bool), u32> {
     let items = snapshot.recoverable_items_for_folder(folder_id);
     if crate::mapi_store::recoverable_storage_folder(folder_id).is_none() {
         return Err(0x8004_010F);
     }
     let mut partial_completion = false;
-    let mut deleted_any = false;
+    let mut changed_folder_ids = Vec::new();
     for item in items {
         if store
             .purge_recoverable_item(
@@ -715,10 +832,12 @@ async fn hard_delete_recoverable_folder_contents<S: ExchangeStore>(
         {
             partial_completion = true;
         } else {
-            deleted_any = true;
+            if changed_folder_ids.is_empty() {
+                changed_folder_ids.push(folder_id);
+            }
         }
     }
-    Ok((deleted_any, partial_completion))
+    Ok((changed_folder_ids, partial_completion))
 }
 
 pub(in crate::mapi) async fn execute_response<S, V>(
@@ -4618,6 +4737,24 @@ fn mailbox_parent_folder_id_for_dispatch(mailbox: &JmapMailbox, mailboxes: &[Jma
         .unwrap_or(IPM_SUBTREE_FOLDER_ID)
 }
 
+fn mailbox_is_trash_or_descendant(mailbox_id: Uuid, mailboxes: &[JmapMailbox]) -> bool {
+    let mut current = Some(mailbox_id);
+    let mut visited = HashSet::new();
+    while let Some(id) = current {
+        if !visited.insert(id) {
+            return false;
+        }
+        let Some(mailbox) = mailboxes.iter().find(|candidate| candidate.id == id) else {
+            return false;
+        };
+        if mailbox.role == "trash" {
+            return true;
+        }
+        current = mailbox.parent_id;
+    }
+    false
+}
+
 fn expected_special_folder_item_message_class(folder_id: u64) -> &'static str {
     match folder_id {
         CONTACTS_FOLDER_ID
@@ -5301,6 +5438,18 @@ where
             Some(RopId::GetContentsTable) => {
                 if input_handle(&handle_slots, &request).is_none() {
                     responses.extend_from_slice(&rop_handle_index_error_response(&request));
+                    continue;
+                }
+                if request
+                    .payload
+                    .first()
+                    .is_some_and(|flags| flags & 0x20 != 0)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x05,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_0102,
+                    ));
                     continue;
                 }
                 let folder_id = input_object(session, &handle_slots, &request)
@@ -7405,7 +7554,7 @@ where
                     partial_completion,
                 ));
             }
-            Some(RopId::DeleteMessages | RopId::HardDeleteMessages | RopId::ExpandRow) => {
+            Some(RopId::DeleteMessages | RopId::HardDeleteMessages) => {
                 let folder_id = match input_object(session, &handle_slots, &request) {
                     Some(MapiObject::Folder { folder_id, .. }) => *folder_id,
                     _ if request.rop_id == RopId::HardDeleteMessages.as_u8() => {
@@ -7437,8 +7586,20 @@ where
                     ));
                     continue;
                 }
+                if folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 for message_id in request.message_ids() {
                     if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
+                        if request.rop_id == RopId::DeleteMessages.as_u8() {
+                            partial_completion = true;
+                            continue;
+                        }
                         let Some(item) = snapshot.recoverable_item_for_id(folder_id, message_id)
                         else {
                             partial_completion = true;
@@ -7549,9 +7710,9 @@ where
                         partial_completion = true;
                         continue;
                     };
-                    let result = if request.rop_id == 0x59
-                        || request.rop_id == 0x91
+                    let result = if request.rop_id == 0x91
                         || email.mailbox_role == "trash"
+                        || mailbox_is_trash_or_descendant(email.mailbox_id, mailboxes)
                     {
                         store
                             .delete_jmap_email_from_mailbox(
@@ -8566,6 +8727,14 @@ where
                         continue;
                     }
                 };
+                if source_folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x33,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 if matches!(source_folder_id, NOTES_FOLDER_ID | JOURNAL_FOLDER_ID) {
                     let mut partial_completion = false;
                     for message_id in request.move_copy_message_ids() {
@@ -8665,6 +8834,14 @@ where
                     continue;
                 }
                 if crate::mapi_store::recoverable_storage_folder(source_folder_id).is_some() {
+                    if request.move_copy_want_copy() {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x33,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        continue;
+                    }
                     let Some(target_mailbox) = folder_row_for_id(target_folder_id, mailboxes)
                     else {
                         responses.extend_from_slice(&rop_error_response(
@@ -11064,7 +11241,10 @@ where
                         partial_completion = true;
                         continue;
                     };
-                    let result = if hard_delete || email.mailbox_role == "trash" {
+                    let result = if hard_delete
+                        || email.mailbox_role == "trash"
+                        || mailbox_is_trash_or_descendant(email.mailbox_id, mailboxes)
+                    {
                         store
                             .delete_jmap_email_from_mailbox(
                                 principal.account_id,
@@ -11121,7 +11301,7 @@ where
                 ));
             }
             Some(RopId::SynchronizationImportMessageMove) => {
-                let Some((message_id, target_folder_id)) = request.import_move() else {
+                let Some((source_folder_id, message_id)) = request.import_move() else {
                     responses.extend_from_slice(&rop_error_response(
                         0x78,
                         request.response_handle_index(),
@@ -11129,9 +11309,16 @@ where
                     ));
                     continue;
                 };
-                let source_folder_id = input_object(session, &handle_slots, &request)
-                    .and_then(MapiObject::folder_id)
-                    .unwrap_or(INBOX_FOLDER_ID);
+                let Some(target_folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x78,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
                 if snapshot.note_for_id(source_folder_id, message_id).is_some() {
                     if target_folder_id == NOTES_FOLDER_ID {
                         record_sync_upload_content_checkpoint(session, source_folder_id);
@@ -11329,9 +11516,31 @@ where
                     continue;
                 };
 
+                if folder_id == crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+                if snapshot.public_folder_for_id(folder_id).is_some() {
+                    responses.extend_from_slice(&rop_error_response(
+                        request.rop_id,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
+
                 let result = if crate::mapi_store::recoverable_storage_folder(folder_id).is_some() {
                     hard_delete_recoverable_folder_contents(store, principal, folder_id, snapshot)
                         .await
+                } else if request.rop_id == RopId::HardDeleteMessagesAndSubfolders.as_u8() {
+                    hard_delete_mailbox_tree_contents(
+                        store, principal, folder_id, mailboxes, emails, snapshot,
+                    )
+                    .await
                 } else {
                     hard_delete_folder_contents(
                         store, principal, folder_id, mailboxes, emails, snapshot,
@@ -11340,10 +11549,11 @@ where
                 };
 
                 match result {
-                    Ok((deleted_any, partial_completion)) => {
-                        if deleted_any {
+                    Ok((changed_folder_ids, partial_completion)) => {
+                        for changed_folder_id in changed_folder_ids {
                             session.record_notification(MapiNotificationEvent::content(
-                                folder_id, None,
+                                changed_folder_id,
+                                None,
                             ));
                         }
                         responses.extend_from_slice(&rop_partial_completion_response(

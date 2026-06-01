@@ -511,6 +511,12 @@ fn log_mapi_transport_connection(
         .unwrap_or_default();
     let mailbox_id = query_parameter(uri.query().unwrap_or_default(), "mailboxId");
     let client_request_id = mapi::safe_header(headers, "client-request-id").unwrap_or_default();
+    let trace_id = mapi::safe_header(headers, "x-trace-id").unwrap_or_default();
+    let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
+    let client_application = mapi::safe_header(headers, "x-clientapplication").unwrap_or_default();
+    let client_info = mapi::safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let x_mapi_http_capability =
+        mapi::safe_header(headers, "x-mapihttpcapability").unwrap_or_default();
     let request_content_type = mapi::safe_header(headers, "content-type").unwrap_or_default();
     let request_host = mapi::safe_header(headers, "host").unwrap_or_default();
     let response_payload_bytes = mapi::mapi_response_payload_bytes(response).unwrap_or(0);
@@ -545,6 +551,11 @@ fn log_mapi_transport_connection(
             request_type = %request_type,
             mapi_request_id = %mapi_request_id,
             client_request_id = %client_request_id,
+            trace_id = %trace_id,
+            user_agent = %user_agent,
+            client_application = %client_application,
+            client_info = %client_info,
+            x_mapi_http_capability = %x_mapi_http_capability,
             request_content_type = %request_content_type,
             request_host = %request_host,
             http_status = status,
@@ -579,6 +590,11 @@ fn log_mapi_transport_connection(
             request_type = %request_type,
             mapi_request_id = %mapi_request_id,
             client_request_id = %client_request_id,
+            trace_id = %trace_id,
+            user_agent = %user_agent,
+            client_application = %client_application,
+            client_info = %client_info,
+            x_mapi_http_capability = %x_mapi_http_capability,
             request_content_type = %request_content_type,
             request_host = %request_host,
             http_status = status,

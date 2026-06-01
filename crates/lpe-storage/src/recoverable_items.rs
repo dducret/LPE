@@ -122,7 +122,10 @@ impl Storage {
             r#"
             SELECT
                 ri.message_id,
+                ri.source_mailbox_message_id,
                 ri.source_mailbox_id,
+                ri.source_imap_uid,
+                ri.recoverable_folder,
                 ri.source_thread_id,
                 to_char(m.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS received_at
             FROM recoverable_items ri
@@ -144,6 +147,9 @@ impl Storage {
         .ok_or_else(|| anyhow!("recoverable item not found"))?;
 
         let message_id: Uuid = item.try_get("message_id")?;
+        let source_mailbox_message_id: Uuid = item.try_get("source_mailbox_message_id")?;
+        let source_imap_uid: i64 = item.try_get("source_imap_uid")?;
+        let recoverable_folder: String = item.try_get("recoverable_folder")?;
         let target_mailbox_id = target_mailbox_id.unwrap_or(item.try_get("source_mailbox_id")?);
         let target_role = sqlx::query_scalar::<_, String>(
             r#"
@@ -224,8 +230,9 @@ impl Storage {
             &principals,
             serde_json::json!({
                 "messageId": message_id,
-                "sourceMailboxMessageId": membership_id,
-                "recoverableFolder": "deletions",
+                "sourceMailboxMessageId": source_mailbox_message_id,
+                "sourceImapUid": source_imap_uid,
+                "recoverableFolder": recoverable_folder,
                 "restoredMailboxMessageId": membership_id,
                 "targetMailboxId": target_mailbox_id
             }),

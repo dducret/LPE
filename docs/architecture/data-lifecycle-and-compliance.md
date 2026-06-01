@@ -28,6 +28,10 @@
 - Recoverable Items Root, Deletions, Versions, and Purges are compatibility
   projections over canonical recoverable state. They are not normal JMAP/IMAP
   mailboxes and must not become protocol-local Exchange storage.
+- Versions and Purges are bounded LPE lifecycle projections. LPE does not
+  implement full Exchange copy-on-write Versions storage or user-visible Purges
+  recovery parity unless a future architecture update adds canonical state for
+  those behaviors.
 - `/api/mail/recoverable-items` is the canonical owner-facing recovery API for
   active recoverable items. Restore creates a fresh mailbox membership and
   purge is allowed only after recoverable retention expires and legal hold is

@@ -536,7 +536,13 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%summary_json%'
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
+          AND (
+              pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
+              OR (
+                  pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'
+                  AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
+              )
+          )
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -591,7 +597,7 @@ BEGIN
                     AND summary_json ? 'sourceMailboxMessageId'
                     AND summary_json ? 'recoverableFolder'
                     AND (summary_json ->> 'messageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                    AND (summary_json ->> 'sourceMailboxMessageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                    AND (summary_json ->> 'sourceMailboxMessageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                 )
                 OR (
                     object_kind = 'submission'

@@ -139,6 +139,12 @@ recoverable_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -
   || fail "Recoverable-item change-log constraints are missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Recoverable-item change-log constraints are present"
 
+recoverable_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%' AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%' AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%';")" \
+  || fail "Unable to inspect recoverable-item replay shape constraint"
+[[ "$recoverable_shape_constraint_ok" -ge "1" ]] \
+  || fail "Recoverable-item replay shape constraint is stale. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Recoverable-item replay shape constraint is current"
+
 public_folder_table_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name IN ('public_folder_trees', 'public_folders', 'public_folder_items', 'public_folder_permissions', 'public_folder_replicas', 'public_folder_per_user_state');")" \
   || fail "Unable to inspect public-folder tables"
 [[ "$public_folder_table_count" == "6" ]] \
