@@ -530,7 +530,14 @@ fn hierarchy_rows<'a>(
     let mut rows = mailboxes
         .iter()
         .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
-        .filter(|mailbox| restriction_matches_mailbox_with_context(restriction, mailbox, mailboxes))
+        .filter(|mailbox| {
+            restriction_matches_mailbox_with_context_for_account(
+                restriction,
+                mailbox,
+                mailboxes,
+                mailbox_guid,
+            )
+        })
         .map(HierarchyRow::Mailbox)
         .chain(
             snapshot
@@ -689,9 +696,12 @@ fn hierarchy_row_matches(
     mailbox_guid: Uuid,
 ) -> bool {
     match row {
-        HierarchyRow::Mailbox(mailbox) => {
-            restriction_matches_mailbox_with_context(restriction, mailbox, mailboxes)
-        }
+        HierarchyRow::Mailbox(mailbox) => restriction_matches_mailbox_with_context_for_account(
+            restriction,
+            mailbox,
+            mailboxes,
+            mailbox_guid,
+        ),
         HierarchyRow::Collaboration(folder) => {
             restriction_matches_collaboration_folder(restriction, folder)
         }
@@ -765,7 +775,7 @@ fn special_folder_property_value(
         )),
         PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
         _ if folder_id == INBOX_FOLDER_ID => {
-            special_folder_identification_property_value(Uuid::nil(), property_tag)
+            special_folder_identification_property_value(mailbox_guid, property_tag)
         }
         _ => None,
     }

@@ -904,13 +904,19 @@ pub(in crate::mapi) fn search_folder_message_for_id(
     }
 }
 
-pub(in crate::mapi) fn restriction_matches_mailbox_with_context(
+pub(in crate::mapi) fn restriction_matches_mailbox_with_context_for_account(
     restriction: Option<&MapiRestriction>,
     mailbox: &JmapMailbox,
     mailboxes: &[JmapMailbox],
+    mailbox_guid: Uuid,
 ) -> bool {
     restriction_matches(restriction, |property_tag| {
-        mailbox_property_value_with_context(mailbox, mailboxes, property_tag)
+        mailbox_property_value_with_context_for_account(
+            mailbox,
+            mailboxes,
+            property_tag,
+            mailbox_guid,
+        )
     })
 }
 

@@ -705,9 +705,12 @@ during that walk can be reopened later. Restricted hierarchy searches over those
 rows must match the same display names and identity values that unrestricted
 hierarchy `QueryRows` returns, including `"Top of Information Store"` for the
 IPM subtree and exact account-scoped `PidTagEntryId` matches for the IPM subtree
-and Calendar folder. FastTransfer/ICS hierarchy folder-change rows for virtual
-parent folders such as Root, IPM subtree, Sync Issues, and Recoverable Items
-root must also report `PidTagSubfolders=true` based on the virtual
+and Calendar folder. Inbox hierarchy restriction matching must also evaluate
+`PidTagIpmAppointmentEntryId` with the authenticated mailbox GUID for both real
+canonical Inbox rows and synthetic virtual Inbox rows. FastTransfer/ICS
+hierarchy folder-change rows for virtual parent folders such as Root, IPM
+subtree, Sync Issues, and Recoverable Items root must also report
+`PidTagSubfolders=true` based on the virtual
 special-folder tree, not only on the subset of child rows included in the
 current transfer.
 `PidTagIpmAppointmentEntryId` projections from
