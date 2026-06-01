@@ -182,6 +182,13 @@ fn calendar_event_attachments_use_canonical_event_and_blob_tables() {
         "CREATE INDEX calendar_event_attachments_event_idx",
         "CREATE INDEX calendar_event_attachments_blob_idx",
     ]);
+    assert!(
+        ATTACHMENTS_STORAGE.contains("pub async fn delete_calendar_event_attachment")
+            && ATTACHMENTS_STORAGE.contains("DELETE FROM calendar_event_attachments")
+            && ATTACHMENTS_STORAGE.contains("\"attachmentChanged\": true")
+            && ATTACHMENTS_STORAGE.contains("CanonicalChangeCategory::Calendar"),
+        "calendar attachment delete must mutate canonical event attachment rows and emit calendar change state"
+    );
 }
 
 #[test]
@@ -619,32 +626,26 @@ fn mapi_navigation_shortcuts_persist_group_header_links() {
 }
 
 #[test]
-fn mapi_delegate_freebusy_messages_are_materialized_canonical_state() {
-    let messages = table_definition("mapi_delegate_freebusy_messages");
-    for required in [
-        "message_kind TEXT NOT NULL CHECK (message_kind IN ('delegate', 'freebusy'))",
-        "owner_account_id UUID NOT NULL",
-        "payload_json JSONB NOT NULL DEFAULT '{}'::jsonb",
-        "PRIMARY KEY (tenant_id, id)",
-        "FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
-        "FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
-    ] {
-        assert!(
-            messages.contains(required),
-            "mapi_delegate_freebusy_messages must persist canonical delegate/free-busy message objects: {required}"
-        );
-    }
-
-    assert_schema_contains_all(&["CREATE INDEX mapi_delegate_freebusy_messages_account_idx"]);
+fn mapi_delegate_freebusy_messages_are_computed_from_canonical_state() {
+    assert!(
+        !SCHEMA.contains("CREATE TABLE mapi_delegate_freebusy_messages"),
+        "delegate/free-busy projections must not introduce MAPI-local storage"
+    );
     assert_source_contains_all(
         "collaboration storage",
         COLLABORATION_STORAGE,
         &[
-            "materialize_delegate_freebusy_messages",
-            "INSERT INTO mapi_delegate_freebusy_messages",
+            "project_delegate_freebusy_messages",
             "fetch_delegate_freebusy_messages",
-            "DELETE FROM mapi_delegate_freebusy_messages",
+            "compute_delegate_freebusy_messages",
+            "fetch_delegate_access_objects",
+            "fetch_free_busy_blocks",
+            "delegate_freebusy_message_objects",
         ],
+    );
+    assert!(
+        !COLLABORATION_STORAGE.contains("mapi_delegate_freebusy_messages"),
+        "delegate/free-busy storage must stay computed from calendar grants, sender rights, accounts, and calendar events"
     );
 }
 

@@ -952,6 +952,13 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, Option<CalendarEventAttachment>>;
 
+    fn delete_calendar_event_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<Uuid>>;
+
     fn delete_message_attachment<'a>(
         &'a self,
         account_id: Uuid,
@@ -3313,6 +3320,18 @@ impl ExchangeStore for Storage {
     ) -> StoreFuture<'a, Option<JmapEmail>> {
         Box::pin(async move {
             self.delete_message_attachment(account_id, file_reference, audit)
+                .await
+        })
+    }
+
+    fn delete_calendar_event_attachment<'a>(
+        &'a self,
+        account_id: Uuid,
+        file_reference: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<Uuid>> {
+        Box::pin(async move {
+            self.delete_calendar_event_attachment(account_id, file_reference, audit)
                 .await
         })
     }

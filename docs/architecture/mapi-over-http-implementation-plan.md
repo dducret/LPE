@@ -202,7 +202,16 @@ non-canonical LPE state.
   user/API action creates real collaboration state. Outlook may write back or
   cache the Calendar default-folder EntryID during profile bootstrap, so the
   advertised folder must have durable MAPI backing even when the calendar has no
-  events yet. LPE does not synthesize Calendar configuration FAI rows during
+  events yet. A MAPI `IPM.Appointment` create/save against that advertised empty
+  Calendar folder creates the event through canonical calendar storage using
+  the default calendar collection, not through MAPI-local item state. Existing
+  events in that implicit default collection can be read, updated, deleted, and
+  opened with canonical attachments through the advertised Calendar folder. If
+  collection discovery returns no explicit default Calendar row but canonical
+  events already reference the default calendar collection, MAPI sync and
+  selective object loads still project those events through the advertised
+  Calendar folder. LPE does not
+  synthesize Calendar configuration FAI rows during
   first sync. `[MS-OXOCFG]` defines how `IPM.Configuration.Calendar`,
   `IPM.Configuration.CategoryList`, and `IPM.Configuration.WorkHours` messages
   are stored when configuration data exists, but partially fabricated bootstrap
@@ -277,7 +286,7 @@ non-canonical LPE state.
   free/busy blocks, calendar read grants preserve tentative/busy distinctions,
   and calendar write plus `send-on-behalf` is the supported canonical signal for
   receiving or processing meeting-related objects on behalf of a delegator.
-  Empty delegate/free-busy materialization stays empty; LPE must not create
+  Empty delegate/free-busy projection stays empty; LPE must not create
   placeholder `IPM.Microsoft.Delegate` or
   `IPM.Microsoft.ScheduleData.FreeBusy` messages just to satisfy Outlook folder
   contents.
@@ -351,6 +360,18 @@ not by itself authorize broad client publication.
   against the canonical special-folder map and acknowledged for interoperability,
   but they do not override the canonical projection or create session-local
   folder identity state.
+- Store-level `RopGetPropertiesAll` and `RopGetPropertiesList` enumerate the
+  same computed default-folder identities as targeted store `GetProps` calls,
+  including `PidTagIpmAppointmentEntryId`, so Outlook bootstrap paths that
+  discover Calendar through broad store-property enumeration receive the
+  canonical Calendar EntryID without relying on MAPI-local folder state.
+- Root and Inbox `RopGetPropertiesAll` / `RopGetPropertiesList` enumerate the
+  same computed default-folder identity properties for Outlook's documented
+  Inbox-first, Root-fallback special-folder discovery path; the values remain
+  computed from canonical reserved MAPI folder identities.
+- `PidTagValidFolderMask` is kept aligned with the special-folder EntryIDs LPE
+  advertises for the documented store-level mask surface, including Finder /
+  Search.
 - Outlook store bootstrap metadata includes the private-store marker, store
   state, mailbox owner, user GUID, server icons, and max submit message size.
 - Profile settings needed for cached-mode reuse are canonical account settings,
@@ -674,41 +695,62 @@ to be strictly earlier than end time, so zero-duration canonical events are
 projected to MAPI with a minimum one-minute appointment window while leaving the
 canonical event unchanged. Bounded MAPI calendar writes update only existing
 canonical `calendar_events` columns: subject/display name, body, HTML body,
-start/end, location, all-day, busy-status-derived canonical status, organizer,
+start/end through `PidTagStartDate`/`PidTagEndDate` and
+`PidLidAppointmentStartWhole`/`PidLidAppointmentEndWhole` plus
+`PidLidCommonStart`/`PidLidCommonEnd`, location, all-day,
+busy-status-derived canonical status, organizer,
 required attendees from display/To attendee properties, and optional attendees
-from `PidLidCcAttendeesString`. Calendar reads project those canonical body,
-organizer, and attendee fields through direct properties, requested contents
-columns, and FastTransfer/ICS message properties, including the bounded
+from `PidTagDisplayCc` and `PidLidCcAttendeesString`, plus the bounded
+`PidLidTimeZoneDescription` string into canonical `time_zone`. Bounded
+`PidLidAppointmentStateFlags` writes map only the meeting/cancel bits; the
+cancel bit updates canonical event status to `cancelled`, while unsupported
+state bits are rejected without side effects. Calendar reads project those
+canonical body, organizer, attendee, and timezone fields through
+direct properties, requested contents columns, and FastTransfer/ICS message
+properties, including common start/end aliases, the bounded
 `PidLidAllAttendeesString`, `PidLidToAttendeesString`, and
-`PidLidCcAttendeesString` projections from canonical attendee metadata.
+`PidLidCcAttendeesString` plus `PidTagDisplayCc` projections from canonical attendee metadata and
+timezone description/definition projections from canonical event timezone
+state. Calendar content sync also projects canonical attachment presence from
+`calendar_event_attachments` through `PidTagHasAttachments`; attachment table,
+open, stream, create, and save paths use canonical calendar attachment rows.
+Binary timezone payload writes remain rejected until parser-backed
+canonical timezone mappings exist.
 `PidLidAppointmentRecur` has a parser-backed bounded read/write mapping for
 Gregorian daily, weekly, monthly-by-day including month-end, monthly-nth,
 yearly-by-day, and yearly-nth recurrence patterns into canonical `recurrence_rule`,
-`recurrence_json`, and deleted-instance `recurrence_exceptions_json` fields.
+`recurrence_json`, deleted-instance `recurrence_exceptions_json` fields, and
+modified-instance exceptions that change the occurrence start/end time, subject,
+or location.
 Direct property reads, contents rows that request the property, and
 FastTransfer/ICS calendar sync can project the bounded recurrence blob back
 from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
 payloads that contain only the bounded event property subset are canonicalized
 as `calendar_events`; bounded meeting responses update canonical attendee
 participation status on the existing event; and bounded cancellation payloads
-delete the existing canonical event. Modified exception payloads, Hijri
-recurrence, malformed recurrence blobs, unsupported meeting response/cancel
-properties, and other binary meeting payloads remain unsupported and are
-rejected with deterministic parseable errors instead of being stored as opaque
-MAPI blobs.
+delete the existing canonical event. Modified exceptions that override body,
+reminder, busy status, attachment, or other per-instance fields, Hijri
+recurrence, malformed recurrence blobs, unsupported meeting
+response/cancel properties, and other binary meeting payloads remain
+unsupported and are rejected with deterministic parseable errors instead of
+being stored as opaque MAPI blobs.
 Calendar attachments are projected only through canonical
 `calendar_event_attachments`:
 `PidTagHasAttachments`, `RopGetValidAttachments`, `RopGetAttachmentTable`, and
 `RopOpenAttachment` read that table, while bounded
 `RopCreateAttachment`/`RopSaveChangesAttachment` writes validated attachment
-blobs into the same canonical event attachment state. Outlook-only attachment
-state is not stored.
+blobs into the same canonical event attachment state. `RopDeleteAttachment`
+removes the canonical event attachment row and emits calendar change state.
+Outlook-only attachment state is not stored.
 
 Delegate/free-busy readiness additionally requires the canonical
 `/api/mail/delegation/free-busy` layer to return delegate access objects and
 merged non-overlapping availability blocks for the target mailbox calendar.
 When no canonical delegate or free/busy state exists, the message-object list is
-empty rather than a fabricated status object.
+empty rather than a fabricated status object. MAPI delegate/free-busy message
+objects are computed from canonical grants, sender rights, accounts, and
+calendar events; LPE does not persist a MAPI-local delegate/free-busy message
+table.
 This follows the Microsoft MAPI over HTTP session model, the delegate calendar
 constraints in MS-OXODLGT, the delegate-management contract in MS-OXWSDLGM, and
 the Outlook free/busy block behavior described by Microsoft's Free/Busy API

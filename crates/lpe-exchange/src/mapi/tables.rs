@@ -38,6 +38,12 @@ pub(in crate::mapi) fn folder_message_count(
     if let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) {
         return folder.item_count;
     }
+    if folder_id == CALENDAR_FOLDER_ID {
+        return snapshot
+            .events_for_folder(folder_id)
+            .len()
+            .min(u32::MAX as usize) as u32;
+    }
     if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
         return folder.item_count;
     }
@@ -393,6 +399,61 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
         PID_TAG_CHANGE_NUMBER,
+    ]
+}
+
+pub(in crate::mapi) fn default_store_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_VALID_FOLDER_MASK,
+        PID_TAG_IPM_SUBTREE_ENTRY_ID,
+        PID_TAG_IPM_OUTBOX_ENTRY_ID,
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID,
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID,
+        PID_TAG_VIEWS_ENTRY_ID,
+        PID_TAG_COMMON_VIEWS_ENTRY_ID,
+        PID_TAG_FINDER_ENTRY_ID,
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+        PID_TAG_IPM_CONTACT_ENTRY_ID,
+        PID_TAG_IPM_JOURNAL_ENTRY_ID,
+        PID_TAG_IPM_NOTE_ENTRY_ID,
+        PID_TAG_IPM_TASK_ENTRY_ID,
+        PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_IPM_DRAFTS_ENTRY_ID,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        PID_TAG_FREE_BUSY_ENTRY_IDS,
+        PID_TAG_SERIALIZED_REPLID_GUID_MAP,
+        PID_TAG_MAILBOX_OWNER_ENTRY_ID,
+        PID_TAG_MAILBOX_OWNER_NAME_W,
+        PID_TAG_SERVER_TYPE_DISPLAY_NAME_W,
+        PID_TAG_PRIVATE,
+        PID_TAG_USER_GUID,
+        PID_TAG_MAX_SUBMIT_MESSAGE_SIZE,
+    ]
+}
+
+pub(in crate::mapi) fn default_folder_identity_property_tags() -> Vec<u32> {
+    vec![
+        PID_TAG_VALID_FOLDER_MASK,
+        PID_TAG_IPM_SUBTREE_ENTRY_ID,
+        PID_TAG_IPM_OUTBOX_ENTRY_ID,
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID,
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID,
+        PID_TAG_VIEWS_ENTRY_ID,
+        PID_TAG_COMMON_VIEWS_ENTRY_ID,
+        PID_TAG_FINDER_ENTRY_ID,
+        PID_TAG_IPM_ARCHIVE_ENTRY_ID,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+        PID_TAG_IPM_CONTACT_ENTRY_ID,
+        PID_TAG_IPM_JOURNAL_ENTRY_ID,
+        PID_TAG_IPM_NOTE_ENTRY_ID,
+        PID_TAG_IPM_TASK_ENTRY_ID,
+        PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_IPM_DRAFTS_ENTRY_ID,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        PID_TAG_FREE_BUSY_ENTRY_IDS,
     ]
 }
 
@@ -971,9 +1032,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
                     default_message_property_tags()
                 } else if *associated
-                    && snapshot
-                        .collaboration_folder_for_id(*folder_id)
-                        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+                    && (*folder_id == CALENDAR_FOLDER_ID
+                        || snapshot
+                            .collaboration_folder_for_id(*folder_id)
+                            .is_some_and(|folder| {
+                                folder.kind == MapiCollaborationFolderKind::Calendar
+                            }))
                 {
                     default_calendar_configuration_property_tags()
                 } else {
@@ -1000,9 +1064,10 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .iter()
                         .map(|message| serialize_delegate_freebusy_row(message, &columns))
                         .collect::<Vec<_>>()
-                } else if snapshot
-                    .collaboration_folder_for_id(*folder_id)
-                    .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+                } else if *folder_id == CALENDAR_FOLDER_ID
+                    || snapshot
+                        .collaboration_folder_for_id(*folder_id)
+                        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
                 {
                     Vec::new()
                 } else {
@@ -1013,6 +1078,21 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .public_folder_items_for_folder(*folder_id)
                     .into_iter()
                     .map(|item| serialize_public_folder_item_row(item, &columns))
+                    .collect::<Vec<_>>()
+            } else if *folder_id == CALENDAR_FOLDER_ID {
+                let mut rows = snapshot.events_for_folder(*folder_id);
+                rows.retain(|event| restriction_matches_event(restriction.as_ref(), &event.event));
+                sort_events(&mut rows, sort_orders);
+                rows.into_iter()
+                    .map(|event| {
+                        serialize_event_row_with_attachments(
+                            &event.event,
+                            event.id,
+                            event.folder_id,
+                            !event.attachments.is_empty(),
+                            &columns,
+                        )
+                    })
                     .collect::<Vec<_>>()
             } else if let Some(folder) = snapshot.collaboration_folder_for_id(*folder_id) {
                 match folder.kind {

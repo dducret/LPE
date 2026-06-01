@@ -386,6 +386,93 @@ impl Storage {
         }))
     }
 
+    pub async fn delete_calendar_event_attachment(
+        &self,
+        account_id: Uuid,
+        file_reference: &str,
+        audit: AuditEntryInput,
+    ) -> Result<Option<Uuid>> {
+        let Some((event_id, attachment_id)) =
+            parse_calendar_attachment_file_reference(file_reference)
+        else {
+            return Ok(None);
+        };
+        let tenant_id = self.tenant_id_for_account_id(account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = sqlx::query(
+            r#"
+            DELETE FROM calendar_event_attachments
+            WHERE tenant_id = $1
+              AND owner_account_id = $2
+              AND event_id = $3
+              AND id = $4
+            RETURNING event_id
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(event_id)
+        .bind(attachment_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        if deleted.is_none() {
+            tx.commit().await?;
+            return Ok(None);
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE calendar_events
+            SET updated_at = NOW()
+            WHERE tenant_id = $1 AND owner_account_id = $2 AND id = $3
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(account_id)
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(account_id),
+            None,
+            "calendar_event",
+            event_id,
+            "updated",
+            modseq,
+            &[account_id],
+            serde_json::json!({
+                "objectUid": event_id,
+                "attachmentChanged": true,
+                "attachmentId": attachment_id,
+            }),
+        )
+        .await?;
+
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_collaboration_change(
+            &mut tx,
+            &tenant_id,
+            CanonicalChangeCategory::Calendar,
+            account_id,
+        )
+        .await?;
+        tx.commit().await?;
+
+        Ok(Some(event_id))
+    }
+
     async fn store_attachment_blob_in_tx(
         &self,
         tx: &mut sqlx::Transaction<'_, Postgres>,

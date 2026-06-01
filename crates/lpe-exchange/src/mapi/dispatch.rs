@@ -32,6 +32,7 @@ const SEARCH_RECURSIVE_FLAG: u32 = 0x0000_0004;
 const EC_RULE_UNSUPPORTED: u32 = 0x8004_0102;
 const EC_RULE_NOT_FOUND: u32 = 0x8004_010F;
 const EC_RULE_INVALID_PARAMETER: u32 = 0x8007_0057;
+const DEFAULT_CALENDAR_COLLECTION_ID: &str = "default";
 const ROW_ADD: u8 = 0x01;
 const ROW_MODIFY: u8 = 0x02;
 const ROW_REMOVE: u8 = 0x04;
@@ -3062,6 +3063,8 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
     matches!(
         canonical_property_storage_tag(property_tag),
         PID_LID_FLAG_REQUEST_W_TAG
+            | PID_LID_COMMON_START_TAG
+            | PID_LID_COMMON_END_TAG
             | PID_LID_TASK_START_DATE_TAG
             | PID_LID_TASK_DUE_DATE_TAG
             | PID_LID_GLOBAL_OBJECT_ID_TAG
@@ -3071,8 +3074,16 @@ fn is_canonical_named_property_tag(property_tag: u32) -> bool {
             | PID_LID_APPOINTMENT_START_WHOLE_TAG
             | PID_LID_APPOINTMENT_END_WHOLE_TAG
             | PID_LID_APPOINTMENT_DURATION_TAG
+            | PID_LID_APPOINTMENT_RECUR_TAG
             | PID_LID_APPOINTMENT_SUB_TYPE_TAG
             | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+            | PID_LID_ALL_ATTENDEES_STRING_W_TAG
+            | PID_LID_TO_ATTENDEES_STRING_W_TAG
+            | PID_LID_CC_ATTENDEES_STRING_W_TAG
+            | PID_LID_TIME_ZONE_STRUCT_TAG
+            | PID_LID_TIME_ZONE_DESCRIPTION_W_TAG
+            | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_START_DISPLAY_TAG
+            | PID_LID_APPOINTMENT_TIME_ZONE_DEFINITION_END_DISPLAY_TAG
             | PID_LID_REMINDER_SET_TAG
             | PID_LID_REMINDER_TIME_TAG
             | PID_LID_REMINDER_SIGNAL_TIME_TAG
@@ -4475,8 +4486,10 @@ fn calendar_sync_object_start_end_order_ok(
     object: &mapi_mailstore::SpecialMessageSyncFact,
 ) -> bool {
     let start = special_i64_property(object, PID_TAG_START_DATE)
+        .or_else(|| special_i64_property(object, PID_LID_COMMON_START_TAG))
         .or_else(|| special_i64_property(object, PID_LID_APPOINTMENT_START_WHOLE_TAG));
     let end = special_i64_property(object, PID_TAG_END_DATE)
+        .or_else(|| special_i64_property(object, PID_LID_COMMON_END_TAG))
         .or_else(|| special_i64_property(object, PID_LID_APPOINTMENT_END_WHOLE_TAG));
     match (start, end) {
         (Some(start), Some(end)) => start < end,
@@ -4510,6 +4523,8 @@ fn format_calendar_required_property_tags(
         tags.extend([
             PID_TAG_START_DATE,
             PID_TAG_END_DATE,
+            PID_LID_COMMON_START_TAG,
+            PID_LID_COMMON_END_TAG,
             PID_LID_BUSY_STATUS_TAG,
             PID_LID_LOCATION_W_TAG,
             PID_LID_APPOINTMENT_START_WHOLE_TAG,
@@ -5206,6 +5221,7 @@ where
                 if snapshot.collaboration_folder_for_id(folder_id).is_none()
                     && folder_row_for_id(folder_id, mailboxes).is_none()
                     && snapshot.public_folder_for_id(folder_id).is_none()
+                    && folder_id != CALENDAR_FOLDER_ID
                     && !matches!(
                         folder_id,
                         INBOX_FOLDER_ID
@@ -5236,6 +5252,10 @@ where
                         properties: HashMap::new(),
                     },
                     Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
+                        folder_id,
+                        properties: HashMap::new(),
+                    },
+                    None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
                         folder_id,
                         properties: HashMap::new(),
                     },
@@ -5591,18 +5611,24 @@ where
                         folder_id,
                         properties,
                     }) => {
-                        let Some(folder) = snapshot.collaboration_folder_for_id(folder_id) else {
-                            responses.extend_from_slice(&rop_error_response(
-                                0x0C,
-                                request.response_handle_index(),
-                                0x8004_010F,
-                            ));
-                            continue;
+                        let collection_id = match snapshot.collaboration_folder_for_id(folder_id) {
+                            Some(folder) => folder.collection.id.as_str(),
+                            None if folder_id == CALENDAR_FOLDER_ID => {
+                                DEFAULT_CALENDAR_COLLECTION_ID
+                            }
+                            None => {
+                                responses.extend_from_slice(&rop_error_response(
+                                    0x0C,
+                                    request.response_handle_index(),
+                                    0x8004_010F,
+                                ));
+                                continue;
+                            }
                         };
                         let input = match event_input_from_mapi(
                             principal.account_id,
                             None,
-                            &default_event_for_mapping(principal.account_id, &folder.collection.id),
+                            &default_event_for_mapping(principal.account_id, collection_id),
                             &properties,
                         ) {
                             Ok(input) => input,
@@ -5618,7 +5644,7 @@ where
                         match store
                             .create_accessible_event(
                                 principal.account_id,
-                                Some(&folder.collection.id),
+                                Some(collection_id),
                                 input,
                             )
                             .await
@@ -7622,21 +7648,28 @@ where
                 output_handles.push(handle);
             }
             Some(RopId::DeleteAttachment) => {
-                let Some(MapiObject::Message {
-                    folder_id,
-                    message_id,
-                }) = input_object(session, &handle_slots, &request)
-                else {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x24,
-                        request.response_handle_index(),
-                        0x0000_04B9,
-                    ));
-                    continue;
-                };
+                let (folder_id, message_id, is_calendar_event) =
+                    match input_object(session, &handle_slots, &request) {
+                        Some(MapiObject::Message {
+                            folder_id,
+                            message_id,
+                        }) => (*folder_id, *message_id, false),
+                        Some(MapiObject::Event {
+                            folder_id,
+                            event_id,
+                        }) => (*folder_id, *event_id, true),
+                        _ => {
+                            responses.extend_from_slice(&rop_error_response(
+                                0x24,
+                                request.response_handle_index(),
+                                0x0000_04B9,
+                            ));
+                            continue;
+                        }
+                    };
                 let attach_num = request.attach_num().unwrap_or(u32::MAX);
                 let Some(attachment) =
-                    snapshot.attachment_for_message(*folder_id, *message_id, attach_num)
+                    snapshot.attachment_for_message(folder_id, message_id, attach_num)
                 else {
                     responses.extend_from_slice(&rop_error_response(
                         0x24,
@@ -7645,26 +7678,50 @@ where
                     ));
                     continue;
                 };
-                match store
-                    .delete_message_attachment(
-                        principal.account_id,
-                        &attachment.file_reference,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "mapi-delete-attachment".to_string(),
-                            subject: attachment.file_reference.clone(),
-                        },
-                    )
-                    .await
-                {
-                    Ok(Some(_)) => {
-                        responses.extend_from_slice(&rop_simple_success_response(&request))
+                if is_calendar_event {
+                    match store
+                        .delete_calendar_event_attachment(
+                            principal.account_id,
+                            &attachment.file_reference,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-delete-calendar-attachment".to_string(),
+                                subject: attachment.file_reference.clone(),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(Some(_)) => {
+                            responses.extend_from_slice(&rop_simple_success_response(&request))
+                        }
+                        _ => responses.extend_from_slice(&rop_error_response(
+                            0x24,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        )),
                     }
-                    _ => responses.extend_from_slice(&rop_error_response(
-                        0x24,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
+                } else {
+                    match store
+                        .delete_message_attachment(
+                            principal.account_id,
+                            &attachment.file_reference,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "mapi-delete-attachment".to_string(),
+                                subject: attachment.file_reference.clone(),
+                            },
+                        )
+                        .await
+                    {
+                        Ok(Some(_)) => {
+                            responses.extend_from_slice(&rop_simple_success_response(&request))
+                        }
+                        _ => responses.extend_from_slice(&rop_error_response(
+                            0x24,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        )),
+                    }
                 }
             }
             Some(RopId::SaveChangesAttachment) => {
@@ -12424,9 +12481,10 @@ fn changed_special_ids_for_folder<'a>(
     {
         return &changes.changed_contact_ids;
     }
-    if snapshot
-        .collaboration_folder_for_id(folder_id)
-        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+    if folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
     {
         return &changes.changed_calendar_event_ids;
     }
@@ -12469,9 +12527,10 @@ where
             MapiIdentityObjectKind::Contact,
             changes.deleted_contact_ids.as_slice(),
         ))
-    } else if snapshot
-        .collaboration_folder_for_id(folder_id)
-        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
+    } else if folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
     {
         Some((
             MapiIdentityObjectKind::CalendarEvent,

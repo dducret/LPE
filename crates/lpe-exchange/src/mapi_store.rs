@@ -356,7 +356,11 @@ impl MapiMailStoreSnapshot {
                         folder.kind == MapiCollaborationFolderKind::Calendar
                             && folder.collection.id == event.collection_id
                     })
-                    .map(|folder| folder.id)?;
+                    .map(|folder| folder.id)
+                    .or_else(|| {
+                        matches!(event.collection_id.as_str(), "default" | "calendar")
+                            .then_some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                    })?;
                 Some(MapiEvent {
                     id: mapi_item_id(&event.id),
                     folder_id,
@@ -820,11 +824,11 @@ impl MapiMailStoreSnapshot {
             return self
                 .reminder_events()
                 .into_iter()
-                .find(|event| event.id == item_id);
+                .find(|event| mapi_event_id_matches(event, item_id));
         }
         self.events
             .iter()
-            .find(|event| event.folder_id == folder_id && event.id == item_id)
+            .find(|event| event.folder_id == folder_id && mapi_event_id_matches(event, item_id))
     }
 
     pub(crate) fn tasks_for_folder(&self, folder_id: u64) -> Vec<&MapiTask> {
@@ -1235,11 +1239,19 @@ impl<T: ExchangeStore> MapiStore for T {
                 );
             }
             let mut events = Vec::new();
-            for collection in &calendar_collections {
+            if calendar_collections.is_empty() {
                 events.extend(
-                    self.fetch_accessible_events_in_collection(account_id, &collection.id)
-                        .await?,
+                    self.fetch_accessible_events_in_collection(account_id, "default")
+                        .await
+                        .unwrap_or_default(),
                 );
+            } else {
+                for collection in &calendar_collections {
+                    events.extend(
+                        self.fetch_accessible_events_in_collection(account_id, &collection.id)
+                            .await?,
+                    );
+                }
             }
             let mut tasks = Vec::new();
             for collection in &task_collections {
@@ -1595,6 +1607,11 @@ fn mapi_message_id(email: &JmapEmail) -> u64 {
 
 fn mapi_item_id(id: &Uuid) -> u64 {
     crate::mapi::identity::mapped_mapi_object_id(id).expect("MAPI item identity mapping missing")
+}
+
+fn mapi_event_id_matches(event: &MapiEvent, object_id: u64) -> bool {
+    event.id == object_id
+        || crate::mapi::identity::object_id_matches(&event.canonical_id, object_id)
 }
 
 fn mapi_public_folder_id(folder: &PublicFolder) -> u64 {
@@ -2984,7 +3001,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_projects_materialized_delegate_freebusy_messages() {
+    fn snapshot_projects_computed_delegate_freebusy_messages() {
         let message_id = Uuid::parse_str("56565656-5656-4656-8656-565656565656").unwrap();
         crate::mapi::identity::remember_mapi_identity(
             message_id,

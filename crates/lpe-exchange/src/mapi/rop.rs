@@ -835,6 +835,11 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
     object: Option<&MapiObject>,
 ) -> Vec<u8> {
     let tags = match object {
+        Some(MapiObject::Logon) => default_store_property_tags(),
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
+            ..
+        }) => default_folder_property_tags_with_identity(),
         Some(
             MapiObject::Attachment { .. }
             | MapiObject::PendingAttachment { .. }
@@ -2193,6 +2198,11 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
     let mut response = vec![0x08, request.input_handle_index().unwrap_or(0)];
     write_u32(&mut response, 0);
     let tags = match object {
+        Some(MapiObject::Logon) => default_store_property_tags(),
+        Some(MapiObject::Folder {
+            folder_id: ROOT_FOLDER_ID | INBOX_FOLDER_ID,
+            ..
+        }) => default_folder_property_tags_with_identity(),
         Some(
             MapiObject::Attachment { .. }
             | MapiObject::PendingAttachment { .. }
@@ -2229,6 +2239,12 @@ pub(in crate::mapi) fn rop_get_properties_all_response(
         response.extend_from_slice(&value);
     }
     response
+}
+
+fn default_folder_property_tags_with_identity() -> Vec<u32> {
+    let mut tags = default_folder_property_tags();
+    tags.extend(default_folder_identity_property_tags());
+    tags
 }
 
 pub(in crate::mapi) fn rop_get_valid_attachments_response(

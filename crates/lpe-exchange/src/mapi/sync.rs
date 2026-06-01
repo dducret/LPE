@@ -459,11 +459,12 @@ pub(in crate::mapi) fn special_sync_objects_for(
     if sync_type == 0x02 {
         return Vec::new();
     }
-    if snapshot
-        .collaboration_folder_for_id(folder_id)
-        .is_some_and(|folder| {
-            folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
-        })
+    if folder_id == CALENDAR_FOLDER_ID
+        || snapshot
+            .collaboration_folder_for_id(folder_id)
+            .is_some_and(|folder| {
+                folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
+            })
     {
         return snapshot
             .events_for_folder(folder_id)
@@ -1004,6 +1005,8 @@ fn calendar_sync_object(
     for property_tag in [
         PID_TAG_START_DATE,
         PID_TAG_END_DATE,
+        PID_LID_COMMON_START_TAG,
+        PID_LID_COMMON_END_TAG,
         PID_LID_BUSY_STATUS_TAG,
         PID_LID_LOCATION_W_TAG,
         PID_LID_APPOINTMENT_START_WHOLE_TAG,
@@ -1037,15 +1040,21 @@ fn calendar_sync_object(
         PID_LID_REMINDER_PLAY_SOUND_TAG,
         PID_LID_REMINDER_FILE_PARAMETER_W_TAG,
     ] {
-        if let Some(value) = event_property_value_with_reminder(
-            &event.event,
-            event.id,
-            event.folder_id,
-            property_tag,
-            reminder,
-        )
-        .and_then(special_message_property_value)
-        {
+        let value = if property_tag == PID_TAG_HAS_ATTACHMENTS {
+            Some(mapi_mailstore::SpecialMessagePropertyValue::Bool(
+                !event.attachments.is_empty(),
+            ))
+        } else {
+            event_property_value_with_reminder(
+                &event.event,
+                event.id,
+                event.folder_id,
+                property_tag,
+                reminder,
+            )
+            .and_then(special_message_property_value)
+        };
+        if let Some(value) = value {
             properties.push((property_tag, value));
         }
     }
@@ -1161,8 +1170,7 @@ pub(in crate::mapi) fn message_for_id<'a>(
 }
 
 pub(in crate::mapi) fn mapi_item_id_matches(canonical_id: &Uuid, object_id: u64) -> bool {
-    crate::mapi::identity::mapped_mapi_object_id(canonical_id) == Some(object_id)
-        || crate::mapi::identity::legacy_migration_object_id(canonical_id) == object_id
+    crate::mapi::identity::object_id_matches(canonical_id, object_id)
 }
 
 pub(in crate::mapi) fn next_pending_attachment_num(
@@ -1319,6 +1327,65 @@ mod tests {
 
         assert!(row_ids.contains(&root_folder_id));
         assert!(row_ids.contains(&child_folder_id));
+    }
+
+    #[test]
+    fn calendar_sync_object_projects_canonical_attachment_presence() {
+        let event_id = Uuid::from_u128(0x71717171717141719171717171717171);
+        let event = crate::mapi_store::MapiEvent {
+            id: crate::mapi::identity::mapi_store_id(123),
+            folder_id: CALENDAR_FOLDER_ID,
+            canonical_id: event_id,
+            event: lpe_storage::AccessibleEvent {
+                id: event_id,
+                uid: event_id.to_string(),
+                collection_id: "default".to_string(),
+                owner_account_id: Uuid::nil(),
+                owner_email: "alice@example.test".to_string(),
+                owner_display_name: "Alice".to_string(),
+                rights: lpe_storage::CollaborationRights {
+                    may_read: true,
+                    may_write: true,
+                    may_delete: false,
+                    may_share: false,
+                },
+                date: "2026-05-25".to_string(),
+                time: "14:30".to_string(),
+                time_zone: "UTC".to_string(),
+                duration_minutes: 30,
+                all_day: false,
+                status: "confirmed".to_string(),
+                sequence: 0,
+                recurrence_rule: String::new(),
+                recurrence_json: "{}".to_string(),
+                recurrence_exceptions_json: "[]".to_string(),
+                title: "Attachment sync".to_string(),
+                location: String::new(),
+                organizer_json: "{}".to_string(),
+                attendees: String::new(),
+                attendees_json: String::new(),
+                notes: String::new(),
+                body_html: String::new(),
+            },
+            attachments: vec![crate::mapi_store::MapiAttachment {
+                canonical_id: Uuid::from_u128(0x81818181818141819181818181818181),
+                attach_num: 0,
+                file_reference: "calendar-attachment:ref".to_string(),
+                file_name: "agenda.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 12,
+            }],
+        };
+
+        let sync = calendar_sync_object(&event, None);
+
+        assert!(sync.named_properties.iter().any(|(tag, value)| {
+            *tag == PID_TAG_HAS_ATTACHMENTS
+                && matches!(
+                    value,
+                    mapi_mailstore::SpecialMessagePropertyValue::Bool(true)
+                )
+        }));
     }
 
     #[test]

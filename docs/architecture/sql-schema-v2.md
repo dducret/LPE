@@ -562,6 +562,11 @@ queries exclude rows without `reminder_set`, rows with dismissed reminders,
 completed tasks, and cancelled task/calendar state; diagnostic queries can
 include inactive rows with explicit statuses.
 
+Delegate/free-busy MAPI message objects also do not have a protocol-local table.
+They are computed from canonical `calendar_grants`, `sender_rights`, account
+directory rows, and `calendar_events` using the same same-tenant free/busy
+visibility rules as `/api/mail/delegation/free-busy`.
+
 Object-level change logs and tombstones cover mailbox and collaboration
 objects. Custom mailbox deletes, collaboration grants, mailbox delegation
 grants, sender rights, search-folder definitions, Sieve-backed rules, contacts,

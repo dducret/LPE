@@ -439,15 +439,24 @@ where
             calendar_collections.len(),
         );
         let mut events = Vec::new();
-        for collection in &calendar_collections {
+        if calendar_collections.is_empty() {
             events.extend(
                 store
-                    .fetch_accessible_events_in_collection(account_id, &collection.id)
+                    .fetch_accessible_events_in_collection(account_id, "default")
                     .await
-                    .with_context(|| {
-                        format!("fetch MAPI events in collection {}", collection.id)
-                    })?,
+                    .context("fetch MAPI events in default calendar collection")?,
             );
+        } else {
+            for collection in &calendar_collections {
+                events.extend(
+                    store
+                        .fetch_accessible_events_in_collection(account_id, &collection.id)
+                        .await
+                        .with_context(|| {
+                            format!("fetch MAPI events in collection {}", collection.id)
+                        })?,
+                );
+            }
         }
         events
     } else {

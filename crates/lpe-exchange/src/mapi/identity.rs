@@ -198,6 +198,11 @@ pub(crate) fn mapped_mapi_object_id(canonical_id: &Uuid) -> Option<u64> {
         .map(|identity| identity.object_id)
 }
 
+pub(crate) fn object_id_matches(canonical_id: &Uuid, object_id: u64) -> bool {
+    mapped_mapi_object_id(canonical_id) == Some(object_id)
+        || legacy_migration_object_id(canonical_id) == object_id
+}
+
 pub(crate) fn mapped_mapi_source_key(canonical_id: &Uuid) -> Option<Vec<u8>> {
     MAPI_OBJECT_IDS
         .get_or_init(|| Mutex::new(HashMap::new()))

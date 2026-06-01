@@ -551,6 +551,7 @@ const FOLDER_IPM_WASTEBASKET_VALID: u32 = 0x0000_0008;
 const FOLDER_IPM_SENTMAIL_VALID: u32 = 0x0000_0010;
 const FOLDER_VIEWS_VALID: u32 = 0x0000_0020;
 const FOLDER_COMMON_VIEWS_VALID: u32 = 0x0000_0040;
+const FOLDER_FINDER_VALID: u32 = 0x0000_0080;
 
 pub(in crate::mapi) fn logon_property_value(
     principal: &AccountPrincipal,
@@ -741,6 +742,7 @@ fn valid_folder_mask() -> u32 {
         | FOLDER_IPM_SENTMAIL_VALID
         | FOLDER_VIEWS_VALID
         | FOLDER_COMMON_VIEWS_VALID
+        | FOLDER_FINDER_VALID
 }
 
 fn special_folder_entry_id_value(mailbox_guid: Uuid, folder_id: u64) -> MapiValue {
@@ -1686,12 +1688,13 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         }
         PID_TAG_BODY_W => Some(MapiValue::String(event.notes.clone())),
         PID_TAG_START_DATE
+        | PID_LID_COMMON_START_TAG
         | PID_LID_APPOINTMENT_START_WHOLE_TAG
         | PID_TAG_MESSAGE_DELIVERY_TIME
         | PID_TAG_LAST_MODIFICATION_TIME => {
             Some(MapiValue::I64(event_start_filetime(event) as i64))
         }
-        PID_TAG_END_DATE | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
+        PID_TAG_END_DATE | PID_LID_COMMON_END_TAG | PID_LID_APPOINTMENT_END_WHOLE_TAG => {
             Some(MapiValue::I64(event_end_filetime(event) as i64))
         }
         PID_TAG_LOCATION_W | PID_LID_LOCATION_W_TAG => {
@@ -1705,7 +1708,7 @@ pub(in crate::mapi) fn event_property_value_with_reminder(
         PID_TAG_SENDER_NAME_W => Some(MapiValue::String(calendar_organizer_name(event))),
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(calendar_organizer_email(event))),
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(calendar_display_to(event))),
-        PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(String::new())),
+        PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(calendar_optional_attendees(event))),
         PID_TAG_BODY_HTML_W => Some(MapiValue::String(event.body_html.clone())),
         PID_TAG_HTML_BINARY => Some(MapiValue::Binary(event.body_html.clone().into_bytes())),
         PID_LID_ALL_ATTENDEES_STRING_W_TAG => {
@@ -3398,9 +3401,13 @@ pub(in crate::mapi) fn event_input_from_mapi(
         .transpose()?;
     let start_filetime = properties
         .get(&PID_TAG_START_DATE)
+        .or_else(|| properties.get(&PID_LID_APPOINTMENT_START_WHOLE_TAG))
+        .or_else(|| properties.get(&PID_LID_COMMON_START_TAG))
         .and_then(MapiValue::as_i64);
     let end_filetime = properties
         .get(&PID_TAG_END_DATE)
+        .or_else(|| properties.get(&PID_LID_APPOINTMENT_END_WHOLE_TAG))
+        .or_else(|| properties.get(&PID_LID_COMMON_END_TAG))
         .and_then(MapiValue::as_i64)
         .or_else(|| {
             let start = start_filetime?;
@@ -3426,7 +3433,12 @@ pub(in crate::mapi) fn event_input_from_mapi(
         uid: existing.uid.clone(),
         date,
         time,
-        time_zone: existing.time_zone.clone(),
+        time_zone: optional_pending_text_property(
+            properties,
+            &[PID_LID_TIME_ZONE_DESCRIPTION_W_TAG],
+        )
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| existing.time_zone.clone()),
         duration_minutes: end
             .map(|_| duration_minutes)
             .unwrap_or(existing.duration_minutes),
@@ -3434,11 +3446,7 @@ pub(in crate::mapi) fn event_input_from_mapi(
             .get(&PID_LID_APPOINTMENT_SUB_TYPE_TAG)
             .and_then(MapiValue::as_bool)
             .unwrap_or(existing.all_day),
-        status: properties
-            .get(&PID_LID_BUSY_STATUS_TAG)
-            .and_then(MapiValue::as_i64)
-            .map(calendar_status_from_mapi_busy_status)
-            .unwrap_or_else(|| existing.status.clone()),
+        status: calendar_status_from_mapi(properties).unwrap_or_else(|| existing.status.clone()),
         sequence: existing.sequence,
         recurrence_rule: recurrence
             .as_ref()
@@ -3627,7 +3635,10 @@ fn attendees_from_mapi(
             PID_LID_ALL_ATTENDEES_STRING_W_TAG,
         ],
     );
-    let optional = optional_pending_text_property(properties, &[PID_LID_CC_ATTENDEES_STRING_W_TAG]);
+    let optional = optional_pending_text_property(
+        properties,
+        &[PID_TAG_DISPLAY_CC_W, PID_LID_CC_ATTENDEES_STRING_W_TAG],
+    );
     if required.is_none() && optional.is_none() {
         return None;
     }
@@ -3674,6 +3685,19 @@ fn calendar_status_from_mapi_busy_status(value: i64) -> String {
     .to_string()
 }
 
+fn calendar_status_from_mapi(properties: &HashMap<u32, MapiValue>) -> Option<String> {
+    let state_flags = properties
+        .get(&PID_LID_APPOINTMENT_STATE_FLAGS_TAG)
+        .and_then(MapiValue::as_i64);
+    if state_flags.map(|flags| flags & 0x0000_0004 != 0) == Some(true) {
+        return Some("cancelled".to_string());
+    }
+    properties
+        .get(&PID_LID_BUSY_STATUS_TAG)
+        .and_then(MapiValue::as_i64)
+        .map(calendar_status_from_mapi_busy_status)
+}
+
 fn calendar_recurrence_blob(event: &AccessibleEvent) -> Option<Vec<u8>> {
     let recurrence = recurrence_pattern_from_canonical(event).ok()?;
     let mut value = Vec::new();
@@ -3691,21 +3715,80 @@ fn calendar_recurrence_blob(event: &AccessibleEvent) -> Option<Vec<u8>> {
     value.extend_from_slice(&recurrence.end_type.to_le_bytes());
     value.extend_from_slice(&recurrence.count.to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
-    value.extend_from_slice(&(recurrence.deleted_dates.len() as u32).to_le_bytes());
+    value.extend_from_slice(
+        &((recurrence.deleted_dates.len() + recurrence.modified_exceptions.len()) as u32)
+            .to_le_bytes(),
+    );
     for deleted in &recurrence.deleted_dates {
         value.extend_from_slice(&deleted.to_le_bytes());
     }
-    value.extend_from_slice(&0u32.to_le_bytes());
+    for modified in &recurrence.modified_exceptions {
+        value.extend_from_slice(&modified.original_start.to_le_bytes());
+    }
+    value.extend_from_slice(&(recurrence.modified_exceptions.len() as u32).to_le_bytes());
+    for modified in &recurrence.modified_exceptions {
+        value.extend_from_slice(&modified.original_start.to_le_bytes());
+    }
     value.extend_from_slice(&recurrence_minutes_since_1601(&event.date).to_le_bytes());
     value.extend_from_slice(&recurrence.end_date.to_le_bytes());
     value.extend_from_slice(&0x0000_3006u32.to_le_bytes());
     value.extend_from_slice(&0x0000_3009u32.to_le_bytes());
     value.extend_from_slice(&event_start_minutes(event).to_le_bytes());
     value.extend_from_slice(&event_end_minutes(event).to_le_bytes());
-    value.extend_from_slice(&0u16.to_le_bytes());
+    value.extend_from_slice(&(recurrence.modified_exceptions.len() as u16).to_le_bytes());
+    for modified in &recurrence.modified_exceptions {
+        value.extend_from_slice(&modified.start.to_le_bytes());
+        value.extend_from_slice(&modified.end.to_le_bytes());
+        value.extend_from_slice(&modified.original_start.to_le_bytes());
+        let override_flags = recurrence_exception_override_flags(modified);
+        value.extend_from_slice(&override_flags.to_le_bytes());
+        if let Some(title) = modified.title.as_deref() {
+            append_recur_ansi_string(&mut value, title);
+        }
+        if let Some(location) = modified.location.as_deref() {
+            append_recur_ansi_string(&mut value, location);
+        }
+    }
     value.extend_from_slice(&0u32.to_le_bytes());
+    for modified in &recurrence.modified_exceptions {
+        let override_flags = recurrence_exception_override_flags(modified);
+        value.extend_from_slice(&4u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        if override_flags != 0 {
+            value.extend_from_slice(&modified.start.to_le_bytes());
+            value.extend_from_slice(&modified.end.to_le_bytes());
+            value.extend_from_slice(&modified.original_start.to_le_bytes());
+            if let Some(title) = modified.title.as_deref() {
+                append_recur_wide_string(&mut value, title);
+            }
+            if let Some(location) = modified.location.as_deref() {
+                append_recur_wide_string(&mut value, location);
+            }
+            value.extend_from_slice(&0u32.to_le_bytes());
+        }
+    }
     value.extend_from_slice(&0u32.to_le_bytes());
     Some(value)
+}
+
+fn recurrence_exception_override_flags(exception: &CanonicalRecurrenceException) -> u16 {
+    let mut flags = 0u16;
+    if exception
+        .title
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        flags |= 0x0001;
+    }
+    if exception
+        .location
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        flags |= 0x0010;
+    }
+    flags
 }
 
 struct CanonicalRecurrencePattern {
@@ -3717,6 +3800,15 @@ struct CanonicalRecurrencePattern {
     count: u32,
     end_date: u32,
     deleted_dates: Vec<u32>,
+    modified_exceptions: Vec<CanonicalRecurrenceException>,
+}
+
+struct CanonicalRecurrenceException {
+    original_start: u32,
+    start: u32,
+    end: u32,
+    title: Option<String>,
+    location: Option<String>,
 }
 
 fn recurrence_pattern_from_canonical(
@@ -3805,6 +3897,9 @@ fn recurrence_pattern_from_canonical(
         count,
         end_date,
         deleted_dates: recurrence_deleted_dates_from_json(&event.recurrence_exceptions_json),
+        modified_exceptions: recurrence_modified_exceptions_from_json(
+            &event.recurrence_exceptions_json,
+        ),
     })
 }
 
@@ -3875,6 +3970,35 @@ fn recurrence_deleted_dates_from_json(value: &str) -> Vec<u32> {
         .collect()
 }
 
+fn recurrence_modified_exceptions_from_json(value: &str) -> Vec<CanonicalRecurrenceException> {
+    serde_json::from_str::<serde_json::Value>(value)
+        .ok()
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|value| value.get("excluded").and_then(|value| value.as_bool()) != Some(true))
+        .filter_map(|value| {
+            let recurrence_id = value.get("recurrenceId")?.as_str()?;
+            let start = value.get("start")?.as_str()?;
+            let end = value.get("end")?.as_str()?;
+            Some(CanonicalRecurrenceException {
+                original_start: recurrence_minutes_since_1601(recurrence_id),
+                start: recurrence_datetime_minutes_since_1601(start)?,
+                end: recurrence_datetime_minutes_since_1601(end)?,
+                title: value
+                    .get("title")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+                location: value
+                    .get("location")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string),
+            })
+        })
+        .filter(|exception| exception.start < exception.end)
+        .collect()
+}
+
 fn until_date(value: &str) -> String {
     if value.len() >= 8 && value.as_bytes()[0..8].iter().all(u8::is_ascii_digit) {
         format!("{}-{}-{}", &value[0..4], &value[4..6], &value[6..8])
@@ -3912,6 +4036,15 @@ struct MapiAppointmentRecurrence {
     recurrence_rule: String,
     recurrence_json: String,
     recurrence_exceptions_json: String,
+}
+
+struct MapiRecurrenceException {
+    original_start: u32,
+    start: u32,
+    end: u32,
+    title: Option<String>,
+    location: Option<String>,
+    override_flags: u16,
 }
 
 fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecurrence> {
@@ -3959,13 +4092,12 @@ fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecur
     if usize::from(exception_count) != modified.len() {
         bail!("unsupported MAPI calendar recurrence exception payload");
     }
-    if exception_count != 0 {
-        bail!("modified MAPI calendar recurrence exceptions are not mapped yet");
-    }
+    let exceptions = read_recur_exception_infos(value, &mut offset, usize::from(exception_count))?;
     let reserved_block1_size = read_recur_u32(value, &mut offset)?;
     if reserved_block1_size != 0 {
         bail!("unsupported MAPI calendar recurrence reserved block");
     }
+    read_recur_extended_exceptions(value, &mut offset, writer_version2, &exceptions)?;
     let reserved_block2_size = read_recur_u32(value, &mut offset)?;
     if reserved_block2_size != 0 {
         bail!("unsupported MAPI calendar recurrence reserved block");
@@ -4018,7 +4150,7 @@ fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecur
     }
 
     let modified_set = modified.iter().copied().collect::<HashSet<_>>();
-    let deleted_overrides = deleted
+    let mut overrides = deleted
         .into_iter()
         .filter(|date| !modified_set.contains(date))
         .map(|date| {
@@ -4026,11 +4158,28 @@ fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecur
                 .map(|date| format!(r#"{{"recurrenceId":"{date}","excluded":true}}"#))
         })
         .collect::<Result<Vec<_>>>()?;
+    for exception in exceptions {
+        let recurrence_id = recurrence_date_string(exception.original_start)?;
+        let start = recurrence_datetime_string(exception.start)?;
+        let end = recurrence_datetime_string(exception.end)?;
+        let mut override_value = serde_json::json!({
+            "recurrenceId": recurrence_id,
+            "start": start,
+            "end": end,
+        });
+        if let Some(title) = exception.title {
+            override_value["title"] = serde_json::Value::String(title);
+        }
+        if let Some(location) = exception.location {
+            override_value["location"] = serde_json::Value::String(location);
+        }
+        overrides.push(override_value.to_string());
+    }
 
     Ok(MapiAppointmentRecurrence {
         recurrence_rule: rule_parts.join(";"),
         recurrence_json: format!("{{{}}}", json_parts.join(",")),
-        recurrence_exceptions_json: format!("[{}]", deleted_overrides.join(",")),
+        recurrence_exceptions_json: format!("[{}]", overrides.join(",")),
     })
 }
 
@@ -4158,6 +4307,136 @@ fn read_recur_dates(value: &[u8], offset: &mut usize) -> Result<Vec<u32>> {
     Ok(dates)
 }
 
+fn read_recur_exception_infos(
+    value: &[u8],
+    offset: &mut usize,
+    count: usize,
+) -> Result<Vec<MapiRecurrenceException>> {
+    let mut exceptions = Vec::with_capacity(count);
+    for _ in 0..count {
+        let start = read_recur_u32(value, offset)?;
+        let end = read_recur_u32(value, offset)?;
+        let original_start = read_recur_u32(value, offset)?;
+        let override_flags = read_recur_u16(value, offset)?;
+        if start >= end {
+            bail!("unsupported MAPI calendar recurrence exception time range");
+        }
+        if override_flags & !0x0011 != 0 {
+            bail!("unsupported MAPI calendar recurrence exception override");
+        }
+        let title = if override_flags & 0x0001 != 0 {
+            Some(read_recur_ansi_string(value, offset)?)
+        } else {
+            None
+        };
+        let location = if override_flags & 0x0010 != 0 {
+            Some(read_recur_ansi_string(value, offset)?)
+        } else {
+            None
+        };
+        exceptions.push(MapiRecurrenceException {
+            original_start,
+            start,
+            end,
+            title,
+            location,
+            override_flags,
+        });
+    }
+    Ok(exceptions)
+}
+
+fn read_recur_extended_exceptions(
+    value: &[u8],
+    offset: &mut usize,
+    writer_version2: u32,
+    exceptions: &[MapiRecurrenceException],
+) -> Result<()> {
+    if writer_version2 < 0x0000_3009 {
+        return Ok(());
+    }
+    for exception in exceptions {
+        let change_highlight_size = read_recur_u32(value, offset)? as usize;
+        skip_recur_bytes(value, offset, change_highlight_size)?;
+        let reserved_block_ee1_size = read_recur_u32(value, offset)?;
+        if reserved_block_ee1_size != 0 {
+            bail!("unsupported MAPI calendar recurrence extended exception reserved block");
+        }
+        if exception.override_flags & 0x0011 != 0 {
+            let extended_start = read_recur_u32(value, offset)?;
+            let extended_end = read_recur_u32(value, offset)?;
+            let extended_original = read_recur_u32(value, offset)?;
+            if extended_start != exception.start
+                || extended_end != exception.end
+                || extended_original != exception.original_start
+            {
+                bail!("unsupported MAPI calendar recurrence extended exception mismatch");
+            }
+            if exception.override_flags & 0x0001 != 0 {
+                let _ = read_recur_wide_string(value, offset)?;
+            }
+            if exception.override_flags & 0x0010 != 0 {
+                let _ = read_recur_wide_string(value, offset)?;
+            }
+            let reserved_block_ee2_size = read_recur_u32(value, offset)?;
+            if reserved_block_ee2_size != 0 {
+                bail!("unsupported MAPI calendar recurrence extended exception reserved block");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn read_recur_ansi_string(value: &[u8], offset: &mut usize) -> Result<String> {
+    let length_with_nul = read_recur_u16(value, offset)?;
+    let length = read_recur_u16(value, offset)? as usize;
+    if usize::from(length_with_nul) < length {
+        bail!("unsupported MAPI calendar recurrence exception string length");
+    }
+    let bytes = value
+        .get(*offset..offset.saturating_add(length))
+        .ok_or_else(|| anyhow!("truncated MAPI calendar recurrence"))?;
+    *offset += length;
+    Ok(String::from_utf8_lossy(bytes).into_owned())
+}
+
+fn read_recur_wide_string(value: &[u8], offset: &mut usize) -> Result<String> {
+    let length = read_recur_u16(value, offset)? as usize;
+    let byte_len = length.saturating_mul(2);
+    let bytes = value
+        .get(*offset..offset.saturating_add(byte_len))
+        .ok_or_else(|| anyhow!("truncated MAPI calendar recurrence"))?;
+    *offset += byte_len;
+    let units = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect::<Vec<_>>();
+    Ok(String::from_utf16_lossy(&units))
+}
+
+fn append_recur_ansi_string(value: &mut Vec<u8>, text: &str) {
+    let bytes = text.as_bytes();
+    value.extend_from_slice(&((bytes.len() + 1) as u16).to_le_bytes());
+    value.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+    value.extend_from_slice(bytes);
+}
+
+fn append_recur_wide_string(value: &mut Vec<u8>, text: &str) {
+    let units = text.encode_utf16().collect::<Vec<_>>();
+    value.extend_from_slice(&(units.len() as u16).to_le_bytes());
+    for unit in units {
+        value.extend_from_slice(&unit.to_le_bytes());
+    }
+}
+
+fn skip_recur_bytes(value: &[u8], offset: &mut usize, len: usize) -> Result<()> {
+    value
+        .get(*offset..offset.saturating_add(len))
+        .ok_or_else(|| anyhow!("truncated MAPI calendar recurrence"))?;
+    *offset += len;
+    Ok(())
+}
+
 fn read_recur_u16(value: &[u8], offset: &mut usize) -> Result<u16> {
     let bytes = value
         .get(*offset..offset.saturating_add(2))
@@ -4191,6 +4470,13 @@ fn recurrence_minutes_since_1601(date: &str) -> u32 {
     days.max(0).saturating_mul(1440).min(i64::from(u32::MAX)) as u32
 }
 
+fn recurrence_datetime_minutes_since_1601(value: &str) -> Option<u32> {
+    let date_minutes = recurrence_minutes_since_1601(value);
+    let hour = value.get(11..13)?.parse::<u32>().ok()?.min(23);
+    let minute = value.get(14..16)?.parse::<u32>().ok()?.min(59);
+    Some(date_minutes.saturating_add(hour * 60 + minute))
+}
+
 fn recurrence_date_yyyymmdd(minutes_since_1601: u32) -> Result<String> {
     let date = recurrence_date_string(minutes_since_1601)?;
     Ok(date.replace('-', ""))
@@ -4201,6 +4487,12 @@ fn recurrence_date_string(minutes_since_1601: u32) -> Result<String> {
         days_from_civil(1601, 1, 1).saturating_add(i64::from(minutes_since_1601 / 1440));
     let (year, month, day) = civil_from_days(unix_days);
     Ok(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn recurrence_datetime_string(minutes_since_1601: u32) -> Result<String> {
+    let date = recurrence_date_string(minutes_since_1601)?;
+    let minutes = minutes_since_1601 % 1440;
+    Ok(format!("{date}T{:02}:{:02}:00", minutes / 60, minutes % 60))
 }
 
 fn civil_from_days(days: i64) -> (i32, u32, u32) {
@@ -4235,24 +4527,41 @@ pub(in crate::mapi) fn reject_unsupported_mapi_event_properties(
                 | PID_TAG_SENDER_NAME_W
                 | PID_TAG_SENDER_EMAIL_ADDRESS_W
                 | PID_TAG_DISPLAY_TO_W
+                | PID_TAG_DISPLAY_CC_W
                 | PID_TAG_START_DATE
                 | PID_TAG_END_DATE
+                | PID_LID_COMMON_START_TAG
+                | PID_LID_COMMON_END_TAG
                 | PID_TAG_LOCATION_W
                 | PID_LID_LOCATION_W_TAG
                 | PID_TAG_BODY_HTML_W
                 | PID_LID_BUSY_STATUS_TAG
+                | PID_LID_APPOINTMENT_STATE_FLAGS_TAG
+                | PID_LID_APPOINTMENT_START_WHOLE_TAG
+                | PID_LID_APPOINTMENT_END_WHOLE_TAG
                 | PID_LID_APPOINTMENT_DURATION_TAG
                 | PID_LID_APPOINTMENT_SUB_TYPE_TAG
                 | PID_LID_APPOINTMENT_RECUR_TAG
                 | PID_LID_ALL_ATTENDEES_STRING_W_TAG
                 | PID_LID_TO_ATTENDEES_STRING_W_TAG
                 | PID_LID_CC_ATTENDEES_STRING_W_TAG
+                | PID_LID_TIME_ZONE_DESCRIPTION_W_TAG
                 | PID_TAG_MESSAGE_CLASS_W
         );
         if !supported {
             return Err(anyhow!(
                 "MAPI calendar property {tag:#010X} is outside the canonical calendar subset"
             ));
+        }
+        if *tag == PID_LID_APPOINTMENT_STATE_FLAGS_TAG {
+            let flags = value
+                .as_i64()
+                .ok_or_else(|| anyhow!("invalid MAPI appointment state flags value"))?;
+            if flags < 0 || flags & !0x0000_0005 != 0 {
+                return Err(anyhow!(
+                    "unsupported MAPI appointment state flags {flags:#010X}"
+                ));
+            }
         }
     }
     Ok(())
@@ -4943,10 +5252,41 @@ pub(in crate::mapi) async fn apply_canonical_event_property_values<S>(
 where
     S: ExchangeStore,
 {
+    enum EventPropertyMutation {
+        None,
+        Delete,
+        Update(UpsertClientEventInput),
+    }
+
     let event = snapshot
         .event_for_id(folder_id, event_id)
         .ok_or_else(|| anyhow!("canonical MAPI calendar event was not found"))?;
     let (properties, reminder_set, reminder_at) = split_reminder_property_values(values)?;
+    let mutation = if properties.is_empty() {
+        EventPropertyMutation::None
+    } else if bounded_meeting_cancellation_from_mapi(&properties)? {
+        EventPropertyMutation::Delete
+    } else if let Some(input) = meeting_response_event_input_from_mapi(
+        principal.account_id,
+        Some(event.canonical_id),
+        &event.event,
+        &properties,
+    )? {
+        EventPropertyMutation::Update(input)
+    } else {
+        EventPropertyMutation::Update(event_input_from_mapi(
+            principal.account_id,
+            Some(event.canonical_id),
+            &event.event,
+            &properties,
+        )?)
+    };
+    if matches!(mutation, EventPropertyMutation::Delete) {
+        store
+            .delete_accessible_event(principal.account_id, event.canonical_id)
+            .await?;
+        return Ok(());
+    }
     if reminder_set.is_some() || reminder_at.is_some() {
         store
             .update_accessible_event_reminder(
@@ -4958,35 +5298,11 @@ where
             )
             .await?;
     }
-    if properties.is_empty() {
-        return Ok(());
-    }
-    if bounded_meeting_cancellation_from_mapi(&properties)? {
-        store
-            .delete_accessible_event(principal.account_id, event.canonical_id)
-            .await?;
-        return Ok(());
-    }
-    if let Some(input) = meeting_response_event_input_from_mapi(
-        principal.account_id,
-        Some(event.canonical_id),
-        &event.event,
-        &properties,
-    )? {
+    if let EventPropertyMutation::Update(input) = mutation {
         store
             .update_accessible_event(principal.account_id, event.canonical_id, input)
             .await?;
-        return Ok(());
     }
-    let input = event_input_from_mapi(
-        principal.account_id,
-        Some(event.canonical_id),
-        &event.event,
-        &properties,
-    )?;
-    store
-        .update_accessible_event(principal.account_id, event.canonical_id, input)
-        .await?;
     Ok(())
 }
 
@@ -5804,7 +6120,7 @@ mod tests {
 
         assert_eq!(
             special_folder_identification_property_value(Uuid::nil(), PID_TAG_VALID_FOLDER_MASK),
-            Some(MapiValue::U32(0x7F))
+            Some(MapiValue::U32(0xFF))
         );
 
         for (property_tag, folder_id) in [
@@ -6658,6 +6974,14 @@ mod tests {
             Some(MapiValue::I32(0x0000_0005))
         );
         assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_COMMON_START_TAG),
+            Some(MapiValue::I64(event_start_filetime(&event) as i64))
+        );
+        assert_eq!(
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_COMMON_END_TAG),
+            Some(MapiValue::I64(event_end_filetime(&event) as i64))
+        );
+        assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_LOCATION_W),
             Some(MapiValue::String("Room A".to_string()))
         );
@@ -6680,7 +7004,7 @@ mod tests {
         );
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_DISPLAY_CC_W),
-            Some(MapiValue::String(String::new()))
+            Some(MapiValue::String("Cara".to_string()))
         );
         assert_eq!(
             event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_TAG_BODY_HTML_W),
@@ -6778,7 +7102,7 @@ mod tests {
             MapiValue::String("Bob One".to_string()),
         );
         properties.insert(
-            PID_LID_CC_ATTENDEES_STRING_W_TAG,
+            PID_TAG_DISPLAY_CC_W,
             MapiValue::String("Cara Two".to_string()),
         );
         properties.insert(
@@ -6788,6 +7112,10 @@ mod tests {
         properties.insert(
             PID_LID_LOCATION_W_TAG,
             MapiValue::String("Room B".to_string()),
+        );
+        properties.insert(
+            PID_LID_TIME_ZONE_DESCRIPTION_W_TAG,
+            MapiValue::String("W. Europe Standard Time".to_string()),
         );
         properties.insert(
             PID_TAG_START_DATE,
@@ -6810,6 +7138,7 @@ mod tests {
         assert_eq!(input.time, "10:00");
         assert_eq!(input.duration_minutes, 45);
         assert_eq!(input.location, "Room B");
+        assert_eq!(input.time_zone, "W. Europe Standard Time");
         assert_eq!(input.status, "tentative");
         assert_eq!(input.recurrence_rule, existing.recurrence_rule);
         assert_eq!(input.attendees, "Bob One, Cara Two");
@@ -6828,6 +7157,81 @@ mod tests {
         assert!(error
             .to_string()
             .contains("MAPI binary calendar recurrence or meeting payloads are not supported"));
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_state_flags_map_bounded_cancel_state() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0x5));
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x8888)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(input.status, "cancelled");
+
+        properties.insert(PID_LID_APPOINTMENT_STATE_FLAGS_TAG, MapiValue::I32(0x8));
+        let error = reject_unsupported_mapi_event_properties(&properties).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("unsupported MAPI appointment state flags"));
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_whole_start_end_write_to_canonical_start_duration() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_LID_APPOINTMENT_START_WHOLE_TAG,
+            MapiValue::I64(date_time_to_filetime("2026-06-01", "13:15") as i64),
+        );
+        properties.insert(
+            PID_LID_APPOINTMENT_END_WHOLE_TAG,
+            MapiValue::I64(date_time_to_filetime("2026-06-01", "14:45") as i64),
+        );
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x8888)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(input.date, "2026-06-01");
+        assert_eq!(input.time, "13:15");
+        assert_eq!(input.duration_minutes, 90);
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_common_start_end_write_to_canonical_start_duration() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(
+            PID_LID_COMMON_START_TAG,
+            MapiValue::I64(date_time_to_filetime("2026-06-02", "08:00") as i64),
+        );
+        properties.insert(
+            PID_LID_COMMON_END_TAG,
+            MapiValue::I64(date_time_to_filetime("2026-06-02", "09:30") as i64),
+        );
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x8888)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(input.date, "2026-06-02");
+        assert_eq!(input.time, "08:00");
+        assert_eq!(input.duration_minutes, 90);
     }
 
     #[test]
@@ -6943,19 +7347,7 @@ mod tests {
     #[test]
     fn mapi_over_http_calendar_recurrence_rejects_unsupported_shapes() {
         let existing = default_event_for_mapping(Uuid::nil(), "default");
-        let mut modified_exception = Vec::new();
-        append_recur_header(&mut modified_exception, 0x200B, 0x0001, 1);
-        modified_exception.extend_from_slice(&0x0000_0002u32.to_le_bytes());
-        append_recur_tail(
-            &mut modified_exception,
-            0x0000_2022,
-            3,
-            &[recurrence_minutes_since_1601("2026-05-25")],
-            &[recurrence_minutes_since_1601("2026-05-25")],
-            "2026-05-18",
-            "2026-06-01",
-        );
-        append_appointment_recur_suffix(&mut modified_exception, 9 * 60, 10 * 60, 1);
+        let modified_exception = test_weekly_recur_blob_with_modified_instance(0x0004, "", "");
         let mut properties = HashMap::new();
         properties.insert(
             PID_LID_APPOINTMENT_RECUR_TAG,
@@ -6972,7 +7364,7 @@ mod tests {
 
         assert!(error
             .to_string()
-            .contains("modified MAPI calendar recurrence exceptions are not mapped yet"));
+            .contains("unsupported MAPI calendar recurrence exception override"));
     }
 
     #[test]
@@ -7096,6 +7488,80 @@ mod tests {
     }
 
     #[test]
+    fn mapi_over_http_calendar_recurrence_binary_maps_modified_instances_to_overrides() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(
+            0x8216_0102,
+            MapiValue::Binary(test_weekly_recur_blob_with_modified_instance(0, "", "")),
+        );
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x9990)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(input.recurrence_rule, "FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE");
+        assert_eq!(
+            input.recurrence_exceptions_json,
+            r#"[{"end":"2026-05-25T11:30:00","recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00"}]"#
+        );
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_recurrence_binary_maps_subject_location_exceptions() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(
+            0x8216_0102,
+            MapiValue::Binary(test_weekly_recur_blob_with_modified_instance(
+                0x0011,
+                "Changed subject",
+                "Room B",
+            )),
+        );
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x9991)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.recurrence_exceptions_json,
+            r#"[{"end":"2026-05-25T11:30:00","location":"Room B","recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","title":"Changed subject"}]"#
+        );
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_recurrence_binary_maps_mixed_deleted_and_modified_instances() {
+        let existing = default_event_for_mapping(Uuid::nil(), "default");
+        let mut properties = HashMap::new();
+        properties.insert(
+            0x8216_0102,
+            MapiValue::Binary(test_weekly_recur_blob_with_deleted_and_modified_instances()),
+        );
+
+        let input = event_input_from_mapi(
+            Uuid::nil(),
+            Some(Uuid::from_u128(0x9992)),
+            &existing,
+            &properties,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input.recurrence_exceptions_json,
+            r#"[{"recurrenceId":"2026-05-27","excluded":true},{"end":"2026-05-25T11:30:00","location":"Room B","recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","title":"Changed subject"}]"#
+        );
+    }
+
+    #[test]
     fn mapi_over_http_calendar_recurrence_projects_back_to_mapi_binary() {
         let mut event = default_event_for_mapping(Uuid::nil(), "default");
         event.date = "2026-05-18".to_string();
@@ -7119,6 +7585,83 @@ mod tests {
         assert_eq!(
             recurrence.recurrence_exceptions_json,
             event.recurrence_exceptions_json
+        );
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_modified_recurrence_projects_back_to_mapi_binary() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "default");
+        event.date = "2026-05-18".to_string();
+        event.time = "09:00".to_string();
+        event.duration_minutes = 60;
+        event.recurrence_rule = "FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE".to_string();
+        event.recurrence_json =
+            r#"{"frequency":"weekly","count":4,"byDay":["MO","WE"]}"#.to_string();
+        event.recurrence_exceptions_json =
+            r#"[{"recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","end":"2026-05-25T11:30:00"}]"#.to_string();
+
+        let Some(MapiValue::Binary(value)) =
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_RECUR_TAG)
+        else {
+            panic!("expected recurrence binary projection");
+        };
+        let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
+
+        assert_eq!(recurrence.recurrence_rule, event.recurrence_rule);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&recurrence.recurrence_exceptions_json)
+                .unwrap(),
+            serde_json::from_str::<serde_json::Value>(&event.recurrence_exceptions_json).unwrap()
+        );
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_subject_location_recurrence_projects_back_to_mapi_binary() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "default");
+        event.date = "2026-05-18".to_string();
+        event.time = "09:00".to_string();
+        event.duration_minutes = 60;
+        event.recurrence_rule = "FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE".to_string();
+        event.recurrence_json =
+            r#"{"frequency":"weekly","count":4,"byDay":["MO","WE"]}"#.to_string();
+        event.recurrence_exceptions_json =
+            r#"[{"recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","end":"2026-05-25T11:30:00","title":"Changed subject","location":"Room B"}]"#.to_string();
+
+        let Some(MapiValue::Binary(value)) =
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_RECUR_TAG)
+        else {
+            panic!("expected recurrence binary projection");
+        };
+        let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
+
+        assert_eq!(
+            recurrence.recurrence_exceptions_json,
+            r#"[{"end":"2026-05-25T11:30:00","location":"Room B","recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","title":"Changed subject"}]"#
+        );
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_mixed_recurrence_overrides_project_back_to_mapi_binary() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "default");
+        event.date = "2026-05-18".to_string();
+        event.time = "09:00".to_string();
+        event.duration_minutes = 60;
+        event.recurrence_rule = "FREQ=WEEKLY;COUNT=4;BYDAY=MO,WE".to_string();
+        event.recurrence_json =
+            r#"{"frequency":"weekly","count":4,"byDay":["MO","WE"]}"#.to_string();
+        event.recurrence_exceptions_json =
+            r#"[{"recurrenceId":"2026-05-27","excluded":true},{"recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","end":"2026-05-25T11:30:00","title":"Changed subject","location":"Room B"}]"#.to_string();
+
+        let Some(MapiValue::Binary(value)) =
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_RECUR_TAG)
+        else {
+            panic!("expected recurrence binary projection");
+        };
+        let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
+
+        assert_eq!(
+            recurrence.recurrence_exceptions_json,
+            r#"[{"recurrenceId":"2026-05-27","excluded":true},{"end":"2026-05-25T11:30:00","location":"Room B","recurrenceId":"2026-05-25","start":"2026-05-25T11:00:00","title":"Changed subject"}]"#
         );
     }
 
@@ -7175,6 +7718,110 @@ mod tests {
             "2026-06-08",
         );
         append_appointment_recur_suffix(&mut value, 9 * 60, 10 * 60, 0);
+        value
+    }
+
+    fn test_weekly_recur_blob_with_modified_instance(
+        override_flags: u16,
+        subject: &str,
+        location: &str,
+    ) -> Vec<u8> {
+        let original = recurrence_minutes_since_1601("2026-05-25");
+        let start = original + 11 * 60;
+        let end = original + 11 * 60 + 30;
+        let mut value = Vec::new();
+        append_recur_header(&mut value, 0x200B, 0x0001, 1);
+        value.extend_from_slice(&0x0000_000Au32.to_le_bytes());
+        append_recur_tail(
+            &mut value,
+            0x0000_2022,
+            4,
+            &[original],
+            &[original],
+            "2026-05-18",
+            "2026-06-08",
+        );
+        value.extend_from_slice(&0x0000_3006u32.to_le_bytes());
+        value.extend_from_slice(&0x0000_3009u32.to_le_bytes());
+        value.extend_from_slice(&(9u32 * 60).to_le_bytes());
+        value.extend_from_slice(&(10u32 * 60).to_le_bytes());
+        value.extend_from_slice(&1u16.to_le_bytes());
+        value.extend_from_slice(&start.to_le_bytes());
+        value.extend_from_slice(&end.to_le_bytes());
+        value.extend_from_slice(&original.to_le_bytes());
+        value.extend_from_slice(&override_flags.to_le_bytes());
+        if override_flags & 0x0001 != 0 {
+            value.extend_from_slice(&((subject.len() + 1) as u16).to_le_bytes());
+            value.extend_from_slice(&(subject.len() as u16).to_le_bytes());
+            value.extend_from_slice(subject.as_bytes());
+        }
+        if override_flags & 0x0010 != 0 {
+            value.extend_from_slice(&((location.len() + 1) as u16).to_le_bytes());
+            value.extend_from_slice(&(location.len() as u16).to_le_bytes());
+            value.extend_from_slice(location.as_bytes());
+        }
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&4u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        if override_flags & 0x0011 != 0 {
+            value.extend_from_slice(&start.to_le_bytes());
+            value.extend_from_slice(&end.to_le_bytes());
+            value.extend_from_slice(&original.to_le_bytes());
+            if override_flags & 0x0001 != 0 {
+                append_recur_wide_string(&mut value, subject);
+            }
+            if override_flags & 0x0010 != 0 {
+                append_recur_wide_string(&mut value, location);
+            }
+            value.extend_from_slice(&0u32.to_le_bytes());
+        }
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value
+    }
+
+    fn test_weekly_recur_blob_with_deleted_and_modified_instances() -> Vec<u8> {
+        let deleted_only = recurrence_minutes_since_1601("2026-05-27");
+        let modified = recurrence_minutes_since_1601("2026-05-25");
+        let start = modified + 11 * 60;
+        let end = modified + 11 * 60 + 30;
+        let subject = "Changed subject";
+        let location = "Room B";
+        let override_flags = 0x0011u16;
+        let mut value = Vec::new();
+        append_recur_header(&mut value, 0x200B, 0x0001, 1);
+        value.extend_from_slice(&0x0000_000Au32.to_le_bytes());
+        append_recur_tail(
+            &mut value,
+            0x0000_2022,
+            4,
+            &[deleted_only, modified],
+            &[modified],
+            "2026-05-18",
+            "2026-06-08",
+        );
+        value.extend_from_slice(&0x0000_3006u32.to_le_bytes());
+        value.extend_from_slice(&0x0000_3009u32.to_le_bytes());
+        value.extend_from_slice(&(9u32 * 60).to_le_bytes());
+        value.extend_from_slice(&(10u32 * 60).to_le_bytes());
+        value.extend_from_slice(&1u16.to_le_bytes());
+        value.extend_from_slice(&start.to_le_bytes());
+        value.extend_from_slice(&end.to_le_bytes());
+        value.extend_from_slice(&modified.to_le_bytes());
+        value.extend_from_slice(&override_flags.to_le_bytes());
+        append_recur_ansi_string(&mut value, subject);
+        append_recur_ansi_string(&mut value, location);
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&4u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&start.to_le_bytes());
+        value.extend_from_slice(&end.to_le_bytes());
+        value.extend_from_slice(&modified.to_le_bytes());
+        append_recur_wide_string(&mut value, subject);
+        append_recur_wide_string(&mut value, location);
+        value.extend_from_slice(&0u32.to_le_bytes());
+        value.extend_from_slice(&0u32.to_le_bytes());
         value
     }
 

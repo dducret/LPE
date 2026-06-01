@@ -256,6 +256,70 @@ async fn mapi_default_calendar_folder_identity_is_persisted() {
 }
 
 #[tokio::test]
+async fn mapi_calendar_event_identity_survives_restart_style_store_reload() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("71717171-7171-7171-7171-71717171abcd").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-06-03".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Stable calendar identity".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..FakeStore::default()
+    };
+
+    let first = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let second = store
+        .load_mapi_mail_store(account.account_id, 500)
+        .await
+        .unwrap();
+    let first_events = first.events_for_folder(crate::mapi::identity::CALENDAR_FOLDER_ID);
+    let second_events = second.events_for_folder(crate::mapi::identity::CALENDAR_FOLDER_ID);
+    assert_eq!(first_events.len(), 1);
+    assert_eq!(second_events.len(), 1);
+    let first_event = first_events[0];
+    let second_event = second_events[0];
+
+    assert_eq!(first_event.id, second_event.id);
+    assert_eq!(first_event.canonical_id, event_id);
+    assert_eq!(second_event.canonical_id, event_id);
+    assert_eq!(
+        crate::mapi::identity::object_id_from_long_term_id(
+            &crate::mapi::identity::long_term_id_from_object_id(first_event.id).unwrap()
+        ),
+        Some(second_event.id)
+    );
+}
+
+#[tokio::test]
 async fn mapi_full_snapshot_loads_messages_without_search_index_query() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -3430,6 +3494,29 @@ impl ExchangeStore for FakeStore {
         email.has_attachments = has_attachments;
         let email = email.clone();
         Box::pin(async move { Ok(Some(email)) })
+    }
+
+    fn delete_calendar_event_attachment<'a>(
+        &'a self,
+        _account_id: Uuid,
+        file_reference: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<Uuid>> {
+        let Some((event_id, attachment_id)) =
+            lpe_storage::parse_calendar_attachment_file_reference(file_reference)
+        else {
+            return Box::pin(async move { Ok(None) });
+        };
+        let mut attachments = self.calendar_attachments.lock().unwrap();
+        let Some(event_attachments) = attachments.get_mut(&event_id) else {
+            return Box::pin(async move { Ok(None) });
+        };
+        let before_len = event_attachments.len();
+        event_attachments.retain(|attachment| attachment.id != attachment_id);
+        if event_attachments.len() == before_len {
+            return Box::pin(async move { Ok(None) });
+        }
+        Box::pin(async move { Ok(Some(event_id)) })
     }
 
     fn import_jmap_email<'a>(

@@ -232,7 +232,7 @@ pub(crate) async fn get_free_busy(
         .await
         .map_err(bad_request_error)?;
     let message_objects = storage
-        .materialize_delegate_freebusy_messages(
+        .project_delegate_freebusy_messages(
             account.account_id,
             query.owner_account_id,
             query.end.trim(),

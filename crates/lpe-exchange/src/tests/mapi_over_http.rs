@@ -585,6 +585,120 @@ async fn mapi_over_http_custom_named_properties_round_trip_on_canonical_item_kin
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_custom_properties_survive_restart_style_session() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cececece-cece-cece-cece-cececece1234").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-06-04".to_string(),
+            time: "09:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Restart custom calendar".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let custom_tag = 0x8001_001F;
+    let service = ExchangeService::new(store.clone());
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        custom_tag,
+        "calendar restart opaque value",
+    );
+    let mut set_rops = Vec::new();
+    append_rop_open_folder(&mut set_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut set_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut set_rops, 2, 1, &property_values);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&set_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!response_rops
+        .windows(4)
+        .any(|window| window == 0x8004_0102u32.to_le_bytes()));
+
+    let restarted = ExchangeService::new(store);
+    let connect = restarted
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut restarted_headers = mapi_headers("Execute");
+    restarted_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut get_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_get_properties_specific(&mut get_rops, 2, &[custom_tag]);
+    let response = restarted
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &restarted_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("calendar restart opaque value")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_custom_named_property_set_before_save_persists_on_created_item() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -946,6 +1060,182 @@ async fn mapi_over_http_calendar_crud_uses_canonical_events() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_empty_advertised_calendar_create_uses_default_collection() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = HeaderValue::from_str(
+        connect
+            .headers()
+            .get("set-cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0037_001F, "First Calendar Item");
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0060_0040,
+        test_filetime("2026-06-01", "08:00"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x0061_0040,
+        test_filetime("2026-06-01", "08:30"),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_create_message(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_set_properties(&mut rops, 1, 3, &property_values);
+    append_rop_save_changes_message(&mut rops, 1, 1);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", cookie);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes())
+            && !response_rops
+                .windows(4)
+                .any(|window| window == 0x8004_010Fu32.to_le_bytes()),
+        "calendar create returned an error: {response_rops:02x?}"
+    );
+
+    let stored = events.lock().unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].collection_id, "default");
+    assert_eq!(stored[0].title, "First Calendar Item");
+    assert_eq!(stored[0].date, "2026-06-01");
+    assert_eq!(stored[0].time, "08:00");
+    assert_eq!(stored[0].duration_minutes, 30);
+}
+
+#[tokio::test]
+async fn mapi_over_http_advertised_calendar_update_delete_uses_default_collection_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccc0001").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-06-02".to_string(),
+            time: "13:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 45,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Implicit default calendar".to_string(),
+            location: "Room 1".to_string(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut update_values = Vec::new();
+    append_mapi_utf16_property(&mut update_values, 0x0037_001F, "Updated implicit calendar");
+    append_mapi_utf16_property(&mut update_values, 0x3FFB_001F, "Room 2");
+    let mut update_rops = Vec::new();
+    append_rop_open_folder(&mut update_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut update_rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut update_rops, 2, 2, &update_values);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&update_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes()),
+        "calendar update returned an error: {response_rops:02x?}"
+    );
+    {
+        let stored = events.lock().unwrap();
+        assert_eq!(stored[0].title, "Updated implicit calendar");
+        assert_eq!(stored[0].location, "Room 2");
+    }
+
+    let mut delete_rops = Vec::new();
+    append_rop_open_folder(&mut delete_rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_delete_messages(&mut delete_rops, 1, &[test_mapi_uuid_id(&event_id)]);
+    renew_mapi_request_id(&mut execute_headers);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&delete_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        !response_rops
+            .windows(4)
+            .any(|window| window == 0x8004_0102u32.to_le_bytes()),
+        "calendar delete returned an error: {response_rops:02x?}"
+    );
+    assert!(events.lock().unwrap().is_empty());
+    assert_eq!(deleted_events.lock().unwrap().as_slice(), &[event_id]);
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_event() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -1002,6 +1292,99 @@ async fn mapi_over_http_calendar_create_rejects_malformed_recurrence_without_eve
         &0x8004_0102u32.to_le_bytes()
     ));
     assert!(events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_mixed_reminder_and_malformed_recurrence_has_no_side_effect() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcdcdcd").unwrap();
+    let reminders = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Reminder recurrence guard".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        reminders: reminders.clone(),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    property_values.extend_from_slice(&0x8503_000Bu32.to_le_bytes());
+    property_values.push(1);
+    append_mapi_i64_property(
+        &mut property_values,
+        0x8560_0040,
+        mapi_mailstore::filetime_from_rfc3339_utc("2026-05-04T09:00:00Z") as i64,
+    );
+    append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 3, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    assert!(reminders.lock().unwrap().is_empty());
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].recurrence_rule, "");
+    assert_eq!(stored[0].title, "Reminder recurrence guard");
 }
 
 #[tokio::test]
@@ -1171,6 +1554,94 @@ async fn mapi_over_http_calendar_meeting_cancel_deletes_existing_canonical_event
 }
 
 #[tokio::test]
+async fn mapi_over_http_calendar_meeting_cancel_rejects_binary_payload_without_side_effect() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cececece-cece-cece-cece-000000000001").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Meeting cancel guard".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let deleted_events = store.deleted_events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Schedule.Meeting.Canceled",
+    );
+    append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    assert_eq!(events.lock().unwrap().len(), 1);
+    assert!(deleted_events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_status() {
     let account = FakeStore::account();
     let event_id = Uuid::parse_str("cfcfcfcf-cfcf-cfcf-cfcf-cfcfcfcfcfcf").unwrap();
@@ -1259,6 +1730,781 @@ async fn mapi_over_http_calendar_meeting_response_updates_canonical_attendee_sta
     assert!(stored[0]
         .attendees_json
         .contains(r#""partstat":"accepted""#));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_meeting_response_rejects_binary_payload_without_side_effect() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d0d0d0d0-d0d0-d0d0-d0d0-d0d0d0d0d0d0").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Unsupported meeting response".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: "Bob".to_string(),
+            attendees_json: r#"{"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"needs-action","rsvp":true}]}"#.to_string(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Schedule.Meeting.Resp.Pos",
+    );
+    append_mapi_utf16_property(&mut property_values, 0x0C1A_001F, "Bob");
+    append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "bob@example.test");
+    append_mapi_binary_property(&mut property_values, 0x8216_0102, &[1, 2, 3]);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 4, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert!(stored[0]
+        .attendees_json
+        .contains(r#""partstat":"needs-action""#));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_attendee_named_properties_update_canonical_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d1d1d1d1-d1d1-d1d1-d1d1-d1d1d1d1d1d1").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Attendee named properties".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x823B_001F, "Bob Required");
+    append_mapi_utf16_property(&mut property_values, 0x823C_001F, "Cara Optional");
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].attendees, "Bob Required, Cara Optional");
+    assert!(stored[0].attendees_json.contains("REQ-PARTICIPANT"));
+    assert!(stored[0].attendees_json.contains("OPT-PARTICIPANT"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_display_cc_updates_optional_attendees() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d8d8d8d8-d8d8-d8d8-d8d8-d8d8d8d8d8d8").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Display CC attendees".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x0E04_001F, "Bob Required");
+    append_mapi_utf16_property(&mut property_values, 0x0E03_001F, "Cara Optional");
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].attendees, "Bob Required, Cara Optional");
+    assert!(stored[0].attendees_json.contains("REQ-PARTICIPANT"));
+    assert!(stored[0].attendees_json.contains("OPT-PARTICIPANT"));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_time_zone_blob_rejects_without_side_effect() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d2d2d2d2-d2d2-d2d2-d2d2-d2d2d2d2d2d2").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Timezone blob".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(&mut property_values, 0x8233_0102, &[1, 2, 3, 4]);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].time_zone, "UTC");
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_time_zone_description_updates_canonical_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d3d3d3d3-d3d3-d3d3-d3d3-d3d3d3d3d3d3").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Timezone description".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(&mut property_values, 0x8234_001F, "W. Europe Standard Time");
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].time_zone, "W. Europe Standard Time");
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_whole_start_end_update_canonical_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Whole start end".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_i64_property(
+        &mut property_values,
+        0x820D_0040,
+        test_filetime("2026-06-01", "13:15"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x820E_0040,
+        test_filetime("2026-06-01", "14:45"),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].date, "2026-06-01");
+    assert_eq!(stored[0].time, "13:15");
+    assert_eq!(stored[0].duration_minutes, 90);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_common_start_end_update_canonical_event() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d7d7d7d7-d7d7-d7d7-d7d7-d7d7d7d7d7d7").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Common start end".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_i64_property(
+        &mut property_values,
+        0x8516_0040,
+        test_filetime("2026-06-02", "08:00"),
+    );
+    append_mapi_i64_property(
+        &mut property_values,
+        0x8517_0040,
+        test_filetime("2026-06-02", "09:30"),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].date, "2026-06-02");
+    assert_eq!(stored[0].time, "08:00");
+    assert_eq!(stored[0].duration_minutes, 90);
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_state_flags_cancel_updates_canonical_event_status() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d4d4d4d4-d4d4-d4d4-d4d4-d4d4d4d4d4d4").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "State flags".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x5);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(!contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].status, "cancelled");
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_state_flags_reject_unsupported_bits_without_side_effect() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("d6d6d6d6-d6d6-d6d6-d6d6-d6d6d6d6d6d6").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Unsupported state flags".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut property_values = Vec::new();
+    append_mapi_i32_property(&mut property_values, 0x8217_0003, 0x8);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_set_properties(&mut rops, 2, 1, &property_values);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8004_0102u32.to_le_bytes()
+    ));
+    let stored = events.lock().unwrap();
+    assert_eq!(stored[0].status, "confirmed");
 }
 
 #[tokio::test]
@@ -1480,6 +2726,190 @@ async fn mapi_over_http_calendar_get_valid_attachments_lists_canonical_attachmen
         &response_rops,
         &[0x52, 0x02, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 1, 0, 0, 0]
     ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_advertised_calendar_open_attachment_reads_default_collection_attachment() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("cdcdcdcd-cdcd-cdcd-cdcd-cdcdcdcd0001").unwrap();
+    let attachment_id = Uuid::parse_str("adadadad-adad-adad-adad-adadadad0001").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Advertised Calendar attachment".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        calendar_attachments: Arc::new(Mutex::new(HashMap::from([(
+            event_id,
+            vec![CalendarEventAttachment {
+                id: attachment_id,
+                event_id,
+                file_reference: format!("calendar-attachment:{event_id}:{attachment_id}"),
+                file_name: "default-agenda.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                size_octets: 33,
+            }],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    rops.extend_from_slice(&[
+        0x22, 0x00, 0x02, 0x03, 0x00, // RopOpenAttachment
+    ]);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    append_rop_get_properties_specific(
+        &mut rops,
+        3,
+        &[0x0E21_0003, 0x3707_001F, 0x370E_001F, 0x0E20_0003],
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x22, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("default-agenda.pdf")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("application/pdf")));
+    assert!(contains_bytes(&response_rops, &33u32.to_le_bytes()));
+}
+
+#[tokio::test]
+async fn mapi_over_http_calendar_delete_attachment_removes_canonical_event_attachment() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    let attachment_id = Uuid::parse_str("afafafaf-afaf-afaf-afaf-afafafafafaf").unwrap();
+    let calendar_attachments = Arc::new(Mutex::new(HashMap::from([(
+        event_id,
+        vec![CalendarEventAttachment {
+            id: attachment_id,
+            event_id,
+            file_reference: format!("calendar-attachment:{event_id}:{attachment_id}"),
+            file_name: "delete-agenda.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            size_octets: 11,
+        }],
+    )])));
+    let store = FakeStore {
+        session: Some(account.clone()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email.clone(),
+            owner_display_name: account.display_name.clone(),
+            rights: FakeStore::rights(),
+            date: "2026-05-04".to_string(),
+            time: "09:30".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Calendar delete attachment".to_string(),
+            location: String::new(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: String::new(),
+            body_html: String::new(),
+        }])),
+        calendar_attachments: calendar_attachments.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    rops.extend_from_slice(&[0x24, 0x00, 0x02]);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x24, 0x02, 0, 0, 0, 0]));
+    assert!(calendar_attachments.lock().unwrap()[&event_id].is_empty());
 }
 
 #[tokio::test]
@@ -13460,7 +14890,10 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
         stream.message_changes[0].subject,
         "Calendar sync appointment"
     );
-    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    assert!(
+        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
+        "response rops: {response_rops:02x?}"
+    );
     assert!(contains_bytes(&response_rops, &utf16z("Conference room")));
     assert!(contains_bytes(
         &response_rops,
@@ -13507,6 +14940,228 @@ async fn mapi_over_http_virtual_calendar_content_sync_stores_virtual_checkpoint(
     let checkpoint = checkpoint.unwrap();
     assert_eq!(checkpoint.last_change_sequence, 55);
     assert_eq!(checkpoint.last_modseq, 41);
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("syncRootFolderId")
+            .and_then(|id| id.as_u64()),
+        Some(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_advertised_calendar_sync_projects_default_collection_event_without_collection_row(
+) {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171710001").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: FakeStore::rights(),
+            date: "2026-06-02".to_string(),
+            time: "11:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 30,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Advertised Calendar appointment".to_string(),
+            location: "Room 16".to_string(),
+            organizer_json: "{}".to_string(),
+            attendees: String::new(),
+            attendees_json: String::new(),
+            notes: "Projected without collection row".to_string(),
+            body_html: String::new(),
+        }])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        changed_calendar_event_ids: vec![event_id],
+        current_change_sequence: 56,
+        current_modseq: 42,
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(
+        stream.message_changes[0].subject,
+        "Advertised Calendar appointment"
+    );
+    assert!(
+        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
+        "response rops: {response_rops:02x?}"
+    );
+    assert!(contains_bytes(&response_rops, &utf16z("Room 16")));
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                    .unwrap()
+                    .id,
+            ),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 56);
+    assert_eq!(checkpoint.last_modseq, 42);
+}
+
+#[tokio::test]
+async fn mapi_over_http_advertised_calendar_open_message_reads_default_collection_event_without_collection_row(
+) {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("71717171-7171-7171-7171-717171710003").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        events: Arc::new(Mutex::new(vec![AccessibleEvent {
+            id: event_id,
+            uid: event_id.to_string(),
+            collection_id: "default".to_string(),
+            owner_account_id: account.account_id,
+            owner_email: account.email,
+            owner_display_name: account.display_name,
+            rights: FakeStore::rights(),
+            date: "2026-06-02".to_string(),
+            time: "13:00".to_string(),
+            time_zone: "UTC".to_string(),
+            duration_minutes: 45,
+            all_day: false,
+            status: "confirmed".to_string(),
+            sequence: 0,
+            recurrence_rule: String::new(),
+            recurrence_json: "{}".to_string(),
+            recurrence_exceptions_json: "[]".to_string(),
+            title: "Advertised Calendar open appointment".to_string(),
+            location: "Room 18".to_string(),
+            organizer_json: r#"{"email":"alice@example.test","common_name":"Alice"}"#.to_string(),
+            attendees: "Bob".to_string(),
+            attendees_json: r#"{"attendees":[{"email":"bob@example.test","common_name":"Bob","role":"REQ-PARTICIPANT","partstat":"accepted","rsvp":false}]}"#.to_string(),
+            notes: "Open without collection row".to_string(),
+            body_html: "<p>Open without collection row</p>".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(16));
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        test_mapi_folder_id(16),
+        test_mapi_uuid_id(&event_id),
+    );
+    append_rop_get_properties_specific(
+        &mut rops,
+        2,
+        &[
+            0x001A_001F,
+            0x0037_001F,
+            0x3FFB_001F,
+            0x1000_001F,
+            0x1013_001F,
+            0x0C1F_001F,
+            0x0E04_001F,
+            0x820D_0040,
+            0x820E_0040,
+        ],
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(
+        contains_bytes(&response_rops, &utf16z("IPM.Appointment")),
+        "response rops: {response_rops:02x?}"
+    );
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Advertised Calendar open appointment")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Room 18")));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Open without collection row")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("<p>Open without collection row</p>")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("alice@example.test")
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Bob")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_empty_virtual_calendar_sync_has_no_placeholder_rows() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 9,
+        current_modseq: 11,
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops(store.clone(), 16, &[]).await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert!(stream.message_changes.is_empty());
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Configuration.Calendar")
+    ));
+    assert!(!contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+                    .unwrap()
+                    .id,
+            ),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(checkpoint.last_change_sequence, 9);
+    assert_eq!(checkpoint.last_modseq, 11);
     assert_eq!(
         checkpoint
             .cursor_json
@@ -13753,9 +15408,10 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
     };
     let storage = fixture.storage.clone();
     let account_id = fixture.account_id;
+    let event_id = Uuid::parse_str("71717171-7171-4171-9171-717171717171").unwrap();
     storage
         .upsert_client_event(UpsertClientEventInput {
-            id: Some(Uuid::parse_str("71717171-7171-4171-9171-717171717171").unwrap()),
+            id: Some(event_id),
             account_id,
             uid: "mapi-calendar-postgres".to_string(),
             date: "2026-05-25".to_string(),
@@ -13776,6 +15432,24 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
             notes: "Canonical body text".to_string(),
             body_html: "<p>Canonical body text</p>".to_string(),
         })
+        .await?;
+    storage
+        .add_calendar_event_attachment(
+            account_id,
+            event_id,
+            AttachmentUploadInput {
+                file_name: "agenda.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                content_id: None,
+                disposition: Some("attachment".to_string()),
+                blob_bytes: b"calendar attachment".to_vec(),
+            },
+            lpe_storage::AuditEntryInput {
+                actor: "alice@example.test".to_string(),
+                action: "test-calendar-sync-attachment".to_string(),
+                subject: event_id.to_string(),
+            },
+        )
         .await?;
 
     let response_rops = content_sync_response_rops_for_store(
@@ -13823,6 +15497,10 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
     ));
     assert!(contains_bytes(
         &response_rops,
+        &0x0E03_001Fu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &0x8205_0003u32.to_le_bytes()
     ));
     assert!(contains_bytes(&response_rops, &1i32.to_le_bytes()));
@@ -13850,6 +15528,14 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
     ));
     assert!(contains_bytes(
         &response_rops,
+        &0x8516_0040u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x8517_0040u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
         &mapi_mailstore::filetime_from_rfc3339_utc("2026-05-25T14:30:00Z").to_le_bytes()
     ));
     assert!(contains_bytes(
@@ -13860,6 +15546,9 @@ async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_proper
         &response_rops,
         &0x0E1B_000Bu32.to_le_bytes()
     ));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&0x0E1B_000Bu32));
 
     fixture.cleanup().await?;
     Ok(())
@@ -28177,6 +29866,135 @@ async fn mapi_over_http_get_receive_folder_maps_appointments_to_calendar() {
         &mapi_wire_id_bytes(crate::mapi::identity::CALENDAR_FOLDER_ID)
     );
     assert_eq!(&response_rops[14..], b"IPM.Appointment\0");
+}
+
+#[tokio::test]
+async fn mapi_over_http_store_get_properties_all_lists_calendar_default_entry_id() {
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01]; // Private-mailbox RopLogon.
+    let legacy_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}\0",
+        FakeStore::account().email
+    );
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn.as_bytes());
+    rops.extend_from_slice(&[0x08, 0x00, 0x00, 0x00, 0x10, 0x01, 0x00]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x08, 0x00, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36D0_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap(),
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_store_get_properties_list_advertises_calendar_default_entry_id() {
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01]; // Private-mailbox RopLogon.
+    let legacy_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}\0",
+        FakeStore::account().email
+    );
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn.as_bytes());
+    rops.extend_from_slice(&[0x09, 0x00, 0x00]); // RopGetPropertiesList on logon.
+
+    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x09, 0x00, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36D0_0102u32.to_le_bytes()
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_root_get_properties_all_lists_calendar_default_entry_id() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Root.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x08, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36D0_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap(),
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_root_get_properties_list_advertises_calendar_default_entry_id() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Root.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x09, 0x00, 0x01]); // RopGetPropertiesList on Root.
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x09, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36D0_0102u32.to_le_bytes()
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_inbox_get_properties_all_lists_calendar_default_entry_id() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Inbox.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x08, 0x00, 0x01, 0x00, 0x10, 0x01, 0x00]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x08, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36D0_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap(),
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_inbox_get_properties_list_advertises_calendar_default_entry_id() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Inbox.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x09, 0x00, 0x01]); // RopGetPropertiesList on Inbox.
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x09, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36D0_0102u32.to_le_bytes()
+    ));
 }
 
 #[tokio::test]

@@ -870,77 +870,20 @@ impl Storage {
         ))
     }
 
-    pub async fn materialize_delegate_freebusy_messages(
+    pub async fn project_delegate_freebusy_messages(
         &self,
         principal_account_id: Uuid,
         owner_account_id: Uuid,
         starts_before: &str,
         ends_after: &str,
     ) -> Result<Vec<DelegateFreeBusyMessageObject>> {
-        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
-        let delegate_objects = self
-            .fetch_delegate_access_objects(principal_account_id)
-            .await?;
-        let delegate = delegate_objects
-            .iter()
-            .find(|object| object.owner_account_id == owner_account_id);
-        let free_busy = self
-            .fetch_free_busy_blocks(
-                principal_account_id,
-                owner_account_id,
-                starts_before,
-                ends_after,
-            )
-            .await?;
-        let materialized = delegate_freebusy_materializations(
+        self.compute_delegate_freebusy_messages(
             principal_account_id,
-            owner_account_id,
-            delegate,
-            free_busy,
-        )?;
-
-        let mut tx = self.pool.begin().await?;
-        sqlx::query(
-            r#"
-            DELETE FROM mapi_delegate_freebusy_messages
-            WHERE tenant_id = $1
-              AND account_id = $2
-              AND owner_account_id = $3
-            "#,
+            Some(owner_account_id),
+            starts_before,
+            ends_after,
         )
-        .bind(&tenant_id)
-        .bind(principal_account_id)
-        .bind(owner_account_id)
-        .execute(&mut *tx)
-        .await?;
-        for message in &materialized {
-            sqlx::query(
-                r#"
-                INSERT INTO mapi_delegate_freebusy_messages (
-                    tenant_id, id, account_id, owner_account_id, message_kind, subject, body_text,
-                    starts_at, ends_at, busy_status, payload_json
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz, $10, $11::jsonb)
-                "#,
-            )
-            .bind(&tenant_id)
-            .bind(message.id)
-            .bind(principal_account_id)
-            .bind(owner_account_id)
-            .bind(&message.message_kind)
-            .bind(&message.subject)
-            .bind(&message.body_text)
-            .bind(message.starts_at.as_deref())
-            .bind(message.ends_at.as_deref())
-            .bind(message.busy_status.as_deref())
-            .bind(message.payload_json.to_string())
-            .execute(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-
-        self.fetch_delegate_freebusy_messages(principal_account_id, Some(owner_account_id))
-            .await
+        .await
     }
 
     pub async fn fetch_delegate_freebusy_messages(
@@ -948,42 +891,70 @@ impl Storage {
         principal_account_id: Uuid,
         owner_account_id: Option<Uuid>,
     ) -> Result<Vec<DelegateFreeBusyMessageObject>> {
-        let tenant_id = self.tenant_id_for_account_id(principal_account_id).await?;
-        let rows = sqlx::query_as::<_, crate::DelegateFreeBusyMessageRow>(
-            r#"
-            SELECT
-                m.id,
-                m.account_id,
-                m.owner_account_id,
-                owner.primary_email AS owner_email,
-                m.message_kind,
-                m.subject,
-                m.body_text,
-                to_char(m.starts_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS starts_at,
-                to_char(m.ends_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS ends_at,
-                m.busy_status,
-                m.payload_json::text AS payload_json,
-                to_char(m.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
-            FROM mapi_delegate_freebusy_messages m
-            JOIN accounts owner
-              ON owner.tenant_id = m.tenant_id
-             AND owner.id = m.owner_account_id
-            WHERE m.tenant_id = $1
-              AND m.account_id = $2
-              AND ($3::uuid IS NULL OR m.owner_account_id = $3)
-            ORDER BY m.owner_account_id ASC, m.message_kind ASC, m.starts_at ASC NULLS FIRST, m.id ASC
-            "#,
+        self.compute_delegate_freebusy_messages(
+            principal_account_id,
+            owner_account_id,
+            "9999-12-31T23:59:59Z",
+            "1970-01-01T00:00:00Z",
         )
-        .bind(&tenant_id)
-        .bind(principal_account_id)
-        .bind(owner_account_id)
-        .fetch_all(&self.pool)
-        .await?;
+        .await
+    }
 
-        Ok(rows
-            .into_iter()
-            .map(map_delegate_freebusy_message)
-            .collect())
+    async fn compute_delegate_freebusy_messages(
+        &self,
+        principal_account_id: Uuid,
+        owner_account_id: Option<Uuid>,
+        starts_before: &str,
+        ends_after: &str,
+    ) -> Result<Vec<DelegateFreeBusyMessageObject>> {
+        let delegate_objects = self
+            .fetch_delegate_access_objects(principal_account_id)
+            .await?;
+        let mut messages = Vec::new();
+        if let Some(owner_account_id) = owner_account_id {
+            let delegate = delegate_objects
+                .iter()
+                .find(|object| object.owner_account_id == owner_account_id);
+            let free_busy = self
+                .fetch_free_busy_blocks(
+                    principal_account_id,
+                    owner_account_id,
+                    starts_before,
+                    ends_after,
+                )
+                .await?;
+            messages.extend(delegate_freebusy_message_objects(
+                principal_account_id,
+                owner_account_id,
+                delegate,
+                free_busy,
+            )?);
+        } else {
+            for delegate in &delegate_objects {
+                let free_busy = self
+                    .fetch_free_busy_blocks(
+                        principal_account_id,
+                        delegate.owner_account_id,
+                        starts_before,
+                        ends_after,
+                    )
+                    .await?;
+                messages.extend(delegate_freebusy_message_objects(
+                    principal_account_id,
+                    delegate.owner_account_id,
+                    Some(delegate),
+                    free_busy,
+                )?);
+            }
+        }
+        messages.sort_by(|left, right| {
+            left.owner_account_id
+                .cmp(&right.owner_account_id)
+                .then(left.message_kind.cmp(&right.message_kind))
+                .then(left.starts_at.cmp(&right.starts_at))
+                .then(left.id.cmp(&right.id))
+        });
+        Ok(messages)
     }
 
     pub async fn create_accessible_calendar_collection(
@@ -2302,7 +2273,7 @@ fn free_busy_status(status: &str, can_read_details: bool) -> String {
     }
 }
 
-struct DelegateFreeBusyMaterialization {
+struct DelegateFreeBusyProjection {
     id: Uuid,
     message_kind: String,
     subject: String,
@@ -2313,15 +2284,15 @@ struct DelegateFreeBusyMaterialization {
     payload_json: serde_json::Value,
 }
 
-fn delegate_freebusy_materializations(
+fn delegate_freebusy_projections(
     principal_account_id: Uuid,
     owner_account_id: Uuid,
     delegate: Option<&DelegateAccessObject>,
     free_busy: Vec<FreeBusyBlock>,
-) -> Result<Vec<DelegateFreeBusyMaterialization>> {
-    let mut materialized = Vec::new();
+) -> Result<Vec<DelegateFreeBusyProjection>> {
+    let mut projected = Vec::new();
     if let Some(delegate) = delegate {
-        materialized.push(DelegateFreeBusyMaterialization {
+        projected.push(DelegateFreeBusyProjection {
             id: stable_delegate_freebusy_id(&[
                 "delegate",
                 &principal_account_id.to_string(),
@@ -2343,7 +2314,7 @@ fn delegate_freebusy_materializations(
         });
     }
     for block in free_busy {
-        materialized.push(DelegateFreeBusyMaterialization {
+        projected.push(DelegateFreeBusyProjection {
             id: stable_delegate_freebusy_id(&[
                 "freebusy",
                 &principal_account_id.to_string(),
@@ -2364,7 +2335,48 @@ fn delegate_freebusy_materializations(
             }),
         });
     }
-    Ok(materialized)
+    Ok(projected)
+}
+
+fn delegate_freebusy_message_objects(
+    principal_account_id: Uuid,
+    owner_account_id: Uuid,
+    delegate: Option<&DelegateAccessObject>,
+    free_busy: Vec<FreeBusyBlock>,
+) -> Result<Vec<DelegateFreeBusyMessageObject>> {
+    let owner_email = delegate
+        .map(|delegate| delegate.owner_email.clone())
+        .or_else(|| free_busy.first().map(|block| block.owner_email.clone()))
+        .unwrap_or_default();
+    delegate_freebusy_projections(principal_account_id, owner_account_id, delegate, free_busy)?
+        .into_iter()
+        .map(|message| {
+            let updated_at = delegate_freebusy_projection_updated_at(&message);
+            Ok(DelegateFreeBusyMessageObject {
+                id: message.id,
+                account_id: principal_account_id,
+                owner_account_id,
+                owner_email: owner_email.clone(),
+                message_kind: message.message_kind,
+                subject: message.subject,
+                body_text: message.body_text,
+                starts_at: message.starts_at,
+                ends_at: message.ends_at,
+                busy_status: message.busy_status,
+                payload_json: message.payload_json.to_string(),
+                updated_at,
+            })
+        })
+        .collect()
+}
+
+fn delegate_freebusy_projection_updated_at(message: &DelegateFreeBusyProjection) -> String {
+    message
+        .ends_at
+        .as_ref()
+        .or(message.starts_at.as_ref())
+        .cloned()
+        .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
 }
 
 fn stable_delegate_freebusy_id(parts: &[&str]) -> Uuid {
@@ -2379,25 +2391,6 @@ fn stable_delegate_freebusy_id(parts: &[&str]) -> Uuid {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     Uuid::from_bytes(bytes)
-}
-
-fn map_delegate_freebusy_message(
-    row: crate::DelegateFreeBusyMessageRow,
-) -> DelegateFreeBusyMessageObject {
-    DelegateFreeBusyMessageObject {
-        id: row.id,
-        account_id: row.account_id,
-        owner_account_id: row.owner_account_id,
-        owner_email: row.owner_email,
-        message_kind: row.message_kind,
-        subject: row.subject,
-        body_text: row.body_text,
-        starts_at: row.starts_at,
-        ends_at: row.ends_at,
-        busy_status: row.busy_status,
-        payload_json: row.payload_json,
-        updated_at: row.updated_at,
-    }
 }
 
 #[cfg(test)]
@@ -2472,23 +2465,19 @@ mod free_busy_tests {
     }
 
     #[test]
-    fn delegate_freebusy_materialization_does_not_create_empty_placeholder() {
+    fn delegate_freebusy_projection_does_not_create_empty_placeholder() {
         let principal_account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
         let owner_account_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
 
-        let materialized = delegate_freebusy_materializations(
-            principal_account_id,
-            owner_account_id,
-            None,
-            vec![],
-        )
-        .unwrap();
+        let projected =
+            delegate_freebusy_projections(principal_account_id, owner_account_id, None, vec![])
+                .unwrap();
 
-        assert!(materialized.is_empty());
+        assert!(projected.is_empty());
     }
 
     #[test]
-    fn delegate_freebusy_materialization_uses_only_canonical_delegate_and_blocks() {
+    fn delegate_freebusy_projection_uses_only_canonical_delegate_and_blocks() {
         let principal_account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
         let owner_account_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
         let delegate = DelegateAccessObject {
@@ -2511,7 +2500,7 @@ mod free_busy_tests {
             status: "busy".to_string(),
         }];
 
-        let materialized = delegate_freebusy_materializations(
+        let projected = delegate_freebusy_projections(
             principal_account_id,
             owner_account_id,
             Some(&delegate),
@@ -2519,8 +2508,34 @@ mod free_busy_tests {
         )
         .unwrap();
 
-        assert_eq!(materialized.len(), 2);
-        assert_eq!(materialized[0].message_kind, "delegate");
-        assert_eq!(materialized[1].message_kind, "freebusy");
+        assert_eq!(projected.len(), 2);
+        assert_eq!(projected[0].message_kind, "delegate");
+        assert_eq!(projected[1].message_kind, "freebusy");
+    }
+
+    #[test]
+    fn delegate_freebusy_message_objects_use_interval_commit_time_without_store_state() {
+        let principal_account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let owner_account_id = Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap();
+        let messages = delegate_freebusy_message_objects(
+            principal_account_id,
+            owner_account_id,
+            None,
+            vec![FreeBusyBlock {
+                owner_account_id,
+                owner_email: "owner@example.test".to_string(),
+                start: "2026-05-30T08:00:00Z".to_string(),
+                end: "2026-05-30T09:00:00Z".to_string(),
+                status: "busy".to_string(),
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].updated_at, "2026-05-30T09:00:00Z");
+        assert_eq!(
+            messages[0].payload_json,
+            r#"{"ownerAccountId":"22222222-2222-4222-8222-222222222222","ownerEmail":"owner@example.test"}"#
+        );
     }
 }
