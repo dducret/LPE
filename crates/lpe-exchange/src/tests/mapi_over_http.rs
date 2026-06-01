@@ -27623,6 +27623,8 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
     let mut row_offset = table_offset + 10;
     let mut receive_folder_rows = Vec::new();
     for _ in 0..3 {
+        assert_eq!(response_rops[row_offset], 0);
+        row_offset += 1;
         let folder_id = crate::mapi::identity::object_id_from_wire_id(
             &response_rops[row_offset..row_offset + 8],
         )

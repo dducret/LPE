@@ -2708,14 +2708,25 @@ pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopReques
     write_u32(&mut response, 0);
     write_u32(&mut response, RECEIVE_FOLDER_ENTRIES.len() as u32);
     for entry in RECEIVE_FOLDER_ENTRIES {
-        write_object_id(&mut response, entry.folder_id);
-        write_utf16z(&mut response, entry.message_class);
-        write_u64(
-            &mut response,
-            crate::mapi_mailstore::filetime_from_change_number(
-                crate::mapi_mailstore::change_number_for_store_id(entry.folder_id),
-            ),
+        let mut row = Vec::new();
+        write_mapi_value(
+            &mut row,
+            PID_TAG_FOLDER_ID,
+            &MapiValue::U64(entry.folder_id),
         );
+        write_mapi_value(
+            &mut row,
+            PID_TAG_MESSAGE_CLASS_W,
+            &MapiValue::String(entry.message_class.to_string()),
+        );
+        write_mapi_value(
+            &mut row,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            &MapiValue::U64(crate::mapi_mailstore::filetime_from_change_number(
+                crate::mapi_mailstore::change_number_for_store_id(entry.folder_id),
+            )),
+        );
+        write_standard_property_row(&mut response, &row);
     }
     response
 }
