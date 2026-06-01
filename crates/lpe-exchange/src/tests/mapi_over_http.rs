@@ -27650,6 +27650,11 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
         row_offset += 8;
         receive_folder_rows.push((message_class, folder_id, last_modified));
     }
+    assert_eq!(receive_folder_rows[0].0, "IPM.Appointment");
+    assert_eq!(
+        receive_folder_rows[0].1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID
+    );
     assert!(receive_folder_rows
         .iter()
         .any(|(message_class, folder_id, _)| {

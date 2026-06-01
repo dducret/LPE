@@ -2650,16 +2650,16 @@ struct ReceiveFolderEntry {
 
 const RECEIVE_FOLDER_ENTRIES: &[ReceiveFolderEntry] = &[
     ReceiveFolderEntry {
-        message_class: "IPM",
-        folder_id: INBOX_FOLDER_ID,
+        message_class: "IPM.Appointment",
+        folder_id: CALENDAR_FOLDER_ID,
     },
     ReceiveFolderEntry {
         message_class: "IPM.Note",
         folder_id: INBOX_FOLDER_ID,
     },
     ReceiveFolderEntry {
-        message_class: "IPM.Appointment",
-        folder_id: CALENDAR_FOLDER_ID,
+        message_class: "IPM",
+        folder_id: INBOX_FOLDER_ID,
     },
 ];
 
