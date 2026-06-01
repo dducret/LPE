@@ -365,6 +365,11 @@ not by itself authorize broad client publication.
   including `PidTagIpmAppointmentEntryId`, so Outlook bootstrap paths that
   discover Calendar through broad store-property enumeration receive the
   canonical Calendar EntryID without relying on MAPI-local folder state.
+- `RopGetReceiveFolder`, `RopGetReceiveFolderTable`, and bounded
+  `RopSetReceiveFolder` use the same canonical receive-folder map. The only
+  accepted `IPM.Appointment` or `IPM.Appointment.*` receive-folder write is the
+  canonical Calendar folder; mismatched writes are rejected without creating
+  protocol-local receive-folder state.
 - Root and Inbox `RopGetPropertiesAll` / `RopGetPropertiesList` enumerate the
   same computed default-folder identity properties for Outlook's documented
   Inbox-first, Root-fallback special-folder discovery path; the values remain

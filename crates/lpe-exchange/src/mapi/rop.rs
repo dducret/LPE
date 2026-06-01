@@ -2643,10 +2643,17 @@ const RECEIVE_FOLDER_ENTRIES: &[ReceiveFolderEntry] = &[
 ];
 
 fn receive_folder_entry_matches(entry: ReceiveFolderEntry, message_class: &str) -> bool {
-    entry.message_class.is_empty()
-        || message_class.len() >= entry.message_class.len()
-            && message_class.as_bytes()[..entry.message_class.len()]
-                .eq_ignore_ascii_case(entry.message_class.as_bytes())
+    if entry.message_class.is_empty() {
+        return true;
+    }
+    if message_class.len() < entry.message_class.len()
+        || !message_class.as_bytes()[..entry.message_class.len()]
+            .eq_ignore_ascii_case(entry.message_class.as_bytes())
+    {
+        return false;
+    }
+    message_class.len() == entry.message_class.len()
+        || message_class.as_bytes().get(entry.message_class.len()) == Some(&b'.')
 }
 
 fn receive_folder_entry_for_message_class(message_class: &str) -> ReceiveFolderEntry {
@@ -3767,6 +3774,21 @@ impl RopRequest {
 
     pub(in crate::mapi) fn receive_folder_message_class(&self) -> Option<&str> {
         let bytes = self.payload.strip_suffix(&[0])?;
+        std::str::from_utf8(bytes).ok()
+    }
+
+    pub(in crate::mapi) fn set_receive_folder_id(&self) -> Option<u64> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::SetReceiveFolder)) {
+            return None;
+        }
+        crate::mapi::identity::object_id_from_wire_id(self.payload.get(..8)?)
+    }
+
+    pub(in crate::mapi) fn set_receive_folder_message_class(&self) -> Option<&str> {
+        if !matches!(RopId::from_u8(self.rop_id), Some(RopId::SetReceiveFolder)) {
+            return None;
+        }
+        let bytes = self.payload.get(8..)?.strip_suffix(&[0])?;
         std::str::from_utf8(bytes).ok()
     }
 

@@ -25602,6 +25602,10 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
     rops.extend_from_slice(&[0x27, 0x00, 0x00]);
     rops.extend_from_slice(b"IPM.Appointment\0");
     rops.extend_from_slice(&[0x27, 0x00, 0x00]);
+    rops.extend_from_slice(b"IPM.Appointment.Custom\0");
+    rops.extend_from_slice(&[0x27, 0x00, 0x00]);
+    rops.extend_from_slice(b"IPM.AppointmentCustom\0");
+    rops.extend_from_slice(&[0x27, 0x00, 0x00]);
     rops.extend_from_slice(b"IPM.MY.Class\0");
     rops.extend_from_slice(&[0x27, 0x00, 0x00]);
     rops.extend_from_slice(b"MY.Class\0");
@@ -25623,6 +25627,13 @@ async fn mapi_over_http_get_receive_folder_uses_message_class_matching() {
     append_mapi_wire_id(&mut calendar_response, test_mapi_folder_id(16));
     calendar_response.extend_from_slice(b"IPM.Appointment\0");
     assert!(contains_bytes(&response_rops, calendar_response.as_slice()));
+    assert_eq!(
+        response_rops
+            .windows(calendar_response.len())
+            .filter(|window| *window == calendar_response.as_slice())
+            .count(),
+        2
+    );
     let mut ipm_response = vec![0x27, 0x00, 0, 0, 0, 0];
     append_mapi_wire_id(&mut ipm_response, test_mapi_folder_id(5));
     ipm_response.extend_from_slice(b"IPM\0");
@@ -29804,7 +29815,7 @@ async fn mapi_over_http_private_logon_per_user_lookup_returns_public_folder_iden
 }
 
 #[tokio::test]
-async fn mapi_over_http_set_receive_folder_returns_rop_specific_protocol_error() {
+async fn mapi_over_http_set_receive_folder_accepts_canonical_calendar_mapping() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -29826,8 +29837,8 @@ async fn mapi_over_http_set_receive_folder_returns_rop_specific_protocol_error()
         .to_string();
 
     let mut rops = vec![0x26, 0x00, 0x00];
-    append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
-    rops.extend_from_slice(b"IPM.Note\0");
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(b"IPM.Appointment\0");
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -29849,7 +29860,102 @@ async fn mapi_over_http_set_receive_folder_returns_rop_specific_protocol_error()
     assert_eq!(response_rops[1], 0x00);
     assert_eq!(
         u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
-        0x8004_0102
+        0
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_set_receive_folder_accepts_canonical_custom_calendar_mapping() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![0x26, 0x00, 0x00];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(b"IPM.Appointment.Custom\0");
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(response_rops[0], 0x26);
+    assert_eq!(response_rops[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_set_receive_folder_rejects_noncanonical_calendar_mapping() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let mut rops = vec![0x26, 0x00, 0x00];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
+    rops.extend_from_slice(b"IPM.Appointment\0");
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let request = execute_body(&rop_buffer(&rops, &[1]));
+    let response = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &execute_headers, &request)
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let body = response_bytes(response).await;
+    let rop_buffer_size = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+    let rop_buffer = &body[16..16 + rop_buffer_size];
+    let response_rop_size = u16::from_le_bytes(rop_buffer[0..2].try_into().unwrap()) as usize;
+    let response_rops = &rop_buffer[2..2 + response_rop_size];
+
+    assert_eq!(response_rops[0], 0x26);
+    assert_eq!(response_rops[1], 0x00);
+    assert_eq!(
+        u32::from_le_bytes(response_rops[2..6].try_into().unwrap()),
+        0x8007_0057
     );
 }
 

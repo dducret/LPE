@@ -8660,11 +8660,54 @@ where
                     partial_completion,
                 ));
             }
-            Some(RopId::SetReceiveFolder) => responses.extend_from_slice(&rop_error_response(
-                0x26,
-                request.response_handle_index(),
-                0x8004_0102,
-            )),
+            Some(RopId::SetReceiveFolder) => {
+                let Some(folder_id) = request.set_receive_folder_id() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x26,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                };
+                let Some(message_class) = request.set_receive_folder_message_class() else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x26,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                };
+                if !valid_receive_folder_message_class(message_class) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x26,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
+                let canonical_folder_id = receive_folder_id_for_message_class(message_class);
+                if folder_id != canonical_folder_id {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x26,
+                        request.response_handle_index(),
+                        0x8007_0057,
+                    ));
+                    continue;
+                }
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    requested_message_class = %message_class,
+                    canonical_message_class =
+                        %explicit_receive_folder_message_class(message_class),
+                    canonical_folder_id = %format!("0x{canonical_folder_id:016x}"),
+                    "rca debug mapi canonical set receive folder accepted"
+                );
+                responses.extend_from_slice(&rop_simple_success_response(&request));
+            }
             Some(RopId::SetSearchCriteria) => {
                 let Some(MapiObject::Folder { folder_id, .. }) =
                     input_object(session, &handle_slots, &request)
