@@ -1065,6 +1065,7 @@ pub(in crate::mapi) fn restriction_matches(
     }
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn mailbox_property_value_with_context(
     mailbox: &JmapMailbox,
     mailboxes: &[JmapMailbox],
