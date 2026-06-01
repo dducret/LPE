@@ -2657,6 +2657,15 @@ fn mapi_folder_display_name(mailbox: &JmapMailbox) -> &str {
 
 fn mapi_folder_has_subfolders(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> bool {
     let folder_id = mapi_folder_id_for_mailbox(mailbox, 0);
+    if matches!(
+        folder_id,
+        crate::mapi::identity::ROOT_FOLDER_ID
+            | crate::mapi::identity::IPM_SUBTREE_FOLDER_ID
+            | crate::mapi::identity::SYNC_ISSUES_FOLDER_ID
+            | crate::mapi::identity::RECOVERABLE_ITEMS_ROOT_FOLDER_ID
+    ) {
+        return true;
+    }
     mailboxes
         .iter()
         .any(|candidate| mapi_folder_parent_id_for_mailbox(candidate, mailboxes) == folder_id)
@@ -4131,6 +4140,30 @@ mod tests {
             &buffer[offset + 6..offset + 10],
             &INCR_SYNC_STATE_BEGIN.to_le_bytes()
         );
+    }
+
+    #[test]
+    fn root_hierarchy_transfer_ipm_subtree_reports_virtual_children() {
+        let mailbox = virtual_special_mailbox(crate::mapi::identity::IPM_SUBTREE_FOLDER_ID)
+            .expect("virtual IPM subtree folder");
+        let buffer = sync_manifest_buffer_with_attachments(
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[],
+            crate::mapi::identity::ROOT_FOLDER_ID,
+            &[mailbox],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        let summary = decode_hierarchy_transfer_debug_summary(&buffer).unwrap();
+        let row = summary.rows.first().expect("IPM subtree folder row");
+
+        assert_eq!(row.display_name, "Top of Information Store");
+        assert_eq!(row.subfolders, Some(true));
     }
 
     #[test]

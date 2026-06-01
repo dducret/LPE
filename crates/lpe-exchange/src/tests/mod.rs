@@ -6199,6 +6199,17 @@ fn append_search_property_i64(restriction: &mut Vec<u8>, property_tag: u32, relo
     restriction.extend_from_slice(&value.to_le_bytes());
 }
 
+fn append_search_property_binary(
+    restriction: &mut Vec<u8>,
+    property_tag: u32,
+    relop: u8,
+    value: &[u8],
+) {
+    restriction.extend_from_slice(&[0x04, relop]);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    append_mapi_binary_property(restriction, property_tag, value);
+}
+
 fn append_search_exists(restriction: &mut Vec<u8>, property_tag: u32) {
     restriction.push(0x08);
     restriction.extend_from_slice(&property_tag.to_le_bytes());

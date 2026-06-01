@@ -6887,6 +6887,7 @@ where
                     mailboxes,
                     emails,
                     snapshot,
+                    principal.account_id,
                 ))
             }
             Some(RopId::SeekRow) => responses.extend_from_slice(&rop_seek_row_response(
@@ -6895,6 +6896,7 @@ where
                 mailboxes,
                 emails,
                 snapshot,
+                principal.account_id,
             )),
             Some(RopId::SeekRowBookmark) => {
                 responses.extend_from_slice(&rop_seek_row_bookmark_response(
@@ -6903,6 +6905,7 @@ where
                     mailboxes,
                     emails,
                     snapshot,
+                    principal.account_id,
                 ))
             }
             Some(RopId::SeekRowFractional) => {
@@ -6912,6 +6915,7 @@ where
                     mailboxes,
                     emails,
                     snapshot,
+                    principal.account_id,
                 ))
             }
             Some(RopId::CreateBookmark) => {
@@ -6921,6 +6925,7 @@ where
                     mailboxes,
                     emails,
                     snapshot,
+                    principal.account_id,
                 ))
             }
             Some(RopId::QueryColumnsAll) => {

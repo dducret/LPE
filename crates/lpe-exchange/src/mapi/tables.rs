@@ -21,7 +21,7 @@ pub(in crate::mapi) fn hierarchy_row_count(
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
     if is_root_hierarchy_folder(folder_id) || snapshot.public_folder_for_id(folder_id).is_some() {
-        hierarchy_rows(folder_id, mailboxes, snapshot, None, &[])
+        hierarchy_rows(folder_id, mailboxes, snapshot, None, &[], Uuid::nil())
             .len()
             .min(u32::MAX as usize) as u32
     } else {
@@ -514,6 +514,7 @@ fn hierarchy_rows<'a>(
     snapshot: &'a MapiMailStoreSnapshot,
     restriction: Option<&MapiRestriction>,
     sort_orders: &[MapiSortOrder],
+    mailbox_guid: Uuid,
 ) -> Vec<HierarchyRow<'a>> {
     if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID {
         let mut rows = snapshot
@@ -543,7 +544,7 @@ fn hierarchy_rows<'a>(
     if folder_id == ROOT_FOLDER_ID {
         for special_folder_id in ROOT_HIERARCHY_FOLDER_IDS {
             if folder_ids.insert(*special_folder_id)
-                && special_hierarchy_row_matches(*special_folder_id, restriction)
+                && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
             {
                 rows.push(HierarchyRow::Special(*special_folder_id));
             }
@@ -551,7 +552,7 @@ fn hierarchy_rows<'a>(
     } else if folder_id == IPM_SUBTREE_FOLDER_ID {
         for special_folder_id in IPM_SUBTREE_HIERARCHY_FOLDER_IDS {
             if folder_ids.insert(*special_folder_id)
-                && special_hierarchy_row_matches(*special_folder_id, restriction)
+                && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
             {
                 rows.push(HierarchyRow::Special(*special_folder_id));
             }
@@ -685,6 +686,7 @@ fn hierarchy_row_matches(
     row: &HierarchyRow<'_>,
     mailboxes: &[JmapMailbox],
     restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
 ) -> bool {
     match row {
         HierarchyRow::Mailbox(mailbox) => {
@@ -696,22 +698,39 @@ fn hierarchy_row_matches(
         HierarchyRow::PublicFolder(folder) => {
             restriction_matches_public_folder(restriction, folder)
         }
-        HierarchyRow::Special(folder_id) => special_hierarchy_row_matches(*folder_id, restriction),
+        HierarchyRow::Special(folder_id) => {
+            special_hierarchy_row_matches(*folder_id, restriction, mailbox_guid)
+        }
     }
 }
 
-fn special_hierarchy_row_matches(folder_id: u64, restriction: Option<&MapiRestriction>) -> bool {
+fn special_hierarchy_row_matches(
+    folder_id: u64,
+    restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
+) -> bool {
     restriction_matches(restriction, |property_tag| {
-        special_folder_property_value(folder_id, property_tag)
+        special_folder_property_value(folder_id, property_tag, mailbox_guid)
     })
 }
 
-fn special_folder_property_value(folder_id: u64, property_tag: u32) -> Option<MapiValue> {
+fn special_folder_property_value(
+    folder_id: u64,
+    property_tag: u32,
+    mailbox_guid: Uuid,
+) -> Option<MapiValue> {
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
     let change_number = mapi_mailstore::change_number_for_store_id(folder_id);
     match canonical_property_storage_tag(property_tag) {
         PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(display_name.to_string())),
+        PID_TAG_ENTRY_ID => {
+            crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
+                .map(MapiValue::Binary)
+        }
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(folder_id),
+        )),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder_id)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
         PID_TAG_FOLDER_TYPE => Some(MapiValue::U32(special_folder_type(folder_id))),
@@ -1025,6 +1044,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 snapshot,
                 restriction.as_ref(),
                 sort_orders,
+                mailbox_guid,
             )
             .into_iter()
             .map(|row| serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid))
@@ -2338,12 +2358,14 @@ pub(in crate::mapi) fn rop_query_position_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     if !object.is_some_and(is_table_object) {
         return rop_error_response(0x17, request.response_handle_index(), 0x8004_0102);
     }
 
-    let (position, row_count) = table_position_and_count(object, mailboxes, emails, snapshot);
+    let (position, row_count) =
+        table_position_and_count(object, mailboxes, emails, snapshot, mailbox_guid);
     let mut response = vec![0x17, request.response_handle_index()];
     write_u32(&mut response, 0);
     write_u32(&mut response, position as u32);
@@ -2357,11 +2379,13 @@ pub(in crate::mapi) fn rop_seek_row_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
     };
-    let total_rows = table_position_and_count(Some(object), mailboxes, emails, snapshot).1;
+    let total_rows =
+        table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid).1;
     let Some(position) = table_position_mut(object) else {
         return rop_error_response(0x18, request.response_handle_index(), 0x8004_0102);
     };
@@ -2391,11 +2415,12 @@ pub(in crate::mapi) fn rop_create_bookmark_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(0x1B, request.response_handle_index(), 0x8004_0102);
     };
-    let row_key = table_row_keys(object, mailboxes, emails, snapshot)
+    let row_key = table_row_keys(object, mailboxes, emails, snapshot, mailbox_guid)
         .get(table_position(object).unwrap_or(0))
         .copied();
     let Some((position, bookmarks, next_bookmark)) = table_bookmark_state_mut(object) else {
@@ -2424,11 +2449,12 @@ pub(in crate::mapi) fn rop_seek_row_bookmark_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(0x19, request.response_handle_index(), 0x8004_0102);
     };
-    let row_keys = table_row_keys(object, mailboxes, emails, snapshot);
+    let row_keys = table_row_keys(object, mailboxes, emails, snapshot, mailbox_guid);
     let total_rows = row_keys.len();
     let Some((position, bookmarks, _next_bookmark)) = table_bookmark_state_mut(object) else {
         return rop_error_response(0x19, request.response_handle_index(), 0x8004_0102);
@@ -2475,11 +2501,13 @@ pub(in crate::mapi) fn rop_seek_row_fractional_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Some(object) = object else {
         return rop_error_response(0x1A, request.response_handle_index(), 0x8004_0102);
     };
-    let total_rows = table_position_and_count(Some(object), mailboxes, emails, snapshot).1;
+    let total_rows =
+        table_position_and_count(Some(object), mailboxes, emails, snapshot, mailbox_guid).1;
     let Some(position) = table_position_mut(object) else {
         return rop_error_response(0x1A, request.response_handle_index(), 0x8004_0102);
     };
@@ -2560,6 +2588,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 snapshot,
                 table_restriction.as_ref(),
                 sort_orders,
+                mailbox_guid,
             );
             if let Some((index, row)) = find_hierarchy_row(
                 rows.as_slice(),
@@ -2567,6 +2596,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 *position,
                 request,
                 Some(&restriction),
+                mailbox_guid,
             ) {
                 *position = index;
                 response.push(1);
@@ -2726,6 +2756,7 @@ fn find_hierarchy_row<'a>(
     current_position: usize,
     request: &RopRequest,
     restriction: Option<&MapiRestriction>,
+    mailbox_guid: Uuid,
 ) -> Option<(usize, HierarchyRow<'a>)> {
     if rows.is_empty() {
         return None;
@@ -2738,7 +2769,7 @@ fn find_hierarchy_row<'a>(
     if request.find_backward() {
         let end = start.min(rows.len().saturating_sub(1));
         (0..=end).rev().find_map(|index| {
-            hierarchy_row_matches(&rows[index], mailboxes, restriction)
+            hierarchy_row_matches(&rows[index], mailboxes, restriction, mailbox_guid)
                 .then_some((index, rows[index]))
         })
     } else {
@@ -2746,7 +2777,8 @@ fn find_hierarchy_row<'a>(
             .enumerate()
             .skip(start)
             .find_map(|(index, row)| {
-                hierarchy_row_matches(row, mailboxes, restriction).then_some((index, *row))
+                hierarchy_row_matches(row, mailboxes, restriction, mailbox_guid)
+                    .then_some((index, *row))
             })
     }
 }
@@ -2756,6 +2788,7 @@ pub(in crate::mapi) fn table_position_and_count(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> (usize, usize) {
     match object {
         Some(MapiObject::HierarchyTable {
@@ -2771,6 +2804,7 @@ pub(in crate::mapi) fn table_position_and_count(
                 snapshot,
                 restriction.as_ref(),
                 sort_orders,
+                mailbox_guid,
             )
             .len();
             (*position, total)
@@ -2948,6 +2982,7 @@ pub(in crate::mapi) fn table_row_keys(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u64> {
     match object {
         MapiObject::HierarchyTable {
@@ -2961,6 +2996,7 @@ pub(in crate::mapi) fn table_row_keys(
             snapshot,
             restriction.as_ref(),
             sort_orders,
+            mailbox_guid,
         )
         .into_iter()
         .map(|row| hierarchy_row_id(&row))
@@ -3702,10 +3738,15 @@ mod tests {
 
         assert!(special_hierarchy_row_matches(
             IPM_SUBTREE_FOLDER_ID,
-            Some(&restriction)
+            Some(&restriction),
+            Uuid::nil()
         ));
         assert_eq!(
-            special_folder_property_value(IPM_SUBTREE_FOLDER_ID, PID_TAG_DISPLAY_NAME_W),
+            special_folder_property_value(
+                IPM_SUBTREE_FOLDER_ID,
+                PID_TAG_DISPLAY_NAME_W,
+                Uuid::nil()
+            ),
             Some(MapiValue::String("Top of Information Store".to_string()))
         );
     }
@@ -3788,7 +3829,14 @@ mod tests {
             is_builtin: false,
         }]);
         let mailboxes = snapshot.mailboxes();
-        let rows = hierarchy_rows(IPM_SUBTREE_FOLDER_ID, &mailboxes, &snapshot, None, &[]);
+        let rows = hierarchy_rows(
+            IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
         let row = rows
             .iter()
             .find(|row| hierarchy_row_id(row) == folder_id)

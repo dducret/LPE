@@ -704,7 +704,12 @@ subtree rows must also project decodeable `PidTagEntryId` and
 during that walk can be reopened later. Restricted hierarchy searches over those
 rows must match the same display names and identity values that unrestricted
 hierarchy `QueryRows` returns, including `"Top of Information Store"` for the
-IPM subtree.
+IPM subtree and exact account-scoped `PidTagEntryId` matches for the IPM subtree
+and Calendar folder. FastTransfer/ICS hierarchy folder-change rows for virtual
+parent folders such as Root, IPM subtree, Sync Issues, and Recoverable Items
+root must also report `PidTagSubfolders=true` based on the virtual
+special-folder tree, not only on the subset of child rows included in the
+current transfer.
 `PidTagIpmAppointmentEntryId` projections from
 canonical and synthetic Inbox hierarchy `QueryRows`/`FindRow` rows, direct Inbox
 property reads, Root fallback reads, and store logon reads must use the
