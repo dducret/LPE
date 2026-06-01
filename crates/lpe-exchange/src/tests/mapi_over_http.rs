@@ -25826,6 +25826,40 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
     assert!(contains_bytes(response_rops, &utf16z("IPM")));
     assert!(contains_bytes(response_rops, &utf16z("IPM.Note")));
     assert!(contains_bytes(response_rops, &utf16z("IPM.Appointment")));
+    let mut row_offset = table_offset + 10;
+    let mut receive_folder_rows = Vec::new();
+    for _ in 0..3 {
+        let folder_id = crate::mapi::identity::object_id_from_wire_id(
+            &response_rops[row_offset..row_offset + 8],
+        )
+        .unwrap();
+        row_offset += 8;
+        let string_start = row_offset;
+        while response_rops[row_offset..row_offset + 2] != [0, 0] {
+            row_offset += 2;
+        }
+        let message_class = String::from_utf16(
+            &response_rops[string_start..row_offset]
+                .chunks_exact(2)
+                .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        row_offset += 2;
+        let last_modified = u64::from_le_bytes(
+            response_rops[row_offset..row_offset + 8]
+                .try_into()
+                .unwrap(),
+        );
+        row_offset += 8;
+        receive_folder_rows.push((message_class, folder_id, last_modified));
+    }
+    assert!(receive_folder_rows
+        .iter()
+        .any(|(message_class, folder_id, _)| {
+            message_class == "IPM.Appointment"
+                && *folder_id == crate::mapi::identity::CALENDAR_FOLDER_ID
+        }));
 
     let store_offset = response_rops.len() - 10;
     assert_eq!(response_rops[store_offset], 0x7B);

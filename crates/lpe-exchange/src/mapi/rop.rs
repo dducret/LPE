@@ -2687,7 +2687,6 @@ pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopReques
     write_u32(&mut response, 0);
     write_u32(&mut response, RECEIVE_FOLDER_ENTRIES.len() as u32);
     for entry in RECEIVE_FOLDER_ENTRIES {
-        response.push(0);
         write_object_id(&mut response, entry.folder_id);
         write_utf16z(&mut response, entry.message_class);
         write_u64(&mut response, 0);
