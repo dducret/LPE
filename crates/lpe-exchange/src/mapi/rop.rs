@@ -2716,7 +2716,7 @@ pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopReques
         );
         write_mapi_value(
             &mut row,
-            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_MESSAGE_CLASS_STRING8,
             &MapiValue::String(entry.message_class.to_string()),
         );
         write_mapi_value(

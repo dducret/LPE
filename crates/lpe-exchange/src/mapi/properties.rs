@@ -144,6 +144,7 @@ pub(in crate::mapi) const PID_TAG_FREE_BUSY_ENTRY_IDS: u32 = 0x36E4_1102;
 pub(in crate::mapi) const PID_TAG_HIER_REV: u32 = 0x4082_0040;
 pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
+pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_STRING8: u32 = 0x001A_001E;
 pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;

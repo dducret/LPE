@@ -11280,6 +11280,22 @@ where
                     ));
                     continue;
                 }
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x68",
+                    row_count = 3u32,
+                    first_message_class = "IPM.Appointment",
+                    first_folder_id = format!("0x{CALENDAR_FOLDER_ID:016x}"),
+                    calendar_row_present = true,
+                    message_class_wire_type = "String8",
+                    property_row_wire_shape =
+                        "PidTagFolderId,PidTagMessageClass,PidTagLastModificationTime",
+                    message = "rca debug mapi receive folder table"
+                );
                 responses.extend_from_slice(&rop_get_receive_folder_table_response(&request))
             }
             Some(RopId::LongTermIdFromId) => {

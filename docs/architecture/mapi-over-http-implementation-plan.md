@@ -692,11 +692,15 @@ rule that a folder directly below the configured hierarchy sync root is
 represented by a zero-length `PidTagParentSourceKey`; this is expected for
 Calendar when Outlook syncs the IPM subtree root. Receive-folder table rows must
 keep the fixed FolderId, MessageClass, and LastModificationTime property-row
-wire shape, with LastModificationTime derived from canonical folder change
-state, so Outlook can resolve the `IPM.Appointment` receive folder to the
-advertised Calendar folder. `RopGetReceiveFolder`, `RopSetReceiveFolder`, and
-`RopGetReceiveFolderTable` are valid only on the private mailbox logon handle
-and return `ecNotSupported` for other handles.
+wire shape, advertise `IPM.Appointment` before the generic `IPM` row, encode
+MessageClass as String8, and derive LastModificationTime from canonical folder
+change state, so Outlook can resolve the `IPM.Appointment` receive folder to
+the advertised Calendar folder. `RopGetReceiveFolder`, `RopSetReceiveFolder`,
+and `RopGetReceiveFolderTable` are valid only on the private mailbox logon
+handle and return `ecNotSupported` for other handles. RCA diagnostics log the
+receive-folder table row count, first message class, Calendar row presence, and
+MessageClass wire type so Outlook startup traces can distinguish a missing
+Calendar mapping from stale client cache behavior.
 Root and IPM subtree `PidTagSubfolders` projections must remain true even in an
 otherwise empty canonical mailbox because LPE's virtual Outlook special-folder
 tree is always present below those folders; Outlook startup must be able to walk

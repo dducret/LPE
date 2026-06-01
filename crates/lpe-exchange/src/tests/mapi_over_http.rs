@@ -27617,9 +27617,9 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
         ),
         3
     );
-    assert!(contains_bytes(response_rops, &utf16z("IPM")));
-    assert!(contains_bytes(response_rops, &utf16z("IPM.Note")));
-    assert!(contains_bytes(response_rops, &utf16z("IPM.Appointment")));
+    assert!(contains_bytes(response_rops, b"IPM\0"));
+    assert!(contains_bytes(response_rops, b"IPM.Note\0"));
+    assert!(contains_bytes(response_rops, b"IPM.Appointment\0"));
     let mut row_offset = table_offset + 10;
     let mut receive_folder_rows = Vec::new();
     for _ in 0..3 {
@@ -27631,17 +27631,13 @@ async fn mapi_over_http_execute_returns_receive_folder_and_store_state() {
         .unwrap();
         row_offset += 8;
         let string_start = row_offset;
-        while response_rops[row_offset..row_offset + 2] != [0, 0] {
-            row_offset += 2;
+        while response_rops[row_offset] != 0 {
+            row_offset += 1;
         }
-        let message_class = String::from_utf16(
-            &response_rops[string_start..row_offset]
-                .chunks_exact(2)
-                .map(|unit| u16::from_le_bytes([unit[0], unit[1]]))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap();
-        row_offset += 2;
+        let message_class = std::str::from_utf8(&response_rops[string_start..row_offset])
+            .unwrap()
+            .to_string();
+        row_offset += 1;
         let last_modified = u64::from_le_bytes(
             response_rops[row_offset..row_offset + 8]
                 .try_into()
@@ -32036,6 +32032,81 @@ async fn mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_de
         &response_rops,
         &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
     ));
+    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_ms_oxosfld_calendar_lookup_chain_opens_calendar_from_inbox() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+    let calendar_long_term_id = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+
+    let mut rops = Vec::new();
+    rops.extend_from_slice(&[0x27, 0x00, 0x00]); // RopGetReceiveFolder.
+    rops.extend_from_slice(b"IPM\0");
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x36D0_0102]);
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]); // RopIdFromLongTermId.
+    rops.extend_from_slice(&calendar_long_term_id);
+    append_rop_open_folder(&mut rops, 0, 2, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    append_rop_get_properties_specific(&mut rops, 2, &[0x3001_001F, 0x3613_001F, 0x65E0_0102]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    let mut inbox_receive_folder_response = vec![0x27, 0x00, 0, 0, 0, 0];
+    append_mapi_wire_id(
+        &mut inbox_receive_folder_response,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+    );
+    inbox_receive_folder_response.extend_from_slice(b"IPM\0");
+    assert!(contains_bytes(
+        &response_rops,
+        &inbox_receive_folder_response
+    ));
+    assert!(contains_bytes(&response_rops, &calendar_entry_id));
+    let mut id_from_long_term_response = vec![0x44, 0x00, 0, 0, 0, 0];
+    append_mapi_wire_id(
+        &mut id_from_long_term_response,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    assert!(contains_bytes(&response_rops, &id_from_long_term_response));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
     assert!(contains_bytes(
