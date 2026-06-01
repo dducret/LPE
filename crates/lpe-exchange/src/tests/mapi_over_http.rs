@@ -5523,6 +5523,176 @@ async fn mapi_over_http_execute_opens_freebusy_data_folder() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_freebusy_data_folder_has_no_placeholder_messages_without_canonical_state() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x02]); // associated contents table
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    rops.extend_from_slice(&50u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x15, 0x02, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.Delegate")
+    ));
+    assert!(!contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_freebusy_messages() {
+    let delegate_message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+    let freebusy_message_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        delegate_freebusy_messages: Arc::new(Mutex::new(vec![
+            DelegateFreeBusyMessageObject {
+                id: delegate_message_id,
+                account_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222")
+                    .unwrap(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "delegate".to_string(),
+                subject: "Delegate access for owner@example.test".to_string(),
+                body_text: "calendarRead=true; calendarWrite=true".to_string(),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: r#"{"canOpenCalendar":true}"#.to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            DelegateFreeBusyMessageObject {
+                id: freebusy_message_id,
+                account_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222")
+                    .unwrap(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "freebusy".to_string(),
+                subject: "Free/busy for owner@example.test".to_string(),
+                body_text: "busy 2026-01-01T09:00:00Z/2026-01-01T10:00:00Z".to_string(),
+                starts_at: Some("2026-01-01T09:00:00Z".to_string()),
+                ends_at: Some("2026-01-01T10:00:00Z".to_string()),
+                busy_status: Some("busy".to_string()),
+                payload_json: r#"{"status":"busy"}"#.to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x02]); // associated contents table
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x6748_0014u32.to_le_bytes());
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    rops.extend_from_slice(&50u16.to_le_bytes());
+    rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x03]); // RopOpenMessage.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID);
+    append_mapi_wire_id(&mut rops, test_mapi_uuid_id(&delegate_message_id));
+    rops.extend_from_slice(&[0x00, 0x07, 0x00, 0x03]); // RopGetPropertiesSpecific.
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x15, 0x02, 0, 0, 0, 0, 2, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Delegate access for owner@example.test")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.Delegate")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Free/busy for owner@example.test")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_wire_id_bytes(test_mapi_uuid_id(&delegate_message_id))
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("calendarRead=true; calendarWrite=true")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_query_columns_all_reports_canonical_table_columns() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -29812,6 +29982,80 @@ async fn mapi_over_http_private_logon_per_user_lookup_returns_public_folder_iden
     let mut guid_response = vec![0x61, 0x00, 0, 0, 0, 0];
     guid_response.extend_from_slice(&crate::mapi::identity::STORE_REPLICA_GUID);
     assert!(contains_bytes(&response_rops, &guid_response));
+}
+
+#[tokio::test]
+async fn mapi_over_http_outlook_startup_calendar_folder_chain_uses_advertised_default_calendar() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+    let calendar_long_term_id = crate::mapi::identity::long_term_id_from_object_id(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    )
+    .unwrap();
+
+    let mut rops = Vec::new();
+    rops.extend_from_slice(&[0x27, 0x00, 0x00]); // RopGetReceiveFolder.
+    rops.extend_from_slice(b"IPM.Appointment.Custom\0");
+    rops.extend_from_slice(&[0x26, 0x00, 0x00]); // RopSetReceiveFolder.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(b"IPM.Appointment.Custom\0");
+    append_rop_get_properties_specific(&mut rops, 0, &[0x36D0_0102]);
+    rops.extend_from_slice(&[0x44, 0x00, 0x00]); // RopIdFromLongTermId.
+    rops.extend_from_slice(&calendar_long_term_id);
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x3001_001F, 0x3613_001F, 0x65E0_0102]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_wire_id_bytes(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    ));
+    assert!(contains_bytes(&response_rops, b"IPM.Appointment\0"));
+    assert!(contains_bytes(&response_rops, &[0x26, 0x00, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &calendar_entry_id));
+    let mut id_from_long_term_response = vec![0x44, 0x00, 0, 0, 0, 0];
+    id_from_long_term_response.extend_from_slice(&mapi_wire_id_bytes(
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    ));
+    assert!(contains_bytes(&response_rops, &id_from_long_term_response));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CALENDAR_FOLDER_ID)
+    ));
 }
 
 #[tokio::test]

@@ -470,6 +470,7 @@ struct FakeStore {
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
+    delegate_freebusy_messages: Arc<Mutex<Vec<DelegateFreeBusyMessageObject>>>,
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
@@ -2191,7 +2192,8 @@ impl ExchangeStore for FakeStore {
         &'a self,
         _principal_account_id: Uuid,
     ) -> StoreFuture<'a, Vec<DelegateFreeBusyMessageObject>> {
-        Box::pin(async move { Ok(Vec::new()) })
+        let messages = self.delegate_freebusy_messages.lock().unwrap().clone();
+        Box::pin(async move { Ok(messages) })
     }
 
     fn fetch_accessible_contacts_in_collection<'a>(
