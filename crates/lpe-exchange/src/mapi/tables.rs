@@ -760,8 +760,17 @@ fn serialize_hierarchy_row(
         }
         HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
         HierarchyRow::PublicFolder(folder) => serialize_public_folder_row(folder, columns),
-        HierarchyRow::Special(folder_id) => {
+        HierarchyRow::Special(folder_id)
+            if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
+        {
             serialize_special_folder_row(folder_id, &[], columns, None)
+        }
+        HierarchyRow::Special(folder_id) => {
+            serialize_advertised_special_folder_row_with_mailbox_guid(
+                folder_id,
+                columns,
+                mailbox_guid,
+            )
         }
     }
 }
@@ -3131,6 +3140,20 @@ fn serialize_advertised_special_folder_row(
     columns: &[u32],
     principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
+    serialize_advertised_special_folder_row_with_mailbox_guid(
+        folder_id,
+        columns,
+        principal
+            .map(|principal| principal.account_id)
+            .unwrap_or_default(),
+    )
+}
+
+fn serialize_advertised_special_folder_row_with_mailbox_guid(
+    folder_id: u64,
+    columns: &[u32],
+    mailbox_guid: Uuid,
+) -> Vec<u8> {
     let mut row = Vec::new();
     let (display_name, parent_folder_id, message_class, has_subfolders) =
         special_folder_metadata(folder_id);
@@ -3182,12 +3205,7 @@ fn serialize_advertised_special_folder_row(
             ),
             PID_TAG_CHANGE_NUMBER => write_u64(&mut row, change_number),
             _ if folder_id == INBOX_FOLDER_ID => {
-                match special_folder_identification_property_value(
-                    principal
-                        .map(|principal| principal.account_id)
-                        .unwrap_or_default(),
-                    *column,
-                ) {
+                match special_folder_identification_property_value(mailbox_guid, *column) {
                     Some(value) => write_mapi_value(&mut row, *column, &value),
                     None => write_property_default(&mut row, *column),
                 }
