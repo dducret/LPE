@@ -687,7 +687,11 @@ represented by a zero-length `PidTagParentSourceKey`; this is expected for
 Calendar when Outlook syncs the IPM subtree root. Receive-folder table rows must
 keep the fixed FolderId, MessageClass, and LastModificationTime property-row
 wire shape so Outlook can resolve the `IPM.Appointment` receive folder to the
-advertised Calendar folder. Calendar content sync must
+advertised Calendar folder. `PidTagIpmAppointmentEntryId` projections from
+Inbox folder rows, direct Inbox property reads, Root fallback reads, and store
+logon reads must use the authenticated mailbox GUID consistently so Outlook does
+not see distinct Calendar entry IDs for the same default folder. Calendar
+content sync must
 load canonical calendar events for the Calendar folder and emit them as normal
 `IPM.Appointment` message changes with appointment timing/location properties,
 `PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day, busy status,

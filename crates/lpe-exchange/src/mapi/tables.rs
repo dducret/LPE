@@ -752,10 +752,11 @@ fn serialize_hierarchy_row(
     row: HierarchyRow<'_>,
     mailboxes: &[JmapMailbox],
     columns: &[u32],
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     match row {
         HierarchyRow::Mailbox(mailbox) => {
-            serialize_folder_row_with_context(mailbox, mailboxes, columns)
+            serialize_folder_row_with_context(mailbox, mailboxes, columns, mailbox_guid)
         }
         HierarchyRow::Collaboration(folder) => serialize_collaboration_folder_row(folder, columns),
         HierarchyRow::PublicFolder(folder) => serialize_public_folder_row(folder, columns),
@@ -973,6 +974,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     if !object.as_deref().is_some_and(is_table_object) {
         return rop_error_response(0x15, request.response_handle_index(), 0x8004_0102);
@@ -1008,7 +1010,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 sort_orders,
             )
             .into_iter()
-            .map(|row| serialize_hierarchy_row(row, mailboxes, &columns))
+            .map(|row| serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid))
             .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
@@ -2505,6 +2507,7 @@ pub(in crate::mapi) fn rop_find_row_response(
     mailboxes: &[JmapMailbox],
     emails: &[JmapEmail],
     snapshot: &MapiMailStoreSnapshot,
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let Ok(restriction) = request.restriction() else {
         return rop_error_response(0x4F, request.response_handle_index(), 0x8004_0102);
@@ -2552,7 +2555,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 response.push(1);
                 write_standard_property_row(
                     &mut response,
-                    &serialize_hierarchy_row(row, mailboxes, &columns),
+                    &serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid),
                 );
             } else {
                 response.push(0);
@@ -3589,7 +3592,8 @@ mod tests {
             is_subscribed: true,
         };
 
-        let mailbox_row = serialize_folder_row_with_context(&mailbox, &[], &[PID_TAG_FOLDER_TYPE]);
+        let mailbox_row =
+            serialize_folder_row_with_context(&mailbox, &[], &[PID_TAG_FOLDER_TYPE], Uuid::nil());
         assert_eq!(
             u32::from_le_bytes(mailbox_row.try_into().unwrap()),
             FOLDER_GENERIC
@@ -3667,6 +3671,7 @@ mod tests {
                 PID_TAG_PARENT_FOLDER_ID,
                 PID_TAG_CONTAINER_CLASS_W,
             ],
+            Uuid::nil(),
         );
         assert_eq!(
             u32::from_le_bytes(serialized[0..4].try_into().unwrap()),
@@ -3804,7 +3809,8 @@ mod tests {
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
             0
         );
-        let response = rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot);
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], 0x15);
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
@@ -3848,7 +3854,8 @@ mod tests {
             is_subscribed: true,
         };
 
-        let mailbox_row = serialize_folder_row_with_context(&mailbox, &[], &[PID_TAG_ACCESS]);
+        let mailbox_row =
+            serialize_folder_row_with_context(&mailbox, &[], &[PID_TAG_ACCESS], Uuid::nil());
         assert_eq!(
             u32::from_le_bytes(mailbox_row.try_into().unwrap()),
             MAPI_FOLDER_ACCESS
@@ -4027,6 +4034,7 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
     mailbox: &JmapMailbox,
     mailboxes: &[JmapMailbox],
     columns: &[u32],
+    mailbox_guid: Uuid,
 ) -> Vec<u8> {
     let mut row = Vec::new();
     for column in columns {
@@ -4041,7 +4049,12 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_FOLDER_ACCESS),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, folder_message_class(mailbox)),
-            _ => match mailbox_property_value_with_context(mailbox, mailboxes, *column) {
+            _ => match mailbox_property_value_with_context_for_account(
+                mailbox,
+                mailboxes,
+                *column,
+                mailbox_guid,
+            ) {
                 Some(value) => write_mapi_value(&mut row, *column, &value),
                 None => write_property_default(&mut row, *column),
             },

@@ -1064,9 +1064,19 @@ pub(in crate::mapi) fn mailbox_property_value_with_context(
     mailboxes: &[JmapMailbox],
     property_tag: u32,
 ) -> Option<MapiValue> {
+    mailbox_property_value_with_context_for_account(mailbox, mailboxes, property_tag, Uuid::nil())
+}
+
+pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
+    mailbox: &JmapMailbox,
+    mailboxes: &[JmapMailbox],
+    property_tag: u32,
+    mailbox_guid: Uuid,
+) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
     if mailbox.role == "inbox" {
-        if let Some(value) = special_folder_identification_property_value(Uuid::nil(), property_tag)
+        if let Some(value) =
+            special_folder_identification_property_value(mailbox_guid, property_tag)
         {
             return Some(value);
         }

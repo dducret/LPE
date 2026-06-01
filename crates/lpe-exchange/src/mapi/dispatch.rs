@@ -6806,6 +6806,7 @@ where
                 mailboxes,
                 emails,
                 snapshot,
+                principal.account_id,
             )),
             Some(RopId::GetStatus) => responses.extend_from_slice(&rop_get_status_response(
                 &request,
@@ -7500,6 +7501,7 @@ where
                 mailboxes,
                 emails,
                 snapshot,
+                principal.account_id,
             )),
             Some(RopId::GetValidAttachments) => {
                 responses.extend_from_slice(&rop_get_valid_attachments_response(

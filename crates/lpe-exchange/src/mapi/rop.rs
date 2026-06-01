@@ -1198,7 +1198,14 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 .and_then(MapiObject::folder_id)
                 .unwrap_or(ROOT_FOLDER_ID);
             folder_row_for_id(folder_id, mailboxes)
-                .map(|mailbox| serialize_folder_row_with_context(mailbox, mailboxes, &columns))
+                .map(|mailbox| {
+                    serialize_folder_row_with_context(
+                        mailbox,
+                        mailboxes,
+                        &columns,
+                        principal.account_id,
+                    )
+                })
                 .or_else(|| {
                     snapshot
                         .collaboration_folder_for_id(folder_id)
@@ -2527,7 +2534,14 @@ pub(in crate::mapi) fn serialize_object_property(
                 .and_then(MapiObject::folder_id)
                 .unwrap_or(ROOT_FOLDER_ID);
             folder_row_for_id(folder_id, mailboxes)
-                .map(|mailbox| serialize_folder_row_with_context(mailbox, mailboxes, &[tag]))
+                .map(|mailbox| {
+                    serialize_folder_row_with_context(
+                        mailbox,
+                        mailboxes,
+                        &[tag],
+                        principal.account_id,
+                    )
+                })
                 .or_else(|| {
                     snapshot
                         .collaboration_folder_for_id(folder_id)
@@ -2578,7 +2592,14 @@ fn serialize_session_folder_row(
         }
 
         let value = folder_row_for_id(folder_id, mailboxes)
-            .map(|mailbox| serialize_folder_row_with_context(mailbox, mailboxes, &[*column]))
+            .map(|mailbox| {
+                serialize_folder_row_with_context(
+                    mailbox,
+                    mailboxes,
+                    &[*column],
+                    principal.account_id,
+                )
+            })
             .or_else(|| {
                 snapshot
                     .collaboration_folder_for_id(folder_id)
