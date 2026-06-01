@@ -5563,10 +5563,10 @@ async fn mapi_over_http_freebusy_data_folder_has_no_placeholder_messages_without
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x15, 0x02, 0, 0, 0, 0, 0, 0, 0]
-    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 2, 0, 0]),
+        "{response_rops:02x?}"
+    );
     assert!(!contains_bytes(
         &response_rops,
         &utf16z("IPM.Microsoft.Delegate")
@@ -5587,8 +5587,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
             DelegateFreeBusyMessageObject {
                 id: delegate_message_id,
                 account_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
-                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222")
-                    .unwrap(),
+                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
                 owner_email: "owner@example.test".to_string(),
                 message_kind: "delegate".to_string(),
                 subject: "Delegate access for owner@example.test".to_string(),
@@ -5602,8 +5601,7 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
             DelegateFreeBusyMessageObject {
                 id: freebusy_message_id,
                 account_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
-                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222")
-                    .unwrap(),
+                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
                 owner_email: "owner@example.test".to_string(),
                 message_kind: "freebusy".to_string(),
                 subject: "Free/busy for owner@example.test".to_string(),
@@ -5639,15 +5637,14 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
     rops.extend_from_slice(&0x6748_0014u32.to_le_bytes());
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
     rops.extend_from_slice(&50u16.to_le_bytes());
-    rops.extend_from_slice(&[0x03, 0x00, 0x01, 0x03]); // RopOpenMessage.
-    append_mapi_wire_id(&mut rops, crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID);
-    append_mapi_wire_id(&mut rops, test_mapi_uuid_id(&delegate_message_id));
-    rops.extend_from_slice(&[0x00, 0x07, 0x00, 0x03]); // RopGetPropertiesSpecific.
-    rops.extend_from_slice(&4096u16.to_le_bytes());
-    rops.extend_from_slice(&3u16.to_le_bytes());
-    rops.extend_from_slice(&0x0037_001Fu32.to_le_bytes());
-    rops.extend_from_slice(&0x001A_001Fu32.to_le_bytes());
-    rops.extend_from_slice(&0x1000_001Fu32.to_le_bytes());
+    append_rop_open_message(
+        &mut rops,
+        1,
+        3,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+        test_mapi_uuid_id(&delegate_message_id),
+    );
+    append_rop_get_properties_specific(&mut rops, 3, &[0x0037_001F, 0x001A_001F, 0x1000_001F]);
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -5662,10 +5659,10 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x15, 0x02, 0, 0, 0, 0, 2, 0, 0]
-    ));
+    assert!(
+        contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0, 2, 2, 0]),
+        "{response_rops:02x?}"
+    );
     assert!(contains_bytes(
         &response_rops,
         &utf16z("Delegate access for owner@example.test")
@@ -5682,13 +5679,110 @@ async fn mapi_over_http_freebusy_data_folder_projects_canonical_delegate_and_fre
         &response_rops,
         &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
     ));
-    assert!(contains_bytes(
-        &response_rops,
-        &mapi_wire_id_bytes(test_mapi_uuid_id(&delegate_message_id))
-    ));
+    assert!(contains_bytes(&response_rops, &[0x03, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("calendarRead=true; calendarWrite=true")
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_freebusy_data_folder_content_sync_projects_canonical_fai_messages() {
+    let delegate_message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+    let freebusy_message_id = Uuid::parse_str("bbbbbbbb-cccc-dddd-eeee-ffffffffffff").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        delegate_freebusy_messages: Arc::new(Mutex::new(vec![
+            DelegateFreeBusyMessageObject {
+                id: delegate_message_id,
+                account_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "delegate".to_string(),
+                subject: "Delegate access for owner@example.test".to_string(),
+                body_text: "calendarRead=true; calendarWrite=true".to_string(),
+                starts_at: None,
+                ends_at: None,
+                busy_status: None,
+                payload_json: r#"{"canOpenCalendar":true}"#.to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            DelegateFreeBusyMessageObject {
+                id: freebusy_message_id,
+                account_id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                owner_account_id: Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                owner_email: "owner@example.test".to_string(),
+                message_kind: "freebusy".to_string(),
+                subject: "Free/busy for owner@example.test".to_string(),
+                body_text: "busy 2026-01-01T09:00:00Z/2026-01-01T10:00:00Z".to_string(),
+                starts_at: Some("2026-01-01T09:00:00Z".to_string()),
+                ends_at: Some("2026-01-01T10:00:00Z".to_string()),
+                busy_status: Some("busy".to_string()),
+                payload_json: r#"{"status":"busy"}"#.to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    );
+    rops.extend_from_slice(&[
+        0x70, 0x00, 0x01, 0x02, // RopSynchronizationConfigure
+        0x01, 0x00, 0x10, 0x00, // content sync, FAI only
+        0x00, 0x00, // RestrictionDataSize
+        0x05, 0x00, 0x00, 0x00, // SynchronizationExtraFlags: Eid | CN
+        0x00, 0x00, // PropertyTagCount
+        0x4E, 0x00, 0x02, // RopFastTransferSourceGetBuffer
+    ]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert_eq!(mapi_sync_manifest_counts(&response_rops), Some((0, 2)));
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 2);
+    assert!(stream
+        .message_changes
+        .iter()
+        .all(|message| message.associated));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Delegate access for owner@example.test"));
+    assert!(stream
+        .message_changes
+        .iter()
+        .any(|message| message.subject == "Free/busy for owner@example.test"));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.Delegate")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("IPM.Microsoft.ScheduleData.FreeBusy")
     ));
 }
 

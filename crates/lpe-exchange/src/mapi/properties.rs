@@ -3706,7 +3706,7 @@ fn calendar_recurrence_blob(event: &AccessibleEvent) -> Option<Vec<u8>> {
     value.extend_from_slice(&recurrence.frequency.to_le_bytes());
     value.extend_from_slice(&recurrence.pattern_type.to_le_bytes());
     value.extend_from_slice(&0u16.to_le_bytes());
-    value.extend_from_slice(&recurrence_minutes_since_1601(&event.date).to_le_bytes());
+    value.extend_from_slice(&recurrence.first_date_time.to_le_bytes());
     value.extend_from_slice(&recurrence.period.to_le_bytes());
     value.extend_from_slice(&0u32.to_le_bytes());
     for extra in &recurrence.pattern_extra {
@@ -3794,6 +3794,7 @@ fn recurrence_exception_override_flags(exception: &CanonicalRecurrenceException)
 struct CanonicalRecurrencePattern {
     frequency: u16,
     pattern_type: u16,
+    first_date_time: u32,
     period: u32,
     pattern_extra: Vec<u32>,
     end_type: u32,
@@ -3821,6 +3822,8 @@ fn recurrence_pattern_from_canonical(
         .unwrap_or(1)
         .max(1);
     let by_day = recurrence_rule_value(&parts, "BYDAY").unwrap_or_default();
+    let by_month =
+        recurrence_rule_value(&parts, "BYMONTH").and_then(|value| value.parse::<u32>().ok());
     let by_month_day =
         recurrence_rule_value(&parts, "BYMONTHDAY").and_then(|value| value.parse::<u32>().ok());
     let by_set_pos =
@@ -3891,6 +3894,7 @@ fn recurrence_pattern_from_canonical(
     Ok(CanonicalRecurrencePattern {
         frequency,
         pattern_type,
+        first_date_time: recurrence_first_date_minutes(event, by_month, by_month_day),
         period,
         pattern_extra,
         end_type,
@@ -3919,6 +3923,36 @@ fn recurrence_rule_value(parts: &[(String, String)], key: &str) -> Option<String
     parts
         .iter()
         .find_map(|(candidate, value)| (candidate == key).then_some(value.clone()))
+}
+
+fn recurrence_first_date_minutes(
+    event: &AccessibleEvent,
+    by_month: Option<u32>,
+    by_month_day: Option<u32>,
+) -> u32 {
+    if let Some(month) = by_month {
+        let day = by_month_day.or_else(|| {
+            event
+                .date
+                .get(8..10)
+                .and_then(|value| value.parse::<u32>().ok())
+        });
+        let year = event
+            .date
+            .get(0..4)
+            .and_then(|value| value.parse::<i32>().ok());
+        if (1..=12).contains(&month)
+            && day.is_some_and(|day| (1..=31).contains(&day))
+            && year.is_some()
+        {
+            return recurrence_minutes_since_1601(&format!(
+                "{:04}-{month:02}-{:02}",
+                year.unwrap(),
+                day.unwrap()
+            ));
+        }
+    }
+    recurrence_minutes_since_1601(&event.date)
 }
 
 fn recurrence_day_mask(value: &str) -> Result<u32> {
@@ -4060,7 +4094,7 @@ fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecur
     if calendar_type != 0 {
         bail!("unsupported MAPI calendar recurrence calendar type");
     }
-    let _first_date_time = read_recur_u32(value, &mut offset)?;
+    let first_date_time = read_recur_u32(value, &mut offset)?;
     let period = read_recur_u32(value, &mut offset)?;
     if period == 0 {
         bail!("unsupported MAPI calendar recurrence interval");
@@ -4070,7 +4104,14 @@ fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecur
         bail!("unsupported MAPI calendar recurrence sliding flag");
     }
 
-    let pattern = read_recur_pattern(value, &mut offset, frequency, pattern_type, period)?;
+    let pattern = read_recur_pattern(
+        value,
+        &mut offset,
+        frequency,
+        pattern_type,
+        period,
+        first_date_time,
+    )?;
     let end_type = read_recur_u32(value, &mut offset)?;
     let occurrence_count = read_recur_u32(value, &mut offset)?;
     let _first_dow = read_recur_u32(value, &mut offset)?;
@@ -4144,6 +4185,10 @@ fn appointment_recurrence_from_mapi(value: &[u8]) -> Result<MapiAppointmentRecur
         rule_parts.push(format!("BYMONTHDAY={day}"));
         json_parts.push(format!("\"byMonthDay\":{day}"));
     }
+    if let Some(month) = pattern.by_month {
+        rule_parts.push(format!("BYMONTH={month}"));
+        json_parts.push(format!("\"byMonth\":{month}"));
+    }
     if let Some(position) = pattern.by_set_pos {
         rule_parts.push(format!("BYSETPOS={position}"));
         json_parts.push(format!("\"bySetPosition\":{position}"));
@@ -4187,6 +4232,7 @@ struct MapiRecurPattern {
     frequency: &'static str,
     interval: u32,
     by_day: Vec<&'static str>,
+    by_month: Option<u32>,
     by_month_day: Option<u32>,
     by_set_pos: Option<i32>,
 }
@@ -4197,12 +4243,14 @@ fn read_recur_pattern(
     frequency: u16,
     pattern_type: u16,
     period: u32,
+    first_date_time: u32,
 ) -> Result<MapiRecurPattern> {
     match (frequency, pattern_type) {
         (0x200A, 0x0000) => Ok(MapiRecurPattern {
             frequency: "DAILY",
             interval: (period / 1440).max(1),
             by_day: Vec::new(),
+            by_month: None,
             by_month_day: None,
             by_set_pos: None,
         }),
@@ -4212,6 +4260,7 @@ fn read_recur_pattern(
                 frequency: "WEEKLY",
                 interval: period,
                 by_day: recurrence_days_from_mask(mask)?,
+                by_month: None,
                 by_month_day: None,
                 by_set_pos: None,
             })
@@ -4225,6 +4274,7 @@ fn read_recur_pattern(
                 frequency: "MONTHLY",
                 interval: period,
                 by_day: Vec::new(),
+                by_month: None,
                 by_month_day: Some(day),
                 by_set_pos: None,
             })
@@ -4238,6 +4288,7 @@ fn read_recur_pattern(
                 frequency: "MONTHLY",
                 interval: period,
                 by_day: Vec::new(),
+                by_month: None,
                 by_month_day: Some(31),
                 by_set_pos: None,
             })
@@ -4258,6 +4309,9 @@ fn read_recur_pattern(
                 },
                 interval: if frequency == 0x200D { 1 } else { period },
                 by_day: recurrence_days_from_mask(mask)?,
+                by_month: (frequency == 0x200D)
+                    .then(|| recurrence_month_from_minutes(first_date_time))
+                    .transpose()?,
                 by_month_day: None,
                 by_set_pos: Some(set_pos),
             })
@@ -4271,6 +4325,7 @@ fn read_recur_pattern(
                 frequency: "YEARLY",
                 interval: 1,
                 by_day: Vec::new(),
+                by_month: Some(recurrence_month_from_minutes(first_date_time)?),
                 by_month_day: Some(day),
                 by_set_pos: None,
             })
@@ -4487,6 +4542,17 @@ fn recurrence_date_string(minutes_since_1601: u32) -> Result<String> {
         days_from_civil(1601, 1, 1).saturating_add(i64::from(minutes_since_1601 / 1440));
     let (year, month, day) = civil_from_days(unix_days);
     Ok(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn recurrence_month_from_minutes(minutes_since_1601: u32) -> Result<u32> {
+    let unix_days =
+        days_from_civil(1601, 1, 1).saturating_add(i64::from(minutes_since_1601 / 1440));
+    let (_, month, _) = civil_from_days(unix_days);
+    if (1..=12).contains(&month) {
+        Ok(month)
+    } else {
+        bail!("unsupported MAPI yearly recurrence month")
+    }
 }
 
 fn recurrence_datetime_string(minutes_since_1601: u32) -> Result<String> {
@@ -7451,11 +7517,11 @@ mod tests {
 
         assert_eq!(
             yearly.recurrence_rule,
-            "FREQ=YEARLY;COUNT=2;BYDAY=FR;BYSETPOS=-1"
+            "FREQ=YEARLY;COUNT=2;BYDAY=FR;BYMONTH=5;BYSETPOS=-1"
         );
         assert_eq!(
             yearly.recurrence_json,
-            r#"{"frequency":"yearly","count":2,"byDay":["FR"],"bySetPosition":-1}"#
+            r#"{"frequency":"yearly","count":2,"byDay":["FR"],"byMonth":5,"bySetPosition":-1}"#
         );
     }
 
@@ -7683,6 +7749,63 @@ mod tests {
 
         assert_eq!(u16::from_le_bytes([value[4], value[5]]), 0x200C);
         assert_eq!(u16::from_le_bytes([value[6], value[7]]), 0x0004);
+        let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
+        assert_eq!(recurrence.recurrence_rule, event.recurrence_rule);
+        assert_eq!(recurrence.recurrence_json, event.recurrence_json);
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_yearly_recurrence_projects_back_to_mapi_binary_with_month() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "default");
+        event.date = "2026-01-14".to_string();
+        event.time = "09:00".to_string();
+        event.duration_minutes = 60;
+        event.recurrence_rule = "FREQ=YEARLY;COUNT=2;BYMONTHDAY=14;BYMONTH=7".to_string();
+        event.recurrence_json =
+            r#"{"frequency":"yearly","count":2,"byMonthDay":14,"byMonth":7}"#.to_string();
+        event.recurrence_exceptions_json = "[]".to_string();
+
+        let Some(MapiValue::Binary(value)) =
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_RECUR_TAG)
+        else {
+            panic!("expected recurrence binary projection");
+        };
+
+        let first_date_time = u32::from_le_bytes(value[10..14].try_into().unwrap());
+        assert_eq!(
+            recurrence_date_string(first_date_time).unwrap(),
+            "2026-07-14"
+        );
+        let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
+        assert_eq!(recurrence.recurrence_rule, event.recurrence_rule);
+        assert_eq!(recurrence.recurrence_json, event.recurrence_json);
+    }
+
+    #[test]
+    fn mapi_over_http_calendar_yearly_nth_recurrence_projects_back_to_mapi_binary_with_month() {
+        let mut event = default_event_for_mapping(Uuid::nil(), "default");
+        event.date = "2026-01-09".to_string();
+        event.time = "09:00".to_string();
+        event.duration_minutes = 60;
+        event.recurrence_rule = "FREQ=YEARLY;COUNT=3;BYDAY=FR;BYMONTH=10;BYSETPOS=2".to_string();
+        event.recurrence_json =
+            r#"{"frequency":"yearly","count":3,"byDay":["FR"],"byMonth":10,"bySetPosition":2}"#
+                .to_string();
+        event.recurrence_exceptions_json = "[]".to_string();
+
+        let Some(MapiValue::Binary(value)) =
+            event_property_value(&event, 1, CALENDAR_FOLDER_ID, PID_LID_APPOINTMENT_RECUR_TAG)
+        else {
+            panic!("expected recurrence binary projection");
+        };
+
+        assert_eq!(u16::from_le_bytes([value[4], value[5]]), 0x200D);
+        assert_eq!(u16::from_le_bytes([value[6], value[7]]), 0x0003);
+        let first_date_time = u32::from_le_bytes(value[10..14].try_into().unwrap());
+        assert_eq!(
+            recurrence_date_string(first_date_time).unwrap(),
+            "2026-10-09"
+        );
         let recurrence = appointment_recurrence_from_mapi(&value).unwrap();
         assert_eq!(recurrence.recurrence_rule, event.recurrence_rule);
         assert_eq!(recurrence.recurrence_json, event.recurrence_json);

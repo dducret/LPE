@@ -723,10 +723,10 @@ Binary timezone payload writes remain rejected until parser-backed
 canonical timezone mappings exist.
 `PidLidAppointmentRecur` has a parser-backed bounded read/write mapping for
 Gregorian daily, weekly, monthly-by-day including month-end, monthly-nth,
-yearly-by-day, and yearly-nth recurrence patterns into canonical `recurrence_rule`,
-`recurrence_json`, deleted-instance `recurrence_exceptions_json` fields, and
-modified-instance exceptions that change the occurrence start/end time, subject,
-or location.
+yearly-by-month-day, and yearly-nth recurrence patterns, including supported
+yearly `BYMONTH` values, into canonical `recurrence_rule`, `recurrence_json`,
+deleted-instance `recurrence_exceptions_json` fields, and modified-instance
+exceptions that change the occurrence start/end time, subject, or location.
 Direct property reads, contents rows that request the property, and
 FastTransfer/ICS calendar sync can project the bounded recurrence blob back
 from canonical event state. Appointment-like `IPM.Schedule.Meeting.Request`
