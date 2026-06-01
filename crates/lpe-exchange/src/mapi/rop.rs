@@ -2134,6 +2134,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE => "PidTagMaxSubmitMessageSize",
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => "PidTagDefaultPostMessageClass",
         PID_LID_LOCATION_W_TAG => "PidLidLocation",
         PID_LID_APPOINTMENT_DURATION_TAG => "PidLidAppointmentDuration",
         PID_LID_APPOINTMENT_START_WHOLE_TAG => "PidLidAppointmentStartWhole",
@@ -6267,6 +6268,10 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_CHANGE_KEY),
             "PidTagChangeKey"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            "PidTagDefaultPostMessageClass"
         );
     }
 

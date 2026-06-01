@@ -4647,6 +4647,7 @@ const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 const PID_TAG_MID: u32 = 0x674A_0014;
 const PID_TAG_CHANGE_NUMBER: u32 = 0x67A4_0014;
+const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const OUTLOOK_IPM_HIERARCHY_FOLDER_COUNT: u32 = 23;
 const OUTLOOK_IPM_HIERARCHY_TABLE_FOLDER_COUNT: u32 = 23;
 const PRIVATE_LOGON_SPECIAL_FOLDER_ID_COUNT: usize = 13;
@@ -4673,6 +4674,7 @@ struct StrictHierarchyFolderChange {
     change_key: Vec<u8>,
     display_name: String,
     container_class: Option<String>,
+    default_post_message_class: Option<String>,
     folder_id: Option<u64>,
     parent_folder_id: Option<u64>,
     folder_type: Option<u32>,
@@ -4690,6 +4692,7 @@ struct StrictHierarchyFolderBuilder {
     change_key: Option<Vec<u8>>,
     display_name: Option<String>,
     container_class: Option<String>,
+    default_post_message_class: Option<String>,
     folder_id: Option<u64>,
     parent_folder_id: Option<u64>,
     folder_type: Option<u32>,
@@ -4993,6 +4996,9 @@ fn strict_record_folder_property(
         PID_TAG_CONTAINER_CLASS_W => {
             folder.container_class = Some(strict_decode_utf16z(&property.value)?);
         }
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            folder.default_post_message_class = Some(strict_decode_utf16z(&property.value)?);
+        }
         _ => {}
     }
     Ok(())
@@ -5153,6 +5159,7 @@ fn strict_finish_folder_change(
         change_key,
         display_name,
         container_class: folder.container_class,
+        default_post_message_class: folder.default_post_message_class,
         folder_id: folder.folder_id,
         parent_folder_id: folder.parent_folder_id,
         folder_type: folder.folder_type,

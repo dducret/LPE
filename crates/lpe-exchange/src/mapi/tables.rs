@@ -110,6 +110,7 @@ pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
         PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
         PID_TAG_SERIALIZED_REPLID_GUID_MAP,
         PID_TAG_SUBFOLDERS,
     ]
@@ -392,6 +393,7 @@ pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
         PID_TAG_SUBFOLDERS,
         PID_TAG_CONTAINER_CLASS_W,
         PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
         PID_TAG_LAST_MODIFICATION_TIME,
         PID_TAG_LOCAL_COMMIT_TIME,
         PID_TAG_LOCAL_COMMIT_TIME_MAX,
@@ -3240,6 +3242,12 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
             }
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, message_class),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, message_class),
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8 if message_class == "IPF.Appointment" => {
+                write_ascii_z(&mut row, "IPM.Appointment")
+            }
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W if message_class == "IPF.Appointment" => {
+                write_utf16z(&mut row, "IPM.Appointment")
+            }
             PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_LOCAL_COMMIT_TIME_MAX
@@ -3600,6 +3608,7 @@ mod tests {
             PID_TAG_CONTENT_COUNT,
             PID_TAG_CONTENT_UNREAD_COUNT,
             PID_TAG_CONTAINER_CLASS_W,
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
             PID_TAG_SERIALIZED_REPLID_GUID_MAP,
             PID_TAG_SUBFOLDERS,
         ] {

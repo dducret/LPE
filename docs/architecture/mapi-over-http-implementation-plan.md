@@ -728,8 +728,21 @@ properties and hierarchy rows must also project decodeable `PidTagEntryId`,
 `PidTagInstanceKey`, and `PidTagSourceKey` values for the same canonical folder
 object, including `GetPropertiesSpecific`, `GetPropertiesAll`, property-list,
 hierarchy-table probes, and ICS hierarchy folder-change rows unless the client
-explicitly excludes the property. Custom and shared calendar hierarchy rows must
-use owner-scoped decodeable folder `PidTagEntryId` values rather than
+explicitly excludes the property. Calendar folders with `IPF.Appointment`
+container class must also project `PidTagDefaultPostMessageClass` as
+`IPM.Appointment` in both String8 and Unicode request forms so Outlook binds
+the folder's default item type without falling back to generic mail semantics;
+the Unicode form must be advertised by folder property enumeration and default
+hierarchy column discovery and emitted in hierarchy FastTransfer/ICS folder
+changes, not only returned for exact property probes. Hierarchy ICS exclusion
+lists are matched through canonical string-property identity, so excluding the
+String8 or Unicode form of a folder string property suppresses the same
+underlying folder fact instead of reintroducing it through the alternate wire
+type. Content ICS property include and exclude lists follow the same canonical
+string-property matching, including Calendar `IPM.Appointment` message-class
+rows, so String8 client filters and Unicode server projections remain aligned.
+Custom and shared calendar hierarchy rows must use owner-scoped decodeable
+folder `PidTagEntryId` values rather than
 nil-mailbox placeholders so Outlook can reopen the advertised folder identity,
 including ICS hierarchy-sync folder-change rows. Custom and shared calendar
 folders must also be present in IPM subtree hierarchy sync as `IPF.Appointment`

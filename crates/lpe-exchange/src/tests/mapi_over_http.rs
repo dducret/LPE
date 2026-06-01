@@ -5906,6 +5906,10 @@ async fn mapi_over_http_query_columns_all_folder_columns_omit_note_geometry() {
         &response_rops,
         &0x3001_001Fu32.to_le_bytes()
     ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36E5_001Fu32.to_le_bytes()
+    ));
     for note_geometry_tag in [
         0x8B00_0003u32,
         0x8B02_0003u32,
@@ -18250,6 +18254,11 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
     assert!(folder_offsets.windows(2).all(|pair| pair[0] < pair[1]));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Contact")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36E5_001Fu32.to_le_bytes()
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Journal")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.StickyNote")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Task")));
@@ -32144,6 +32153,8 @@ async fn mapi_over_http_calendar_folder_open_projects_entry_id_identity() {
             0x65E0_0102, // PidTagSourceKey
             0x3001_001F, // PidTagDisplayName
             0x3613_001F, // PidTagContainerClass
+            0x36E5_001E, // PidTagDefaultPostMessageClass
+            0x36E5_001F, // PidTagDefaultPostMessageClass
         ],
     );
     let response = service
@@ -32169,6 +32180,8 @@ async fn mapi_over_http_calendar_folder_open_projects_entry_id_identity() {
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Calendar")));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(&response_rops, b"IPM.Appointment\0"));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
     assert!(!contains_bytes(
         &response_rops,
         &0x8004_0102u32.to_le_bytes()
@@ -32307,6 +32320,8 @@ async fn mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_id
             0x65E0_0102, // PidTagSourceKey
             0x3001_001F, // PidTagDisplayName
             0x3613_001F, // PidTagContainerClass
+            0x36E5_001E, // PidTagDefaultPostMessageClass
+            0x36E5_001F, // PidTagDefaultPostMessageClass
         ],
     );
 
@@ -32332,6 +32347,8 @@ async fn mapi_over_http_custom_calendar_hierarchy_row_projects_owner_entry_id_id
         &mapi_mailstore::source_key_for_store_id(custom_folder_id)
     ));
     assert!(contains_bytes(&response_rops, &utf16z("IPF.Appointment")));
+    assert!(contains_bytes(&response_rops, b"IPM.Appointment\0"));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
 }
 
 #[tokio::test]
@@ -32402,6 +32419,10 @@ async fn mapi_over_http_custom_calendar_hierarchy_sync_projects_owner_entry_id_i
     assert_eq!(
         team_calendar.container_class.as_deref(),
         Some("IPF.Appointment")
+    );
+    assert_eq!(
+        team_calendar.default_post_message_class.as_deref(),
+        Some("IPM.Appointment")
     );
     assert_eq!(team_calendar.folder_id, Some(custom_folder_id));
     assert_eq!(
@@ -32496,6 +32517,10 @@ async fn mapi_over_http_shared_calendar_hierarchy_sync_projects_owner_entry_id_i
     assert_eq!(
         shared_calendar.container_class.as_deref(),
         Some("IPF.Appointment")
+    );
+    assert_eq!(
+        shared_calendar.default_post_message_class.as_deref(),
+        Some("IPM.Appointment")
     );
     assert_eq!(shared_calendar.folder_id, Some(shared_folder_id));
     assert!(contains_bytes(&response_rops, &owner_entry_id));
@@ -32666,7 +32691,12 @@ async fn mapi_over_http_calendar_get_properties_all_lists_entry_id_identity() {
         &response_rops,
         &0x0FF6_0102u32.to_le_bytes()
     ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36E5_001Fu32.to_le_bytes()
+    ));
     assert!(contains_bytes(&response_rops, &calendar_entry_id));
+    assert!(contains_bytes(&response_rops, &utf16z("IPM.Appointment")));
 }
 
 #[tokio::test]
@@ -32685,6 +32715,10 @@ async fn mapi_over_http_calendar_get_properties_list_advertises_entry_id_identit
     assert!(contains_bytes(
         &response_rops,
         &0x0FF6_0102u32.to_le_bytes()
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x36E5_001Fu32.to_le_bytes()
     ));
 }
 

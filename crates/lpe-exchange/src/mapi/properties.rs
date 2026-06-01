@@ -104,7 +104,7 @@ impl MapiPropertyTag {
     }
 }
 
-pub(in crate::mapi) fn canonical_property_storage_tag(property_tag: u32) -> u32 {
+pub(crate) fn canonical_property_storage_tag(property_tag: u32) -> u32 {
     let tag = MapiPropertyTag::new(property_tag);
     if tag.property_id() >= FIRST_NAMED_PROPERTY_ID {
         return property_tag;
@@ -146,6 +146,8 @@ pub(in crate::mapi) const PID_TAG_FOLDER_ID: u32 = 0x6748_0014;
 pub(in crate::mapi) const PID_TAG_PARENT_FOLDER_ID: u32 = 0x6749_0014;
 pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_STRING8: u32 = 0x001A_001E;
 pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
+pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8: u32 = 0x36E5_001E;
+pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
@@ -1101,6 +1103,11 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         })),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
+            if folder_message_class(mailbox) == "IPF.Appointment" =>
+        {
+            Some(MapiValue::String("IPM.Appointment".to_string()))
+        }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
         PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
             mailbox_guid,
@@ -1194,6 +1201,11 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
+            if collaboration_folder_message_class(folder.kind) == "IPF.Appointment" =>
+        {
+            Some(MapiValue::String("IPM.Appointment".to_string()))
+        }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
             folder.collection.owner_account_id,

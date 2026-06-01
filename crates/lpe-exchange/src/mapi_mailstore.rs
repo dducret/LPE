@@ -4,6 +4,7 @@ use lpe_storage::{JmapEmail, JmapMailbox};
 use uuid::Uuid;
 
 pub(crate) use crate::mapi::identity::STORE_REPLICA_GUID;
+use crate::mapi::properties::canonical_property_storage_tag;
 use crate::mapi::wire::{FastTransferMarker, MapiSyncType};
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -25,6 +26,7 @@ const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 const PID_TAG_NORMALIZED_SUBJECT_A: u32 = 0x0E1D_001E;
 const PID_TAG_BODY_W: u32 = 0x1000_001F;
 const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
+const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
@@ -593,6 +595,18 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
             }
             if !property_tag_excluded(excluded_property_tags, PID_TAG_CONTAINER_CLASS_W) {
                 write_utf16_property(&mut buffer, PID_TAG_CONTAINER_CLASS_W, container_class);
+            }
+            if container_class == "IPF.Appointment"
+                && !property_tag_excluded(
+                    excluded_property_tags,
+                    PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+                )
+            {
+                write_utf16_property(
+                    &mut buffer,
+                    PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+                    "IPM.Appointment",
+                );
             }
             if content_count_present {
                 write_i32_property(&mut buffer, PID_TAG_CONTENT_COUNT, content_count);
@@ -1341,7 +1355,7 @@ fn hierarchy_microsoft_payload_comparison(
             {
                 optional_property_tags.insert(*tag);
             }
-            if requested_property_tags.contains(tag)
+            if property_tag_requested(requested_property_tags, *tag)
                 && hierarchy_property_filter_mode(sync_flags, requested_property_tags) == "exclude"
             {
                 requested_excluded_property_present_tags.insert(*tag);
@@ -2186,6 +2200,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_SUBFOLDERS => "PidTagSubfolders",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => "PidTagDefaultPostMessageClass",
         PID_TAG_MESSAGE_SIZE => "PidTagMessageSize",
         PID_TAG_LAST_MODIFICATION_TIME => "PidTagLastModificationTime",
         PID_TAG_ACCESS => "PidTagAccess",
@@ -3103,7 +3118,14 @@ fn virtual_special_folder_metadata(
 }
 
 fn property_tag_excluded(excluded_property_tags: &[u32], property_tag: u32) -> bool {
-    excluded_property_tags.contains(&property_tag)
+    property_tag_requested(excluded_property_tags, property_tag)
+}
+
+fn property_tag_requested(requested_property_tags: &[u32], property_tag: u32) -> bool {
+    let property_tag = canonical_property_storage_tag(property_tag);
+    requested_property_tags
+        .iter()
+        .any(|tag| canonical_property_storage_tag(*tag) == property_tag)
 }
 
 fn content_property_in_scope(
@@ -3116,9 +3138,9 @@ fn content_property_in_scope(
         return true;
     }
     if sync_flags & 0x0080 != 0 {
-        sync_property_tags.contains(&property_tag)
+        property_tag_requested(sync_property_tags, property_tag)
     } else {
-        !sync_property_tags.contains(&property_tag)
+        !property_tag_requested(sync_property_tags, property_tag)
     }
 }
 
@@ -4659,6 +4681,11 @@ mod tests {
         );
 
         assert_variable_property(&buffer, PID_TAG_ENTRY_ID, &entry_id);
+        assert_variable_property(
+            &buffer,
+            PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
+            &utf16z("IPM.Appointment"),
+        );
     }
 
     #[test]
@@ -4687,6 +4714,72 @@ mod tests {
         );
 
         assert_absent_property(&buffer, PID_TAG_ENTRY_ID);
+    }
+
+    #[test]
+    fn hierarchy_transfer_respects_default_post_message_class_exclusion() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox = virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .expect("virtual calendar folder");
+        let buffer = sync_manifest_buffer_with_final_state(
+            account_id,
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_absent_property(&buffer, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W);
+        assert_variable_property(
+            &buffer,
+            PID_TAG_CONTAINER_CLASS_W,
+            &utf16z("IPF.Appointment"),
+        );
+    }
+
+    #[test]
+    fn hierarchy_transfer_respects_default_post_message_class_string8_exclusion() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox = virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .expect("virtual calendar folder");
+        let buffer = sync_manifest_buffer_with_final_state(
+            account_id,
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[0x36E5_001E],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_absent_property(&buffer, PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W);
+        assert_variable_property(
+            &buffer,
+            PID_TAG_CONTAINER_CLASS_W,
+            &utf16z("IPF.Appointment"),
+        );
     }
 
     #[test]
@@ -4842,6 +4935,94 @@ mod tests {
             &PID_TAG_MESSAGE_SIZE.to_le_bytes()
         ));
         assert!(!contains_bytes(&buffer, &0x8205_0003u32.to_le_bytes()));
+    }
+
+    #[test]
+    fn content_sync_manifest_applies_string8_property_excludes_to_special_objects() {
+        let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999995").unwrap();
+        let item_id = crate::mapi::identity::mapi_store_id(95);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let special = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+            item_id,
+            canonical_id,
+            associated: false,
+            subject: "Kept subject".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Appointment".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 19,
+            read_state: None,
+            named_properties: Vec::new(),
+        };
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL,
+            SYNC_EXTRA_FLAG_EID,
+            &[0x001A_001E],
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&special),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&special),
+            &[],
+            &[],
+            1,
+        );
+
+        assert!(contains_bytes(&buffer, &utf16z("Kept subject")));
+        assert!(!contains_bytes(&buffer, &utf16z("IPM.Appointment")));
+    }
+
+    #[test]
+    fn content_sync_manifest_applies_string8_property_includes_to_special_objects() {
+        let canonical_id = Uuid::parse_str("99999999-9999-9999-9999-999999999994").unwrap();
+        let item_id = crate::mapi::identity::mapi_store_id(94);
+        crate::mapi::identity::remember_mapi_identity(canonical_id, item_id);
+        let special = SpecialMessageSyncFact {
+            folder_id: crate::mapi::identity::CALENDAR_FOLDER_ID,
+            item_id,
+            canonical_id,
+            associated: false,
+            subject: "Filtered subject".to_string(),
+            body_text: String::new(),
+            message_class: "IPM.Appointment".to_string(),
+            last_modified_filetime: filetime_from_rfc3339_utc("2026-05-19T10:00:00Z"),
+            message_size: 19,
+            read_state: None,
+            named_properties: Vec::new(),
+        };
+        let buffer = sync_manifest_buffer_with_special_objects_and_final_state(
+            Uuid::nil(),
+            SYNC_TYPE_CONTENTS,
+            SYNC_FLAG_NORMAL | 0x0080,
+            SYNC_EXTRA_FLAG_EID,
+            &[0x001A_001E],
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&special),
+            &[],
+            &[],
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&special),
+            &[],
+            &[],
+            1,
+        );
+
+        assert!(!contains_bytes(&buffer, &utf16z("Filtered subject")));
+        assert!(contains_bytes(&buffer, &utf16z("IPM.Appointment")));
     }
 
     #[test]
