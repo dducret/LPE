@@ -571,6 +571,14 @@ pub(crate) fn sync_manifest_buffer_with_special_objects_and_final_state(
                 PID_TAG_PREDECESSOR_CHANGE_LIST,
                 &predecessor_change_list(change_number),
             );
+            if !property_tag_excluded(excluded_property_tags, PID_TAG_ENTRY_ID) {
+                if let Some(entry_id) = crate::mapi::identity::folder_entry_id_from_object_id(
+                    hierarchy_entry_id_mailbox_guid(mailbox, mailbox_guid),
+                    folder_id,
+                ) {
+                    write_binary_property(&mut buffer, PID_TAG_ENTRY_ID, &entry_id);
+                }
+            }
             write_utf16_property(&mut buffer, PID_TAG_DISPLAY_NAME_W, display_name);
             if sync_extra_flags & SYNC_EXTRA_FLAG_EID != 0 {
                 write_u32(&mut buffer, PID_TAG_FOLDER_ID);
@@ -2579,6 +2587,7 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
         "journal"
         | "notes"
         | "tasks"
+        | "__mapi_collaboration_calendar"
         | "suggested_contacts"
         | "quick_contacts"
         | "im_contact_list"
@@ -2607,12 +2616,20 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
     }
 }
 
+fn hierarchy_entry_id_mailbox_guid(mailbox: &JmapMailbox, fallback_mailbox_guid: Uuid) -> Uuid {
+    if mailbox.role == "__mapi_collaboration_calendar" {
+        return mailbox.parent_id.unwrap_or(fallback_mailbox_guid);
+    }
+    fallback_mailbox_guid
+}
+
 fn mapi_folder_message_class(mailbox: &JmapMailbox) -> &'static str {
     virtual_special_folder_metadata(mapi_folder_id_for_mailbox(mailbox, 0))
         .map(|(_, _, _, _, message_class)| message_class)
         .unwrap_or(match mailbox.role.as_str() {
             "contacts" => "IPF.Contact",
             "calendar" => "IPF.Appointment",
+            "__mapi_collaboration_calendar" => "IPF.Appointment",
             "journal" => "IPF.Journal",
             "notes" => "IPF.StickyNote",
             "tasks" => "IPF.Task",
@@ -4576,6 +4593,67 @@ mod tests {
             Some(crate::mapi::identity::INBOX_FOLDER_ID)
         );
         assert!(summary.emitted_property_tags.contains(&PID_TAG_FOLDER_ID));
+    }
+
+    #[test]
+    fn hierarchy_transfer_calendar_includes_account_scoped_entry_id() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox = virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .expect("virtual calendar folder");
+        let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            account_id,
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap();
+        let buffer = sync_manifest_buffer_with_final_state(
+            account_id,
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_variable_property(&buffer, PID_TAG_ENTRY_ID, &entry_id);
+    }
+
+    #[test]
+    fn hierarchy_transfer_respects_entry_id_exclusion() {
+        let account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+        let mailbox = virtual_special_mailbox(crate::mapi::identity::CALENDAR_FOLDER_ID)
+            .expect("virtual calendar folder");
+        let buffer = sync_manifest_buffer_with_final_state(
+            account_id,
+            SYNC_TYPE_HIERARCHY,
+            0,
+            0,
+            &[PID_TAG_ENTRY_ID],
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            std::slice::from_ref(&mailbox),
+            std::slice::from_ref(&mailbox),
+            &[],
+            &[],
+            &[],
+            &[],
+            1,
+        );
+
+        assert_absent_property(&buffer, PID_TAG_ENTRY_ID);
     }
 
     #[test]

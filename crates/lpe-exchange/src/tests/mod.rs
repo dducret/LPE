@@ -4569,6 +4569,7 @@ const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 const PID_TAG_FLAG_STATUS: u32 = 0x1090_0003;
+const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
 const PID_TAG_ASSOCIATED: u32 = 0x67AA_000B;
 const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
 const PID_TAG_PARENT_SOURCE_KEY: u32 = 0x65E1_0102;
@@ -5011,7 +5012,6 @@ fn strict_finish_folder_change(
         PID_TAG_LAST_MODIFICATION_TIME,
         PID_TAG_CHANGE_KEY,
         PID_TAG_PREDECESSOR_CHANGE_LIST,
-        PID_TAG_DISPLAY_NAME_W,
     ];
     if folder.tags.len() < required_prefix.len()
         || folder.tags[..required_prefix.len()] != required_prefix
@@ -5020,6 +5020,23 @@ fn strict_finish_folder_change(
             "folderChange required property prefix was not in documented order: {:x?}",
             folder.tags
         ));
+    }
+    let display_name_position = folder
+        .tags
+        .iter()
+        .position(|tag| *tag == PID_TAG_DISPLAY_NAME_W)
+        .ok_or_else(|| {
+            format!(
+                "folderChange missing PidTagDisplayName after identity prefix: {:x?}",
+                folder.tags
+            )
+        })?;
+    for tag in &folder.tags[required_prefix.len()..display_name_position] {
+        if *tag != PID_TAG_ENTRY_ID {
+            return Err(format!(
+                "folderChange unexpected property before PidTagDisplayName: 0x{tag:08x}"
+            ));
+        }
     }
     if let Some(container_class_position) = folder
         .tags

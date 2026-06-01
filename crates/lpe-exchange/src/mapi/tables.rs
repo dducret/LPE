@@ -96,6 +96,8 @@ pub(in crate::mapi) fn associated_folder_message_count(
 pub(in crate::mapi) fn default_hierarchy_columns() -> Vec<u32> {
     vec![
         PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
         PID_TAG_FOLDER_ID,
         PID_TAG_PARENT_FOLDER_ID,
         PID_TAG_FOLDER_TYPE,
@@ -379,6 +381,8 @@ pub(in crate::mapi) fn default_attachment_columns() -> Vec<u32> {
 pub(in crate::mapi) fn default_folder_property_tags() -> Vec<u32> {
     vec![
         PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
         PID_TAG_FOLDER_ID,
         PID_TAG_PARENT_FOLDER_ID,
         PID_TAG_FOLDER_TYPE,
@@ -763,7 +767,11 @@ fn serialize_hierarchy_row(
         HierarchyRow::Special(folder_id)
             if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
         {
-            serialize_special_folder_row(folder_id, &[], columns, None)
+            serialize_advertised_special_folder_row_with_mailbox_guid(
+                folder_id,
+                columns,
+                mailbox_guid,
+            )
         }
         HierarchyRow::Special(folder_id) => {
             serialize_advertised_special_folder_row_with_mailbox_guid(
@@ -3161,6 +3169,18 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, display_name),
+            PID_TAG_ENTRY_ID => {
+                let entry_id =
+                    crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
+                        .unwrap_or_else(|| {
+                            crate::mapi::identity::instance_key_for_object_id(folder_id)
+                        });
+                write_u16_prefixed_bytes(&mut row, &entry_id);
+            }
+            PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &crate::mapi::identity::instance_key_for_object_id(folder_id),
+            ),
             PID_TAG_FOLDER_ID => write_object_id(&mut row, folder_id),
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, parent_folder_id),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, special_folder_type(folder_id)),
@@ -3218,6 +3238,8 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
 
 fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, bool) {
     match folder_id {
+        ROOT_FOLDER_ID => ("Root", 0, "", true),
+        IPM_SUBTREE_FOLDER_ID => ("Top of Information Store", ROOT_FOLDER_ID, "IPF.Note", true),
         DEFERRED_ACTION_FOLDER_ID => ("Deferred Action", ROOT_FOLDER_ID, "", false),
         SPOOLER_QUEUE_FOLDER_ID => ("Spooler Queue", ROOT_FOLDER_ID, "", false),
         INBOX_FOLDER_ID => ("Inbox", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
@@ -3332,7 +3354,7 @@ fn special_folder_type(folder_id: u64) -> u32 {
 }
 
 pub(in crate::mapi) fn serialize_root_folder_row(
-    mailboxes: &[JmapMailbox],
+    _mailboxes: &[JmapMailbox],
     columns: &[u32],
     principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
@@ -3341,6 +3363,23 @@ pub(in crate::mapi) fn serialize_root_folder_row(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Root"),
+            PID_TAG_ENTRY_ID => {
+                let mailbox_guid = principal
+                    .map(|principal| principal.account_id)
+                    .unwrap_or_default();
+                let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+                    mailbox_guid,
+                    ROOT_FOLDER_ID,
+                )
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::instance_key_for_object_id(ROOT_FOLDER_ID)
+                });
+                write_u16_prefixed_bytes(&mut row, &entry_id);
+            }
+            PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &crate::mapi::identity::instance_key_for_object_id(ROOT_FOLDER_ID),
+            ),
             PID_TAG_FOLDER_ID => write_object_id(&mut row, ROOT_FOLDER_ID),
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, 0),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
@@ -3348,7 +3387,7 @@ pub(in crate::mapi) fn serialize_root_folder_row(
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
                 write_u32(&mut row, 0)
             }
-            PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
+            PID_TAG_SUBFOLDERS => row.push(1),
             PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
                 write_property_default(&mut row, *column)
             }
@@ -3394,7 +3433,7 @@ pub(in crate::mapi) fn serialize_root_folder_row(
 }
 
 pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
-    mailboxes: &[JmapMailbox],
+    _mailboxes: &[JmapMailbox],
     columns: &[u32],
     principal: Option<&AccountPrincipal>,
 ) -> Vec<u8> {
@@ -3403,6 +3442,23 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
     for column in columns {
         match *column {
             PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, "Top of Information Store"),
+            PID_TAG_ENTRY_ID => {
+                let mailbox_guid = principal
+                    .map(|principal| principal.account_id)
+                    .unwrap_or_default();
+                let entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+                    mailbox_guid,
+                    IPM_SUBTREE_FOLDER_ID,
+                )
+                .unwrap_or_else(|| {
+                    crate::mapi::identity::instance_key_for_object_id(IPM_SUBTREE_FOLDER_ID)
+                });
+                write_u16_prefixed_bytes(&mut row, &entry_id);
+            }
+            PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
+                &mut row,
+                &crate::mapi::identity::instance_key_for_object_id(IPM_SUBTREE_FOLDER_ID),
+            ),
             PID_TAG_FOLDER_ID => write_object_id(&mut row, IPM_SUBTREE_FOLDER_ID),
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, ROOT_FOLDER_ID),
             PID_TAG_FOLDER_TYPE => write_u32(&mut row, FOLDER_ROOT),
@@ -3410,7 +3466,7 @@ pub(in crate::mapi) fn serialize_ipm_subtree_folder_row(
             PID_TAG_CONTENT_COUNT | PID_TAG_CONTENT_UNREAD_COUNT | PID_TAG_DELETED_COUNT_TOTAL => {
                 write_u32(&mut row, 0)
             }
-            PID_TAG_SUBFOLDERS => row.push((!mailboxes.is_empty()) as u8),
+            PID_TAG_SUBFOLDERS => row.push(1),
             PID_TAG_CONTAINER_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
             PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPF.Note"),
             PID_TAG_LAST_MODIFICATION_TIME
@@ -3484,6 +3540,8 @@ mod tests {
         let columns = default_hierarchy_columns();
         for property_tag in [
             PID_TAG_DISPLAY_NAME_W,
+            PID_TAG_ENTRY_ID,
+            PID_TAG_INSTANCE_KEY,
             PID_TAG_FOLDER_ID,
             PID_TAG_PARENT_FOLDER_ID,
             PID_TAG_FOLDER_TYPE,
@@ -3594,6 +3652,62 @@ mod tests {
         assert_eq!(u16::from_le_bytes(row[0..2].try_into().unwrap()), 20);
         assert_eq!(&row[2..18], principal.account_id.as_bytes());
         assert_eq!(u32::from_le_bytes(row[18..22].try_into().unwrap()), 1);
+    }
+
+    #[test]
+    fn root_and_ipm_subtree_rows_project_entry_id_identity() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            account_id: Uuid::parse_str("ea339446-27b9-4a9c-b0de-873f03a35376").unwrap(),
+            email: "test@l-p-e.ch".to_string(),
+            display_name: "test".to_string(),
+        };
+
+        for folder_id in [ROOT_FOLDER_ID, IPM_SUBTREE_FOLDER_ID] {
+            let row = serialize_special_folder_row(
+                folder_id,
+                &[],
+                &[PID_TAG_ENTRY_ID, PID_TAG_INSTANCE_KEY],
+                Some(&principal),
+            );
+            let entry_id_len = u16::from_le_bytes(row[0..2].try_into().unwrap()) as usize;
+            let entry_id = &row[2..2 + entry_id_len];
+            let instance_key_offset = 2 + entry_id_len;
+            let instance_key_len = u16::from_le_bytes(
+                row[instance_key_offset..instance_key_offset + 2]
+                    .try_into()
+                    .unwrap(),
+            ) as usize;
+            let instance_key =
+                &row[instance_key_offset + 2..instance_key_offset + 2 + instance_key_len];
+
+            assert_eq!(entry_id_len, 46);
+            assert_eq!(
+                crate::mapi::identity::object_id_from_folder_entry_id(entry_id),
+                Some(folder_id)
+            );
+            assert_eq!(
+                instance_key,
+                crate::mapi::identity::instance_key_for_object_id(folder_id)
+            );
+        }
+    }
+
+    #[test]
+    fn ipm_subtree_hierarchy_restrictions_match_serialized_display_name() {
+        let restriction = MapiRestriction::Content {
+            property_tag: PID_TAG_DISPLAY_NAME_W,
+            value: "Top of Information Store".to_string(),
+        };
+
+        assert!(special_hierarchy_row_matches(
+            IPM_SUBTREE_FOLDER_ID,
+            Some(&restriction)
+        ));
+        assert_eq!(
+            special_folder_property_value(IPM_SUBTREE_FOLDER_ID, PID_TAG_DISPLAY_NAME_W),
+            Some(MapiValue::String("Top of Information Store".to_string()))
+        );
     }
 
     #[test]

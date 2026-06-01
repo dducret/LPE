@@ -286,6 +286,10 @@ non-canonical LPE state.
   free/busy blocks, calendar read grants preserve tentative/busy distinctions,
   and calendar write plus `send-on-behalf` is the supported canonical signal for
   receiving or processing meeting-related objects on behalf of a delegator.
+  MAPI creates, updates, deletes, and attachment mutations against custom or
+  shared calendar folders use the same canonical collection rights: read-only
+  shared calendars remain visible but reject write/delete attempts without
+  mutating `calendar_events` or `calendar_event_attachments`.
   Empty delegate/free-busy projection stays empty; LPE must not create
   placeholder `IPM.Microsoft.Delegate` or
   `IPM.Microsoft.ScheduleData.FreeBusy` messages just to satisfy Outlook folder
@@ -686,13 +690,38 @@ rule that a folder directly below the configured hierarchy sync root is
 represented by a zero-length `PidTagParentSourceKey`; this is expected for
 Calendar when Outlook syncs the IPM subtree root. Receive-folder table rows must
 keep the fixed FolderId, MessageClass, and LastModificationTime property-row
-wire shape so Outlook can resolve the `IPM.Appointment` receive folder to the
-advertised Calendar folder. `PidTagIpmAppointmentEntryId` projections from
+wire shape, with LastModificationTime derived from canonical folder change
+state, so Outlook can resolve the `IPM.Appointment` receive folder to the
+advertised Calendar folder. `RopGetReceiveFolder`, `RopSetReceiveFolder`, and
+`RopGetReceiveFolderTable` are valid only on the private mailbox logon handle
+and return `ecNotSupported` for other handles.
+Root and IPM subtree `PidTagSubfolders` projections must remain true even in an
+otherwise empty canonical mailbox because LPE's virtual Outlook special-folder
+tree is always present below those folders; Outlook startup must be able to walk
+that tree before any canonical mail rows or calendar events exist. Root and IPM
+subtree rows must also project decodeable `PidTagEntryId` and
+`PidTagInstanceKey` values so any cached hierarchy identity Outlook captures
+during that walk can be reopened later. Restricted hierarchy searches over those
+rows must match the same display names and identity values that unrestricted
+hierarchy `QueryRows` returns, including `"Top of Information Store"` for the
+IPM subtree.
+`PidTagIpmAppointmentEntryId` projections from
 canonical and synthetic Inbox hierarchy `QueryRows`/`FindRow` rows, direct Inbox
 property reads, Root fallback reads, and store logon reads must use the
 authenticated mailbox GUID consistently so Outlook does not see distinct
-Calendar entry IDs for the same default folder. Calendar content sync must
-load canonical calendar events for the Calendar folder and emit them as normal
+Calendar entry IDs for the same default folder. Opened Calendar folder
+properties and hierarchy rows must also project decodeable `PidTagEntryId`,
+`PidTagInstanceKey`, and `PidTagSourceKey` values for the same canonical folder
+object, including `GetPropertiesSpecific`, `GetPropertiesAll`, property-list,
+hierarchy-table probes, and ICS hierarchy folder-change rows unless the client
+explicitly excludes the property. Custom and shared calendar hierarchy rows must
+use owner-scoped decodeable folder `PidTagEntryId` values rather than
+nil-mailbox placeholders so Outlook can reopen the advertised folder identity,
+including ICS hierarchy-sync folder-change rows. Custom and shared calendar
+folders must also be present in IPM subtree hierarchy sync as `IPF.Appointment`
+folder-change rows, not only in hierarchy tables.
+Calendar content sync must load canonical calendar events for the Calendar folder
+and emit them as normal
 `IPM.Appointment` message changes with appointment timing/location properties,
 `PidLidAppointmentStartWhole`, `PidLidAppointmentEndWhole`, all-day, busy status,
 state flags, and stable `PidLidGlobalObjectId` / `PidLidCleanGlobalObjectId`

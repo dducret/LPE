@@ -1094,6 +1094,14 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
+        PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
+            mailbox_guid,
+            mapi_folder_id(mailbox),
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(mapi_folder_id(mailbox)),
+        )),
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
         | PID_TAG_LOCAL_COMMIT_TIME_MAX
@@ -1179,6 +1187,14 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             collaboration_folder_message_class(folder.kind).to_string(),
         )),
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
+        PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
+            folder.collection.owner_account_id,
+            folder.id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(folder.id),
+        )),
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
         | PID_TAG_LOCAL_COMMIT_TIME_MAX
@@ -1233,6 +1249,13 @@ pub(in crate::mapi) fn public_folder_property_value(
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(folder.id)),
         PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(parent_folder_id)),
+        PID_TAG_ENTRY_ID => {
+            crate::mapi::identity::folder_entry_id_from_object_id(Uuid::nil(), folder.id)
+                .map(MapiValue::Binary)
+        }
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            crate::mapi::identity::instance_key_for_object_id(folder.id),
+        )),
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
         | PID_TAG_LOCAL_COMMIT_TIME_MAX

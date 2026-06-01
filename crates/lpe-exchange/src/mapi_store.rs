@@ -1147,12 +1147,29 @@ impl MapiMailStoreSnapshot {
         folder_id: u64,
         principal_account_id: Uuid,
     ) -> Option<MapiFolderAccess> {
-        let folder = self.folders.iter().find(|folder| folder.id == folder_id)?;
-        let permission = self.folder_permissions.iter().find(|permission| {
-            permission.mailbox_id == folder.canonical_id
-                && permission.member_account_id == Some(principal_account_id)
-        })?;
-        Some(access_from_rights(permission.rights))
+        if let Some(folder) = self.folders.iter().find(|folder| folder.id == folder_id) {
+            let permission = self.folder_permissions.iter().find(|permission| {
+                permission.mailbox_id == folder.canonical_id
+                    && permission.member_account_id == Some(principal_account_id)
+            })?;
+            return Some(access_from_rights(permission.rights));
+        }
+        let folder = self
+            .collaboration_folders
+            .iter()
+            .find(|folder| folder.id == folder_id)?;
+        if folder.collection.owner_account_id == principal_account_id || folder.collection.is_owned
+        {
+            return Some(access_from_rights(rights_from_grant(
+                true, true, true, true,
+            )));
+        }
+        Some(access_from_rights(rights_from_grant(
+            folder.collection.rights.may_read,
+            folder.collection.rights.may_write,
+            folder.collection.rights.may_delete,
+            folder.collection.rights.may_share,
+        )))
     }
 
     #[cfg(test)]
@@ -1670,7 +1687,7 @@ fn mapi_collaboration_folder_id(
     }
 }
 
-fn collaboration_folder_identity_canonical_id(
+pub(crate) fn collaboration_folder_identity_canonical_id(
     kind: MapiCollaborationFolderKind,
     collection: &CollaborationCollection,
 ) -> Option<Uuid> {

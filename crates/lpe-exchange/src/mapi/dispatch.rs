@@ -42,6 +42,18 @@ const PID_TAG_RULE_NAME_W: u32 = 0x6682_001F;
 const PID_TAG_RULE_PROVIDER_DATA: u32 = 0x6684_0102;
 const ST_ENABLED: u32 = 0x0000_0001;
 
+fn private_logon_request_handle(
+    session: &MapiSession,
+    handle_slots: &[u32],
+    request: &RopRequest,
+) -> bool {
+    let object = input_object(session, handle_slots, request);
+    matches!(object, Some(MapiObject::Logon))
+        || (object.is_none()
+            && request.input_handle_index() == Some(0)
+            && input_handle(handle_slots, request).is_some())
+}
+
 #[derive(Debug)]
 struct BoundedSearchCriteria {
     scope_json: Value,
@@ -2358,6 +2370,17 @@ where
             "public-folder item custom property mutation is not implemented"
         ));
     }
+    if let Some(folder_id) = object.folder_id() {
+        if !snapshot
+            .folder_access_for_principal(folder_id, principal.account_id)
+            .map(|access| access.may_write)
+            .unwrap_or(true)
+        {
+            return Err(anyhow!(
+                "MAPI object mutation denied by canonical folder rights"
+            ));
+        }
+    }
     if !canonical_values.is_empty() {
         match object {
             MapiObject::Message {
@@ -4404,6 +4427,8 @@ fn log_special_sync_objects(
 fn sync_mailboxes_with_collaboration_counts(
     mut mailboxes: Vec<JmapMailbox>,
     snapshot: &MapiMailStoreSnapshot,
+    sync_root_folder_id: u64,
+    sync_type: u8,
 ) -> Vec<JmapMailbox> {
     for mailbox in &mut mailboxes {
         let Some(folder_id) = try_mapi_folder_id(mailbox) else {
@@ -4414,7 +4439,47 @@ fn sync_mailboxes_with_collaboration_counts(
             mailbox.unread_emails = 0;
         }
     }
+    if sync_type == MapiSyncType::Hierarchy.as_u8() {
+        let mut folder_ids = mailboxes
+            .iter()
+            .filter_map(try_mapi_folder_id)
+            .collect::<HashSet<_>>();
+        for folder in snapshot.collaboration_folders() {
+            if folder.kind != crate::mapi_store::MapiCollaborationFolderKind::Calendar {
+                continue;
+            }
+            if !collaboration_folder_in_hierarchy_sync_scope(folder.id, sync_root_folder_id) {
+                continue;
+            }
+            if !folder_ids.insert(folder.id) {
+                continue;
+            }
+            let Some(canonical_id) = crate::mapi_store::collaboration_folder_identity_canonical_id(
+                folder.kind,
+                &folder.collection,
+            ) else {
+                continue;
+            };
+            crate::mapi::identity::remember_mapi_identity(canonical_id, folder.id);
+            mailboxes.push(JmapMailbox {
+                id: canonical_id,
+                parent_id: Some(folder.collection.owner_account_id),
+                role: "__mapi_collaboration_calendar".to_string(),
+                name: folder.collection.display_name.clone(),
+                sort_order: 57,
+                modseq: mapi_mailstore::change_number_for_store_id(folder.id),
+                total_emails: folder.item_count,
+                unread_emails: 0,
+                is_subscribed: true,
+            });
+        }
+    }
     mailboxes
+}
+
+fn collaboration_folder_in_hierarchy_sync_scope(folder_id: u64, sync_root_folder_id: u64) -> bool {
+    matches!(sync_root_folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID)
+        || folder_id == sync_root_folder_id
 }
 
 fn is_rca_special_contract_folder(folder_id: u64) -> bool {
@@ -4459,6 +4524,9 @@ fn expected_special_folder_parent_id(folder_id: u64) -> u64 {
 }
 
 fn mailbox_parent_folder_id_for_dispatch(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) -> u64 {
+    if mailbox.role == "__mapi_collaboration_calendar" {
+        return IPM_SUBTREE_FOLDER_ID;
+    }
     mailbox
         .parent_id
         .and_then(|parent_id| mailboxes.iter().find(|candidate| candidate.id == parent_id))
@@ -7632,6 +7700,18 @@ where
                     ));
                     continue;
                 }
+                if !snapshot
+                    .folder_access_for_principal(folder_id, principal.account_id)
+                    .map(|access| access.may_write)
+                    .unwrap_or(true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x23,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
 
                 let attach_num =
                     next_pending_attachment_num(session, folder_id, message_id, snapshot);
@@ -7680,6 +7760,18 @@ where
                     ));
                     continue;
                 };
+                if !snapshot
+                    .folder_access_for_principal(folder_id, principal.account_id)
+                    .map(|access| access.may_write)
+                    .unwrap_or(true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x24,
+                        request.response_handle_index(),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
                 if is_calendar_event {
                     match store
                         .delete_calendar_event_attachment(
@@ -7750,6 +7842,18 @@ where
                     ));
                     continue;
                 };
+                if !snapshot
+                    .folder_access_for_principal(folder_id, principal.account_id)
+                    .map(|access| access.may_write)
+                    .unwrap_or(true)
+                {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x25,
+                        request.response_handle_index(),
+                        0x8007_0005,
+                    ));
+                    continue;
+                }
                 let attachment = pending_attachment_upload(attach_num, &properties, data);
                 let validation = validator.validate_bytes(
                     ValidationRequest {
@@ -8663,6 +8767,14 @@ where
                 ));
             }
             Some(RopId::SetReceiveFolder) => {
+                if !private_logon_request_handle(session, &handle_slots, &request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x26,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let Some(folder_id) = request.set_receive_folder_id() else {
                     responses.extend_from_slice(&rop_error_response(
                         0x26,
@@ -8805,6 +8917,14 @@ where
             }
             Some(RopId::GetReceiveFolder) => {
                 echo_input_handle_table = true;
+                if !private_logon_request_handle(session, &handle_slots, &request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x27,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 let Some(message_class) = request.receive_folder_message_class() else {
                     responses.extend_from_slice(&rop_error_response(
                         0x27,
@@ -9056,10 +9176,14 @@ where
                 let all_sync_mailboxes = sync_mailboxes_with_collaboration_counts(
                     sync_mailboxes_for(folder_id, sync_type, mailboxes),
                     snapshot,
+                    folder_id,
+                    sync_type,
                 );
                 let state_sync_mailboxes = sync_mailboxes_with_collaboration_counts(
                     sync_state_mailboxes_for(folder_id, sync_type, mailboxes),
                     snapshot,
+                    folder_id,
+                    sync_type,
                 );
                 let all_sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                 let all_special_sync_objects =
@@ -11143,6 +11267,14 @@ where
                 responses.extend_from_slice(&rop_options_data_response(&request))
             }
             Some(RopId::GetReceiveFolderTable) => {
+                if !private_logon_request_handle(session, &handle_slots, &request) {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x68,
+                        request.response_handle_index(),
+                        0x8004_0102,
+                    ));
+                    continue;
+                }
                 responses.extend_from_slice(&rop_get_receive_folder_table_response(&request))
             }
             Some(RopId::LongTermIdFromId) => {

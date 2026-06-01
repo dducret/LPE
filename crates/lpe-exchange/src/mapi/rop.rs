@@ -2710,7 +2710,12 @@ pub(in crate::mapi) fn rop_get_receive_folder_table_response(request: &RopReques
     for entry in RECEIVE_FOLDER_ENTRIES {
         write_object_id(&mut response, entry.folder_id);
         write_utf16z(&mut response, entry.message_class);
-        write_u64(&mut response, 0);
+        write_u64(
+            &mut response,
+            crate::mapi_mailstore::filetime_from_change_number(
+                crate::mapi_mailstore::change_number_for_store_id(entry.folder_id),
+            ),
+        );
     }
     response
 }

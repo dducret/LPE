@@ -294,6 +294,7 @@ fn mailbox_parent_folder_id(mailbox: &JmapMailbox, mailboxes: &[JmapMailbox]) ->
         | "__mapi_views"
         | "__mapi_shortcuts"
         | "__mapi_freebusy_data" => ROOT_FOLDER_ID,
+        "__mapi_collaboration_calendar" => IPM_SUBTREE_FOLDER_ID,
         "conflicts" | "local_failures" | "server_failures" => SYNC_ISSUES_FOLDER_ID,
         _ => mailbox
             .parent_id
