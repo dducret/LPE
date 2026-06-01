@@ -491,6 +491,140 @@ impl Storage {
         Ok(())
     }
 
+    pub async fn set_calendar_collection_grant(
+        &self,
+        owner_account_id: Uuid,
+        calendar_collection_id: &str,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        validate_collaboration_rights(may_read, may_write, may_delete, may_share)?;
+        let calendar_id = Uuid::parse_str(calendar_collection_id.trim())
+            .map_err(|_| anyhow!("calendar collection id must be a UUID"))?;
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let owner = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, owner_account_id)
+            .await?;
+        let grantee = self
+            .load_account_identity_in_tx(&mut tx, &tenant_id, grantee_account_id)
+            .await?;
+        if owner.id == grantee.id {
+            bail!("self-delegation is not supported");
+        }
+
+        let calendar_exists = sqlx::query_scalar::<_, bool>(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM calendars
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND id = $3
+            )
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner.id)
+        .bind(calendar_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !calendar_exists {
+            bail!("calendar collection not found");
+        }
+
+        let (grant_id, change_type) = if may_read {
+            let grant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                INSERT INTO calendar_grants (
+                    id, tenant_id, calendar_id, owner_account_id, grantee_account_id,
+                    may_read, may_write, may_delete, may_share
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (tenant_id, calendar_id, grantee_account_id)
+                DO UPDATE SET
+                    may_read = EXCLUDED.may_read,
+                    may_write = EXCLUDED.may_write,
+                    may_delete = EXCLUDED.may_delete,
+                    may_share = EXCLUDED.may_share,
+                    updated_at = NOW()
+                RETURNING id
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(&tenant_id)
+            .bind(calendar_id)
+            .bind(owner.id)
+            .bind(grantee.id)
+            .bind(may_read)
+            .bind(may_write)
+            .bind(may_delete)
+            .bind(may_share)
+            .fetch_one(&mut *tx)
+            .await?;
+            (grant_id, "updated")
+        } else {
+            let grant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                DELETE FROM calendar_grants
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND calendar_id = $3
+                  AND grantee_account_id = $4
+                RETURNING id
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(owner.id)
+            .bind(calendar_id)
+            .bind(grantee.id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow!("calendar grant not found"))?;
+            (grant_id, "destroyed")
+        };
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner.id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner.id),
+            None,
+            "calendar_grant",
+            grant_id,
+            change_type,
+            modseq,
+            &[owner.id, grantee.id],
+            serde_json::json!({
+                "collectionId": calendar_id,
+                "granteeId": grantee.id
+            }),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_collaboration_grant_change(
+            &mut tx,
+            &tenant_id,
+            CollaborationResourceKind::Calendar,
+            owner.id,
+            grantee.id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn fetch_collaboration_grant(
         &self,
         kind: CollaborationResourceKind,

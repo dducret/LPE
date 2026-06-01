@@ -425,6 +425,18 @@ pub trait ExchangeStore: AccountAuthStore {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
+    fn set_mapi_calendar_collection_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        calendar_collection_id: &'a str,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()>;
+
     fn fetch_mapi_notification_cursor<'a>(
         &'a self,
         account_id: Uuid,
@@ -2067,6 +2079,32 @@ impl ExchangeStore for Storage {
             )
             .await
             .map(|_| ())
+        })
+    }
+
+    fn set_mapi_calendar_collection_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        calendar_collection_id: &'a str,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.set_calendar_collection_grant(
+                owner_account_id,
+                calendar_collection_id,
+                grantee_account_id,
+                may_read,
+                may_write,
+                may_delete,
+                may_share,
+                audit,
+            )
+            .await
         })
     }
 

@@ -468,7 +468,7 @@ not by itself authorize broad client publication.
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. Restore uses canonical recoverable restore, purge and empty-folder use canonical recoverable purge, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `OpenSoftDeleted`, complete Exchange dumpster folder parity, and any MAPI-local dumpster store remain unsupported. |
 | Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` remain unsupported; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
-| Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for the default Calendar folder, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
+| Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for default, owned custom, and share-right delegated calendar folders, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
 | Full notification registration and delivery | Partially implemented through session-local pending events with bounded folder/message/table payloads and canonical change-cursor replay. Cross-process notification replay remains deferred; clients must re-register after reconnect or worker movement and use normal sync to converge. |
 | Outlook tolerance beyond the documented lab matrix | Unknown until captured through the release gates below. |
 
@@ -594,13 +594,15 @@ not by itself authorize broad client publication.
 - `RopModifyPermissions` is bounded to Outlook folder ACL rows that identify a
   same-tenant account member through `PidTagMemberId` and supply rights through
   `PidTagMemberRights`. Add and modify rows map read, write, delete, and share
-  bits to the canonical `mailbox_delegation_grants` row for the target mailbox;
-  remove rows delete that canonical grant. Successful mutations write canonical
-  audit and mail change-log rows and wake affected principals through the
-  existing rights journal. Owner, `Default`, and `Anonymous` rows are accepted
-  as non-mutating compatibility rows. Unsupported member identities, malformed
-  rights, virtual folders, and non-canonical ACL data return ROP-specific errors
-  without creating MAPI-local ACL state.
+  bits to the canonical `mailbox_delegation_grants` row for the target mailbox
+  or the canonical `calendar_grants` row for the target calendar collection;
+  remove rows delete that canonical grant. Custom and shared calendar folders
+  are accepted only when canonical collection rights include share permission.
+  Successful mutations write canonical audit and mail change-log rows and wake
+  affected principals through the existing rights journal. Owner, `Default`, and
+  `Anonymous` rows are accepted as non-mutating compatibility rows. Unsupported
+  member identities, malformed rights, virtual folders, and non-canonical ACL
+  data return ROP-specific errors without creating MAPI-local ACL state.
 
 ## Release Gates
 

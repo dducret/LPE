@@ -2058,6 +2058,67 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn set_mapi_calendar_collection_permission<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        calendar_collection_id: &'a str,
+        grantee_account_id: Uuid,
+        may_read: bool,
+        may_write: bool,
+        may_delete: bool,
+        may_share: bool,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, ()> {
+        let principal = self.session.clone().unwrap_or_else(FakeStore::account);
+        let grantee = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| account.account_id == grantee_account_id)
+            .cloned();
+        Box::pin(async move {
+            let Some(grantee) = grantee else {
+                anyhow::bail!("calendar grantee account not found")
+            };
+            let calendar_id = Uuid::parse_str(calendar_collection_id)?;
+            let mut permissions = self.mapi_calendar_permissions.lock().unwrap();
+            permissions.retain(|permission| {
+                permission.mailbox_id != calendar_id
+                    || permission.member_account_id != Some(grantee_account_id)
+            });
+            if may_read {
+                permissions.push(MapiFolderPermission {
+                    mailbox_id: calendar_id,
+                    member_account_id: Some(grantee_account_id),
+                    member_name: grantee.display_name,
+                    rights: crate::mapi::permissions::rights_from_grant(
+                        may_read, may_write, may_delete, may_share,
+                    ),
+                });
+            }
+            if !permissions.iter().any(|permission| {
+                permission.mailbox_id == calendar_id
+                    && permission.member_account_id == Some(owner_account_id)
+            }) {
+                permissions.push(crate::mapi::permissions::owner_permission(
+                    calendar_id,
+                    &AccountPrincipal {
+                        tenant_id: principal.tenant_id,
+                        account_id: owner_account_id,
+                        email: principal.email,
+                        display_name: principal.display_name,
+                    },
+                ));
+            }
+            self.mapi_folder_permission_audits
+                .lock()
+                .unwrap()
+                .push(audit);
+            Ok(())
+        })
+    }
+
     fn fetch_mapi_notification_cursor<'a>(
         &'a self,
         _account_id: Uuid,

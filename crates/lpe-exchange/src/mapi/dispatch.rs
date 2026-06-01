@@ -11933,8 +11933,15 @@ where
                 };
                 let mailbox_folder = folder_row_for_id(folder_id, mailboxes);
                 let public_folder = snapshot.public_folder_for_id(folder_id);
+                let calendar_collection_folder = snapshot
+                    .collaboration_folder_for_id(folder_id)
+                    .filter(|folder| folder.kind == MapiCollaborationFolderKind::Calendar);
                 let default_calendar_folder = role_for_folder_id(folder_id) == Some("calendar");
-                if mailbox_folder.is_none() && public_folder.is_none() && !default_calendar_folder {
+                if mailbox_folder.is_none()
+                    && public_folder.is_none()
+                    && calendar_collection_folder.is_none()
+                    && !default_calendar_folder
+                {
                     responses.extend_from_slice(&rop_error_response(
                         0x40,
                         request.response_handle_index(),
@@ -11944,6 +11951,8 @@ where
                 };
                 let can_share = if default_calendar_folder {
                     true
+                } else if let Some(folder) = calendar_collection_folder {
+                    folder.collection.rights.may_share
                 } else if let Some(public_folder) = public_folder {
                     public_folder.folder.rights.may_share
                 } else {
@@ -12084,6 +12093,41 @@ where
                                     actor: principal.email.clone(),
                                     action: "mapi-modify-calendar-permissions".to_string(),
                                     subject: format!("calendar {grantee_account_id}"),
+                                },
+                            )
+                            .await
+                            .is_err()
+                        {
+                            failed = true;
+                            break;
+                        }
+                    }
+                } else if let Some(folder) = calendar_collection_folder {
+                    for (
+                        _row_kind,
+                        grantee_account_id,
+                        may_read,
+                        may_write,
+                        may_delete,
+                        may_share,
+                    ) in actions
+                    {
+                        if store
+                            .set_mapi_calendar_collection_permission(
+                                folder.collection.owner_account_id,
+                                &folder.collection.id,
+                                grantee_account_id,
+                                may_read,
+                                may_write,
+                                may_delete,
+                                may_share,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "mapi-modify-calendar-permissions".to_string(),
+                                    subject: format!(
+                                        "calendar {} {}",
+                                        folder.collection.id, grantee_account_id
+                                    ),
                                 },
                             )
                             .await

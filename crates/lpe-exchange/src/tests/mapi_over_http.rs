@@ -22290,6 +22290,194 @@ async fn mapi_over_http_calendar_modify_permissions_maps_acl_rows_to_calendar_gr
 }
 
 #[tokio::test]
+async fn mapi_over_http_custom_calendar_modify_permissions_maps_acl_rows_to_calendar_grants() {
+    let account = FakeStore::account();
+    let calendar_collection_id = Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-cccccccccccc").unwrap();
+    let delegate = AuthenticatedAccount {
+        tenant_id: account.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(82);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            delegate.account_id,
+            delegate_member_id,
+        )]))),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            &calendar_collection_id.to_string(),
+            "calendar",
+            "Team Calendar",
+        )])),
+        ..Default::default()
+    };
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 100)
+        .await
+        .unwrap();
+    let custom_folder_id = snapshot
+        .collaboration_folders()
+        .iter()
+        .find(|folder| folder.collection.id == calendar_collection_id.to_string())
+        .expect("custom calendar folder")
+        .id;
+    let observed_permissions = store.mapi_calendar_permissions.clone();
+    let observed_audits = store.mapi_folder_permission_audits.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, custom_folder_id);
+    rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]); // RopModifyPermissions.
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x6671_0014u32.to_le_bytes());
+    rops.extend_from_slice(&(delegate_member_id as i64).to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(
+        &(crate::mapi::permissions::rights_from_grant(true, true, true, true) as i32).to_le_bytes(),
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x40, 0x01, 0, 0, 0, 0]));
+    let permissions = observed_permissions.lock().unwrap();
+    let delegate_permission = permissions
+        .iter()
+        .find(|permission| permission.member_account_id == Some(delegate.account_id))
+        .expect("custom calendar delegate permission was not written");
+    assert_eq!(delegate_permission.mailbox_id, calendar_collection_id);
+    assert_eq!(
+        delegate_permission.rights,
+        crate::mapi::permissions::rights_from_grant(true, true, true, true)
+    );
+    let audits = observed_audits.lock().unwrap();
+    assert_eq!(audits[0].action, "mapi-modify-calendar-permissions");
+    assert!(audits[0]
+        .subject
+        .contains(&calendar_collection_id.to_string()));
+}
+
+#[tokio::test]
+async fn mapi_over_http_shared_calendar_with_share_right_modify_permissions_maps_acl_rows_to_calendar_grants(
+) {
+    let account = FakeStore::account();
+    let owner_account_id = Uuid::parse_str("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa").unwrap();
+    let calendar_collection_id = Uuid::parse_str("cccccccc-cccc-4ccc-8ccc-cccccccccccd").unwrap();
+    let delegate = AuthenticatedAccount {
+        tenant_id: account.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let delegate_member_id = crate::mapi::identity::mapi_store_id(83);
+    let mut shared_calendar = FakeStore::collection(
+        &calendar_collection_id.to_string(),
+        "calendar",
+        "Shared Team Calendar",
+    );
+    shared_calendar.owner_account_id = owner_account_id;
+    shared_calendar.owner_email = "owner@example.test".to_string();
+    shared_calendar.owner_display_name = "Owner".to_string();
+    shared_calendar.is_owned = false;
+    shared_calendar.rights.may_read = true;
+    shared_calendar.rights.may_write = true;
+    shared_calendar.rights.may_delete = true;
+    shared_calendar.rights.may_share = true;
+    let store = FakeStore {
+        session: Some(account.clone()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(
+            delegate.account_id,
+            delegate_member_id,
+        )]))),
+        calendar_collections: Arc::new(Mutex::new(vec![shared_calendar])),
+        ..Default::default()
+    };
+    let snapshot = store
+        .load_mapi_mail_store(account.account_id, 100)
+        .await
+        .unwrap();
+    let shared_folder_id = snapshot
+        .collaboration_folders()
+        .iter()
+        .find(|folder| folder.collection.id == calendar_collection_id.to_string())
+        .expect("shared calendar folder")
+        .id;
+    let observed_permissions = store.mapi_calendar_permissions.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, shared_folder_id);
+    rops.extend_from_slice(&[0x40, 0x00, 0x01, 0x00]); // RopModifyPermissions.
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&2u16.to_le_bytes());
+    rops.extend_from_slice(&0x6671_0014u32.to_le_bytes());
+    rops.extend_from_slice(&(delegate_member_id as i64).to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(
+        &(crate::mapi::permissions::rights_from_grant(true, true, false, false) as i32)
+            .to_le_bytes(),
+    );
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x40, 0x01, 0, 0, 0, 0]));
+    let permissions = observed_permissions.lock().unwrap();
+    let delegate_permission = permissions
+        .iter()
+        .find(|permission| permission.member_account_id == Some(delegate.account_id))
+        .expect("shared calendar delegate permission was not written");
+    assert_eq!(delegate_permission.mailbox_id, calendar_collection_id);
+    assert_eq!(
+        delegate_permission.rights,
+        crate::mapi::permissions::rights_from_grant(true, true, false, false)
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_denies_mutation_without_folder_write_permission() {
     let inbox_id = "55555555-5555-5555-5555-555555555555";
     let account = FakeStore::account();
