@@ -754,6 +754,13 @@ calendar collections.
 embedded long-term ID converts back to the same canonical Calendar FID; reopening
 that FID must expose the same `IPF.Appointment`/`IPM.Appointment` folder
 classification.
+RCA diagnostics for Outlook Calendar startup must expose the exact folder
+discovery path: whether `PidTagIpmAppointmentEntryId` was requested from Inbox
+or Root, whether the Root fallback EntryID bytes match the Inbox EntryID bytes,
+whether `RopGetReceiveFolder(IPM.Appointment)` resolves to the Calendar FID, and
+whether the exact hierarchy-table property set requested by Outlook included
+decodeable Calendar `PidTagEntryId`, `PidTagSourceKey`, and `PidTagFolderId`
+values.
 Outlook can issue FAI-only content sync (`syncFlags` normal content not
 requested) against Deleted Items. When canonical normal messages exist in
 Deleted Items, LPE completes the sync source but must not advance the normal

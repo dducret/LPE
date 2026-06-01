@@ -3963,6 +3963,85 @@ fn log_calendar_folder_contract(
     );
 }
 
+fn log_calendar_hierarchy_query_rows_contract(
+    principal: &AccountPrincipal,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let Some(MapiObject::HierarchyTable {
+        folder_id, columns, ..
+    }) = object
+    else {
+        return;
+    };
+    if *folder_id != IPM_SUBTREE_FOLDER_ID && *folder_id != ROOT_FOLDER_ID {
+        return;
+    }
+    let requested_entry_id = columns.contains(&PID_TAG_ENTRY_ID);
+    let requested_instance_key = columns.contains(&PID_TAG_INSTANCE_KEY);
+    let requested_source_key = columns.contains(&PID_TAG_SOURCE_KEY);
+    let requested_folder_id = columns.contains(&PID_TAG_FOLDER_ID);
+    let requested_container_class = columns.contains(&PID_TAG_CONTAINER_CLASS_W);
+    let requested_default_post_class = columns
+        .iter()
+        .any(|tag| canonical_property_storage_tag(*tag) == PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W);
+    let calendar_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        principal.account_id,
+        CALENDAR_FOLDER_ID,
+    )
+    .unwrap_or_default();
+    let calendar_source_key = mapi_mailstore::source_key_for_store_id(CALENDAR_FOLDER_ID);
+    let decoded_entry_id =
+        crate::mapi::identity::object_id_from_folder_entry_id(&calendar_entry_id);
+    let decoded_source_key = crate::mapi::identity::object_id_from_source_key(&calendar_source_key);
+    let exact_property_set_can_reopen_calendar = requested_entry_id
+        && requested_source_key
+        && requested_folder_id
+        && decoded_entry_id == Some(CALENDAR_FOLDER_ID)
+        && decoded_source_key == Some(CALENDAR_FOLDER_ID);
+    let calendar_row_in_scope = *folder_id == IPM_SUBTREE_FOLDER_ID;
+    let calendar_folder = snapshot.collaboration_folder_for_id(CALENDAR_FOLDER_ID);
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x15",
+        hierarchy_root_folder_id = %format!("0x{folder_id:016x}"),
+        hierarchy_root_role = debug_role_for_folder_id(*folder_id),
+        requested_property_tag_count = columns.len(),
+        requested_property_tags = %format_debug_property_tags(columns),
+        requested_entry_id,
+        requested_instance_key,
+        requested_source_key,
+        requested_folder_id,
+        requested_container_class,
+        requested_default_post_class,
+        calendar_row_in_scope,
+        calendar_row_projected = calendar_row_in_scope,
+        calendar_canonical_collection_present = calendar_folder.is_some(),
+        calendar_entry_id_bytes = calendar_entry_id.len(),
+        calendar_entry_id_preview = %hex_preview(&calendar_entry_id, 24),
+        calendar_entry_id_decoded_folder_id =
+            %format_optional_folder_id(decoded_entry_id),
+        calendar_entry_id_decodes_to_calendar =
+            decoded_entry_id == Some(CALENDAR_FOLDER_ID),
+        calendar_source_key = %bytes_to_hex(&calendar_source_key),
+        calendar_source_key_decoded_folder_id =
+            %format_optional_folder_id(decoded_source_key),
+        calendar_source_key_decodes_to_calendar =
+            decoded_source_key == Some(CALENDAR_FOLDER_ID),
+        calendar_folder_id_property_value = %format!("0x{CALENDAR_FOLDER_ID:016x}"),
+        exact_property_set_can_reopen_calendar,
+        expected_container_class = "IPF.Appointment",
+        expected_default_post_message_class = "IPM.Appointment",
+        "rca debug mapi calendar hierarchy query requested property contract"
+    );
+}
+
 fn log_calendar_identity_chain(
     principal: &AccountPrincipal,
     stage: &str,
@@ -6873,14 +6952,21 @@ where
                     0x8004_0102,
                 )),
             },
-            Some(RopId::QueryRows) => responses.extend_from_slice(&rop_query_rows_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
-                mailboxes,
-                emails,
-                snapshot,
-                principal.account_id,
-            )),
+            Some(RopId::QueryRows) => {
+                log_calendar_hierarchy_query_rows_contract(
+                    principal,
+                    input_object(session, &handle_slots, &request),
+                    snapshot,
+                );
+                responses.extend_from_slice(&rop_query_rows_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    principal.account_id,
+                ));
+            }
             Some(RopId::GetStatus) => responses.extend_from_slice(&rop_get_status_response(
                 &request,
                 input_object(session, &handle_slots, &request),
@@ -8951,24 +9037,27 @@ where
                     ));
                     continue;
                 }
-                if session.hierarchy_sync_completed() {
-                    let response_folder_id = receive_folder_id_for_message_class(message_class);
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        account_id = %principal.account_id,
-                        mailbox = %principal.email,
-                        input_handle_index = request.input_handle_index().unwrap_or(0),
-                        response_handle_index = request.response_handle_index(),
-                        requested_message_class = %message_class,
-                        response_message_class =
-                            %explicit_receive_folder_message_class(message_class),
-                        response_folder_id = %format!("0x{response_folder_id:016x}"),
-                        "rca debug mapi post hierarchy get receive folder"
-                    );
-                }
                 let response_folder_id = receive_folder_id_for_message_class(message_class);
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x27",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    response_handle_index = request.response_handle_index(),
+                    hierarchy_sync_completed = session.hierarchy_sync_completed(),
+                    requested_message_class = %message_class,
+                    response_message_class =
+                        %explicit_receive_folder_message_class(message_class),
+                    response_folder_id = %format!("0x{response_folder_id:016x}"),
+                    response_folder_is_calendar =
+                        response_folder_id == CALENDAR_FOLDER_ID,
+                    expected_calendar_folder_id = "0x0000000000100001",
+                    "rca debug mapi get receive folder resolution"
+                );
                 responses.extend_from_slice(&rop_get_receive_folder_response(
                     &request,
                     response_folder_id,

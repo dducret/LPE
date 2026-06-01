@@ -1469,7 +1469,19 @@ fn log_calendar_default_folder_lookup_debug(
         _ => None,
     })
     .unwrap_or_default();
+    let inbox_entry_id = entry_id.clone();
+    let root_fallback_entry_id = special_folder_identification_property_value(
+        principal.account_id,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+    )
+    .and_then(|value| match value {
+        MapiValue::Binary(bytes) => Some(bytes),
+        _ => None,
+    })
+    .unwrap_or_default();
     let decoded_folder_id = crate::mapi::identity::object_id_from_folder_entry_id(&entry_id);
+    let root_fallback_decoded_folder_id =
+        crate::mapi::identity::object_id_from_folder_entry_id(&root_fallback_entry_id);
     let calendar_collection = snapshot.collaboration_folder_for_id(CALENDAR_FOLDER_ID);
     let returned_value_shape = format_property_value_shapes_for_debug(
         object,
@@ -1491,15 +1503,29 @@ fn log_calendar_default_folder_lookup_debug(
         folder_id = %folder_id,
         microsoft_documented_lookup_order = "GetReceiveFolder(Inbox), Inbox.GetProps(PR_IPM_APPOINTMENT_ENTRYID), root fallback",
         lookup_location,
+        lookup_asked_inbox =
+            matches!(object, Some(MapiObject::Folder { folder_id: INBOX_FOLDER_ID, .. })),
+        lookup_asked_root =
+            matches!(object, Some(MapiObject::Folder { folder_id: ROOT_FOLDER_ID, .. })),
         property_tag = "0x36d00102",
         property_name = "PidTagIpmAppointmentEntryId",
         property_returned = !unsupported,
         entry_id_bytes = entry_id.len(),
         entry_id_preview = %hex_preview_for_debug(&entry_id, 24),
+        inbox_entry_id_bytes = inbox_entry_id.len(),
+        inbox_entry_id_preview = %hex_preview_for_debug(&inbox_entry_id, 24),
+        root_fallback_entry_id_bytes = root_fallback_entry_id.len(),
+        root_fallback_entry_id_preview = %hex_preview_for_debug(&root_fallback_entry_id, 24),
+        root_fallback_matches_inbox = root_fallback_entry_id == inbox_entry_id,
         decoded_folder_id = %decoded_folder_id
             .map(|folder_id| format!("0x{folder_id:016x}"))
             .unwrap_or_default(),
+        root_fallback_decoded_folder_id = %root_fallback_decoded_folder_id
+            .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_default(),
         decoded_folder_is_calendar = decoded_folder_id == Some(CALENDAR_FOLDER_ID),
+        root_fallback_decoded_folder_is_calendar =
+            root_fallback_decoded_folder_id == Some(CALENDAR_FOLDER_ID),
         expected_calendar_folder_id = "0x0000000000100001",
         calendar_folder_projected = calendar_collection.is_some(),
         calendar_collection_id =
