@@ -405,6 +405,570 @@ CREATE TABLE IF NOT EXISTS public.public_folder_per_user_state (
 CREATE INDEX IF NOT EXISTS public_folder_per_user_state_account_idx
     ON public.public_folder_per_user_state (tenant_id, account_id, public_folder_id, updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS public.retention_policy_tags (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    tag_type TEXT NOT NULL CHECK (tag_type IN ('all', 'inbox', 'sent', 'deleted_items', 'junk_email', 'custom_folder', 'personal')),
+    action TEXT NOT NULL CHECK (action IN ('delete_and_allow_recovery', 'permanently_delete', 'move_to_archive', 'none')),
+    retention_days INTEGER CHECK (retention_days IS NULL OR retention_days >= 0),
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
+    is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+    description TEXT NOT NULL DEFAULT '',
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'disabled', 'deleted')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK ((action = 'none' AND retention_days IS NULL) OR (action <> 'none' AND retention_days IS NOT NULL)),
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS retention_policy_tags_tenant_idx
+    ON public.retention_policy_tags (tenant_id, lifecycle_state, is_visible, display_name, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS retention_policy_tags_default_type_idx
+    ON public.retention_policy_tags (tenant_id, tag_type)
+    WHERE is_default = TRUE AND lifecycle_state = 'active';
+
+CREATE TABLE IF NOT EXISTS public.account_retention_policy_assignments (
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    default_tag_id UUID,
+    policy_name TEXT NOT NULL DEFAULT '',
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    assigned_by_account_id UUID,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, account_id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, default_tag_id) REFERENCES public.retention_policy_tags (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, assigned_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_jobs (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('import', 'export')),
+    source_protocol TEXT NOT NULL DEFAULT 'ews' CHECK (source_protocol IN ('ews', 'mapi', 'api')),
+    status TEXT NOT NULL DEFAULT 'requested'
+        CHECK (status IN ('requested', 'running', 'completed', 'failed', 'cancelled')),
+    requested_by_account_id UUID NOT NULL,
+    request_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    total_items INTEGER NOT NULL DEFAULT 0 CHECK (total_items >= 0),
+    processed_items INTEGER NOT NULL DEFAULT 0 CHECK (processed_items >= 0),
+    failed_items INTEGER NOT NULL DEFAULT 0 CHECK (failed_items >= 0),
+    error_message TEXT,
+    idempotency_key TEXT CHECK (idempotency_key IS NULL OR btrim(idempotency_key) <> ''),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (jsonb_typeof(request_json) = 'object'),
+    CHECK (processed_items <= total_items),
+    CHECK (failed_items <= total_items),
+    CHECK (
+        (status IN ('requested', 'running') AND completed_at IS NULL)
+        OR (status IN ('completed', 'failed', 'cancelled') AND completed_at IS NOT NULL)
+    ),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, requested_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS mailbox_item_transfer_jobs_account_idx
+    ON public.mailbox_item_transfer_jobs (tenant_id, account_id, direction, created_at DESC, id);
+
+CREATE INDEX IF NOT EXISTS mailbox_item_transfer_jobs_status_idx
+    ON public.mailbox_item_transfer_jobs (tenant_id, status, updated_at, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS mailbox_item_transfer_jobs_idempotency_idx
+    ON public.mailbox_item_transfer_jobs (tenant_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_entries (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    job_id UUID NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+    item_kind TEXT NOT NULL CHECK (item_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'public_folder_item')),
+    canonical_id UUID,
+    mailbox_message_id UUID,
+    source_item_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processed', 'failed', 'skipped')),
+    error_message TEXT,
+    source_payload_sha256 TEXT CHECK (source_payload_sha256 IS NULL OR source_payload_sha256 ~ '^[0-9a-f]{64}$'),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, job_id, ordinal),
+    CHECK ((status IN ('pending', 'skipped') AND processed_at IS NULL) OR (status IN ('processed', 'failed') AND processed_at IS NOT NULL)),
+    FOREIGN KEY (tenant_id, job_id) REFERENCES public.mailbox_item_transfer_jobs (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mailbox_item_transfer_entries_job_idx
+    ON public.mailbox_item_transfer_entries (tenant_id, job_id, status, ordinal);
+
+CREATE TABLE IF NOT EXISTS public.compliance_cases (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    created_by_account_id UUID NOT NULL,
+    closed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK ((status = 'closed' AND closed_at IS NOT NULL) OR (status = 'open' AND closed_at IS NULL)),
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS compliance_cases_tenant_status_idx
+    ON public.compliance_cases (tenant_id, status, updated_at DESC, id);
+
+CREATE TABLE IF NOT EXISTS public.compliance_holds (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    case_id UUID,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    query_text TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'released')),
+    created_by_account_id UUID NOT NULL,
+    released_by_account_id UUID,
+    released_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK ((status = 'released' AND released_at IS NOT NULL) OR (status = 'active' AND released_at IS NULL)),
+    FOREIGN KEY (tenant_id, case_id) REFERENCES public.compliance_cases (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, released_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS compliance_holds_tenant_status_idx
+    ON public.compliance_holds (tenant_id, status, updated_at DESC, id);
+
+CREATE TABLE IF NOT EXISTS public.compliance_hold_mailboxes (
+    tenant_id UUID NOT NULL,
+    hold_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    applied_by_account_id UUID NOT NULL,
+    released_at TIMESTAMPTZ,
+    PRIMARY KEY (tenant_id, hold_id, account_id),
+    CHECK (released_at IS NULL OR released_at >= applied_at),
+    FOREIGN KEY (tenant_id, hold_id) REFERENCES public.compliance_holds (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, applied_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS compliance_hold_mailboxes_account_idx
+    ON public.compliance_hold_mailboxes (tenant_id, account_id, released_at, hold_id);
+
+CREATE TABLE IF NOT EXISTS public.discovery_searches (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    case_id UUID,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    query_text TEXT NOT NULL CHECK (btrim(query_text) <> ''),
+    scope_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by_account_id UUID NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (jsonb_typeof(scope_json) = 'object'),
+    FOREIGN KEY (tenant_id, case_id) REFERENCES public.compliance_cases (tenant_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS discovery_searches_case_idx
+    ON public.discovery_searches (tenant_id, case_id, updated_at DESC, id);
+
+CREATE TABLE IF NOT EXISTS public.discovery_search_jobs (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    search_id UUID NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    result_count INTEGER NOT NULL DEFAULT 0 CHECK (result_count >= 0),
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (
+        (status IN ('queued', 'running') AND completed_at IS NULL)
+        OR (status IN ('completed', 'failed', 'cancelled') AND completed_at IS NOT NULL)
+    ),
+    FOREIGN KEY (tenant_id, search_id) REFERENCES public.discovery_searches (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS discovery_search_jobs_status_idx
+    ON public.discovery_search_jobs (tenant_id, status, updated_at, id);
+
+CREATE TABLE IF NOT EXISTS public.discovery_result_items (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    job_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    mailbox_message_id UUID NOT NULL,
+    message_id UUID NOT NULL,
+    rank INTEGER NOT NULL DEFAULT 0 CHECK (rank >= 0),
+    preview TEXT NOT NULL DEFAULT '',
+    matched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, job_id, account_id, mailbox_message_id),
+    FOREIGN KEY (tenant_id, job_id) REFERENCES public.discovery_search_jobs (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id, mailbox_message_id, message_id)
+        REFERENCES public.mailbox_messages (tenant_id, account_id, id, message_id)
+        ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS discovery_result_items_job_idx
+    ON public.discovery_result_items (tenant_id, job_id, rank, id);
+
+CREATE INDEX IF NOT EXISTS discovery_result_items_message_idx
+    ON public.discovery_result_items (tenant_id, message_id);
+
+CREATE TABLE IF NOT EXISTS public.non_indexable_item_reports (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    message_id UUID,
+    attachment_id UUID,
+    report_kind TEXT NOT NULL CHECK (report_kind IN ('message', 'attachment')),
+    reason TEXT NOT NULL CHECK (btrim(reason) <> ''),
+    detail_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    CHECK (
+        (report_kind = 'message' AND message_id IS NOT NULL AND attachment_id IS NULL)
+        OR (report_kind = 'attachment' AND attachment_id IS NOT NULL)
+    ),
+    CHECK (jsonb_typeof(detail_json) = 'object'),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, message_id) REFERENCES public.messages (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, attachment_id) REFERENCES public.attachments (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS non_indexable_item_reports_account_idx
+    ON public.non_indexable_item_reports (tenant_id, account_id, detected_at DESC, id);
+
+CREATE INDEX IF NOT EXISTS non_indexable_item_reports_open_idx
+    ON public.non_indexable_item_reports (tenant_id, report_kind, detected_at DESC, id)
+    WHERE resolved_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS public.lpe_ct_transport_trace_events (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    trace_id TEXT NOT NULL CHECK (btrim(trace_id) <> ''),
+    submission_queue_id UUID,
+    recipient_address TEXT CHECK (recipient_address IS NULL OR btrim(recipient_address) <> ''),
+    event_kind TEXT NOT NULL CHECK (event_kind IN ('accepted', 'queued', 'deferred', 'relayed', 'bounced', 'failed', 'quarantined', 'released', 'delivered', 'duplicate', 'rejected')),
+    event_source TEXT NOT NULL DEFAULT 'lpe-ct' CHECK (event_source = 'lpe-ct'),
+    dsn_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    route_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    technical_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, trace_id, event_kind, recipient_address, occurred_at),
+    CHECK (jsonb_typeof(dsn_json) = 'object'),
+    CHECK (jsonb_typeof(route_json) = 'object'),
+    CHECK (jsonb_typeof(technical_json) = 'object'),
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, submission_queue_id) REFERENCES public.submission_queue (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS lpe_ct_transport_trace_events_trace_idx
+    ON public.lpe_ct_transport_trace_events (tenant_id, trace_id, occurred_at DESC, id);
+
+CREATE INDEX IF NOT EXISTS lpe_ct_transport_trace_events_submission_idx
+    ON public.lpe_ct_transport_trace_events (tenant_id, submission_queue_id, occurred_at DESC, id)
+    WHERE submission_queue_id IS NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgrelid = 'public.lpe_ct_transport_trace_events'::regclass
+          AND tgname = 'lpe_ct_transport_trace_events_append_only_update_guard'
+    ) THEN
+        CREATE TRIGGER lpe_ct_transport_trace_events_append_only_update_guard
+            BEFORE UPDATE ON public.lpe_ct_transport_trace_events
+            FOR EACH ROW
+            EXECUTE FUNCTION prevent_append_only_update();
+    END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS public.contact_groups (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    contact_book_id UUID NOT NULL,
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
+    group_kind TEXT NOT NULL DEFAULT 'contact_group'
+        CHECK (group_kind IN ('contact_group', 'im_group')),
+    notes TEXT NOT NULL DEFAULT '',
+    source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, owner_account_id, id),
+    UNIQUE (tenant_id, owner_account_id, contact_book_id, normalized_display_name),
+    CHECK (jsonb_typeof(source_payload_json) = 'object'),
+    FOREIGN KEY (tenant_id, owner_account_id, contact_book_id)
+        REFERENCES public.contact_books (tenant_id, owner_account_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS contact_groups_owner_idx
+    ON public.contact_groups (tenant_id, owner_account_id, contact_book_id, group_kind, display_name);
+
+CREATE TABLE IF NOT EXISTS public.contact_group_members (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    contact_group_id UUID NOT NULL,
+    member_kind TEXT NOT NULL CHECK (member_kind IN ('contact', 'account', 'distribution_group', 'tel_uri')),
+    contact_id UUID,
+    account_id UUID,
+    external_address TEXT CHECK (external_address IS NULL OR btrim(external_address) <> ''),
+    display_name TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (
+        (member_kind = 'contact' AND contact_id IS NOT NULL AND account_id IS NULL AND external_address IS NULL)
+        OR (member_kind = 'account' AND contact_id IS NULL AND account_id IS NOT NULL AND external_address IS NULL)
+        OR (member_kind IN ('distribution_group', 'tel_uri') AND contact_id IS NULL AND account_id IS NULL AND external_address IS NOT NULL)
+    ),
+    FOREIGN KEY (tenant_id, owner_account_id, contact_group_id)
+        REFERENCES public.contact_groups (tenant_id, owner_account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, contact_id)
+        REFERENCES public.contacts (tenant_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS contact_group_members_contact_idx
+    ON public.contact_group_members (tenant_id, owner_account_id, contact_group_id, contact_id)
+    WHERE member_kind = 'contact';
+
+CREATE UNIQUE INDEX IF NOT EXISTS contact_group_members_account_idx
+    ON public.contact_group_members (tenant_id, owner_account_id, contact_group_id, account_id)
+    WHERE member_kind = 'account';
+
+CREATE UNIQUE INDEX IF NOT EXISTS contact_group_members_external_idx
+    ON public.contact_group_members (tenant_id, owner_account_id, contact_group_id, member_kind, lower(external_address))
+    WHERE member_kind IN ('distribution_group', 'tel_uri');
+
+CREATE TABLE IF NOT EXISTS public.account_client_configurations (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    scope_kind TEXT NOT NULL DEFAULT 'account' CHECK (scope_kind IN ('account', 'mailbox', 'public_folder')),
+    mailbox_id UUID,
+    public_folder_id UUID,
+    config_name TEXT NOT NULL CHECK (btrim(config_name) <> ''),
+    config_class TEXT NOT NULL DEFAULT 'ews_user_configuration' CHECK (btrim(config_class) <> ''),
+    dictionary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    xml_payload TEXT,
+    binary_payload BYTEA,
+    payload_size_octets INTEGER NOT NULL DEFAULT 0 CHECK (payload_size_octets >= 0),
+    modseq BIGINT NOT NULL DEFAULT 1 CHECK (modseq > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (
+        (scope_kind = 'account' AND mailbox_id IS NULL AND public_folder_id IS NULL)
+        OR (scope_kind = 'mailbox' AND mailbox_id IS NOT NULL AND public_folder_id IS NULL)
+        OR (scope_kind = 'public_folder' AND mailbox_id IS NULL AND public_folder_id IS NOT NULL)
+    ),
+    CHECK (jsonb_typeof(dictionary_json) = 'object'),
+    CHECK (payload_size_octets = COALESCE(length(xml_payload), 0) + COALESCE(octet_length(binary_payload), 0)),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id, mailbox_id)
+        REFERENCES public.mailboxes (tenant_id, account_id, id)
+        ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, public_folder_id)
+        REFERENCES public.public_folders (tenant_id, id)
+        ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_client_configurations_account_idx
+    ON public.account_client_configurations (tenant_id, account_id, config_class, config_name)
+    WHERE scope_kind = 'account';
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_client_configurations_mailbox_idx
+    ON public.account_client_configurations (tenant_id, account_id, mailbox_id, config_class, config_name)
+    WHERE scope_kind = 'mailbox';
+
+CREATE UNIQUE INDEX IF NOT EXISTS account_client_configurations_public_folder_idx
+    ON public.account_client_configurations (tenant_id, account_id, public_folder_id, config_class, config_name)
+    WHERE scope_kind = 'public_folder';
+
+CREATE TABLE IF NOT EXISTS public.delegate_preferences (
+    tenant_id UUID NOT NULL,
+    owner_account_id UUID NOT NULL,
+    grantee_account_id UUID NOT NULL,
+    meeting_request_delivery TEXT NOT NULL DEFAULT 'delegate_and_owner'
+        CHECK (meeting_request_delivery IN ('delegate_only', 'delegate_and_owner', 'owner_only')),
+    receives_meeting_request_copy BOOLEAN NOT NULL DEFAULT TRUE,
+    may_view_private_items BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, owner_account_id, grantee_account_id),
+    CHECK (owner_account_id <> grantee_account_id),
+    FOREIGN KEY (tenant_id, owner_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, grantee_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS delegate_preferences_grantee_idx
+    ON public.delegate_preferences (tenant_id, grantee_account_id, owner_account_id);
+
+CREATE TABLE IF NOT EXISTS public.mail_app_catalog (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    app_id TEXT NOT NULL CHECK (btrim(app_id) <> ''),
+    display_name TEXT NOT NULL CHECK (btrim(display_name) <> ''),
+    manifest_xml TEXT NOT NULL CHECK (btrim(manifest_xml) <> ''),
+    provider_name TEXT NOT NULL DEFAULT '',
+    version TEXT NOT NULL DEFAULT '',
+    lifecycle_state TEXT NOT NULL DEFAULT 'active' CHECK (lifecycle_state IN ('active', 'disabled', 'deleted')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, app_id),
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mail_app_catalog_tenant_state_idx
+    ON public.mail_app_catalog (tenant_id, lifecycle_state, display_name, id);
+
+CREATE TABLE IF NOT EXISTS public.mail_app_tenant_policies (
+    tenant_id UUID PRIMARY KEY,
+    marketplace_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    marketplace_url TEXT CHECK (marketplace_url IS NULL OR btrim(marketplace_url) <> ''),
+    default_install_allowed BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (tenant_id) REFERENCES public.tenants (id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS public.mail_app_installations (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    app_catalog_id UUID NOT NULL,
+    account_id UUID,
+    install_scope TEXT NOT NULL CHECK (install_scope IN ('tenant', 'account')),
+    status TEXT NOT NULL DEFAULT 'installed' CHECK (status IN ('installed', 'disabled', 'uninstalled')),
+    installed_by_account_id UUID,
+    installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    CHECK (
+        (install_scope = 'tenant' AND account_id IS NULL)
+        OR (install_scope = 'account' AND account_id IS NOT NULL)
+    ),
+    FOREIGN KEY (tenant_id, app_catalog_id) REFERENCES public.mail_app_catalog (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, installed_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS mail_app_installations_tenant_idx
+    ON public.mail_app_installations (tenant_id, app_catalog_id)
+    WHERE install_scope = 'tenant' AND status <> 'uninstalled';
+
+CREATE UNIQUE INDEX IF NOT EXISTS mail_app_installations_account_idx
+    ON public.mail_app_installations (tenant_id, account_id, app_catalog_id)
+    WHERE install_scope = 'account' AND status <> 'uninstalled';
+
+CREATE TABLE IF NOT EXISTS public.mail_app_consents (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    app_catalog_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    consent_scope TEXT NOT NULL CHECK (btrim(consent_scope) <> ''),
+    granted_by_account_id UUID NOT NULL,
+    granted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, app_catalog_id, account_id, consent_scope),
+    CHECK (revoked_at IS NULL OR revoked_at >= granted_at),
+    FOREIGN KEY (tenant_id, app_catalog_id) REFERENCES public.mail_app_catalog (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, granted_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS mail_app_consents_account_idx
+    ON public.mail_app_consents (tenant_id, account_id, app_catalog_id, revoked_at);
+
+CREATE TABLE IF NOT EXISTS public.mail_app_token_events (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    app_catalog_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    token_hash TEXT NOT NULL CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+    scopes_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, token_hash),
+    CHECK (jsonb_typeof(scopes_json) = 'array'),
+    CHECK (expires_at > issued_at),
+    CHECK (revoked_at IS NULL OR revoked_at >= issued_at),
+    FOREIGN KEY (tenant_id, app_catalog_id) REFERENCES public.mail_app_catalog (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mail_app_token_events_account_idx
+    ON public.mail_app_token_events (tenant_id, account_id, app_catalog_id, issued_at DESC);
+
+CREATE INDEX IF NOT EXISTS mail_app_token_events_expiry_idx
+    ON public.mail_app_token_events (tenant_id, expires_at)
+    WHERE revoked_at IS NULL;
+
+CREATE TABLE IF NOT EXISTS public.unified_messaging_calls (
+    id UUID PRIMARY KEY,
+    tenant_id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    call_id TEXT NOT NULL CHECK (btrim(call_id) <> ''),
+    call_kind TEXT NOT NULL CHECK (call_kind IN ('play_on_phone', 'voicemail', 'missed_call')),
+    status TEXT NOT NULL DEFAULT 'requested'
+        CHECK (status IN ('requested', 'ringing', 'connected', 'completed', 'failed', 'cancelled')),
+    phone_number TEXT CHECK (phone_number IS NULL OR btrim(phone_number) <> ''),
+    message_id UUID,
+    technical_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    connected_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, account_id, call_id),
+    CHECK (jsonb_typeof(technical_json) = 'object'),
+    CHECK (
+        (status IN ('requested', 'ringing', 'connected') AND completed_at IS NULL)
+        OR (status IN ('completed', 'failed', 'cancelled') AND completed_at IS NOT NULL)
+    ),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (tenant_id, message_id) REFERENCES public.messages (tenant_id, id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS unified_messaging_calls_account_idx
+    ON public.unified_messaging_calls (tenant_id, account_id, requested_at DESC, id);
+
+CREATE INDEX IF NOT EXISTS unified_messaging_calls_status_idx
+    ON public.unified_messaging_calls (tenant_id, status, updated_at, id);
+
 DO $$
 BEGIN
     IF EXISTS (

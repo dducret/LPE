@@ -857,6 +857,34 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         ],
     );
     assert_source_contains_all(
+        "update-lpe.sh EWS compatibility SQL model patch",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "CREATE TABLE IF NOT EXISTS public.account_client_configurations",
+            "CREATE TABLE IF NOT EXISTS public.delegate_preferences",
+            "CREATE TABLE IF NOT EXISTS public.retention_policy_tags",
+            "CREATE TABLE IF NOT EXISTS public.account_retention_policy_assignments",
+            "CREATE TABLE IF NOT EXISTS public.compliance_cases",
+            "CREATE TABLE IF NOT EXISTS public.compliance_holds",
+            "CREATE TABLE IF NOT EXISTS public.compliance_hold_mailboxes",
+            "CREATE TABLE IF NOT EXISTS public.discovery_searches",
+            "CREATE TABLE IF NOT EXISTS public.discovery_search_jobs",
+            "CREATE TABLE IF NOT EXISTS public.discovery_result_items",
+            "CREATE TABLE IF NOT EXISTS public.non_indexable_item_reports",
+            "CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_jobs",
+            "CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_entries",
+            "CREATE TABLE IF NOT EXISTS public.lpe_ct_transport_trace_events",
+            "CREATE TABLE IF NOT EXISTS public.mail_app_catalog",
+            "CREATE TABLE IF NOT EXISTS public.mail_app_tenant_policies",
+            "CREATE TABLE IF NOT EXISTS public.mail_app_installations",
+            "CREATE TABLE IF NOT EXISTS public.mail_app_consents",
+            "CREATE TABLE IF NOT EXISTS public.mail_app_token_events",
+            "CREATE TABLE IF NOT EXISTS public.unified_messaging_calls",
+            "CREATE TABLE IF NOT EXISTS public.contact_groups",
+            "CREATE TABLE IF NOT EXISTS public.contact_group_members",
+        ],
+    );
+    assert_source_contains_all(
         "check-lpe.sh public-folder compatibility check",
         CHECK_LPE_SCRIPT,
         &[
