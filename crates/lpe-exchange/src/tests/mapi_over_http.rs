@@ -26268,6 +26268,7 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
     append_rop_create_associated_message(&mut inbox_rops, 0, 1, test_mapi_folder_id(5));
     append_rop_set_properties(&mut inbox_rops, 1, 2, &inbox_values);
     append_rop_save_changes_message(&mut inbox_rops, 1, 1);
+    append_rop_get_properties_specific(&mut inbox_rops, 1, &[PID_TAG_SUBJECT_W]);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -26278,6 +26279,7 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
     assert_eq!(imported_emails.lock().unwrap().len(), 0);
 
     renew_mapi_request_id(&mut execute_headers);
@@ -26301,6 +26303,7 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
     );
     append_rop_set_properties(&mut calendar_rops, 1, 2, &calendar_values);
     append_rop_save_changes_message(&mut calendar_rops, 1, 1);
+    append_rop_get_properties_specific(&mut calendar_rops, 1, &[PID_TAG_SUBJECT_W]);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
@@ -26311,6 +26314,44 @@ async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items()
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
+    assert!(events.lock().unwrap().is_empty());
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut freebusy_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut freebusy_values,
+        0x001A_001F,
+        "IPM.Microsoft.ScheduleData.FreeBusy",
+    );
+    append_mapi_utf16_property(
+        &mut freebusy_values,
+        PID_TAG_SUBJECT_W,
+        "Calendar freebusy view state",
+    );
+    let mut freebusy_rops = Vec::new();
+    append_rop_create_message(
+        &mut freebusy_rops,
+        0,
+        1,
+        crate::mapi::identity::FREEBUSY_DATA_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut freebusy_rops, 1, 2, &freebusy_values);
+    append_rop_save_changes_message(&mut freebusy_rops, 1, 1);
+    append_rop_get_properties_specific(&mut freebusy_rops, 1, &[PID_TAG_SUBJECT_W]);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&freebusy_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x06, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
+    assert_eq!(imported_emails.lock().unwrap().len(), 0);
     assert!(events.lock().unwrap().is_empty());
 }
 
@@ -26387,7 +26428,7 @@ async fn mapi_over_http_sync_import_associated_message_does_not_create_visible_i
 }
 
 #[tokio::test]
-async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
+async fn mapi_over_http_save_message_acknowledges_foreign_trash_sync_upload_without_persisting() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let imported_source_key =
         crate::mapi::identity::source_key_for_object_id(crate::mapi::identity::mapi_store_id(
@@ -26403,7 +26444,6 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
         ..Default::default()
     };
     let imported_emails = store.imported_emails.clone();
-    let emails = store.emails.clone();
     let mapi_identities = store.mapi_identities.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -26433,12 +26473,6 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     rops.extend_from_slice(&4u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
     rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x03, 0x00]);
-    rops.extend_from_slice(&[
-        0x07, 0x00, 0x03, // RopGetPropertiesSpecific on pending message
-    ]);
-    rops.extend_from_slice(&0u16.to_le_bytes());
-    rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&PID_TAG_CHANGE_KEY.to_le_bytes());
 
     let mut execute_headers = mapi_headers("Execute");
     execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
@@ -26455,26 +26489,7 @@ async fn mapi_over_http_save_message_persists_foreign_trash_sync_upload() {
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
-    assert!(!contains_bytes(
-        &response_rops,
-        &imported_source_key[16..22]
-    ));
-    assert!(contains_bytes(&response_rops, &[0x07, 0x03, 0, 0, 0, 0]));
-    let recorded = imported_emails.lock().unwrap();
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].mailbox_id, trash_id);
-    assert_eq!(recorded[0].subject, "Client trash upload");
-    let saved_id = emails.lock().unwrap().last().unwrap().id;
-    let saved_object_id = mapi_identities
-        .lock()
-        .unwrap()
-        .get(&saved_id)
-        .copied()
-        .unwrap();
-    assert_ne!(
-        crate::mapi::identity::source_key_for_object_id(saved_object_id),
-        imported_source_key
-    );
+    assert!(imported_emails.lock().unwrap().is_empty());
     assert!(!mapi_identities.lock().unwrap().values().any(|object_id| {
         crate::mapi::identity::source_key_for_object_id(*object_id) == imported_source_key
     }));
@@ -26497,7 +26512,6 @@ async fn mapi_over_http_replays_outlook_trash_collector_import_then_save() {
         ..Default::default()
     };
     let imported_emails = store.imported_emails.clone();
-    let emails = store.emails.clone();
     let mapi_identities = store.mapi_identities.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -26566,21 +26580,10 @@ async fn mapi_over_http_replays_outlook_trash_collector_import_then_save() {
     assert!(contains_bytes(&response_rops, &[0x0C, 0x03, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x07, 0x00, 0, 0, 0, 0]));
 
-    let recorded = imported_emails.lock().unwrap();
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].mailbox_id, trash_id);
-    assert_eq!(recorded[0].subject, "Outlook trash upload");
-    let saved_id = emails.lock().unwrap().last().unwrap().id;
-    let saved_object_id = mapi_identities
-        .lock()
-        .unwrap()
-        .get(&saved_id)
-        .copied()
-        .unwrap();
-    assert_ne!(
-        crate::mapi::identity::source_key_for_object_id(saved_object_id),
-        imported_source_key
-    );
+    assert!(imported_emails.lock().unwrap().is_empty());
+    assert!(!mapi_identities.lock().unwrap().values().any(|object_id| {
+        crate::mapi::identity::source_key_for_object_id(*object_id) == imported_source_key
+    }));
 }
 
 #[tokio::test]

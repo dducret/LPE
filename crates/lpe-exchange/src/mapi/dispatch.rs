@@ -5536,6 +5536,7 @@ where
                             | OUTBOX_FOLDER_ID
                             | NOTES_FOLDER_ID
                             | JOURNAL_FOLDER_ID
+                            | FREEBUSY_DATA_FOLDER_ID
                             | COMMON_VIEWS_FOLDER_ID
                             | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
                     )
@@ -5588,6 +5589,12 @@ where
                         },
                         _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
                             MapiObject::PendingConversationAction {
+                                folder_id,
+                                properties: HashMap::new(),
+                            }
+                        }
+                        _ if folder_id == FREEBUSY_DATA_FOLDER_ID => {
+                            MapiObject::PendingAssociatedMessage {
                                 folder_id,
                                 properties: HashMap::new(),
                             }
@@ -6456,12 +6463,10 @@ where
                         properties,
                     }) => {
                         let message_id = transient_associated_message_id(folder_id, &properties);
-                        session.handles.insert(
+                        set_handle_slot(
+                            &mut handle_slots,
+                            Some(request.response_handle_index()),
                             handle,
-                            MapiObject::Message {
-                                folder_id,
-                                message_id,
-                            },
                         );
                         record_sync_upload_content_change(
                             session,
@@ -6631,6 +6636,18 @@ where
                     ));
                     continue;
                 };
+                if pending_message_is_trash_sync_artifact(folder_id, &properties, &recipients) {
+                    let message_id = transient_associated_message_id(folder_id, &properties);
+                    set_handle_slot(
+                        &mut handle_slots,
+                        Some(request.response_handle_index()),
+                        handle,
+                    );
+                    responses.extend_from_slice(&rop_save_changes_message_response(
+                        &request, message_id,
+                    ));
+                    continue;
+                }
                 if pending_message_is_sync_metadata_only(&properties, &recipients) {
                     if folder_id == TRASH_FOLDER_ID {
                         let message_id = transient_associated_message_id(folder_id, &properties);
@@ -13383,6 +13400,22 @@ fn pending_message_is_sync_metadata_only(
                     | PID_TAG_PREDECESSOR_CHANGE_LIST
             )
         })
+}
+
+fn pending_message_is_trash_sync_artifact(
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+    recipients: &[PendingRecipient],
+) -> bool {
+    folder_id == TRASH_FOLDER_ID
+        && !properties.is_empty()
+        && recipients.is_empty()
+        && imported_message_source_key(properties)
+            .as_deref()
+            .and_then(source_key_global_counter)
+            .is_some_and(|counter| {
+                import_source_key_identity_scope(counter) == "out_of_lpe_persisted_range"
+            })
 }
 
 fn transient_associated_message_id(folder_id: u64, properties: &HashMap<u32, MapiValue>) -> u64 {

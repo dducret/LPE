@@ -807,6 +807,17 @@ Checkpoint storage diagnostics therefore report
 summary reports `status=ok_partial_scope_no_checkpoint` together with
 `all_sync_sources_completed=true` and an expected partial-scope
 not-stored count. This is not a Calendar-folder lookup failure by itself.
+Outlook can also upload transient collector artifacts into Deleted Items using
+client-local source keys outside LPE's persisted MAPI identity range. LPE
+acknowledges those saves with transient object identities but must not import
+them into the canonical mailbox or they will surface as user-visible trash
+messages.
+Outlook Calendar startup can create Freebusy Data view/configuration messages
+under the special Freebusy Data folder. Until LPE stores first-class writable
+Freebusy Data FAI state, those creates are acknowledged as transient associated
+messages and must not be routed into canonical mail or calendar storage. The
+same transient handle remains readable for immediate Outlook
+`RopGetPropertiesSpecific` calls after `RopSaveChangesMessage`.
 Custom and shared calendar hierarchy rows must use owner-scoped decodeable
 folder `PidTagEntryId` values rather than
 nil-mailbox placeholders so Outlook can reopen the advertised folder identity,
