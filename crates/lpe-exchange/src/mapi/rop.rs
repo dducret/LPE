@@ -637,7 +637,7 @@ pub(in crate::mapi) fn rop_get_address_types_response(request: &RopRequest) -> V
 pub(in crate::mapi) fn rop_transport_send_success_response(request: &RopRequest) -> Vec<u8> {
     let mut response = vec![0x4A, request.response_handle_index()];
     write_u32(&mut response, 0);
-    write_u16(&mut response, 0);
+    response.push(1);
     response
 }
 
@@ -4565,7 +4565,11 @@ pub(in crate::mapi) fn optional_mapi_value_text(
 
 pub(in crate::mapi) fn parse_mapi_restriction(bytes: &[u8]) -> Result<MapiRestriction> {
     let mut cursor = Cursor::new(bytes);
-    parse_mapi_restriction_from(&mut cursor)
+    let restriction = parse_mapi_restriction_from(&mut cursor)?;
+    if cursor.remaining() != 0 {
+        return Err(anyhow!("restriction data has trailing bytes"));
+    }
+    Ok(restriction)
 }
 
 pub(in crate::mapi) fn parse_mapi_restriction_from(
@@ -6322,6 +6326,23 @@ mod tests {
             Some(&folder),
             PID_TAG_DELETED_COUNT_TOTAL
         ));
+    }
+
+    #[test]
+    pub(in crate::mapi) fn restriction_parser_rejects_trailing_bytes() {
+        let mut restriction = vec![MapiRestrictionType::Exist as u8];
+        restriction.extend_from_slice(&PID_TAG_HAS_ATTACHMENTS.to_le_bytes());
+
+        assert_eq!(
+            parse_mapi_restriction(&restriction).unwrap(),
+            MapiRestriction::Exist {
+                property_tag: PID_TAG_HAS_ATTACHMENTS
+            }
+        );
+
+        restriction.extend_from_slice(&[0xEE, 0xEE]);
+
+        assert!(parse_mapi_restriction(&restriction).is_err());
     }
 
     #[test]

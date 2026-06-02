@@ -6347,6 +6347,13 @@ fn append_search_content(restriction: &mut Vec<u8>, property_tag: u32, value: &s
     append_mapi_utf16_property(restriction, property_tag, value);
 }
 
+fn append_search_content_string8(restriction: &mut Vec<u8>, property_tag: u32, value: &str) {
+    restriction.push(0x03);
+    restriction.extend_from_slice(&0x0001_0000u32.to_le_bytes());
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    append_mapi_string8_property(restriction, property_tag, value);
+}
+
 fn append_search_property_bool(
     restriction: &mut Vec<u8>,
     property_tag: u32,
@@ -6373,6 +6380,18 @@ fn append_search_property_i64(restriction: &mut Vec<u8>, property_tag: u32, relo
     restriction.extend_from_slice(&value.to_le_bytes());
 }
 
+fn append_search_bitmask(
+    restriction: &mut Vec<u8>,
+    property_tag: u32,
+    must_be_nonzero: bool,
+    mask: u32,
+) {
+    restriction.push(0x06);
+    restriction.push(must_be_nonzero as u8);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.extend_from_slice(&mask.to_le_bytes());
+}
+
 fn append_search_property_string(
     restriction: &mut Vec<u8>,
     property_tag: u32,
@@ -6397,6 +6416,18 @@ fn append_search_property_multi_string(
     for value in values {
         restriction.extend_from_slice(&utf16z(value));
     }
+}
+
+fn append_search_property_tagged_string(
+    restriction: &mut Vec<u8>,
+    property_tag: u32,
+    value_tag: u32,
+    relop: u8,
+    value: &str,
+) {
+    restriction.extend_from_slice(&[0x04, relop]);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    append_mapi_utf16_property(restriction, value_tag, value);
 }
 
 fn append_search_property_binary(

@@ -290,8 +290,9 @@ non-canonical LPE state.
   `PidTagHasAttachments`. `RES_OR`, `RES_NOT`, `RES_SIZE`,
   `RES_COMPAREPROPS`, `RES_SUBRESTRICTION`, `RES_COMMENT`, `RES_COUNT`,
   recipient display predicates, Bcc-related predicates, Exchange template BLOBs,
-  and arbitrary Microsoft search-folder definition blobs remain rejected with
-  parseable `RopSetSearchCriteria` / `RopGetSearchCriteria` errors until a
+  arbitrary Microsoft search-folder definition blobs, and malformed restriction
+  blobs that leave trailing bytes after the parsed restriction remain rejected
+  with parseable `RopSetSearchCriteria` / `RopGetSearchCriteria` errors until a
   canonical evaluator and serializer are explicitly documented.
 - Delegate and free/busy objects are canonical projections over
   `calendar_grants`, `sender_rights`, and `calendar_events`. LPE does not create

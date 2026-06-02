@@ -8463,6 +8463,17 @@ where
             },
             Some(RopId::SubmitMessage | RopId::TransportSend) => {
                 let Some(handle) = input_handle(&handle_slots, &request) else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = %format!("{:#04x}", request.rop_id),
+                        response_handle_index = request.response_handle_index(),
+                        failure_reason = "missing_input_handle",
+                        "rca debug mapi submit message"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
                         request.response_handle_index(),
@@ -8471,6 +8482,18 @@ where
                     continue;
                 };
                 let Some(object) = session.handles.get(&handle).cloned() else {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = %format!("{:#04x}", request.rop_id),
+                        input_handle = handle,
+                        response_handle_index = request.response_handle_index(),
+                        failure_reason = "session_handle_not_found",
+                        "rca debug mapi submit message"
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         request.rop_id,
                         request.response_handle_index(),
@@ -8490,6 +8513,20 @@ where
                     } => {
                         let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                         else {
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = %format!("{:#04x}", request.rop_id),
+                                input_handle = handle,
+                                object_kind = "message",
+                                folder_id = %format!("{folder_id:#018x}"),
+                                message_id = %format!("{message_id:#018x}"),
+                                failure_reason = "message_identity_not_found",
+                                "rca debug mapi submit message"
+                            );
                             responses.extend_from_slice(&rop_error_response(
                                 request.rop_id,
                                 request.response_handle_index(),
@@ -8550,6 +8587,17 @@ where
                         mapi_submit_from_email(principal, source_email, attachments)
                     }
                     _ => {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = %format!("{:#04x}", request.rop_id),
+                            input_handle = handle,
+                            failure_reason = "unsupported_object_for_submit",
+                            "rca debug mapi submit message"
+                        );
                         responses.extend_from_slice(&rop_error_response(
                             request.rop_id,
                             request.response_handle_index(),
@@ -8558,6 +8606,23 @@ where
                         continue;
                     }
                 };
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = %format!("{:#04x}", request.rop_id),
+                    input_handle = handle,
+                    subject = %input.subject,
+                    to_count = input.to.len(),
+                    cc_count = input.cc.len(),
+                    bcc_count = input.bcc.len(),
+                    attachment_count = input.attachments.len(),
+                    draft_message_id = %input.draft_message_id.map(|id| id.to_string()).unwrap_or_default(),
+                    source = %input.source,
+                    "rca debug mapi submit message"
+                );
                 match store
                     .submit_message(
                         input,
@@ -8604,11 +8669,25 @@ where
                             responses.extend_from_slice(&rop_simple_success_response(&request));
                         }
                     }
-                    Err(_) => responses.extend_from_slice(&rop_error_response(
-                        request.rop_id,
-                        request.response_handle_index(),
-                        0x8004_010F,
-                    )),
+                    Err(error) => {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = %format!("{:#04x}", request.rop_id),
+                            input_handle = handle,
+                            submit_error = %error,
+                            failure_reason = "canonical_submit_failed",
+                            "rca debug mapi submit message"
+                        );
+                        responses.extend_from_slice(&rop_error_response(
+                            request.rop_id,
+                            request.response_handle_index(),
+                            0x8004_010F,
+                        ));
+                    }
                 }
             }
             Some(RopId::AbortSubmit) => {

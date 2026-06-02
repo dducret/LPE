@@ -9849,10 +9849,7 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x4A, 0x02, 0, 0, 0, 0, 0, 0]
-    ));
+    assert!(contains_bytes(&response_rops, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
 
     {
         let recorded = submitted_messages.lock().unwrap();
@@ -9969,10 +9966,7 @@ async fn mapi_over_http_transport_send_opened_draft_preserves_canonical_attachme
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x4A, 0x02, 0, 0, 0, 0, 0, 0]
-    ));
+    assert!(contains_bytes(&response_rops, &[0x4A, 0x02, 0, 0, 0, 0, 1]));
 
     {
         let recorded = submitted_messages.lock().unwrap();
@@ -29209,6 +29203,193 @@ async fn mapi_over_http_set_get_search_criteria_round_trips_attachment_exists() 
 }
 
 #[tokio::test]
+async fn mapi_over_http_set_get_search_criteria_round_trips_read_bitmask() {
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555505").unwrap();
+    let search_folder_id = Uuid::parse_str("34343434-3434-4434-8434-343434343493").unwrap();
+    let search_folder_mapi_id = test_mapi_uuid_id(&search_folder_id);
+    crate::mapi::identity::remember_mapi_identity(search_folder_id, search_folder_mapi_id);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: search_folder_id,
+            account_id: account.account_id,
+            role: "custom".to_string(),
+            display_name: "Unread bitmask".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({}),
+            restriction_json: serde_json::json!({}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: false,
+        }])),
+        ..Default::default()
+    };
+    let stored_search_folders = store.search_folders.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut restriction = Vec::new();
+    append_search_bitmask(&mut restriction, 0x0E07_0003, false, 0x0000_0001);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+    append_rop_set_search_criteria(
+        &mut rops,
+        1,
+        &restriction,
+        &[test_mapi_folder_id(5)],
+        0x0000_0005,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x30, 0x01, 0, 0, 0, 0]));
+    {
+        let stored = stored_search_folders.lock().unwrap();
+        assert_eq!(
+            stored[0].restriction_json,
+            serde_json::json!({
+                "kind": "mapi_bounded",
+                "all": [
+                    {"field": "unread", "equals": true}
+                ]
+            })
+        );
+    }
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, search_folder_mapi_id);
+    append_rop_get_search_criteria(&mut get_rops, 1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x31, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &0x0E69_000Bu32.to_le_bytes()
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_set_get_search_criteria_round_trips_string8_body_content() {
+    let account = FakeStore::account();
+    let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555506").unwrap();
+    let search_folder_id = Uuid::parse_str("34343434-3434-4434-8434-343434343492").unwrap();
+    let search_folder_mapi_id = test_mapi_uuid_id(&search_folder_id);
+    crate::mapi::identity::remember_mapi_identity(search_folder_id, search_folder_mapi_id);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: search_folder_id,
+            account_id: account.account_id,
+            role: "custom".to_string(),
+            display_name: "String8 body".to_string(),
+            definition_kind: "user_saved".to_string(),
+            result_object_kind: "message".to_string(),
+            scope_json: serde_json::json!({}),
+            restriction_json: serde_json::json!({}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: false,
+        }])),
+        ..Default::default()
+    };
+    let stored_search_folders = store.search_folders.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut restriction = Vec::new();
+    append_search_content_string8(&mut restriction, 0x1000_001E, "plain text body");
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+    append_rop_set_search_criteria(
+        &mut rops,
+        1,
+        &restriction,
+        &[test_mapi_folder_id(5)],
+        0x0000_0005,
+    );
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(&response_rops, &[0x30, 0x01, 0, 0, 0, 0]));
+    {
+        let stored = stored_search_folders.lock().unwrap();
+        assert_eq!(
+            stored[0].restriction_json,
+            serde_json::json!({
+                "kind": "mapi_bounded",
+                "all": [
+                    {"field": "body", "contains": "plain text body"}
+                ]
+            })
+        );
+    }
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut get_rops = Vec::new();
+    append_rop_open_folder(&mut get_rops, 0, 1, search_folder_mapi_id);
+    append_rop_get_search_criteria(&mut get_rops, 1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&get_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x31, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &utf16z("plain text body")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_clauses() {
     let account = FakeStore::account();
     let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555504").unwrap();
@@ -29249,9 +29430,10 @@ async fn mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_
     );
 
     let mut restriction = vec![0x00];
-    restriction.extend_from_slice(&5u16.to_le_bytes());
+    restriction.extend_from_slice(&6u16.to_le_bytes());
     append_search_property_u32(&mut restriction, 0x1090_0003, 0x04, 2);
     append_search_property_multi_string(&mut restriction, 0x9000_101F, 0x04, &["Finance"]);
+    append_search_property_tagged_string(&mut restriction, 0x9000_101F, 0x9000_001F, 0x04, "Legal");
     append_search_property_string(&mut restriction, 0x0C1F_001F, 0x04, "alice@example.test");
     append_search_property_string(&mut restriction, 0x1000_001F, 0x04, "quarterly report");
     append_search_content(&mut restriction, 0x1000_001F, "approval");
@@ -29284,6 +29466,7 @@ async fn mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_
                 "all": [
                     {"field": "flagged", "equals": true},
                     {"field": "category", "equals": "Finance"},
+                    {"field": "category", "equals": "Legal"},
                     {"field": "sender", "equals": "alice@example.test"},
                     {"field": "body", "equals": "quarterly report"},
                     {"field": "body", "contains": "approval"}
@@ -29315,6 +29498,7 @@ async fn mapi_over_http_set_get_search_criteria_round_trips_supported_canonical_
         &0x9000_101Fu32.to_le_bytes()
     ));
     assert!(contains_bytes(&response_rops, &utf16z("Finance")));
+    assert!(contains_bytes(&response_rops, &utf16z("Legal")));
     assert!(contains_bytes(
         &response_rops,
         &utf16z("alice@example.test")
@@ -29478,6 +29662,28 @@ async fn mapi_over_http_set_search_criteria_rejects_unsupported_restriction() {
         &[0x30, 0x01, 0x02, 0x01, 0x04, 0x80]
     ));
 
+    for unsupported_type in [0x05, 0x09, 0x0A, 0x0B] {
+        renew_mapi_request_id(&mut execute_headers);
+        let unsupported_restriction = vec![unsupported_type];
+        let mut rops = Vec::new();
+        append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+        append_rop_set_search_criteria(&mut rops, 1, &unsupported_restriction, &[], 0);
+        let response = service
+            .handle_mapi(
+                MapiEndpoint::Emsmdb,
+                &execute_headers,
+                &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+            )
+            .await
+            .unwrap();
+        let response_rops = response_rops_from_execute_response(response).await;
+
+        assert!(contains_bytes(
+            &response_rops,
+            &[0x30, 0x01, 0x02, 0x01, 0x04, 0x80]
+        ));
+    }
+
     renew_mapi_request_id(&mut execute_headers);
     let mut unsupported_bcc_restriction = Vec::new();
     append_search_content(
@@ -29504,11 +29710,59 @@ async fn mapi_over_http_set_search_criteria_rejects_unsupported_restriction() {
     ));
 
     renew_mapi_request_id(&mut execute_headers);
+    let mut unsupported_bitmask_restriction = Vec::new();
+    append_search_bitmask(
+        &mut unsupported_bitmask_restriction,
+        0x0E07_0003,
+        true,
+        0x0000_0002,
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+    append_rop_set_search_criteria(&mut rops, 1, &unsupported_bitmask_restriction, &[], 0);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x30, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+
+    renew_mapi_request_id(&mut execute_headers);
     let mut unsupported_exists_restriction = Vec::new();
     append_search_exists(&mut unsupported_exists_restriction, 0x0037_001F);
     let mut rops = Vec::new();
     append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
     append_rop_set_search_criteria(&mut rops, 1, &unsupported_exists_restriction, &[], 0);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x30, 0x01, 0x02, 0x01, 0x04, 0x80]
+    ));
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut trailing_bytes_restriction = Vec::new();
+    append_search_property_bool(&mut trailing_bytes_restriction, 0x0E1B_000B, 0x04, true);
+    trailing_bytes_restriction.extend_from_slice(&[0xEE, 0xEE]);
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, search_folder_mapi_id);
+    append_rop_set_search_criteria(&mut rops, 1, &trailing_bytes_restriction, &[], 0);
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
