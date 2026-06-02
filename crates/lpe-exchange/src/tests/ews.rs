@@ -2929,17 +2929,64 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
 
 #[tokio::test]
 async fn rooms_are_projected_from_canonical_directory_entries() {
-    let extra_address_book_entries = Arc::new(Mutex::new(vec![ExchangeAddressBookEntry {
-        id: Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000031").unwrap(),
-        display_name: "Room 101".to_string(),
-        email: "room101@example.test".to_string(),
-        entry_kind: ExchangeAddressBookEntryKind::Account,
-        directory_kind: ExchangeAddressBookDirectoryKind::Room,
-        member_emails: Vec::new(),
-    }]));
+    let room_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000031").unwrap();
+    let equipment_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000032").unwrap();
+    let person_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000033").unwrap();
+    let hidden_room_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000034").unwrap();
+    let foreign_room_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000035").unwrap();
+    let foreign_tenant_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let extra_address_book_entries = Arc::new(Mutex::new(vec![
+        ExchangeAddressBookEntry {
+            id: room_id,
+            display_name: "Room 101".to_string(),
+            email: "room101@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Room,
+            member_emails: Vec::new(),
+        },
+        ExchangeAddressBookEntry {
+            id: equipment_id,
+            display_name: "Projector A".to_string(),
+            email: "projector-a@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Equipment,
+            member_emails: Vec::new(),
+        },
+        ExchangeAddressBookEntry {
+            id: person_id,
+            display_name: "Alice Person".to_string(),
+            email: "alice@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
+        },
+        ExchangeAddressBookEntry {
+            id: hidden_room_id,
+            display_name: "Hidden Room".to_string(),
+            email: "hidden-room@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Room,
+            member_emails: Vec::new(),
+        },
+        ExchangeAddressBookEntry {
+            id: foreign_room_id,
+            display_name: "Foreign Room".to_string(),
+            email: "foreign-room@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Account,
+            directory_kind: ExchangeAddressBookDirectoryKind::Room,
+            member_emails: Vec::new(),
+        },
+    ]));
+    let extra_address_book_entry_tenants = Arc::new(Mutex::new(HashMap::from([(
+        foreign_room_id,
+        foreign_tenant_id,
+    )])));
+    let hidden_address_book_entry_ids = Arc::new(Mutex::new(vec![hidden_room_id]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         extra_address_book_entries: extra_address_book_entries.clone(),
+        extra_address_book_entry_tenants: extra_address_book_entry_tenants.clone(),
+        hidden_address_book_entry_ids: hidden_address_book_entry_ids.clone(),
         ..Default::default()
     };
     let service = ExchangeService::new(store);
@@ -2955,6 +3002,14 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
     assert!(body.contains("<m:GetRoomsResponse>"));
     assert!(body.contains("<t:Name>Room 101</t:Name>"));
     assert!(body.contains("<t:EmailAddress>room101@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:Name>Projector A</t:Name>"));
+    assert!(body.contains("<t:EmailAddress>projector-a@example.test</t:EmailAddress>"));
+    assert!(!body.contains("Alice Person"));
+    assert!(!body.contains("alice@example.test"));
+    assert!(!body.contains("Hidden Room"));
+    assert!(!body.contains("hidden-room@example.test"));
+    assert!(!body.contains("Foreign Room"));
+    assert!(!body.contains("foreign-room@example.test"));
 
     let response = service
         .handle(
@@ -2966,7 +3021,31 @@ async fn rooms_are_projected_from_canonical_directory_entries() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetRoomListsResponse>"));
     assert!(body.contains("<t:EmailAddress>rooms@example.test</t:EmailAddress>"));
-    assert_eq!(extra_address_book_entries.lock().unwrap().len(), 1);
+    assert_eq!(extra_address_book_entries.lock().unwrap().len(), 5);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetRooms><m:RoomList><t:EmailAddress>rooms@example.test</t:EmailAddress></m:RoomList></m:GetRooms></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetRoomsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetRooms><m:RoomList><t:EmailAddress>custom-list@example.test</t:EmailAddress></m:RoomList></m:GetRooms></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetRoomsResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("explicit room-list membership is not supported"));
 }
 
 #[tokio::test]

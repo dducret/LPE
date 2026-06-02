@@ -460,6 +460,8 @@ struct FakeStore {
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
     extra_address_book_entries: Arc<Mutex<Vec<ExchangeAddressBookEntry>>>,
+    extra_address_book_entry_tenants: Arc<Mutex<HashMap<Uuid, Uuid>>>,
+    hidden_address_book_entry_ids: Arc<Mutex<Vec<Uuid>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
@@ -2222,7 +2224,27 @@ impl ExchangeStore for FakeStore {
                 member_emails: group_alias_members.get(id).cloned().unwrap_or_default(),
             },
         ));
-        entries.extend(self.extra_address_book_entries.lock().unwrap().clone());
+        let extra_entry_tenants = self
+            .extra_address_book_entry_tenants
+            .lock()
+            .unwrap()
+            .clone();
+        let hidden_entry_ids = self.hidden_address_book_entry_ids.lock().unwrap().clone();
+        entries.extend(
+            self.extra_address_book_entries
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|entry| {
+                    !hidden_entry_ids.contains(&entry.id)
+                        && extra_entry_tenants
+                            .get(&entry.id)
+                            .copied()
+                            .unwrap_or(principal.tenant_id)
+                            == principal.tenant_id
+                })
+                .cloned(),
+        );
         entries.sort_by(|left, right| {
             left.display_name
                 .cmp(&right.display_name)
