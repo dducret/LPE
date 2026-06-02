@@ -1132,14 +1132,25 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::PublicFolderItem {
             folder_id, item_id, ..
         }) => {
-            let Some(item) = snapshot.public_folder_item_for_id(*folder_id, *item_id) else {
+            if snapshot
+                .public_folder_item_for_id(*folder_id, *item_id)
+                .is_none()
+            {
                 return rop_error_response(
                     0x07,
                     request.input_handle_index().unwrap_or(0),
                     0x8004_010F,
                 );
             };
-            serialize_public_folder_item_row(item, &columns)
+            serialize_object_property_row_with_custom(
+                object,
+                principal,
+                mailboxes,
+                emails,
+                snapshot,
+                &columns,
+                custom_values,
+            )
         }
         Some(MapiObject::Folder {
             folder_id,

@@ -142,9 +142,33 @@ if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.
   exit 1
 fi
 
+if ! psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_custom_property_values');" | grep -qx 'mapi_custom_property_values'; then
+  echo "Table public.mapi_custom_property_values is missing. LPE 0.4 requires an initialized database before compatibility updates can run." >&2
+  exit 1
+fi
+
 echo "Applying LPE 0.4 schema compatibility updates..."
 psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 <<'SQL'
 SET client_min_messages = warning;
+
+DO $$
+DECLARE
+    constraint_name TEXT;
+BEGIN
+    FOR constraint_name IN
+        SELECT conname
+        FROM pg_constraint
+        WHERE conrelid = 'public.mapi_custom_property_values'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%object_kind%'
+    LOOP
+        EXECUTE format('ALTER TABLE public.mapi_custom_property_values DROP CONSTRAINT %I', constraint_name);
+    END LOOP;
+END $$;
+
+ALTER TABLE public.mapi_custom_property_values
+    ADD CONSTRAINT mapi_custom_property_values_object_kind_check
+    CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item'));
 
 ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN target_folder_id DROP NOT NULL,

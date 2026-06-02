@@ -2487,11 +2487,6 @@ where
     S: ExchangeStore,
 {
     let (canonical_values, custom_values) = split_custom_property_values(values);
-    if matches!(object, MapiObject::PublicFolderItem { .. }) && !custom_values.is_empty() {
-        return Err(anyhow!(
-            "public-folder item custom property mutation is not implemented"
-        ));
-    }
     if let Some(folder_id) = object.folder_id() {
         if !snapshot
             .folder_access_for_principal(folder_id, principal.account_id)
@@ -3193,6 +3188,11 @@ fn custom_property_object_identity(
                     attachment.canonical_id,
                 )
             }),
+        MapiObject::PublicFolderItem {
+            folder_id, item_id, ..
+        } => snapshot
+            .public_folder_item_for_id(*folder_id, *item_id)
+            .map(|item| (MapiCustomPropertyObjectKind::PublicFolderItem, item.item.id)),
         _ => None,
     }
 }

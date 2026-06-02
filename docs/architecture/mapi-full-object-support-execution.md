@@ -221,11 +221,12 @@ and both name lookup and zero-count Logon enumeration load durable mappings
 through storage instead of relying only on session-local allocation. A durable
 `mapi_custom_property_values` table and storage runtime set/get/delete methods
 exist for opaque Outlook-specific values, including attachment object values
-where the canonical attachment identity is known. Existing supported
-object-property ROP paths now round-trip custom named-property values through
-that store for canonical object kinds without copying built-in/canonical fields
-into the custom table. Full Exchange property-bag parity remains incomplete and
-must not be claimed from this bounded round trip.
+where the canonical attachment identity is known and public-folder post item
+values where the item has canonical identity. Existing supported object-property
+ROP paths now round-trip custom named-property values through that store for
+canonical object kinds without copying built-in/canonical fields into the custom
+table. Full Exchange property-bag parity remains incomplete and must not be
+claimed from this bounded round trip.
 
 Readiness level after this plan:
 

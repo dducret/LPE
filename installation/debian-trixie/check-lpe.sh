@@ -101,6 +101,12 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_cu
   || fail "Table public.mapi_custom_property_values is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_custom_property_values"
 
+mapi_custom_public_folder_item_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mapi_custom_property_values'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%public_folder_item%';")" \
+  || fail "Unable to inspect MAPI custom property object-kind constraint"
+[[ "$mapi_custom_public_folder_item_constraint_count" -ge "1" ]] \
+  || fail "MAPI custom property object-kind constraint does not allow public_folder_item. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI custom property object-kind constraint includes public_folder_item"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_profile_settings');" | grep -qx 'mapi_profile_settings' \
   || fail "Table public.mapi_profile_settings is missing. LPE 0.4 requires an empty database initialized with /opt/lpe/src/installation/debian-trixie/init-schema.sh."
 pass "Found table public.mapi_profile_settings"

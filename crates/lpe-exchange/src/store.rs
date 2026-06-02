@@ -134,6 +134,7 @@ pub(crate) enum MapiCustomPropertyObjectKind {
     Note,
     JournalEntry,
     Attachment,
+    PublicFolderItem,
 }
 
 impl MapiCustomPropertyObjectKind {
@@ -146,6 +147,7 @@ impl MapiCustomPropertyObjectKind {
             Self::Note => "note",
             Self::JournalEntry => "journal_entry",
             Self::Attachment => "attachment",
+            Self::PublicFolderItem => "public_folder_item",
         }
     }
 }

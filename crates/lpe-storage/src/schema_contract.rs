@@ -708,7 +708,7 @@ fn mapi_named_properties_and_custom_values_are_durable() {
 
     let values = table_definition("mapi_custom_property_values");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item'))",
         "canonical_id UUID NOT NULL",
         "property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295)",
         "property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535)",
@@ -836,6 +836,24 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "recoverable_shape_constraint_ok",
             "pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'",
             "recoverable_item",
+        ],
+    );
+    assert_source_contains_all(
+        "update-lpe.sh MAPI custom property object-kind compatibility patch",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "mapi_custom_property_values_object_kind_check",
+            "public_folder_item",
+            "ALTER TABLE public.mapi_custom_property_values",
+        ],
+    );
+    assert_source_contains_all(
+        "check-lpe.sh MAPI custom property object-kind compatibility check",
+        CHECK_LPE_SCRIPT,
+        &[
+            "mapi_custom_public_folder_item_constraint_count",
+            "public_folder_item",
+            "MAPI custom property object-kind constraint includes public_folder_item",
         ],
     );
 

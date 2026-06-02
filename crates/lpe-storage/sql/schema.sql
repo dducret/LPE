@@ -2187,7 +2187,7 @@ CREATE UNIQUE INDEX mapi_named_properties_name_idx
 CREATE TABLE mapi_custom_property_values (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item')),
     canonical_id UUID NOT NULL,
     property_tag BIGINT NOT NULL CHECK (property_tag >= 0 AND property_tag <= 4294967295),
     property_type INTEGER NOT NULL CHECK (property_type >= 0 AND property_type <= 65535),
