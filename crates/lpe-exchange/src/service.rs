@@ -25,12 +25,13 @@ use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    ClientReminder, ClientTask, CollaborationCollection, CollaborationRights,
-    CreatePublicFolderInput, JmapEmail, JmapEmailAddress, JmapEmailFollowupUpdate,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    MailboxRule, PublicFolder, PublicFolderItem, ReminderQuery, Storage, SubmitMessageInput,
-    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput, UpsertPublicFolderItemInput,
+    ClientReminder, ClientTask, CollaborationCollection, CollaborationGrant,
+    CollaborationResourceKind, CollaborationRights, CreatePublicFolderInput, JmapEmail,
+    JmapEmailAddress, JmapEmailFollowupUpdate, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxRule, PublicFolder, PublicFolderItem,
+    ReminderQuery, Storage, SubmitMessageInput, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
+    UpsertPublicFolderItemInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -47,9 +48,10 @@ use crate::{
     mapi::{self, MapiEndpoint},
     ntlm,
     store::{
-        EwsDelegate, EwsDelegatePreferences, EwsUserConfiguration, EwsUserConfigurationKey,
-        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        EwsDelegate, EwsDelegatePreferences, EwsRetentionPolicyTag, EwsUserConfiguration,
+        EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
+        ExchangeAddressBookEntryKind, ExchangeStore, UpsertEwsDelegateInput,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -71,6 +73,7 @@ const RPC_PROXY_RECEIVE_WINDOW_SIZE: u32 = 0x0001_0000;
 const RPC_PROXY_OUT_CHANNEL_CONTENT_LENGTH: u32 = 0x0002_0000;
 const RPC_PROXY_CONNECTION_TIMEOUT_MS: u32 = 120_000;
 const RPC_PROXY_DCE_FAULT_PROTOCOL_ERROR: u32 = 0x0000_0005;
+const EWS_MAX_MAIL_TIPS_RECIPIENTS: usize = 100;
 const RPC_PROXY_DCE_NDR_TRANSFER_SYNTAX: [u8; 20] = [
     0x04, 0x5d, 0x88, 0x8a, 0xeb, 0x1c, 0xc9, 0x11, 0x9f, 0xe8, 0x08, 0x00, 0x2b, 0x10, 0x48, 0x60,
     0x02, 0x00, 0x00, 0x00,
@@ -752,6 +755,9 @@ where
                         &error.to_string(),
                     )
                 }),
+            "FindConversation" => self.find_conversation(&principal, &body).await?,
+            "GetConversationItems" => self.get_conversation_items(&principal, &body).await?,
+            "ApplyConversationAction" => self.apply_conversation_action(&principal, &body).await?,
             "GetServerTimeZones" => get_server_time_zones_response(),
             "ResolveNames" => self.resolve_names(&principal, &body).await?,
             "GetUserAvailability" => self.get_user_availability(&principal, &body).await?,
@@ -786,8 +792,10 @@ where
             "GetRoomLists" => self.get_room_lists(&principal).await?,
             "ConvertId" => self.convert_id(&body).await?,
             "GetMailTips" => self.get_mail_tips(&principal, &body).await?,
+            "GetServiceConfiguration" => self.get_service_configuration(&body).await?,
+            "GetUserRetentionPolicyTags" => self.get_user_retention_policy_tags(&principal).await?,
             "FindPeople" => unsupported_operation_response("FindPeople"),
-            "ExpandDL" => unsupported_operation_response("ExpandDL"),
+            "ExpandDL" => self.expand_dl(&principal, &body).await?,
             "AddDelegate" => self.add_delegate(&principal, &body).await?,
             "GetDelegate" => self.get_delegate(&principal, &body).await?,
             "UpdateDelegate" => self.update_delegate(&principal, &body).await?,
@@ -796,8 +804,14 @@ where
             "CreateUserConfiguration" => self.create_user_configuration(&principal, &body).await?,
             "UpdateUserConfiguration" => self.update_user_configuration(&principal, &body).await?,
             "DeleteUserConfiguration" => self.delete_user_configuration(&principal, &body).await?,
-            "GetSharingMetadata" => unsupported_operation_response("GetSharingMetadata"),
-            "GetSharingFolder" => unsupported_operation_response("GetSharingFolder"),
+            "GetSharingMetadata" => self.get_sharing_metadata(&principal, &body).await?,
+            "GetSharingFolder" => self.get_sharing_folder(&principal, &body).await?,
+            "RefreshSharingFolder" => self.refresh_sharing_folder(&principal, &body).await?,
+            "GetUserPhoto" => self.get_user_photo(&principal, &body).await?,
+            "GetPasswordExpirationDate" => {
+                self.get_password_expiration_date(&principal, &body).await?
+            }
+            "MarkAsJunk" => self.mark_as_junk(&principal, &body).await?,
             _ => unsupported_operation_response(&operation),
         };
 
@@ -814,6 +828,132 @@ where
     async fn resolve_names(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let entries = self.store.fetch_address_book_entries(principal).await?;
         Ok(resolve_names_response(principal, request, &entries))
+    }
+
+    async fn expand_dl(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(expand_dl_response(principal, request, &entries))
+    }
+
+    async fn get_user_photo(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let email = element_text(request, "Email")
+            .or_else(|| element_text(request, "EmailAddress"))
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty());
+        let Some(email) = email else {
+            return Ok(get_user_photo_error_response(
+                "ErrorInvalidOperation",
+                "GetUserPhoto requires an Email value.",
+            ));
+        };
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        if !visible_address_book_email(principal, &entries, &email) {
+            return Ok(get_user_photo_error_response(
+                "ErrorNameResolutionNoResults",
+                "No same-tenant directory account or contact matches the requested email address.",
+            ));
+        }
+        Ok(get_user_photo_error_response(
+            "ErrorItemNotFound",
+            "No canonical LPE account photo is available for this directory entry.",
+        ))
+    }
+
+    async fn get_password_expiration_date(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let requested = element_text(request, "MailboxSmtpAddress")
+            .or_else(|| element_text(request, "EmailAddress"))
+            .map(|value| value.trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| principal.email.to_ascii_lowercase());
+        if requested != principal.email.to_ascii_lowercase() {
+            return Ok(get_password_expiration_date_error_response(
+                "ErrorAccessDenied",
+                "Password expiration can only be queried for the authenticated account.",
+            ));
+        }
+        Ok(get_password_expiration_date_error_response(
+            "ErrorInvalidOperation",
+            "LPE has no canonical account password expiration date to expose through EWS.",
+        ))
+    }
+
+    async fn mark_as_junk(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let is_junk = ews_bool_attribute(request, "MarkAsJunk", "IsJunk").unwrap_or(true);
+            let move_item = ews_bool_attribute(request, "MarkAsJunk", "MoveItem").unwrap_or(false);
+            if !is_junk || !move_item {
+                bail!(
+                    "LPE supports MarkAsJunk only for moving messages to the canonical Junk mailbox; Exchange blocked-sender and unblock state is not protocol-local state."
+                );
+            }
+            let ids = requested_item_ids(request);
+            let message_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("message:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if ids.is_empty() || message_ids.len() != ids.len() {
+                bail!("MarkAsJunk currently supports only canonical message item ids.");
+            }
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            let Some(junk_mailbox_id) = mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == "junk")
+                .map(|mailbox| mailbox.id)
+            else {
+                return Ok(operation_error_response(
+                    "MarkAsJunk",
+                    "ErrorFolderNotFound",
+                    "The canonical Junk mailbox was not found.",
+                ));
+            };
+
+            let existing = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?;
+            if existing.len() != message_ids.len() {
+                return Ok(operation_error_response(
+                    "MarkAsJunk",
+                    "ErrorItemNotFound",
+                    "message not found",
+                ));
+            }
+
+            let mut moved_item_ids = String::new();
+            for message_id in message_ids {
+                let moved = self
+                    .store
+                    .move_jmap_email(
+                        principal.account_id,
+                        message_id,
+                        junk_mailbox_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-mark-as-junk".to_string(),
+                            subject: format!("{message_id}->{junk_mailbox_id}"),
+                        },
+                    )
+                    .await?;
+                moved_item_ids.push_str(&format!(
+                    "<m:MovedItemId Id=\"message:{}\" ChangeKey=\"{}\"/>",
+                    moved.id, moved.modseq
+                ));
+            }
+            Ok(mark_as_junk_success_response(moved_item_ids))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("MarkAsJunk", "ErrorInvalidOperation", &error.to_string())
+        }))
     }
 
     async fn get_user_configuration(
@@ -879,6 +1019,168 @@ where
                 &error.to_string(),
             )),
         }
+    }
+
+    async fn get_sharing_metadata(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let requested_kind = requested_sharing_kind(request);
+        let contacts =
+            if requested_kind.is_none_or(|kind| kind == CollaborationResourceKind::Contacts) {
+                self.store
+                    .fetch_accessible_contact_collections(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .filter(|collection| collection.is_owned)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+        let calendars =
+            if requested_kind.is_none_or(|kind| kind == CollaborationResourceKind::Calendar) {
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?
+                    .into_iter()
+                    .filter(|collection| collection.is_owned)
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+        Ok(get_sharing_metadata_response(
+            principal, &contacts, &calendars,
+        ))
+    }
+
+    async fn get_sharing_folder(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let input = parse_sharing_request(request)?;
+            let owner = self
+                .resolve_same_tenant_account(principal, &input.owner_email)
+                .await?;
+            let folder = self
+                .accessible_shared_collection(principal, owner.id, input.kind)
+                .await?
+                .ok_or_else(|| anyhow!("shared folder is not accessible to this account"))?;
+            Ok(get_sharing_folder_response(&folder))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "GetSharingFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn refresh_sharing_folder(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let folder_id = requested_collection_id(request)
+                .ok_or_else(|| anyhow!("RefreshSharingFolder requires a FolderId."))?;
+            let mut collections = self
+                .store
+                .fetch_accessible_contact_collections(principal.account_id)
+                .await?;
+            collections.extend(
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?,
+            );
+            if !collections
+                .iter()
+                .any(|collection| collection.id == folder_id)
+            {
+                bail!("shared folder is not accessible to this account");
+            }
+            Ok(simple_operation_success_response("RefreshSharingFolder"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "RefreshSharingFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn accept_sharing_invitation(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let input = parse_sharing_request(request)?;
+        let owner = self
+            .resolve_same_tenant_account(principal, &input.owner_email)
+            .await?;
+        let grant = self
+            .store
+            .upsert_ews_sharing_grant(
+                owner.id,
+                &principal.email,
+                input.kind,
+                input.rights,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-accept-sharing-invitation".to_string(),
+                    subject: format!("{}:{}", input.kind.as_str(), owner.id),
+                },
+            )
+            .await?;
+        Ok(accept_sharing_invitation_response(&grant))
+    }
+
+    async fn accessible_shared_collection(
+        &self,
+        principal: &AccountPrincipal,
+        owner_account_id: Uuid,
+        kind: CollaborationResourceKind,
+    ) -> Result<Option<CollaborationCollection>> {
+        let collections = match kind {
+            CollaborationResourceKind::Contacts => {
+                self.store
+                    .fetch_accessible_contact_collections(principal.account_id)
+                    .await?
+            }
+            CollaborationResourceKind::Calendar => {
+                self.store
+                    .fetch_accessible_calendar_collections(principal.account_id)
+                    .await?
+            }
+            CollaborationResourceKind::Tasks => Vec::new(),
+        };
+        Ok(collections.into_iter().find(|collection| {
+            collection.owner_account_id == owner_account_id && !collection.is_owned
+        }))
+    }
+
+    async fn resolve_same_tenant_account(
+        &self,
+        principal: &AccountPrincipal,
+        email: &str,
+    ) -> Result<ExchangeAddressBookEntry> {
+        self.store
+            .fetch_address_book_entries(principal)
+            .await?
+            .into_iter()
+            .find(|entry| {
+                entry.entry_kind == ExchangeAddressBookEntryKind::Account
+                    && entry.email.eq_ignore_ascii_case(email)
+            })
+            .ok_or_else(|| anyhow!("sharing owner account not found in the same tenant"))
     }
 
     async fn update_user_configuration(
@@ -1738,6 +2040,232 @@ where
         ))
     }
 
+    async fn find_conversation(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let emails = self.conversation_source_emails(principal, request).await?;
+            Ok(find_conversation_response(&emails, request))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "FindConversation",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn get_conversation_items(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let conversation_ids = requested_conversation_ids(request);
+            if conversation_ids.is_empty() {
+                bail!("GetConversationItems requires at least one ConversationId.");
+            }
+            let mut emails = self.conversation_source_emails(principal, request).await?;
+            filter_ignored_conversation_folders(&mut emails, request);
+            Ok(get_conversation_items_response(
+                &emails,
+                &conversation_ids,
+                request,
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "GetConversationItems",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn apply_conversation_action(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let actions = parse_conversation_actions(request);
+            if actions.is_empty() {
+                bail!("ApplyConversationAction requires at least one ConversationAction.");
+            }
+            let all_ids = self
+                .store
+                .fetch_all_jmap_email_ids(principal.account_id)
+                .await?;
+            let emails = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &all_ids)
+                .await?;
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+
+            for action in actions {
+                let conversation_id = action
+                    .conversation_id
+                    .ok_or_else(|| anyhow!("ConversationAction is missing ConversationId."))?;
+                let message_ids = emails
+                    .iter()
+                    .filter(|email| email.thread_id == conversation_id)
+                    .map(|email| email.id)
+                    .collect::<Vec<_>>();
+                if message_ids.is_empty() {
+                    return Ok(operation_error_response(
+                        "ApplyConversationAction",
+                        "ErrorItemNotFound",
+                        "conversation not found",
+                    ));
+                }
+                match action.action.as_str() {
+                    "Move" => {
+                        let target_mailbox_id = action.target_mailbox_id.ok_or_else(|| {
+                            anyhow!("Move conversation action requires DestinationFolderId.")
+                        })?;
+                        if !mailboxes.iter().any(|mailbox| mailbox.id == target_mailbox_id) {
+                            return Ok(operation_error_response(
+                                "ApplyConversationAction",
+                                "ErrorFolderNotFound",
+                                "destination folder not found",
+                            ));
+                        }
+                        for message_id in message_ids {
+                            self.store
+                                .move_jmap_email(
+                                    principal.account_id,
+                                    message_id,
+                                    target_mailbox_id,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-conversation-move".to_string(),
+                                        subject: format!(
+                                            "{conversation_id}:{message_id}->{target_mailbox_id}"
+                                        ),
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    "Delete" => {
+                        for message_id in message_ids {
+                            self.store
+                                .delete_jmap_email(
+                                    principal.account_id,
+                                    message_id,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-conversation-delete".to_string(),
+                                        subject: format!("{conversation_id}:{message_id}"),
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    "SetReadState" => {
+                        let unread = !action.read.unwrap_or(true);
+                        for message_id in message_ids {
+                            self.store
+                                .update_jmap_email_flags(
+                                    principal.account_id,
+                                    message_id,
+                                    Some(unread),
+                                    None,
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-conversation-read-state".to_string(),
+                                        subject: format!("{conversation_id}:{message_id}"),
+                                    },
+                                )
+                                .await?;
+                        }
+                    }
+                    value if value.starts_with("Always") => {
+                        return Ok(operation_error_response(
+                            "ApplyConversationAction",
+                            "ErrorInvalidOperation",
+                            "Persistent future-message conversation actions are not supported without first-class canonical thread lifecycle state.",
+                        ));
+                    }
+                    other => {
+                        return Ok(operation_error_response(
+                            "ApplyConversationAction",
+                            "ErrorInvalidOperation",
+                            &format!("unsupported conversation action {other}"),
+                        ));
+                    }
+                }
+            }
+
+            Ok(simple_operation_success_response("ApplyConversationAction"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "ApplyConversationAction",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn conversation_source_emails(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<Vec<JmapEmail>> {
+        let folder_ids = if element_content(request, "ParentFolderId").is_some() {
+            self.requested_mailbox_folder_ids(principal, request)
+                .await?
+        } else {
+            Vec::new()
+        };
+        let ids = if folder_ids.is_empty() {
+            self.store
+                .fetch_all_jmap_email_ids(principal.account_id)
+                .await?
+        } else {
+            let mut ids = Vec::new();
+            for folder_id in &folder_ids {
+                ids.extend(
+                    self.store
+                        .query_jmap_email_ids(
+                            principal.account_id,
+                            Some(*folder_id),
+                            None,
+                            0,
+                            MAILBOX_QUERY_LIMIT,
+                        )
+                        .await?
+                        .ids,
+                );
+            }
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        let mut emails = self
+            .store
+            .fetch_jmap_emails(principal.account_id, &ids)
+            .await?;
+        if !folder_ids.is_empty() {
+            let folder_set = folder_ids.into_iter().collect::<HashSet<_>>();
+            emails.retain(|email| folder_set.contains(&email.mailbox_id));
+        }
+        Ok(emails)
+    }
+
     async fn get_attachment(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let ids = requested_attachment_ids(request);
         if ids.is_empty() {
@@ -2380,6 +2908,9 @@ where
 
     async fn create_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
+            if element_content(request, "AcceptSharingInvitation").is_some() {
+                return self.accept_sharing_invitation(principal, request).await;
+            }
             if element_content(request, "Contact").is_some() {
                 let collection_id = requested_collection_id_in(request, "SavedItemFolderId");
                 let contact = self
@@ -4153,6 +4684,12 @@ where
             if recipients.is_empty() {
                 bail!("GetMailTips requires at least one recipient Mailbox.");
             }
+            if recipients.len() > EWS_MAX_MAIL_TIPS_RECIPIENTS {
+                bail!(
+                    "GetMailTips supports at most {} recipients per request.",
+                    EWS_MAX_MAIL_TIPS_RECIPIENTS
+                );
+            }
             let requested_tips = requested_mail_tips(request);
             let entries = self.store.fetch_address_book_entries(principal).await?;
             let mut recipient_tips = Vec::new();
@@ -4195,6 +4732,19 @@ where
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("GetMailTips", "ErrorInvalidOperation", &error.to_string())
         }))
+    }
+
+    async fn get_service_configuration(&self, request: &str) -> Result<String> {
+        let configs = requested_service_configurations(request);
+        Ok(get_service_configuration_response(&configs))
+    }
+
+    async fn get_user_retention_policy_tags(&self, principal: &AccountPrincipal) -> Result<String> {
+        let tags = self
+            .store
+            .fetch_ews_retention_policy_tags(principal)
+            .await?;
+        Ok(get_user_retention_policy_tags_response(&tags))
     }
 
     async fn get_rooms(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
@@ -4781,6 +5331,59 @@ fn requested_mail_tips(request: &str) -> HashSet<String> {
                 .map(str::to_string)
                 .collect()
         })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RequestedServiceConfiguration {
+    MailTips,
+    UnifiedMessaging,
+    ProtectionRules,
+    PolicyTips,
+    Unsupported,
+}
+
+fn requested_service_configurations(request: &str) -> Vec<RequestedServiceConfiguration> {
+    let mut configs = Vec::new();
+    let mut values = element_contents(request, "ConfigurationName")
+        .into_iter()
+        .map(xml_text)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        values.extend(
+            element_text(request, "RequestedConfiguration")
+                .into_iter()
+                .flat_map(|value| {
+                    value
+                        .split(|ch: char| ch.is_whitespace() || ch == ',')
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                }),
+        );
+    }
+    for value in values {
+        let normalized = value.trim();
+        if normalized.is_empty() {
+            continue;
+        }
+        let config = match normalized {
+            "MailTips" | "MailTipsConfiguration" => RequestedServiceConfiguration::MailTips,
+            "UnifiedMessaging" | "UnifiedMessagingConfiguration" => {
+                RequestedServiceConfiguration::UnifiedMessaging
+            }
+            "ProtectionRules" | "ProtectionRulesConfiguration" => {
+                RequestedServiceConfiguration::ProtectionRules
+            }
+            "PolicyTips" | "PolicyTipsConfiguration" => RequestedServiceConfiguration::PolicyTips,
+            _ => RequestedServiceConfiguration::Unsupported,
+        };
+        if !configs.contains(&config) {
+            configs.push(config);
+        }
+    }
+    if configs.is_empty() {
+        configs.push(RequestedServiceConfiguration::MailTips);
+    }
+    configs
 }
 
 fn convert_id_sources_for_tag(request: &str, local_name: &str) -> Vec<ConvertIdSource> {
@@ -6605,6 +7208,11 @@ fn attribute_value_after<'a>(body: &'a str, tag: &str, attr: &str) -> Option<&'a
     attribute_value(tag_text, attr)
 }
 
+fn ews_bool_attribute(body: &str, tag: &str, attr: &str) -> Option<bool> {
+    attribute_value_after(body, tag, attr)
+        .map(|value| value.eq_ignore_ascii_case("true") || value == "1")
+}
+
 fn attribute_value<'a>(tag_text: &'a str, attr: &str) -> Option<&'a str> {
     let pattern = format!("{attr}=");
     let start = tag_text.find(&pattern)? + pattern.len();
@@ -6732,6 +7340,520 @@ fn find_item_response(items: String) -> String {
         items = items,
         count = count_tag_occurrences(&items, "<t:ItemId")
     )
+}
+
+#[derive(Debug)]
+struct ConversationActionRequest {
+    action: String,
+    conversation_id: Option<Uuid>,
+    target_mailbox_id: Option<Uuid>,
+    read: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
+struct SharingRequest {
+    owner_email: String,
+    kind: CollaborationResourceKind,
+    rights: CollaborationRights,
+}
+
+fn requested_sharing_kind(request: &str) -> Option<CollaborationResourceKind> {
+    let value = element_text(request, "DataType")
+        .or_else(|| element_text(request, "FolderClass"))
+        .or_else(|| element_text(request, "FolderName"))
+        .unwrap_or_else(|| request.to_string())
+        .to_ascii_lowercase();
+    if value.contains("calendar") {
+        Some(CollaborationResourceKind::Calendar)
+    } else if value.contains("contact") {
+        Some(CollaborationResourceKind::Contacts)
+    } else {
+        None
+    }
+}
+
+fn parse_sharing_request(request: &str) -> Result<SharingRequest> {
+    let owner_email = element_content(request, "SharedFolderOwner")
+        .and_then(parse_mailbox)
+        .map(|mailbox| mailbox.address)
+        .or_else(|| element_text(request, "OwnerSmtpAddress"))
+        .or_else(|| element_text(request, "SharingOwnerSmtpAddress"))
+        .or_else(|| element_text(request, "SmtpAddress"))
+        .or_else(|| {
+            element_content(request, "From")
+                .and_then(parse_mailbox)
+                .map(|mailbox| mailbox.address)
+        })
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| anyhow!("sharing request is missing a same-tenant owner mailbox"))?;
+    let kind = requested_sharing_kind(request)
+        .ok_or_else(|| anyhow!("sharing request supports only calendar and contacts folders"))?;
+    let rights = sharing_rights(request);
+    Ok(SharingRequest {
+        owner_email,
+        kind,
+        rights,
+    })
+}
+
+fn sharing_rights(request: &str) -> CollaborationRights {
+    let permission = element_text(request, "PermissionLevel")
+        .or_else(|| element_text(request, "SharingPermission"))
+        .unwrap_or_else(|| "Reviewer".to_string())
+        .to_ascii_lowercase();
+    let may_write = permission.contains("editor")
+        || permission.contains("author")
+        || permission.contains("owner")
+        || permission.contains("write");
+    CollaborationRights {
+        may_read: true,
+        may_write,
+        may_delete: permission.contains("editor") || permission.contains("owner"),
+        may_share: permission.contains("owner"),
+    }
+}
+
+fn get_sharing_metadata_response(
+    principal: &AccountPrincipal,
+    contact_collections: &[CollaborationCollection],
+    calendar_collections: &[CollaborationCollection],
+) -> String {
+    let entries = contact_collections
+        .iter()
+        .chain(calendar_collections.iter())
+        .map(|collection| sharing_metadata_entry_xml(principal, collection))
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetSharingMetadataResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetSharingMetadataResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SharingMetadata>{entries}</m:SharingMetadata>",
+            "</m:GetSharingMetadataResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetSharingMetadataResponse>"
+        ),
+        entries = entries,
+    )
+}
+
+fn sharing_metadata_entry_xml(
+    principal: &AccountPrincipal,
+    collection: &CollaborationCollection,
+) -> String {
+    format!(
+        concat!(
+            "<t:SharingMetadata>",
+            "<t:OwnerSmtpAddress>{owner}</t:OwnerSmtpAddress>",
+            "<t:FolderId Id=\"{folder_id}\"/>",
+            "<t:FolderClass>{folder_class}</t:FolderClass>",
+            "<t:FolderName>{folder_name}</t:FolderName>",
+            "<t:DataType>{data_type}</t:DataType>",
+            "<t:InitiatorName>{initiator}</t:InitiatorName>",
+            "<t:InitiatorSmtpAddress>{owner}</t:InitiatorSmtpAddress>",
+            "</t:SharingMetadata>"
+        ),
+        owner = escape_xml(&principal.email),
+        folder_id = escape_xml(&collection.id),
+        folder_class = ews_sharing_folder_class(&collection.kind),
+        folder_name = escape_xml(&collection.display_name),
+        data_type = ews_sharing_data_type(&collection.kind),
+        initiator = escape_xml(&principal.display_name),
+    )
+}
+
+fn get_sharing_folder_response(collection: &CollaborationCollection) -> String {
+    format!(
+        concat!(
+            "<m:GetSharingFolderResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetSharingFolderResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SharingFolder>",
+            "<t:FolderId Id=\"{folder_id}\"/>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "<t:FolderClass>{folder_class}</t:FolderClass>",
+            "<t:OwnerSmtpAddress>{owner}</t:OwnerSmtpAddress>",
+            "</m:SharingFolder>",
+            "</m:GetSharingFolderResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetSharingFolderResponse>"
+        ),
+        folder_id = escape_xml(&collection.id),
+        display_name = escape_xml(&collection.display_name),
+        folder_class = ews_sharing_folder_class(&collection.kind),
+        owner = escape_xml(&collection.owner_email),
+    )
+}
+
+fn accept_sharing_invitation_response(grant: &CollaborationGrant) -> String {
+    format!(
+        concat!(
+            "<m:CreateItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:CreateItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>",
+            "<t:AcceptSharingInvitation>",
+            "<t:ItemId Id=\"sharing:{kind}:{owner_id}:{grantee_id}\" ChangeKey=\"{updated_at}\"/>",
+            "<t:SharedFolderId Id=\"shared-{kind}:{owner_id}\"/>",
+            "<t:OwnerSmtpAddress>{owner}</t:OwnerSmtpAddress>",
+            "<t:DataType>{data_type}</t:DataType>",
+            "<t:PermissionLevel>{permission}</t:PermissionLevel>",
+            "</t:AcceptSharingInvitation>",
+            "</m:Items>",
+            "</m:CreateItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:CreateItemResponse>"
+        ),
+        kind = escape_xml(&grant.kind),
+        owner_id = grant.owner_account_id,
+        grantee_id = grant.grantee_account_id,
+        updated_at = escape_xml(&grant.updated_at),
+        owner = escape_xml(&grant.owner_email),
+        data_type = ews_sharing_data_type(&grant.kind),
+        permission = ews_permission_level(&grant.rights),
+    )
+}
+
+fn ews_permission_level(rights: &CollaborationRights) -> &'static str {
+    if rights.may_share {
+        "Owner"
+    } else if rights.may_write || rights.may_delete {
+        "Editor"
+    } else {
+        "Reviewer"
+    }
+}
+
+fn ews_sharing_folder_class(kind: &str) -> &'static str {
+    match kind {
+        "calendar" => "IPF.Appointment",
+        "contacts" => "IPF.Contact",
+        _ => "IPF.Note",
+    }
+}
+
+fn ews_sharing_data_type(kind: &str) -> &'static str {
+    match kind {
+        "calendar" => "Calendar",
+        "contacts" => "Contacts",
+        _ => "Unknown",
+    }
+}
+
+fn requested_conversation_ids(request: &str) -> Vec<Uuid> {
+    attribute_values_for_tag(request, "ConversationId", "Id")
+        .into_iter()
+        .filter_map(parse_conversation_id)
+        .collect()
+}
+
+fn parse_conversation_id(value: &str) -> Option<Uuid> {
+    Uuid::parse_str(value.strip_prefix("conversation:").unwrap_or(value)).ok()
+}
+
+fn parse_conversation_actions(request: &str) -> Vec<ConversationActionRequest> {
+    element_contents(request, "ConversationAction")
+        .into_iter()
+        .map(|action_xml| ConversationActionRequest {
+            action: element_text(action_xml, "Action").unwrap_or_default(),
+            conversation_id: attribute_values_for_tag(action_xml, "ConversationId", "Id")
+                .into_iter()
+                .next()
+                .and_then(parse_conversation_id),
+            target_mailbox_id: requested_mailbox_folder_ids_in(action_xml, "DestinationFolderId")
+                .into_iter()
+                .next(),
+            read: element_text(action_xml, "Read").and_then(|value| parse_xml_bool(&value).ok()),
+        })
+        .collect()
+}
+
+fn filter_ignored_conversation_folders(emails: &mut Vec<JmapEmail>, request: &str) {
+    let Some(ignore_xml) = element_content(request, "FoldersToIgnore") else {
+        return;
+    };
+    let ignored_ids = requested_mailbox_folder_ids(ignore_xml)
+        .into_iter()
+        .collect::<HashSet<_>>();
+    let ignored_roles = attribute_values_for_tag(ignore_xml, "DistinguishedFolderId", "Id")
+        .into_iter()
+        .filter_map(ews_distinguished_mailbox_role)
+        .collect::<HashSet<_>>();
+    emails.retain(|email| {
+        !ignored_ids.contains(&email.mailbox_id)
+            && !ignored_roles.contains(email.mailbox_role.as_str())
+    });
+}
+
+fn find_conversation_response(emails: &[JmapEmail], request: &str) -> String {
+    let mut thread_ids = emails
+        .iter()
+        .map(|email| email.thread_id)
+        .collect::<Vec<_>>();
+    thread_ids.sort();
+    thread_ids.dedup();
+    thread_ids.sort_by(|left, right| {
+        conversation_last_delivery(emails, right).cmp(&conversation_last_delivery(emails, left))
+    });
+
+    let offset = ews_usize_attribute(request, "IndexedPageItemView", "Offset").unwrap_or(0);
+    let max = ews_usize_attribute(request, "IndexedPageItemView", "MaxEntriesReturned")
+        .unwrap_or(MAILBOX_QUERY_LIMIT as usize);
+    let total = thread_ids.len();
+    let conversations = thread_ids
+        .into_iter()
+        .skip(offset)
+        .take(max)
+        .filter_map(|thread_id| {
+            let messages = emails
+                .iter()
+                .filter(|email| email.thread_id == thread_id)
+                .collect::<Vec<_>>();
+            (!messages.is_empty()).then(|| conversation_summary_xml(thread_id, &messages))
+        })
+        .collect::<String>();
+    let returned = count_tag_occurrences(&conversations, "<t:ConversationId");
+    let includes_last = offset.saturating_add(returned) >= total;
+
+    format!(
+        concat!(
+            "<m:FindConversationResponse ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Conversations>{conversations}</m:Conversations>",
+            "<m:TotalConversationsInView>{total}</m:TotalConversationsInView>",
+            "<m:IndexedOffset>{offset}</m:IndexedOffset>",
+            "<m:IncludesLastItemInRange>{includes_last}</m:IncludesLastItemInRange>",
+            "</m:FindConversationResponse>"
+        ),
+        conversations = conversations,
+        total = total,
+        offset = offset,
+        includes_last = includes_last,
+    )
+}
+
+fn conversation_summary_xml(thread_id: Uuid, messages: &[&JmapEmail]) -> String {
+    let topic = messages
+        .iter()
+        .find_map(|email| (!email.subject.trim().is_empty()).then_some(email.subject.as_str()))
+        .unwrap_or("(no subject)");
+    let last_delivery = messages
+        .iter()
+        .map(|email| email.received_at.as_str())
+        .max()
+        .unwrap_or_default();
+    let has_attachments = messages.iter().any(|email| email.has_attachments);
+    let unread_count = messages.iter().filter(|email| email.unread).count();
+    let size: i64 = messages.iter().map(|email| email.size_octets.max(0)).sum();
+    let item_ids = messages
+        .iter()
+        .map(|email| {
+            format!(
+                "<t:ItemId Id=\"message:{}\" ChangeKey=\"{}\"/>",
+                email.id,
+                escape_xml(&email.delivery_status)
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        concat!(
+            "<t:Conversation>",
+            "<t:ConversationId Id=\"conversation:{thread_id}\"/>",
+            "<t:ConversationTopic>{topic}</t:ConversationTopic>",
+            "{recipients}",
+            "{senders}",
+            "<t:LastDeliveryTime>{last_delivery}</t:LastDeliveryTime>",
+            "<t:GlobalLastDeliveryTime>{last_delivery}</t:GlobalLastDeliveryTime>",
+            "<t:HasAttachments>{has_attachments}</t:HasAttachments>",
+            "<t:GlobalHasAttachments>{has_attachments}</t:GlobalHasAttachments>",
+            "<t:MessageCount>{message_count}</t:MessageCount>",
+            "<t:GlobalMessageCount>{message_count}</t:GlobalMessageCount>",
+            "<t:UnreadCount>{unread_count}</t:UnreadCount>",
+            "<t:Size>{size}</t:Size>",
+            "<t:GlobalSize>{size}</t:GlobalSize>",
+            "<t:ItemClasses><t:ItemClass>IPM.Note</t:ItemClass></t:ItemClasses>",
+            "<t:GlobalItemClasses><t:ItemClass>IPM.Note</t:ItemClass></t:GlobalItemClasses>",
+            "<t:Importance>Normal</t:Importance>",
+            "<t:GlobalImportance>Normal</t:GlobalImportance>",
+            "<t:ItemIds>{item_ids}</t:ItemIds>",
+            "<t:GlobalItemIds>{item_ids}</t:GlobalItemIds>",
+            "</t:Conversation>"
+        ),
+        thread_id = thread_id,
+        topic = escape_xml(topic),
+        recipients =
+            conversation_strings_xml("UniqueRecipients", &conversation_recipients(messages)),
+        senders = conversation_strings_xml("UniqueSenders", &conversation_senders(messages)),
+        last_delivery = escape_xml(last_delivery),
+        has_attachments = has_attachments,
+        message_count = messages.len(),
+        unread_count = unread_count,
+        size = size,
+        item_ids = item_ids,
+    )
+}
+
+fn get_conversation_items_response(
+    emails: &[JmapEmail],
+    conversation_ids: &[Uuid],
+    request: &str,
+) -> String {
+    let response_messages = conversation_ids
+        .iter()
+        .map(|thread_id| {
+            let mut messages = emails
+                .iter()
+                .filter(|email| email.thread_id == *thread_id)
+                .collect::<Vec<_>>();
+            let descending = element_text(request, "SortOrder")
+                .map(|value| value.contains("Descending"))
+                .unwrap_or(false);
+            messages.sort_by(|left, right| {
+                let ordering = left.received_at.cmp(&right.received_at);
+                if descending {
+                    ordering.reverse()
+                } else {
+                    ordering
+                }
+            });
+            if messages.is_empty() {
+                return operation_response_message(
+                    "GetConversationItems",
+                    "ErrorItemNotFound",
+                    "conversation not found",
+                );
+            }
+            let nodes = messages
+                .iter()
+                .map(|email| conversation_node_xml(email))
+                .collect::<String>();
+            let sync_state = format!(
+                "conversation:{thread_id}:{}",
+                messages
+                    .iter()
+                    .map(|email| email.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            format!(
+                concat!(
+                    "<m:GetConversationItemsResponseMessage ResponseClass=\"Success\">",
+                    "<m:ResponseCode>NoError</m:ResponseCode>",
+                    "<m:Conversation>",
+                    "<t:ConversationId Id=\"conversation:{thread_id}\"/>",
+                    "<t:SyncState>{sync_state}</t:SyncState>",
+                    "<t:ConversationNodes>{nodes}</t:ConversationNodes>",
+                    "</m:Conversation>",
+                    "</m:GetConversationItemsResponseMessage>"
+                ),
+                thread_id = thread_id,
+                sync_state = escape_xml(&sync_state),
+                nodes = nodes,
+            )
+        })
+        .collect::<String>();
+
+    format!(
+        concat!(
+            "<m:GetConversationItemsResponse>",
+            "<m:ResponseMessages>{response_messages}</m:ResponseMessages>",
+            "</m:GetConversationItemsResponse>"
+        ),
+        response_messages = response_messages,
+    )
+}
+
+fn conversation_node_xml(email: &JmapEmail) -> String {
+    format!(
+        concat!(
+            "<t:ConversationNode>",
+            "{internet_message_id}",
+            "<t:Items>{item}</t:Items>",
+            "</t:ConversationNode>"
+        ),
+        internet_message_id = email
+            .internet_message_id
+            .as_ref()
+            .map(|value| format!(
+                "<t:InternetMessageId>{}</t:InternetMessageId>",
+                escape_xml(value)
+            ))
+            .unwrap_or_default(),
+        item = message_item_xml(email),
+    )
+}
+
+fn conversation_last_delivery(emails: &[JmapEmail], thread_id: &Uuid) -> String {
+    emails
+        .iter()
+        .filter(|email| &email.thread_id == thread_id)
+        .map(|email| email.received_at.clone())
+        .max()
+        .unwrap_or_default()
+}
+
+fn conversation_recipients(messages: &[&JmapEmail]) -> Vec<String> {
+    let mut recipients = messages
+        .iter()
+        .flat_map(|email| email.to.iter().chain(email.cc.iter()))
+        .map(|address| {
+            address
+                .display_name
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| address.address.clone())
+        })
+        .collect::<Vec<_>>();
+    recipients.sort();
+    recipients.dedup();
+    recipients
+}
+
+fn conversation_senders(messages: &[&JmapEmail]) -> Vec<String> {
+    let mut senders = messages
+        .iter()
+        .map(|email| {
+            email
+                .from_display
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| email.from_address.clone())
+        })
+        .collect::<Vec<_>>();
+    senders.sort();
+    senders.dedup();
+    senders
+}
+
+fn conversation_strings_xml(element: &str, values: &[String]) -> String {
+    let strings = values
+        .iter()
+        .map(|value| format!("<t:String>{}</t:String>", escape_xml(value)))
+        .collect::<String>();
+    format!("<t:{element}>{strings}</t:{element}><t:Global{element}>{strings}</t:Global{element}>",)
+}
+
+fn operation_response_message(operation: &str, code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:{operation}ResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "<m:DescriptiveLinkKey>0</m:DescriptiveLinkKey>",
+            "</m:{operation}ResponseMessage>"
+        ),
+        operation = escape_xml(operation),
+        code = escape_xml(code),
+        message = escape_xml(message),
+    )
+}
+
+fn ews_usize_attribute(body: &str, tag: &str, attr: &str) -> Option<usize> {
+    attribute_value_after(body, tag, attr)?.parse().ok()
 }
 
 fn sync_folder_items_response(sync_state: &str, changes: String) -> String {
@@ -7532,6 +8654,22 @@ fn simple_operation_success_response(operation: &str) -> String {
     )
 }
 
+fn mark_as_junk_success_response(moved_item_ids: String) -> String {
+    format!(
+        concat!(
+            "<m:MarkAsJunkResponse>",
+            "<m:ResponseMessages>",
+            "<m:MarkAsJunkResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{moved_item_ids}",
+            "</m:MarkAsJunkResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:MarkAsJunkResponse>"
+        ),
+        moved_item_ids = moved_item_ids,
+    )
+}
+
 fn convert_id_success_response(alternate_ids: String) -> String {
     format!(
         concat!(
@@ -7732,6 +8870,145 @@ fn get_mail_tips_response(tips: &[MailTipProjection]) -> String {
             "</m:GetMailTipsResponse>"
         ),
         tips_xml = tips_xml,
+    )
+}
+
+fn get_service_configuration_response(configs: &[RequestedServiceConfiguration]) -> String {
+    let response_messages = configs
+        .iter()
+        .map(|config| match config {
+            RequestedServiceConfiguration::MailTips => service_configuration_success_message(
+                "MailTips",
+                &format!(
+                    concat!(
+                        "<m:MailTipsConfiguration>",
+                        "<t:MailTipsEnabled>true</t:MailTipsEnabled>",
+                        "<t:MaxRecipientsPerGetMailTipsRequest>{}</t:MaxRecipientsPerGetMailTipsRequest>",
+                        "<t:MaxMessageSize>0</t:MaxMessageSize>",
+                        "<t:LargeAudienceThreshold>0</t:LargeAudienceThreshold>",
+                        "</m:MailTipsConfiguration>"
+                    ),
+                    EWS_MAX_MAIL_TIPS_RECIPIENTS
+                ),
+            ),
+            RequestedServiceConfiguration::UnifiedMessaging => service_configuration_error_message(
+                "UnifiedMessagingConfiguration",
+                "Unified Messaging service configuration is not implemented by LPE.",
+            ),
+            RequestedServiceConfiguration::ProtectionRules => service_configuration_error_message(
+                "ProtectionRules",
+                "Protection Rules service configuration is not implemented by LPE.",
+            ),
+            RequestedServiceConfiguration::PolicyTips => service_configuration_error_message(
+                "PolicyTips",
+                "Policy Tips service configuration is not implemented by LPE.",
+            ),
+            RequestedServiceConfiguration::Unsupported => service_configuration_error_message(
+                "Unknown",
+                "The requested service configuration is not implemented by LPE.",
+            ),
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetServiceConfigurationResponse>",
+            "<m:ResponseMessages>{response_messages}</m:ResponseMessages>",
+            "</m:GetServiceConfigurationResponse>"
+        ),
+        response_messages = response_messages,
+    )
+}
+
+fn get_user_retention_policy_tags_response(tags: &[EwsRetentionPolicyTag]) -> String {
+    let tags_xml = tags
+        .iter()
+        .map(retention_policy_tag_xml)
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetUserRetentionPolicyTagsResponse ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:RetentionPolicyTags>{tags_xml}</m:RetentionPolicyTags>",
+            "</m:GetUserRetentionPolicyTagsResponse>"
+        ),
+        tags_xml = tags_xml,
+    )
+}
+
+fn retention_policy_tag_xml(tag: &EwsRetentionPolicyTag) -> String {
+    format!(
+        concat!(
+            "<t:RetentionPolicyTag>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "<t:RetentionId>{id}</t:RetentionId>",
+            "<t:RetentionPeriod>{retention_period}</t:RetentionPeriod>",
+            "<t:Type>{tag_type}</t:Type>",
+            "<t:RetentionAction>{action}</t:RetentionAction>",
+            "<t:Description>{description}</t:Description>",
+            "<t:IsVisible>{is_visible}</t:IsVisible>",
+            "<t:OptedInto>{opted_into}</t:OptedInto>",
+            "<t:IsArchive>{is_archive}</t:IsArchive>",
+            "</t:RetentionPolicyTag>"
+        ),
+        display_name = escape_xml(&tag.display_name),
+        id = tag.id,
+        retention_period = tag.retention_days.unwrap_or(0),
+        tag_type = ews_retention_tag_type(&tag.tag_type),
+        action = ews_retention_action(&tag.action),
+        description = escape_xml(&tag.description),
+        is_visible = tag.is_visible,
+        opted_into = tag.opted_into,
+        is_archive = tag.action == "move_to_archive",
+    )
+}
+
+fn ews_retention_tag_type(tag_type: &str) -> &'static str {
+    match tag_type {
+        "all" => "All",
+        "inbox" => "Inbox",
+        "sent" => "SentItems",
+        "deleted_items" => "DeletedItems",
+        "junk_email" => "JunkEmail",
+        "custom_folder" | "personal" => "Personal",
+        _ => "All",
+    }
+}
+
+fn ews_retention_action(action: &str) -> &'static str {
+    match action {
+        "delete_and_allow_recovery" => "DeleteAndAllowRecovery",
+        "permanently_delete" => "PermanentlyDelete",
+        "move_to_archive" => "MoveToArchive",
+        "none" => "None",
+        _ => "None",
+    }
+}
+
+fn service_configuration_success_message(configuration_name: &str, payload: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetServiceConfigurationResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:ConfigurationName>{configuration_name}</m:ConfigurationName>",
+            "{payload}",
+            "</m:GetServiceConfigurationResponseMessage>"
+        ),
+        configuration_name = escape_xml(configuration_name),
+        payload = payload,
+    )
+}
+
+fn service_configuration_error_message(configuration_name: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetServiceConfigurationResponseMessage ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>",
+            "<m:ConfigurationName>{configuration_name}</m:ConfigurationName>",
+            "</m:GetServiceConfigurationResponseMessage>"
+        ),
+        configuration_name = escape_xml(configuration_name),
+        message = escape_xml(message),
     )
 }
 
@@ -8218,6 +9495,103 @@ fn resolve_names_response(
     )
 }
 
+fn expand_dl_response(
+    principal: &AccountPrincipal,
+    request: &str,
+    entries: &[ExchangeAddressBookEntry],
+) -> String {
+    let Some(mailbox) = parse_first_mailbox(request) else {
+        return operation_error_response(
+            "ExpandDL",
+            "ErrorNameResolutionNoResults",
+            "No results are found.",
+        );
+    };
+    let query = mailbox.address.trim().to_ascii_lowercase();
+    let principal_entry = principal_address_book_entry(principal);
+    let mut visible_entries = entries.to_vec();
+    if !visible_entries
+        .iter()
+        .any(|entry| entry.email.eq_ignore_ascii_case(&principal_entry.email))
+    {
+        visible_entries.push(principal_entry);
+    }
+
+    let Some(distribution_list) = visible_entries.iter().find(|entry| {
+        entry.entry_kind == ExchangeAddressBookEntryKind::DistributionList
+            && address_book_entry_matches(entry, &query, false)
+    }) else {
+        return operation_error_response(
+            "ExpandDL",
+            "ErrorNameResolutionNoResults",
+            "No results are found.",
+        );
+    };
+
+    let mut members = Vec::new();
+    for member_email in &distribution_list.member_emails {
+        let normalized = member_email.trim().to_ascii_lowercase();
+        if let Some(member) = visible_entries
+            .iter()
+            .find(|entry| entry.email.eq_ignore_ascii_case(&normalized))
+        {
+            members.push(member.clone());
+        }
+    }
+    let member_xml = members
+        .iter()
+        .map(ews_mailbox_xml)
+        .collect::<Vec<_>>()
+        .join("");
+
+    format!(
+        concat!(
+            "<m:ExpandDLResponse>",
+            "<m:ResponseMessages>",
+            "<m:ExpandDLResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:DLExpansion TotalItemsInView=\"{count}\" IncludesLastItemInRange=\"true\">",
+            "{member_xml}",
+            "</m:DLExpansion>",
+            "</m:ExpandDLResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:ExpandDLResponse>"
+        ),
+        count = members.len(),
+        member_xml = member_xml,
+    )
+}
+
+fn visible_address_book_email(
+    principal: &AccountPrincipal,
+    entries: &[ExchangeAddressBookEntry],
+    email: &str,
+) -> bool {
+    principal.email.eq_ignore_ascii_case(email)
+        || entries.iter().any(|entry| {
+            matches!(
+                entry.entry_kind,
+                ExchangeAddressBookEntryKind::Account | ExchangeAddressBookEntryKind::Contact
+            ) && entry.email.eq_ignore_ascii_case(email)
+        })
+}
+
+fn ews_mailbox_xml(entry: &ExchangeAddressBookEntry) -> String {
+    format!(
+        concat!(
+            "<t:Mailbox>",
+            "<t:Name>{}</t:Name>",
+            "<t:EmailAddress>{}</t:EmailAddress>",
+            "<t:RoutingType>SMTP</t:RoutingType>",
+            "<t:MailboxType>{}</t:MailboxType>",
+            "</t:Mailbox>"
+        ),
+        escape_xml(&entry.display_name),
+        escape_xml(&entry.email),
+        ews_mailbox_type(entry),
+    )
+}
+
 fn principal_address_book_entry(principal: &AccountPrincipal) -> ExchangeAddressBookEntry {
     ExchangeAddressBookEntry {
         id: principal.account_id,
@@ -8462,6 +9836,33 @@ fn operation_error_response(operation: &str, code: &str, message: &str) -> Strin
             "</m:{operation}Response>"
         ),
         operation = escape_xml(operation),
+        code = escape_xml(code),
+        message = escape_xml(message),
+    )
+}
+
+fn get_user_photo_error_response(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetUserPhotoResponse ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "<m:HasChanged>false</m:HasChanged>",
+            "</m:GetUserPhotoResponse>"
+        ),
+        code = escape_xml(code),
+        message = escape_xml(message),
+    )
+}
+
+fn get_password_expiration_date_error_response(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetPasswordExpirationDateResponse ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "</m:GetPasswordExpirationDateResponse>"
+        ),
         code = escape_xml(code),
         message = escape_xml(message),
     )

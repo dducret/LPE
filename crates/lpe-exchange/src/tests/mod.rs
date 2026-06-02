@@ -8,8 +8,8 @@ use lpe_storage::{
     AccessibleContact, AccessibleEvent, AccountLogin, ActiveSyncAttachment,
     ActiveSyncAttachmentContent, AttachmentUploadInput, AuthenticatedAccount,
     CalendarEventAttachment, CancelSubmissionResult, ClientNote, ClientReminder, ClientTask,
-    CollaborationCollection, CollaborationGrantInput, CollaborationResourceKind,
-    CollaborationRights, ConversationAction, CreatePublicFolderInput,
+    CollaborationCollection, CollaborationGrant, CollaborationGrantInput,
+    CollaborationResourceKind, CollaborationRights, ConversationAction, CreatePublicFolderInput,
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
@@ -54,7 +54,7 @@ use crate::{
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::{
-        EwsDelegate, EwsUserConfiguration, EwsUserConfigurationKey,
+        EwsDelegate, EwsRetentionPolicyTag, EwsUserConfiguration, EwsUserConfigurationKey,
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
         ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
@@ -485,6 +485,8 @@ struct FakeStore {
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
+    ews_retention_policy_tags: Arc<Mutex<Vec<FakeRetentionPolicyTag>>>,
+    ews_sharing_grants: Arc<Mutex<Vec<CollaborationGrant>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
@@ -493,6 +495,13 @@ struct FakeStore {
 }
 
 type FakeMapiCustomPropertyKey = (Uuid, MapiCustomPropertyObjectKind, Uuid, u32, u16);
+
+#[derive(Clone)]
+struct FakeRetentionPolicyTag {
+    tenant_id: Uuid,
+    assigned_account_id: Option<Uuid>,
+    tag: EwsRetentionPolicyTag,
+}
 
 #[derive(Default)]
 struct FakeMapiNamedProperties {
@@ -1141,6 +1150,95 @@ impl ExchangeStore for FakeStore {
             false
         };
         Box::pin(async move { Ok(deleted) })
+    }
+
+    fn fetch_ews_retention_policy_tags<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsRetentionPolicyTag>> {
+        let tags = self
+            .ews_retention_policy_tags
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.tenant_id == principal.tenant_id)
+            .filter(|entry| {
+                entry.tag.is_visible || entry.assigned_account_id == Some(principal.account_id)
+            })
+            .map(|entry| {
+                let mut tag = entry.tag.clone();
+                tag.opted_into = entry.assigned_account_id == Some(principal.account_id);
+                tag
+            })
+            .collect();
+        Box::pin(async move { Ok(tags) })
+    }
+
+    fn upsert_ews_sharing_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_email: &'a str,
+        kind: CollaborationResourceKind,
+        rights: CollaborationRights,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, CollaborationGrant> {
+        let principal = self.session.clone().unwrap_or_else(FakeStore::account);
+        let owner = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| {
+                account.tenant_id == principal.tenant_id && account.account_id == owner_account_id
+            })
+            .cloned()
+            .or_else(|| (principal.account_id == owner_account_id).then_some(principal.clone()));
+        let grantee = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| {
+                account.tenant_id == principal.tenant_id
+                    && account.email.eq_ignore_ascii_case(grantee_email)
+            })
+            .cloned()
+            .or_else(|| {
+                principal
+                    .email
+                    .eq_ignore_ascii_case(grantee_email)
+                    .then_some(principal.clone())
+            });
+        let grants = self.ews_sharing_grants.clone();
+        Box::pin(async move {
+            let Some(owner) = owner else {
+                anyhow::bail!("sharing owner account not found in tenant")
+            };
+            let Some(grantee) = grantee else {
+                anyhow::bail!("sharing grantee account not found in tenant")
+            };
+            let grant = CollaborationGrant {
+                id: Uuid::new_v4(),
+                kind: kind.as_str().to_string(),
+                owner_account_id,
+                owner_email: owner.email,
+                owner_display_name: owner.display_name,
+                grantee_account_id: grantee.account_id,
+                grantee_email: grantee.email,
+                grantee_display_name: grantee.display_name,
+                rights,
+                created_at: "2026-05-22T00:00:00Z".to_string(),
+                updated_at: "2026-05-22T00:00:00Z".to_string(),
+            };
+            let mut grants = grants.lock().unwrap();
+            grants.retain(|existing| {
+                !(existing.kind == grant.kind
+                    && existing.owner_account_id == grant.owner_account_id
+                    && existing.grantee_account_id == grant.grantee_account_id)
+            });
+            grants.push(grant.clone());
+            Ok(grant)
+        })
     }
 
     fn fetch_ews_delegates<'a>(

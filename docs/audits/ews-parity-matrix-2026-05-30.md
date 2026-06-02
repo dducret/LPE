@@ -97,20 +97,20 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `ApplyConversationAction` | Missing | Existing lightweight `thread_id` plus `conversation_actions` for bounded actions | Canonical conversation-action API | Unsupported through EWS; no Exchange conversation action semantics | P2 |
-| `FindConversation` | Missing | `mailbox_messages.thread_id`, message summaries, search/query state | Canonical thread/conversation query API | Unsupported; clients must use item listing instead | P1 |
-| `GetConversationItems` | Missing | Same as `FindConversation` plus item fetch data | Canonical conversation item fetch API | Unsupported; no Exchange conversation item payloads | P1 |
+| `ApplyConversationAction` | Partial | Existing lightweight `thread_id` and canonical message state | Canonical message move/delete/read-state APIs over current thread messages | Supports one-shot `Move`, `Delete`, and `SetReadState`; persistent future-message `Always*` actions return parseable gaps because no first-class thread lifecycle exists | P2 |
+| `FindConversation` | Partial | `mailbox_messages.thread_id`, message summaries, search/query state | Canonical message grouping by lightweight thread id | Lists current folder-scoped conversations only; no Exchange conversation index or lifecycle identity | P1 |
+| `GetConversationItems` | Partial | Same as `FindConversation` plus item fetch data | Canonical message fetch grouped by lightweight thread id | Returns current message nodes only; folder ignore is bounded to canonical folder membership | P1 |
 
 ## Utility Operations
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `ConvertId` | Partial | No SQL; stateless opaque ids encode canonical LPE EWS family/id payloads | Canonical EWS id codec over supported LPE object families | Supports deterministic opaque alternate ids for canonical message, folder, contact, event, task, attachment, and public-folder ids; no Exchange identity table or full MAPI EntryId parity | P1 |
-| `ExpandDL` | Explicitly unsupported | Existing aliases/groups may help; full distribution-list membership model may need more SQL | Canonical directory/group expansion API | Explicit unsupported EWS response; no DL expansion through EWS | P2 |
-| `GetUserPhoto` | Missing | New account/contact photo blob metadata | Directory/profile photo API | Unsupported; no EWS SOAP/REST photo payload | P3 |
-| `MarkAsJunk` | Missing | New junk classification or mailbox rule state; possible LPE-CT spam feedback integration | Canonical junk-report/move API plus LPE-CT feedback boundary | Unsupported; no EWS junk reporting or block/safe sender behavior | P2 |
+| `ExpandDL` | Partial | Existing canonical group aliases/members and visible directory entries | Canonical directory/group expansion API | Expands visible same-tenant public DL membership only; no recursive expansion or private Exchange DL item expansion | P2 |
+| `GetUserPhoto` | Partial parseable gap | New account/contact photo blob metadata if photo support is later introduced | Directory/profile photo API | Validates same-tenant directory visibility, then returns parseable no-photo because no canonical photo blob state exists | P3 |
+| `MarkAsJunk` | Partial | Existing canonical mailbox/message state; no protocol-local junk list state | Canonical message move to Junk; future spam feedback must cross LPE-CT boundary explicitly | Supports `IsJunk=true` plus `MoveItem=true`; Exchange blocked/safe sender list and unblock-only behavior return parseable gaps | P2 |
 | `ResolveNames` | Partial | Accounts, tenant directory rows, contact books/contacts and grants | Canonical address-book/contact lookup API | No full GAL templates, ambiguous name behavior, or distribution-list expansion parity | P0 |
-| `GetPasswordExpirationDate` | Missing | Credential expiry policy/state if supported | Account credential policy API | Unsupported; clients cannot query Exchange-style password expiry | P3 |
+| `GetPasswordExpirationDate` | Partial parseable gap | Credential expiry policy/state if supported later | Account credential policy API | Authenticated account query returns parseable gap because no canonical password-expiration field exists; other-account query is denied | P3 |
 
 ## Availability Operations
 
@@ -189,13 +189,13 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetUserRetentionPolicyTags` | Missing | Existing mailbox retention days are insufficient; Exchange-like retention tag/policy rows required | Retention policy projection API | Unsupported; clients cannot retrieve retention tags through EWS | P2 |
+| `GetUserRetentionPolicyTags` | Partial | `retention_policy_tags`, `account_retention_policy_assignments` | Bounded retention policy tag projection API | Returns active same-tenant visible tags plus the authenticated account's assigned default tag, including hidden assigned tags; no Exchange managed-folder policy engine or cross-tenant tag visibility | P2 |
 
 ## Service Configuration Operation
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetServiceConfiguration` | Missing | Server/tenant settings plus optional mail tips, policy tips, protection rules, UM settings | Service configuration read API | Unsupported; clients cannot discover Exchange service feature configuration | P2 |
+| `GetServiceConfiguration` | Partial | Existing bounded MailTips capability; no Exchange-only UM, Protection Rules, or Policy Tips service settings | Bounded service configuration read path | Returns MailTips configuration for the implemented MailTips surface; requested Unified Messaging, Protection Rules, Policy Tips, or unknown service configurations return parseable EWS gaps | P2 |
 
 ## Sharing Operations
 
@@ -258,9 +258,9 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 | Priority | Operations |
 | --- | --- |
 | P0 | `CreateItem`, `DeleteItem`, `FindItem`, `GetItem`, `SendItem`, `UpdateItem`, `CreateFolder`, `DeleteFolder`, `FindFolder`, `GetFolder`, `CreateAttachment`, `GetAttachment`, `DeleteAttachment`, `ResolveNames`, `GetUserAvailability`, `GetInboxRules`, `UpdateInboxRules`, `GetEvents`, `Subscribe`, `Unsubscribe`, `SyncFolderHierarchy`, `SyncFolderItems`, `GetServerTimeZones` |
-| P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `FindConversation`, `GetConversationItems`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
-| P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `ApplyConversationAction`, `ExpandDL`, `MarkAsJunk`, `UploadItems`, `ExportItems`, `FindPeople`, `GetPersona`, `GetUserRetentionPolicyTags`, `GetServiceConfiguration`, `CreateItem` with `AcceptSharingInvitation`, `GetSharingFolder`, `GetSharingMetadata` |
-| P3 | `GetUserPhoto`, `GetPasswordExpirationDate`, `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport`, `RefreshSharingFolder` |
+| P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
+| P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `UploadItems`, `ExportItems`, `FindPeople`, `GetPersona`, `CreateItem` with `AcceptSharingInvitation`, `GetSharingFolder`, `GetSharingMetadata` |
+| P3 | `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport`, `RefreshSharingFolder` |
 | P4 | eDiscovery operations, `CreateManagedFolder`, `GetAppMarketplaceUrl`, Unified Messaging operations, Unified Contact Store operations |
 
 ## Main Parity Gaps For Outlook And Native Clients

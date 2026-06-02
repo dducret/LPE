@@ -3,19 +3,19 @@ use lpe_mail_auth::{AccountAuthStore, AccountPrincipal, StoreFuture};
 use lpe_storage::{
     AccessibleContact, AccessibleEvent, ActiveSyncAttachment, ActiveSyncAttachmentContent,
     AttachmentUploadInput, AuditEntryInput, CalendarEventAttachment, CancelSubmissionResult,
-    ClientNote, ClientReminder, ClientTask, CollaborationCollection, CollaborationGrantInput,
-    CollaborationResourceKind, CollaborationRights, ConversationAction, CreatePublicFolderInput,
-    DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate, JmapEmailQuery,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    JournalEntry, MailboxDelegationGrantInput, MailboxFolderDelegationGrantInput, MailboxRule,
-    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
-    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
-    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
-    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
-    SubmitMessageInput, SubmittedMessage, UpdatePublicFolderInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    ClientNote, ClientReminder, ClientTask, CollaborationCollection, CollaborationGrant,
+    CollaborationGrantInput, CollaborationResourceKind, CollaborationRights, ConversationAction,
+    CreatePublicFolderInput, DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate,
+    JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
+    JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
+    MailboxFolderDelegationGrantInput, MailboxRule, PublicFolder, PublicFolderItem,
+    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
+    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
+    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
+    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
+    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -223,6 +223,18 @@ pub(crate) struct UpsertEwsUserConfigurationInput {
     pub(crate) dictionary_json: serde_json::Value,
     pub(crate) xml_payload: Option<String>,
     pub(crate) binary_payload: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsRetentionPolicyTag {
+    pub(crate) id: Uuid,
+    pub(crate) display_name: String,
+    pub(crate) tag_type: String,
+    pub(crate) action: String,
+    pub(crate) retention_days: Option<i32>,
+    pub(crate) is_visible: bool,
+    pub(crate) description: String,
+    pub(crate) opted_into: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -541,6 +553,20 @@ pub trait ExchangeStore: AccountAuthStore {
         key: &'a EwsUserConfigurationKey,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, bool>;
+
+    fn fetch_ews_retention_policy_tags<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsRetentionPolicyTag>>;
+
+    fn upsert_ews_sharing_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_email: &'a str,
+        kind: CollaborationResourceKind,
+        rights: CollaborationRights,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, CollaborationGrant>;
 
     fn fetch_ews_delegates<'a>(
         &'a self,
@@ -1399,6 +1425,87 @@ impl ExchangeStore for Storage {
             } else {
                 Ok(false)
             }
+        })
+    }
+
+    fn fetch_ews_retention_policy_tags<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsRetentionPolicyTag>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                WITH assignment AS (
+                    SELECT default_tag_id
+                    FROM account_retention_policy_assignments
+                    WHERE tenant_id = $1
+                      AND account_id = $2
+                )
+                SELECT
+                    tag.id,
+                    tag.display_name,
+                    tag.tag_type,
+                    tag.action,
+                    tag.retention_days,
+                    tag.is_visible,
+                    tag.description,
+                    COALESCE(tag.id = assignment.default_tag_id, FALSE) AS opted_into
+                FROM retention_policy_tags tag
+                LEFT JOIN assignment ON TRUE
+                WHERE tag.tenant_id = $1
+                  AND tag.lifecycle_state = 'active'
+                  AND (tag.is_visible OR tag.id = assignment.default_tag_id)
+                ORDER BY
+                    CASE WHEN tag.id = assignment.default_tag_id THEN 0 ELSE 1 END,
+                    lower(tag.display_name),
+                    tag.id
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsRetentionPolicyTag {
+                        id: row.try_get("id")?,
+                        display_name: row.try_get("display_name")?,
+                        tag_type: row.try_get("tag_type")?,
+                        action: row.try_get("action")?,
+                        retention_days: row.try_get("retention_days")?,
+                        is_visible: row.try_get("is_visible")?,
+                        description: row.try_get("description")?,
+                        opted_into: row.try_get("opted_into")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn upsert_ews_sharing_grant<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_email: &'a str,
+        kind: CollaborationResourceKind,
+        rights: CollaborationRights,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, CollaborationGrant> {
+        Box::pin(async move {
+            Storage::upsert_collaboration_grant(
+                self,
+                CollaborationGrantInput {
+                    kind,
+                    owner_account_id,
+                    grantee_email: grantee_email.to_string(),
+                    may_read: rights.may_read,
+                    may_write: rights.may_write,
+                    may_delete: rights.may_delete,
+                    may_share: rights.may_share,
+                },
+                audit,
+            )
+            .await
         })
     }
 

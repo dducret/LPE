@@ -2117,12 +2117,7 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
     };
     let service = ExchangeService::new(store);
 
-    for operation in [
-        "FindPeople",
-        "ExpandDL",
-        "GetSharingMetadata",
-        "GetSharingFolder",
-    ] {
+    for operation in ["FindPeople"] {
         let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
         let response = service
             .handle(&bearer_headers(), request.as_bytes())
@@ -2136,6 +2131,617 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_tokens() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "calendar-default",
+            "calendar",
+            "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetSharingMetadata>
+                  <m:IdOfFolderToShare><t:DistinguishedFolderId Id="calendar"/></m:IdOfFolderToShare>
+                </m:GetSharingMetadata>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetSharingMetadataResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:DataType>Calendar</t:DataType>"));
+    assert!(
+        body.contains("<t:FolderId Id=\"calendar-default\" ChangeKey=\"ck-calendar-default\"/>")
+    );
+    assert!(body.contains("<t:OwnerSmtpAddress>alice@example.test</t:OwnerSmtpAddress>"));
+    assert!(!body.contains("<t:DataType>Contacts</t:DataType>"));
+    assert!(!body.to_ascii_lowercase().contains("token"));
+}
+
+#[tokio::test]
+async fn accept_sharing_invitation_creates_same_tenant_calendar_grant() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let grants = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(alice.clone()),
+        directory_accounts: Arc::new(Mutex::new(vec![bob.clone()])),
+        ews_sharing_grants: grants.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem>
+                  <m:Items>
+                    <t:AcceptSharingInvitation>
+                      <t:SharingInvitationData>
+                        <t:DataType>Calendar</t:DataType>
+                        <t:SharedFolderOwner>
+                          <t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
+                        </t:SharedFolderOwner>
+                        <t:PermissionLevel>Editor</t:PermissionLevel>
+                      </t:SharingInvitationData>
+                    </t:AcceptSharingInvitation>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:AcceptSharingInvitation>"));
+    assert!(body.contains("<t:DataType>Calendar</t:DataType>"));
+    assert!(body.contains("<t:PermissionLevel>Editor</t:PermissionLevel>"));
+
+    let grants = grants.lock().unwrap();
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].kind, "calendar");
+    assert_eq!(grants[0].owner_account_id, bob.account_id);
+    assert_eq!(grants[0].grantee_account_id, alice.account_id);
+    assert!(grants[0].rights.may_read);
+    assert!(grants[0].rights.may_write);
+    assert!(grants[0].rights.may_delete);
+    assert!(!grants[0].rights.may_share);
+}
+
+#[tokio::test]
+async fn accept_sharing_invitation_rejects_cross_tenant_owner_without_grant() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb),
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let grants = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        ews_sharing_grants: grants.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateItem>
+                  <m:Items>
+                    <t:AcceptSharingInvitation>
+                      <t:SharingInvitationData>
+                        <t:DataType>Contacts</t:DataType>
+                        <t:SharedFolderOwner>
+                          <t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
+                        </t:SharedFolderOwner>
+                      </t:SharingInvitationData>
+                    </t:AcceptSharingInvitation>
+                  </m:Items>
+                </m:CreateItem>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateItemResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("same tenant"));
+    assert!(grants.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn get_sharing_folder_returns_accessible_same_tenant_calendar_grant() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut shared_calendar =
+        FakeStore::collection("shared-calendar-bob", "calendar", "Bob Calendar");
+    shared_calendar.owner_account_id = bob.account_id;
+    shared_calendar.owner_email = bob.email.clone();
+    shared_calendar.owner_display_name = bob.display_name.clone();
+    shared_calendar.is_owned = false;
+    shared_calendar.rights = CollaborationRights {
+        may_read: true,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        calendar_collections: Arc::new(Mutex::new(vec![shared_calendar])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetSharingFolder>
+                  <m:SharingFolderRequest>
+                    <t:DataType>Calendar</t:DataType>
+                    <t:SharedFolderOwner>
+                      <t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
+                    </t:SharedFolderOwner>
+                  </m:SharingFolderRequest>
+                </m:GetSharingFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetSharingFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body
+        .contains("<t:FolderId Id=\"shared-calendar-bob\" ChangeKey=\"ck-shared-calendar-bob\"/>"));
+    assert!(body.contains("<t:OwnerSmtpAddress>bob@example.test</t:OwnerSmtpAddress>"));
+    assert!(body.contains("<t:PermissionLevel>Reviewer</t:PermissionLevel>"));
+}
+
+#[tokio::test]
+async fn get_sharing_folder_rejects_ungranted_same_tenant_calendar() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetSharingFolder>
+                  <m:SharingFolderRequest>
+                    <t:DataType>Calendar</t:DataType>
+                    <t:SharedFolderOwner>
+                      <t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
+                    </t:SharedFolderOwner>
+                  </m:SharingFolderRequest>
+                </m:GetSharingFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetSharingFolderResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("not accessible"));
+}
+
+#[tokio::test]
+async fn refresh_sharing_folder_verifies_accessible_shared_contacts_folder() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut shared_contacts =
+        FakeStore::collection("shared-contacts-bob", "contacts", "Bob Contacts");
+    shared_contacts.owner_account_id = bob.account_id;
+    shared_contacts.owner_email = bob.email;
+    shared_contacts.owner_display_name = bob.display_name;
+    shared_contacts.is_owned = false;
+    shared_contacts.rights = CollaborationRights {
+        may_read: true,
+        may_write: false,
+        may_delete: false,
+        may_share: false,
+    };
+    let store = FakeStore {
+        session: Some(alice),
+        contact_collections: Arc::new(Mutex::new(vec![shared_contacts])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:RefreshSharingFolder>
+                  <m:SharingFolderId><t:FolderId Id="shared-contacts-bob"/></m:SharingFolderId>
+                </m:RefreshSharingFolder>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:RefreshSharingFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body
+        .contains("<t:FolderId Id=\"shared-contacts-bob\" ChangeKey=\"ck-shared-contacts-bob\"/>"));
+}
+
+#[tokio::test]
+async fn expand_dl_projects_same_tenant_directory_group_members() {
+    let bob = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let carol_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    let foreign_id = Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap();
+    let hidden_id = Uuid::parse_str("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee").unwrap();
+    let group_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let extra_address_book_entries = Arc::new(Mutex::new(vec![
+        ExchangeAddressBookEntry {
+            id: group_id,
+            display_name: "Engineering".to_string(),
+            email: "engineering@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::DistributionList,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: vec![
+                "bob@example.test".to_string(),
+                "carol@example.test".to_string(),
+                "mallory@example.test".to_string(),
+                "hidden@example.test".to_string(),
+            ],
+        },
+        ExchangeAddressBookEntry {
+            id: carol_id,
+            display_name: "Carol Contact".to_string(),
+            email: "carol@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
+        },
+        ExchangeAddressBookEntry {
+            id: foreign_id,
+            display_name: "Mallory".to_string(),
+            email: "mallory@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
+        },
+        ExchangeAddressBookEntry {
+            id: hidden_id,
+            display_name: "Hidden".to_string(),
+            email: "hidden@example.test".to_string(),
+            entry_kind: ExchangeAddressBookEntryKind::Contact,
+            directory_kind: ExchangeAddressBookDirectoryKind::Person,
+            member_emails: Vec::new(),
+        },
+    ]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        extra_address_book_entries: extra_address_book_entries.clone(),
+        extra_address_book_entry_tenants: Arc::new(Mutex::new(HashMap::from([(
+            foreign_id,
+            Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb),
+        )]))),
+        hidden_address_book_entry_ids: Arc::new(Mutex::new(vec![hidden_id])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:ExpandDL>
+                  <m:Mailbox><t:EmailAddress>engineering@example.test</t:EmailAddress></m:Mailbox>
+                </m:ExpandDL>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ExpandDLResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(
+        body.contains("<m:DLExpansion TotalItemsInView=\"2\" IncludesLastItemInRange=\"true\">")
+    );
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:EmailAddress>carol@example.test</t:EmailAddress>"));
+    assert!(!body.contains("mallory@example.test"));
+    assert!(!body.contains("hidden@example.test"));
+}
+
+#[tokio::test]
+async fn expand_dl_returns_parseable_gap_for_unknown_distribution_list() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:ExpandDL>
+                  <m:Mailbox><t:EmailAddress>missing@example.test</t:EmailAddress></m:Mailbox>
+                </m:ExpandDL>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ExpandDLResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorNameResolutionNoResults</m:ResponseCode>"));
+}
+
+#[tokio::test]
+async fn get_user_photo_returns_parseable_canonical_photo_gap() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+              <s:Body>
+                <m:GetUserPhoto>
+                  <m:Email>alice@example.test</m:Email>
+                  <m:SizeRequested>HR48x48</m:SizeRequested>
+                </m:GetUserPhoto>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserPhotoResponse ResponseClass=\"Error\">"));
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(body.contains("<m:HasChanged>false</m:HasChanged>"));
+}
+
+#[tokio::test]
+async fn get_password_expiration_date_returns_parseable_canonical_account_gap() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+              <s:Body>
+                <m:GetPasswordExpirationDate>
+                  <m:MailboxSmtpAddress>alice@example.test</m:MailboxSmtpAddress>
+                </m:GetPasswordExpirationDate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetPasswordExpirationDateResponse ResponseClass=\"Error\">"));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("no canonical account password expiration date"));
+}
+
+#[tokio::test]
+async fn mark_as_junk_moves_messages_to_canonical_junk_mailbox() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let junk_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "66666666-6666-6666-6666-666666666666";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(junk_id, "junk", "Junk Email"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            inbox_id,
+            "inbox",
+            "Suspicious",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body>
+            <m:MarkAsJunk IsJunk="true" MoveItem="true">
+              <m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds>
+            </m:MarkAsJunk>
+          </s:Body>
+        </s:Envelope>
+        "#
+    );
+
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MarkAsJunkResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains(&format!("<m:MovedItemId Id=\"message:{message_id}\"")));
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[(
+            Uuid::parse_str(message_id).unwrap(),
+            Uuid::parse_str(junk_id).unwrap()
+        )]
+    );
+    assert_eq!(emails.lock().unwrap()[0].mailbox_role, "junk");
+}
+
+#[tokio::test]
+async fn mark_as_junk_keeps_exchange_only_block_sender_behavior_parseable() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let junk_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = "66666666-6666-6666-6666-666666666666";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(junk_id, "junk", "Junk Email"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            inbox_id,
+            "inbox",
+            "Suspicious",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+    let request = format!(
+        r#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body>
+            <m:MarkAsJunk IsJunk="true" MoveItem="false">
+              <m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds>
+            </m:MarkAsJunk>
+          </s:Body>
+        </s:Envelope>
+        "#
+    );
+
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MarkAsJunkResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("Exchange blocked-sender"));
+    assert!(moved_emails.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -3563,6 +4169,221 @@ async fn get_mail_tips_projects_directory_and_oof_without_local_tip_state() {
 }
 
 #[tokio::test]
+async fn get_service_configuration_reports_bounded_mail_tips_and_parseable_gaps() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body>
+              <m:GetServiceConfiguration>
+                <m:RequestedConfiguration>
+                  <t:ConfigurationName>MailTips</t:ConfigurationName>
+                  <t:ConfigurationName>UnifiedMessagingConfiguration</t:ConfigurationName>
+                  <t:ConfigurationName>ProtectionRules</t:ConfigurationName>
+                  <t:ConfigurationName>PolicyTips</t:ConfigurationName>
+                </m:RequestedConfiguration>
+              </m:GetServiceConfiguration>
+            </s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetServiceConfigurationResponse>"));
+    assert!(body.contains("<m:ConfigurationName>MailTips</m:ConfigurationName>"));
+    assert!(body.contains("<m:MailTipsConfiguration>"));
+    assert!(body.contains("<t:MailTipsEnabled>true</t:MailTipsEnabled>"));
+    assert!(body.contains(
+        "<t:MaxRecipientsPerGetMailTipsRequest>100</t:MaxRecipientsPerGetMailTipsRequest>"
+    ));
+    assert!(
+        body.contains("<m:ConfigurationName>UnifiedMessagingConfiguration</m:ConfigurationName>")
+    );
+    assert!(body.contains("<m:ConfigurationName>ProtectionRules</m:ConfigurationName>"));
+    assert!(body.contains("<m:ConfigurationName>PolicyTips</m:ConfigurationName>"));
+    assert!(body.contains("Unified Messaging service configuration is not implemented by LPE."));
+    assert!(body.contains("Protection Rules service configuration is not implemented by LPE."));
+    assert!(body.contains("Policy Tips service configuration is not implemented by LPE."));
+    assert_eq!(body.matches("ResponseClass=\"Success\"").count(), 1);
+    assert_eq!(body.matches("ResponseClass=\"Error\"").count(), 3);
+    assert_eq!(
+        body.matches("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>")
+            .count(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn get_service_configuration_defaults_to_supported_mail_tips_config() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetServiceConfiguration /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetServiceConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<m:ConfigurationName>MailTips</m:ConfigurationName>"));
+    assert!(!body.contains("Unified Messaging service configuration"));
+}
+
+#[tokio::test]
+async fn get_user_retention_policy_tags_projects_same_tenant_assignment_visibility() {
+    let account = FakeStore::account();
+    let foreign_tenant_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let visible_tag_id = Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap();
+    let assigned_hidden_tag_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let hidden_unassigned_tag_id = Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap();
+    let foreign_tag_id = Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ews_retention_policy_tags: Arc::new(Mutex::new(vec![
+            FakeRetentionPolicyTag {
+                tenant_id: account.tenant_id,
+                assigned_account_id: None,
+                tag: retention_policy_tag(
+                    visible_tag_id,
+                    "Visible cleanup",
+                    "personal",
+                    "delete_and_allow_recovery",
+                    Some(30),
+                    true,
+                    "User visible cleanup",
+                ),
+            },
+            FakeRetentionPolicyTag {
+                tenant_id: account.tenant_id,
+                assigned_account_id: Some(account.account_id),
+                tag: retention_policy_tag(
+                    assigned_hidden_tag_id,
+                    "Assigned archive",
+                    "all",
+                    "move_to_archive",
+                    Some(730),
+                    false,
+                    "Assigned default archive",
+                ),
+            },
+            FakeRetentionPolicyTag {
+                tenant_id: account.tenant_id,
+                assigned_account_id: None,
+                tag: retention_policy_tag(
+                    hidden_unassigned_tag_id,
+                    "Hidden unassigned",
+                    "all",
+                    "permanently_delete",
+                    Some(90),
+                    false,
+                    "Hidden tenant tag",
+                ),
+            },
+            FakeRetentionPolicyTag {
+                tenant_id: foreign_tenant_id,
+                assigned_account_id: Some(account.account_id),
+                tag: retention_policy_tag(
+                    foreign_tag_id,
+                    "Foreign tenant tag",
+                    "personal",
+                    "delete_and_allow_recovery",
+                    Some(10),
+                    true,
+                    "Foreign tenant",
+                ),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserRetentionPolicyTags /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserRetentionPolicyTagsResponse ResponseClass=\"Success\">"));
+    assert_eq!(body.matches("<t:RetentionPolicyTag>").count(), 2);
+    assert!(body.contains("<t:DisplayName>Visible cleanup</t:DisplayName>"));
+    assert!(body.contains("<t:RetentionId>11111111-1111-1111-1111-111111111111</t:RetentionId>"));
+    assert!(body.contains("<t:OptedInto>false</t:OptedInto>"));
+    assert!(body.contains("<t:DisplayName>Assigned archive</t:DisplayName>"));
+    assert!(body.contains("<t:RetentionId>22222222-2222-2222-2222-222222222222</t:RetentionId>"));
+    assert!(body.contains("<t:IsVisible>false</t:IsVisible>"));
+    assert!(body.contains("<t:OptedInto>true</t:OptedInto>"));
+    assert!(body.contains("<t:IsArchive>true</t:IsArchive>"));
+    assert!(!body.contains("Hidden unassigned"));
+    assert!(!body.contains("Foreign tenant tag"));
+}
+
+#[tokio::test]
+async fn get_user_retention_policy_tags_returns_documented_response_shape() {
+    let account = FakeStore::account();
+    let tag_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ews_retention_policy_tags: Arc::new(Mutex::new(vec![FakeRetentionPolicyTag {
+            tenant_id: account.tenant_id,
+            assigned_account_id: Some(account.account_id),
+            tag: retention_policy_tag(
+                tag_id,
+                "Deleted Items purge",
+                "deleted_items",
+                "permanently_delete",
+                Some(14),
+                true,
+                "Cleanup & recovery policy",
+            ),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetUserRetentionPolicyTags /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<m:RetentionPolicyTags>"));
+    assert!(body.contains("<t:RetentionPolicyTag>"));
+    assert!(body.contains("<t:DisplayName>Deleted Items purge</t:DisplayName>"));
+    assert!(body.contains("<t:RetentionId>55555555-5555-5555-5555-555555555555</t:RetentionId>"));
+    assert!(body.contains("<t:RetentionPeriod>14</t:RetentionPeriod>"));
+    assert!(body.contains("<t:Type>DeletedItems</t:Type>"));
+    assert!(body.contains("<t:RetentionAction>PermanentlyDelete</t:RetentionAction>"));
+    assert!(body.contains("<t:Description>Cleanup &amp; recovery policy</t:Description>"));
+    assert!(body.contains("<t:IsVisible>true</t:IsVisible>"));
+    assert!(body.contains("<t:OptedInto>true</t:OptedInto>"));
+    assert!(body.contains("<t:IsArchive>false</t:IsArchive>"));
+}
+
+#[tokio::test]
 async fn rooms_are_projected_from_canonical_directory_entries() {
     let room_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000031").unwrap();
     let equipment_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000032").unwrap();
@@ -4010,7 +4831,7 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
     };
     let service = ExchangeService::new(store);
 
-    for operation in ["FindConversation", "GetConversationItems"] {
+    for operation in ["FindMessageTrackingReport", "GetMessageTrackingReport"] {
         let request = format!(
             concat!(
                 "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
@@ -4032,6 +4853,339 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn find_conversation_groups_messages_by_canonical_thread_in_folder() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let archive_id = "55555555-5555-5555-5555-555555555555";
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let other_thread_id = Uuid::parse_str("bbbbbbbb-2222-2222-2222-222222222222").unwrap();
+    let mut first = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox_id,
+        "inbox",
+        "Quarterly planning",
+    );
+    first.thread_id = thread_id;
+    first.unread = true;
+    first.received_at = "2026-05-01T09:00:00Z".to_string();
+    first.size_octets = 120;
+    let mut reply = FakeStore::email(
+        "22222222-2222-2222-2222-222222222222",
+        inbox_id,
+        "inbox",
+        "RE: Quarterly planning",
+    );
+    reply.thread_id = thread_id;
+    reply.received_at = "2026-05-01T10:00:00Z".to_string();
+    reply.has_attachments = true;
+    reply.size_octets = 250;
+    let mut other = FakeStore::email(
+        "33333333-3333-3333-3333-333333333333",
+        inbox_id,
+        "inbox",
+        "Budget",
+    );
+    other.thread_id = other_thread_id;
+    let mut archived = FakeStore::email(
+        "44444444-4444-4444-4444-444444444444",
+        archive_id,
+        "archive",
+        "Quarterly planning",
+    );
+    archived.thread_id = thread_id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(archive_id, "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![first, reply, other, archived])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:FindConversation>
+                  <m:IndexedPageItemView BasePoint="Beginning" MaxEntriesReturned="10" Offset="0"/>
+                  <m:ParentFolderId><t:DistinguishedFolderId Id="inbox"/></m:ParentFolderId>
+                </m:FindConversation>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindConversationResponse ResponseClass=\"Success\">"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(body.matches("<t:ConversationId").count(), 2);
+    assert!(body
+        .contains("<t:ConversationId Id=\"conversation:aaaaaaaa-1111-1111-1111-111111111111\"/>"));
+    assert!(body.contains("<t:MessageCount>2</t:MessageCount>"));
+    assert!(body.contains("<t:UnreadCount>1</t:UnreadCount>"));
+    assert!(body.contains("<t:HasAttachments>true</t:HasAttachments>"));
+    assert!(body.contains("<t:Size>370</t:Size>"));
+    assert!(body.contains("<t:ConversationTopic>Quarterly planning</t:ConversationTopic>"));
+    assert!(!body.contains("44444444-4444-4444-4444-444444444444"));
+}
+
+#[tokio::test]
+async fn get_conversation_items_returns_current_canonical_thread_nodes() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let trash_id = "55555555-5555-5555-5555-555555555555";
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let mut inbox = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox_id,
+        "inbox",
+        "Quarterly planning",
+    );
+    inbox.thread_id = thread_id;
+    inbox.internet_message_id = Some("<planning-1@example.test>".to_string());
+    let mut trash = FakeStore::email(
+        "22222222-2222-2222-2222-222222222222",
+        trash_id,
+        "trash",
+        "RE: Quarterly planning",
+    );
+    trash.thread_id = thread_id;
+    trash.internet_message_id = Some("<planning-2@example.test>".to_string());
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(trash_id, "trash", "Deleted Items"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![inbox, trash])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetConversationItems>
+                  <m:FoldersToIgnore><t:DistinguishedFolderId Id="deleteditems"/></m:FoldersToIgnore>
+                  <m:SortOrder>TreeOrderAscending</m:SortOrder>
+                  <m:Conversations>
+                    <t:Conversation><t:ConversationId Id="conversation:aaaaaaaa-1111-1111-1111-111111111111"/></t:Conversation>
+                  </m:Conversations>
+                </m:GetConversationItems>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetConversationItemsResponse>"));
+    assert!(body.contains("<m:GetConversationItemsResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<t:ConversationNodes>"));
+    assert!(
+        body.contains("<t:InternetMessageId>&lt;planning-1@example.test&gt;</t:InternetMessageId>")
+    );
+    assert!(body.contains("<t:ItemId Id=\"message:11111111-1111-1111-1111-111111111111\""));
+    assert!(!body.contains("22222222-2222-2222-2222-222222222222"));
+}
+
+#[tokio::test]
+async fn apply_conversation_action_moves_current_thread_messages() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let archive_id = "55555555-5555-5555-5555-555555555555";
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let mut first = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox_id,
+        "inbox",
+        "Quarterly planning",
+    );
+    first.thread_id = thread_id;
+    let mut reply = FakeStore::email(
+        "22222222-2222-2222-2222-222222222222",
+        inbox_id,
+        "inbox",
+        "RE: Quarterly planning",
+    );
+    reply.thread_id = thread_id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(archive_id, "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![first, reply])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:ApplyConversationAction>
+                  <m:ConversationActions>
+                    <t:ConversationAction>
+                      <t:Action>Move</t:Action>
+                      <t:ConversationId Id="conversation:aaaaaaaa-1111-1111-1111-111111111111"/>
+                      <t:DestinationFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:DestinationFolderId>
+                    </t:ConversationAction>
+                  </m:ConversationActions>
+                </m:ApplyConversationAction>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ApplyConversationActionResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[
+            (
+                Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                Uuid::parse_str(archive_id).unwrap()
+            ),
+            (
+                Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap(),
+                Uuid::parse_str(archive_id).unwrap()
+            )
+        ]
+    );
+}
+
+#[tokio::test]
+async fn apply_conversation_action_sets_current_thread_read_state() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let mut first = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox_id,
+        "inbox",
+        "Quarterly planning",
+    );
+    first.thread_id = thread_id;
+    first.unread = true;
+    let mut reply = FakeStore::email(
+        "22222222-2222-2222-2222-222222222222",
+        inbox_id,
+        "inbox",
+        "RE: Quarterly planning",
+    );
+    reply.thread_id = thread_id;
+    reply.unread = true;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            inbox_id, "inbox", "Inbox",
+        )])),
+        emails: Arc::new(Mutex::new(vec![first, reply])),
+        ..Default::default()
+    };
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:ApplyConversationAction>
+                  <m:ConversationActions>
+                    <t:ConversationAction>
+                      <t:Action>SetReadState</t:Action>
+                      <t:ConversationId Id="conversation:aaaaaaaa-1111-1111-1111-111111111111"/>
+                      <t:Read>true</t:Read>
+                    </t:ConversationAction>
+                  </m:ConversationActions>
+                </m:ApplyConversationAction>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(emails.lock().unwrap().iter().all(|email| !email.unread));
+}
+
+#[tokio::test]
+async fn apply_conversation_action_keeps_future_message_rules_parseable() {
+    let inbox_id = "44444444-4444-4444-4444-444444444444";
+    let archive_id = "55555555-5555-5555-5555-555555555555";
+    let thread_id = Uuid::parse_str("aaaaaaaa-1111-1111-1111-111111111111").unwrap();
+    let mut first = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        inbox_id,
+        "inbox",
+        "Quarterly planning",
+    );
+    first.thread_id = thread_id;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(archive_id, "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![first])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:ApplyConversationAction>
+                  <m:ConversationActions>
+                    <t:ConversationAction>
+                      <t:Action>AlwaysMove</t:Action>
+                      <t:ConversationId Id="conversation:aaaaaaaa-1111-1111-1111-111111111111"/>
+                      <t:DestinationFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:DestinationFolderId>
+                    </t:ConversationAction>
+                  </m:ConversationActions>
+                </m:ApplyConversationAction>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ApplyConversationActionResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("Persistent future-message conversation actions are not supported"));
+    assert!(moved_emails.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -6252,6 +7406,27 @@ async fn find_item_returns_calendar_items_from_canonical_store() {
     assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
 }
 
+fn retention_policy_tag(
+    id: Uuid,
+    display_name: &str,
+    tag_type: &str,
+    action: &str,
+    retention_days: Option<i32>,
+    is_visible: bool,
+    description: &str,
+) -> EwsRetentionPolicyTag {
+    EwsRetentionPolicyTag {
+        id,
+        display_name: display_name.to_string(),
+        tag_type: tag_type.to_string(),
+        action: action.to_string(),
+        retention_days,
+        is_visible,
+        description: description.to_string(),
+        opted_into: false,
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EwsCatalogCoverageKind {
     Behavioral,
@@ -6298,8 +7473,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "ApplyConversationAction",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "apply_conversation_action_moves_current_thread_messages",
     },
     EwsCatalogCoverage {
         operation: "ArchiveItem",
@@ -6388,8 +7563,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "ExpandDL",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "expand_dl_projects_same_tenant_directory_group_members",
     },
     EwsCatalogCoverage {
         operation: "ExportItems",
@@ -6398,8 +7573,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "FindConversation",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "find_conversation_groups_messages_by_canonical_thread_in_folder",
     },
     EwsCatalogCoverage {
         operation: "FindFolder",
@@ -6443,8 +7618,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetConversationItems",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_conversation_items_returns_current_canonical_thread_nodes",
     },
     EwsCatalogCoverage {
         operation: "GetDelegate",
@@ -6513,8 +7688,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetPasswordExpirationDate",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_password_expiration_date_returns_parseable_canonical_account_gap",
     },
     EwsCatalogCoverage {
         operation: "GetPersona",
@@ -6553,18 +7728,18 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetServiceConfiguration",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_service_configuration_reports_bounded_mail_tips_and_parseable_gaps",
     },
     EwsCatalogCoverage {
         operation: "GetSharingFolder",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_sharing_folder_returns_accessible_same_tenant_calendar_grant",
     },
     EwsCatalogCoverage {
         operation: "GetSharingMetadata",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_sharing_metadata_returns_owned_calendar_metadata_without_exchange_tokens",
     },
     EwsCatalogCoverage {
         operation: "GetStreamingEvents",
@@ -6588,13 +7763,13 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetUserPhoto",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_user_photo_returns_parseable_canonical_photo_gap",
     },
     EwsCatalogCoverage {
         operation: "GetUserRetentionPolicyTags",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_user_retention_policy_tags_projects_same_tenant_assignment_visibility",
     },
     EwsCatalogCoverage {
         operation: "InstallApp",
@@ -6608,8 +7783,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "MarkAsJunk",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mark_as_junk_moves_messages_to_canonical_junk_mailbox",
     },
     EwsCatalogCoverage {
         operation: "MoveFolder",
@@ -6633,8 +7808,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "RefreshSharingFolder",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "refresh_sharing_folder_verifies_accessible_shared_contacts_folder",
     },
     EwsCatalogCoverage {
         operation: "RemoveContactFromImList",
