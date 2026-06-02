@@ -575,6 +575,25 @@ They are computed from canonical `calendar_grants`, `sender_rights`, account
 directory rows, and `calendar_events` using the same same-tenant free/busy
 visibility rules as `/api/mail/delegation/free-busy`.
 
+Exchange and Outlook compatibility state is stored as canonical LPE state when
+LPE owns the product behavior. `account_client_configurations` stores bounded
+account, mailbox, and public-folder client configuration payloads for Outlook
+profile/user-configuration compatibility. `delegate_preferences` stores only
+delegate delivery/private-item preferences; mailbox, calendar, task, contact,
+and sender rights remain in the canonical grant tables. Retention tags use
+`retention_policy_tags` and `account_retention_policy_assignments`, not
+Exchange-only policy blobs. Contact groups and IM-group projections use
+`contact_groups` and `contact_group_members` over canonical contacts, accounts,
+and external member references.
+
+Compliance search and hold state is first-class core state because it acts on
+canonical mailboxes and retention. Cases, holds, mailbox hold assignments,
+discovery searches, discovery jobs, discovery result rows, and non-indexable
+item reports live in dedicated compliance tables. These tables must use
+explicit compliance access paths for protected metadata; default user search,
+shared mailbox projections, and AI-facing projections still exclude protected
+`Bcc`.
+
 Object-level change logs and tombstones cover mailbox and collaboration
 objects. Custom mailbox deletes, collaboration grants, mailbox delegation
 grants, sender rights, search-folder definitions, Sieve-backed rules, contacts,
@@ -603,6 +622,8 @@ Core `LPE` schema includes:
 - inbound delivery receipts keyed by `LPE-CT trace_id`
 - outbound queue rows prepared by canonical submission
 - immutable outbound result history received from `LPE-CT`
+- immutable transport trace event summaries received from `LPE-CT`, keyed by
+  `trace_id`
 
 Inbound receipts always reference a real recipient account. Delivered and
 duplicate receipts additionally reference the committed canonical account
@@ -671,11 +692,22 @@ collaboration, rights, or user-visible state.
 - `mime_parts`
 - `message_bodies`
 - `mailbox_messages`
+- `retention_policy_tags`
+- `account_retention_policy_assignments`
 - `mailbox_pst_jobs`
+- `mailbox_item_transfer_jobs`
+- `mailbox_item_transfer_entries`
 - `attachments`
 - `attachment_extraction_jobs`
 - `attachment_texts`
 - `mail_search_documents`
+- `compliance_cases`
+- `compliance_holds`
+- `compliance_hold_mailboxes`
+- `discovery_searches`
+- `discovery_search_jobs`
+- `discovery_result_items`
+- `non_indexable_item_reports`
 
 ### Sync, Changes, and Tombstones
 
@@ -698,11 +730,14 @@ collaboration, rights, or user-visible state.
 - `submission_recipients`
 - `submission_events`
 - `lpe_ct_inbound_delivery_receipts`
+- `lpe_ct_transport_trace_events`
 
 ### Collaboration, ACLs, and Delegation
 
 - `contact_books`
 - `contacts`
+- `contact_groups`
+- `contact_group_members`
 - `calendars`
 - `calendar_events`
 - `calendar_event_attachments`
@@ -715,11 +750,19 @@ collaboration, rights, or user-visible state.
 - `public_folder_items`
 - `public_folder_permissions`
 - `public_folder_per_user_state`
+- `account_client_configurations`
 - `contact_book_grants`
 - `calendar_grants`
 - `task_list_grants`
 - `mailbox_delegation_grants`
 - `sender_rights`
+- `delegate_preferences`
+- `mail_app_catalog`
+- `mail_app_tenant_policies`
+- `mail_app_installations`
+- `mail_app_consents`
+- `mail_app_token_events`
+- `unified_messaging_calls`
 
 Public folders use canonical core tables for folder tree rows, item rows,
 same-tenant permissions, per-user read/unread rows, and replay/tombstone state.

@@ -170,6 +170,47 @@ fn public_folder_schema_uses_canonical_tables_permissions_and_replay() {
 }
 
 #[test]
+fn ews_compatibility_gap_models_are_canonical_sql_state() {
+    assert_schema_contains_all(&[
+        "CREATE TABLE account_client_configurations",
+        "scope_kind TEXT NOT NULL DEFAULT 'account' CHECK (scope_kind IN ('account', 'mailbox', 'public_folder'))",
+        "CREATE UNIQUE INDEX account_client_configurations_mailbox_idx",
+        "CREATE TABLE delegate_preferences",
+        "meeting_request_delivery TEXT NOT NULL DEFAULT 'delegate_and_owner'",
+        "CREATE TABLE retention_policy_tags",
+        "CREATE TABLE account_retention_policy_assignments",
+        "CREATE TABLE compliance_cases",
+        "CREATE TABLE compliance_holds",
+        "CREATE TABLE compliance_hold_mailboxes",
+        "CREATE TABLE discovery_searches",
+        "CREATE TABLE discovery_search_jobs",
+        "CREATE TABLE discovery_result_items",
+        "CREATE TABLE non_indexable_item_reports",
+        "CREATE TABLE mailbox_item_transfer_jobs",
+        "CREATE TABLE mailbox_item_transfer_entries",
+        "CREATE TABLE lpe_ct_transport_trace_events",
+        "CREATE TRIGGER lpe_ct_transport_trace_events_append_only_update_guard",
+        "CREATE TABLE mail_app_catalog",
+        "CREATE TABLE mail_app_tenant_policies",
+        "CREATE TABLE mail_app_installations",
+        "CREATE TABLE mail_app_consents",
+        "CREATE TABLE mail_app_token_events",
+        "CREATE TABLE unified_messaging_calls",
+        "CREATE TABLE contact_groups",
+        "CREATE TABLE contact_group_members",
+    ]);
+
+    assert!(
+        SCHEMA.contains("FOREIGN KEY (tenant_id, submission_queue_id) REFERENCES submission_queue (tenant_id, id)")
+            && SCHEMA.contains("event_source TEXT NOT NULL DEFAULT 'lpe-ct' CHECK (event_source = 'lpe-ct')")
+            && !SCHEMA.contains("CREATE TABLE ews_user_configurations")
+            && !SCHEMA.contains("CREATE TABLE ews_delegate")
+            && !SCHEMA.contains("CREATE TABLE ews_message_tracking"),
+        "EWS compatibility gaps must use canonical LPE/LPE-CT state, not protocol-local Exchange tables"
+    );
+}
+
+#[test]
 fn calendar_event_attachments_use_canonical_event_and_blob_tables() {
     assert_schema_contains_all(&[
         "CREATE TABLE calendar_event_attachments",
