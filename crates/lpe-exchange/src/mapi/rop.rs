@@ -4405,6 +4405,7 @@ fn parse_simple_pending_recipient_row(
         .unwrap_or(fallback_recipient_type);
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
+            .and_then(super::properties::normalize_mapi_submit_address)
             .ok_or_else(|| {
                 anyhow!(
                     "recipient address is required;row_format=simple;columns={}",
@@ -4497,6 +4498,7 @@ fn parse_wrapped_pending_recipient_row(
     let address =
         optional_mapi_value_text(&values, &[PID_TAG_SMTP_ADDRESS_W, PID_TAG_EMAIL_ADDRESS_W])
             .or(email_address)
+            .and_then(super::properties::normalize_mapi_submit_address)
             .or_else(|| {
                 x500_dn
                     .as_deref()

@@ -9660,13 +9660,14 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
     let mut property_values = Vec::new();
     append_mapi_utf16_property(&mut property_values, 0x0037_001F, "Submit from MAPI");
     append_mapi_utf16_property(&mut property_values, 0x1000_001F, "Canonical submit body");
+    append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "SMTP:alice@example.test");
     append_mapi_utf16_property(
         &mut property_values,
         0x1035_001F,
         "<mapi-submit@example.test>",
     );
 
-    let to_row = mapi_recipient_row("Bob", "bob@example.test", 0x01);
+    let to_row = mapi_recipient_row("Bob", "SMTP:bob@example.test", 0x01);
     let bcc_row = mapi_recipient_row("Hidden", "hidden@example.test", 0x03);
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder, Inbox
@@ -9683,7 +9684,7 @@ async fn mapi_over_http_submit_pending_message_uses_canonical_submission() {
         0x0A, 0x00, 0x02, // RopSetProperties
     ]);
     rops.extend_from_slice(&((property_values.len() + 2) as u16).to_le_bytes());
-    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&4u16.to_le_bytes());
     rops.extend_from_slice(&property_values);
     rops.extend_from_slice(&[
         0x0E, 0x00, 0x02, // RopModifyRecipients
@@ -9829,6 +9830,7 @@ async fn mapi_over_http_transport_send_uses_canonical_submission() {
         0x1000_001F,
         "Canonical transport body",
     );
+    append_mapi_utf16_property(&mut property_values, 0x0C1F_001F, "SMTP:");
     let to_row = mapi_recipient_row("Bob", "bob@example.test", 0x01);
 
     let mut rops = Vec::new();

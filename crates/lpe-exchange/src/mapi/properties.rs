@@ -4884,7 +4884,7 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
     );
     let body_text = pending_text_property(properties, &[PID_TAG_BODY_W]);
     let from_address =
-        optional_pending_text_property(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
+        optional_pending_submit_address(properties, &[PID_TAG_SENDER_EMAIL_ADDRESS_W])
             .unwrap_or_else(|| principal.email.clone());
     let from_display = optional_pending_text_property(properties, &[PID_TAG_SENDER_NAME_W])
         .or_else(|| Some(principal.display_name.clone()));
@@ -4914,6 +4914,24 @@ pub(in crate::mapi) fn mapi_submit_from_pending_message(
         flagged: Some(false),
         attachments: Vec::new(),
     }
+}
+
+fn optional_pending_submit_address(
+    properties: &HashMap<u32, MapiValue>,
+    tags: &[u32],
+) -> Option<String> {
+    optional_pending_text_property(properties, tags).and_then(normalize_mapi_submit_address)
+}
+
+pub(in crate::mapi) fn normalize_mapi_submit_address(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    let address = trimmed
+        .strip_prefix("SMTP:")
+        .or_else(|| trimmed.strip_prefix("smtp:"))
+        .unwrap_or(trimmed)
+        .trim();
+    let normalized = lpe_storage::normalize_mailbox_email(address);
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 pub(in crate::mapi) fn mapi_submit_from_email(
