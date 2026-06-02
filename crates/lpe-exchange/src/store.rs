@@ -192,6 +192,38 @@ pub(crate) struct MapiNotificationPoll {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsUserConfiguration {
+    pub(crate) id: Uuid,
+    pub(crate) scope_kind: String,
+    pub(crate) mailbox_id: Option<Uuid>,
+    pub(crate) public_folder_id: Option<Uuid>,
+    pub(crate) config_name: String,
+    pub(crate) config_class: String,
+    pub(crate) dictionary_json: serde_json::Value,
+    pub(crate) xml_payload: Option<String>,
+    pub(crate) binary_payload: Option<Vec<u8>>,
+    pub(crate) modseq: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsUserConfigurationKey {
+    pub(crate) scope_kind: String,
+    pub(crate) mailbox_id: Option<Uuid>,
+    pub(crate) public_folder_id: Option<Uuid>,
+    pub(crate) config_name: String,
+    pub(crate) config_class: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpsertEwsUserConfigurationInput {
+    pub(crate) account_id: Uuid,
+    pub(crate) key: EwsUserConfigurationKey,
+    pub(crate) dictionary_json: serde_json::Value,
+    pub(crate) xml_payload: Option<String>,
+    pub(crate) binary_payload: Option<Vec<u8>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiSyncChangeSet {
     pub(crate) current_change_sequence: u64,
     pub(crate) current_modseq: u64,
@@ -447,6 +479,25 @@ pub trait ExchangeStore: AccountAuthStore {
         account_id: Uuid,
         after_cursor: i64,
     ) -> StoreFuture<'a, MapiNotificationPoll>;
+
+    fn fetch_ews_user_configuration<'a>(
+        &'a self,
+        account_id: Uuid,
+        key: &'a EwsUserConfigurationKey,
+    ) -> StoreFuture<'a, Option<EwsUserConfiguration>>;
+
+    fn upsert_ews_user_configuration<'a>(
+        &'a self,
+        input: UpsertEwsUserConfigurationInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsUserConfiguration>;
+
+    fn delete_ews_user_configuration<'a>(
+        &'a self,
+        account_id: Uuid,
+        key: &'a EwsUserConfigurationKey,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, bool>;
 
     fn fetch_address_book_entries<'a>(
         &'a self,
@@ -1079,7 +1130,211 @@ pub trait ExchangeStore: AccountAuthStore {
     ) -> StoreFuture<'a, CancelSubmissionResult>;
 }
 
+fn ews_user_configuration_from_row(row: sqlx::postgres::PgRow) -> EwsUserConfiguration {
+    EwsUserConfiguration {
+        id: row.get("id"),
+        scope_kind: row.get("scope_kind"),
+        mailbox_id: row.get("mailbox_id"),
+        public_folder_id: row.get("public_folder_id"),
+        config_name: row.get("config_name"),
+        config_class: row.get("config_class"),
+        dictionary_json: row.get("dictionary_json"),
+        xml_payload: row.get("xml_payload"),
+        binary_payload: row.get("binary_payload"),
+        modseq: row.get::<i64, _>("modseq") as u64,
+    }
+}
+
 impl ExchangeStore for Storage {
+    fn fetch_ews_user_configuration<'a>(
+        &'a self,
+        account_id: Uuid,
+        key: &'a EwsUserConfigurationKey,
+    ) -> StoreFuture<'a, Option<EwsUserConfiguration>> {
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT id, scope_kind, mailbox_id, public_folder_id, config_name, config_class,
+                       dictionary_json, xml_payload, binary_payload, modseq
+                FROM account_client_configurations
+                WHERE account_id = $1
+                  AND scope_kind = $2
+                  AND mailbox_id IS NOT DISTINCT FROM $3
+                  AND public_folder_id IS NOT DISTINCT FROM $4
+                  AND config_name = $5
+                  AND config_class = $6
+                LIMIT 1
+                "#,
+            )
+            .bind(account_id)
+            .bind(&key.scope_kind)
+            .bind(key.mailbox_id)
+            .bind(key.public_folder_id)
+            .bind(&key.config_name)
+            .bind(&key.config_class)
+            .fetch_optional(self.pool())
+            .await?;
+
+            Ok(row.map(ews_user_configuration_from_row))
+        })
+    }
+
+    fn upsert_ews_user_configuration<'a>(
+        &'a self,
+        input: UpsertEwsUserConfigurationInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsUserConfiguration> {
+        Box::pin(async move {
+            let tenant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT tenant_id
+                FROM accounts
+                WHERE id = $1
+                LIMIT 1
+                "#,
+            )
+            .bind(input.account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+            let payload_size = input
+                .xml_payload
+                .as_ref()
+                .map(|value| value.len())
+                .unwrap_or(0)
+                + input
+                    .binary_payload
+                    .as_ref()
+                    .map(|value| value.len())
+                    .unwrap_or(0);
+            let existing_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM account_client_configurations
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND scope_kind = $3
+                  AND mailbox_id IS NOT DISTINCT FROM $4
+                  AND public_folder_id IS NOT DISTINCT FROM $5
+                  AND config_name = $6
+                  AND config_class = $7
+                LIMIT 1
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(input.account_id)
+            .bind(&input.key.scope_kind)
+            .bind(input.key.mailbox_id)
+            .bind(input.key.public_folder_id)
+            .bind(&input.key.config_name)
+            .bind(&input.key.config_class)
+            .fetch_optional(self.pool())
+            .await?;
+
+            let row = if let Some(existing_id) = existing_id {
+                sqlx::query(
+                    r#"
+                    UPDATE account_client_configurations
+                    SET dictionary_json = $2,
+                        xml_payload = $3,
+                        binary_payload = $4,
+                        payload_size_octets = $5,
+                        modseq = modseq + 1,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING id, scope_kind, mailbox_id, public_folder_id, config_name,
+                              config_class, dictionary_json, xml_payload, binary_payload, modseq
+                    "#,
+                )
+                .bind(existing_id)
+                .bind(&input.dictionary_json)
+                .bind(&input.xml_payload)
+                .bind(&input.binary_payload)
+                .bind(payload_size as i32)
+                .fetch_one(self.pool())
+                .await?
+            } else {
+                sqlx::query(
+                    r#"
+                    INSERT INTO account_client_configurations (
+                        id, tenant_id, account_id, scope_kind, mailbox_id, public_folder_id,
+                        config_name, config_class, dictionary_json, xml_payload, binary_payload,
+                        payload_size_octets
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    RETURNING id, scope_kind, mailbox_id, public_folder_id, config_name,
+                              config_class, dictionary_json, xml_payload, binary_payload, modseq
+                    "#,
+                )
+                .bind(Uuid::new_v4())
+                .bind(tenant_id)
+                .bind(input.account_id)
+                .bind(&input.key.scope_kind)
+                .bind(input.key.mailbox_id)
+                .bind(input.key.public_folder_id)
+                .bind(&input.key.config_name)
+                .bind(&input.key.config_class)
+                .bind(&input.dictionary_json)
+                .bind(&input.xml_payload)
+                .bind(&input.binary_payload)
+                .bind(payload_size as i32)
+                .fetch_one(self.pool())
+                .await?
+            };
+            self.append_audit_event(tenant_id, audit).await?;
+            Ok(ews_user_configuration_from_row(row))
+        })
+    }
+
+    fn delete_ews_user_configuration<'a>(
+        &'a self,
+        account_id: Uuid,
+        key: &'a EwsUserConfigurationKey,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        Box::pin(async move {
+            let tenant_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT tenant_id
+                FROM accounts
+                WHERE id = $1
+                LIMIT 1
+                "#,
+            )
+            .bind(account_id)
+            .fetch_optional(self.pool())
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("account not found"))?;
+            let result = sqlx::query(
+                r#"
+                DELETE FROM account_client_configurations
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND scope_kind = $3
+                  AND mailbox_id IS NOT DISTINCT FROM $4
+                  AND public_folder_id IS NOT DISTINCT FROM $5
+                  AND config_name = $6
+                  AND config_class = $7
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(&key.scope_kind)
+            .bind(key.mailbox_id)
+            .bind(key.public_folder_id)
+            .bind(&key.config_name)
+            .bind(&key.config_class)
+            .execute(self.pool())
+            .await?;
+            if result.rows_affected() > 0 {
+                self.append_audit_event(tenant_id, audit).await?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+    }
+
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,
         account_id: Uuid,

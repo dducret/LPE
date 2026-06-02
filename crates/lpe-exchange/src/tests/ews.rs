@@ -1842,7 +1842,6 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         "FindPeople",
         "ExpandDL",
         "GetDelegate",
-        "GetUserConfiguration",
         "GetSharingMetadata",
         "GetSharingFolder",
     ] {
@@ -1859,6 +1858,243 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn user_configuration_create_get_update_and_delete_use_canonical_storage() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:CreateUserConfiguration>
+                  <m:UserConfiguration>
+                    <t:UserConfigurationName Name="OWA.UserOptions"/>
+                    <t:Dictionary>
+                      <t:DictionaryEntry>
+                        <t:DictionaryKey><t:Type>String</t:Type><t:Value>previewPane</t:Value></t:DictionaryKey>
+                        <t:DictionaryValue><t:Type>String</t:Type><t:Value>right</t:Value></t:DictionaryValue>
+                      </t:DictionaryEntry>
+                      <t:DictionaryEntry>
+                        <t:DictionaryKey><t:Type>String</t:Type><t:Value>theme</t:Value></t:DictionaryKey>
+                        <t:DictionaryValue><t:Type>String</t:Type><t:Value>contrast</t:Value></t:DictionaryValue>
+                      </t:DictionaryEntry>
+                    </t:Dictionary>
+                    <t:XmlData>&lt;options version=&quot;1&quot;/&gt;</t:XmlData>
+                    <t:BinaryData>cHJvZmlsZS1jYWNoZQ==</t:BinaryData>
+                  </m:UserConfiguration>
+                </m:CreateUserConfiguration>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateUserConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    {
+        let configurations = store.ews_user_configurations.lock().unwrap();
+        assert_eq!(configurations.len(), 1);
+        let configuration = &configurations[0];
+        assert_eq!(configuration.scope_kind, "account");
+        assert_eq!(configuration.config_name, "OWA.UserOptions");
+        assert_eq!(configuration.config_class, "ews_user_configuration");
+        assert_eq!(
+            configuration.dictionary_json["previewPane"].as_str(),
+            Some("right")
+        );
+        assert_eq!(
+            configuration.xml_payload.as_deref(),
+            Some("<options version=\"1\"/>")
+        );
+        assert_eq!(
+            configuration.binary_payload.as_deref(),
+            Some(b"profile-cache".as_slice())
+        );
+    }
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetUserConfiguration>
+                  <m:UserConfigurationName Name="OWA.UserOptions"/>
+                  <m:UserConfigurationProperties>All</m:UserConfigurationProperties>
+                </m:GetUserConfiguration>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:UserConfigurationName Name=\"OWA.UserOptions\"/>"));
+    assert!(body.contains("<t:Value>previewPane</t:Value>"));
+    assert!(body.contains("<t:Value>right</t:Value>"));
+    assert!(body.contains("<t:XmlData>&lt;options version=&quot;1&quot;/&gt;</t:XmlData>"));
+    assert!(body.contains("<t:BinaryData>cHJvZmlsZS1jYWNoZQ==</t:BinaryData>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:UpdateUserConfiguration>
+                  <m:UserConfiguration>
+                    <t:UserConfigurationName Name="OWA.UserOptions"/>
+                    <t:Dictionary>
+                      <t:DictionaryEntry>
+                        <t:DictionaryKey><t:Type>String</t:Type><t:Value>previewPane</t:Value></t:DictionaryKey>
+                        <t:DictionaryValue><t:Type>String</t:Type><t:Value>bottom</t:Value></t:DictionaryValue>
+                      </t:DictionaryEntry>
+                    </t:Dictionary>
+                    <t:XmlData>&lt;options version=&quot;2&quot;/&gt;</t:XmlData>
+                  </m:UserConfiguration>
+                </m:UpdateUserConfiguration>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateUserConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    {
+        let configurations = store.ews_user_configurations.lock().unwrap();
+        assert_eq!(configurations.len(), 1);
+        let configuration = &configurations[0];
+        assert_eq!(configuration.modseq, 2);
+        assert_eq!(
+            configuration.dictionary_json["previewPane"].as_str(),
+            Some("bottom")
+        );
+        assert_eq!(configuration.binary_payload, None);
+    }
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetUserConfiguration>
+                  <m:UserConfigurationName Name="OWA.UserOptions"/>
+                  <m:UserConfigurationProperties>Dictionary</m:UserConfigurationProperties>
+                </m:GetUserConfiguration>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Value>bottom</t:Value>"));
+    assert!(!body.contains("<t:XmlData>"));
+    assert!(!body.contains("<t:BinaryData>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:DeleteUserConfiguration>
+                  <m:UserConfigurationName Name="OWA.UserOptions"/>
+                </m:DeleteUserConfiguration>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DeleteUserConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(store.ews_user_configurations.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn user_configuration_supports_mailbox_scoped_names_and_not_found_errors() {
+    let mailbox_id = "44444444-4444-4444-4444-444444444444";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let create = format!(
+        r#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body>
+            <m:CreateUserConfiguration>
+              <m:UserConfiguration>
+                <t:UserConfigurationName Name="IPM.Configuration.Calendar">
+                  <t:FolderId Id="mailbox:{mailbox_id}"/>
+                </t:UserConfigurationName>
+                <t:Dictionary>
+                  <t:DictionaryEntry>
+                    <t:DictionaryKey><t:Type>String</t:Type><t:Value>view</t:Value></t:DictionaryKey>
+                    <t:DictionaryValue><t:Type>String</t:Type><t:Value>work-week</t:Value></t:DictionaryValue>
+                  </t:DictionaryEntry>
+                </t:Dictionary>
+              </m:UserConfiguration>
+            </m:CreateUserConfiguration>
+          </s:Body>
+        </s:Envelope>
+        "#
+    );
+    let response = service
+        .handle(&bearer_headers(), create.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateUserConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    {
+        let configurations = store.ews_user_configurations.lock().unwrap();
+        assert_eq!(configurations.len(), 1);
+        assert_eq!(configurations[0].scope_kind, "mailbox");
+        assert_eq!(
+            configurations[0].mailbox_id,
+            Some(Uuid::parse_str(mailbox_id).unwrap())
+        );
+    }
+
+    let missing = r#"
+        <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+          <s:Body>
+            <m:GetUserConfiguration>
+              <m:UserConfigurationName Name="Missing.Configuration"/>
+              <m:UserConfigurationProperties>All</m:UserConfigurationProperties>
+            </m:GetUserConfiguration>
+          </s:Body>
+        </s:Envelope>
+    "#;
+    let response = service
+        .handle(&bearer_headers(), missing.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetUserConfigurationResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
 }
 
 #[tokio::test]

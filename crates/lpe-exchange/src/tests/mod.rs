@@ -54,11 +54,13 @@ use crate::{
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::{
-        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
-        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
-        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
-        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
+        EwsUserConfiguration, EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind,
+        ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore, MapiCheckpointKind,
+        MapiContentTableQuery, MapiContentTableQueryResult, MapiContentTableSortField,
+        MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityLookupRecord,
+        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
+        MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -481,6 +483,7 @@ struct FakeStore {
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
+    ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
@@ -1058,6 +1061,87 @@ impl AccountAuthStore for FakeStore {
 }
 
 impl ExchangeStore for FakeStore {
+    fn fetch_ews_user_configuration<'a>(
+        &'a self,
+        account_id: Uuid,
+        key: &'a EwsUserConfigurationKey,
+    ) -> StoreFuture<'a, Option<EwsUserConfiguration>> {
+        let configuration = self
+            .ews_user_configurations
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|configuration| {
+                account_id == FakeStore::account().account_id
+                    && configuration.scope_kind == key.scope_kind
+                    && configuration.mailbox_id == key.mailbox_id
+                    && configuration.public_folder_id == key.public_folder_id
+                    && configuration.config_name == key.config_name
+                    && configuration.config_class == key.config_class
+            })
+            .cloned();
+        Box::pin(async move { Ok(configuration) })
+    }
+
+    fn upsert_ews_user_configuration<'a>(
+        &'a self,
+        input: UpsertEwsUserConfigurationInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsUserConfiguration> {
+        let mut configurations = self.ews_user_configurations.lock().unwrap();
+        if let Some(configuration) = configurations.iter_mut().find(|configuration| {
+            configuration.scope_kind == input.key.scope_kind
+                && configuration.mailbox_id == input.key.mailbox_id
+                && configuration.public_folder_id == input.key.public_folder_id
+                && configuration.config_name == input.key.config_name
+                && configuration.config_class == input.key.config_class
+        }) {
+            configuration.dictionary_json = input.dictionary_json;
+            configuration.xml_payload = input.xml_payload;
+            configuration.binary_payload = input.binary_payload;
+            configuration.modseq += 1;
+            let configuration = configuration.clone();
+            return Box::pin(async move { Ok(configuration) });
+        }
+        let configuration = EwsUserConfiguration {
+            id: Uuid::new_v4(),
+            scope_kind: input.key.scope_kind,
+            mailbox_id: input.key.mailbox_id,
+            public_folder_id: input.key.public_folder_id,
+            config_name: input.key.config_name,
+            config_class: input.key.config_class,
+            dictionary_json: input.dictionary_json,
+            xml_payload: input.xml_payload,
+            binary_payload: input.binary_payload,
+            modseq: 1,
+        };
+        configurations.push(configuration.clone());
+        Box::pin(async move { Ok(configuration) })
+    }
+
+    fn delete_ews_user_configuration<'a>(
+        &'a self,
+        account_id: Uuid,
+        key: &'a EwsUserConfigurationKey,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        let deleted = if account_id == FakeStore::account().account_id {
+            let mut configurations = self.ews_user_configurations.lock().unwrap();
+            let before = configurations.len();
+            configurations.retain(|configuration| {
+                !(configuration.scope_kind == key.scope_kind
+                    && configuration.mailbox_id == key.mailbox_id
+                    && configuration.public_folder_id == key.public_folder_id
+                    && configuration.config_name == key.config_name
+                    && configuration.config_class == key.config_class)
+            });
+            configurations.len() != before
+        } else {
+            false
+        };
+        Box::pin(async move { Ok(deleted) })
+    }
+
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,
         _account_id: Uuid,
