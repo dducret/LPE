@@ -48,10 +48,11 @@ use crate::{
     mapi::{self, MapiEndpoint},
     ntlm,
     store::{
-        EwsDelegate, EwsDelegatePreferences, EwsRetentionPolicyTag, EwsUserConfiguration,
-        EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
-        ExchangeAddressBookEntryKind, ExchangeStore, UpsertEwsDelegateInput,
-        UpsertEwsUserConfigurationInput,
+        EwsDelegate, EwsDelegatePreferences, EwsDiscoverySearchConfig, EwsDiscoverySearchResult,
+        EwsHoldMailbox, EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox,
+        EwsTransferJob, EwsUserConfiguration, EwsUserConfigurationKey,
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -794,6 +795,19 @@ where
             "GetMailTips" => self.get_mail_tips(&principal, &body).await?,
             "GetServiceConfiguration" => self.get_service_configuration(&body).await?,
             "GetUserRetentionPolicyTags" => self.get_user_retention_policy_tags(&principal).await?,
+            "GetDiscoverySearchConfiguration" => {
+                self.get_discovery_search_configuration(&principal).await?
+            }
+            "GetSearchableMailboxes" => self.get_searchable_mailboxes(&principal).await?,
+            "SearchMailboxes" => self.search_mailboxes(&principal, &body).await?,
+            "GetHoldOnMailboxes" => self.get_hold_on_mailboxes(&principal, &body).await?,
+            "SetHoldOnMailboxes" => self.set_hold_on_mailboxes(&principal, &body).await?,
+            "GetNonIndexableItemDetails" => self.get_non_indexable_item_details(&principal).await?,
+            "GetNonIndexableItemStatistics" => {
+                self.get_non_indexable_item_statistics(&principal).await?
+            }
+            "UploadItems" => self.upload_items(&principal, &body).await?,
+            "ExportItems" => self.export_items(&principal, &body).await?,
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => self.expand_dl(&principal, &body).await?,
             "AddDelegate" => self.add_delegate(&principal, &body).await?,
@@ -1098,13 +1112,13 @@ where
                     .fetch_accessible_calendar_collections(principal.account_id)
                     .await?,
             );
-            if !collections
+            let Some(collection) = collections
                 .iter()
-                .any(|collection| collection.id == folder_id)
-            {
+                .find(|collection| collection.id == folder_id)
+            else {
                 bail!("shared folder is not accessible to this account");
-            }
-            Ok(simple_operation_success_response("RefreshSharingFolder"))
+            };
+            Ok(refresh_sharing_folder_response(collection))
         }
         .await;
 
@@ -4747,6 +4761,142 @@ where
         Ok(get_user_retention_policy_tags_response(&tags))
     }
 
+    async fn get_discovery_search_configuration(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let searches = self
+            .store
+            .fetch_ews_discovery_search_configurations(principal)
+            .await?;
+        Ok(get_discovery_search_configuration_response(&searches))
+    }
+
+    async fn get_searchable_mailboxes(&self, principal: &AccountPrincipal) -> Result<String> {
+        let mailboxes = self.store.fetch_ews_searchable_mailboxes(principal).await?;
+        Ok(get_searchable_mailboxes_response(&mailboxes))
+    }
+
+    async fn search_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let query_text = discovery_query_text(request);
+        let mailbox_emails = requested_mailbox_emails(request);
+        let result = self
+            .store
+            .search_ews_mailboxes(principal, &query_text, &mailbox_emails, 100)
+            .await?;
+        Ok(search_mailboxes_response(&result))
+    }
+
+    async fn get_hold_on_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let mailbox_emails = requested_mailbox_emails(request);
+        let holds = self
+            .store
+            .fetch_ews_hold_mailboxes(principal, &mailbox_emails)
+            .await?;
+        Ok(get_hold_on_mailboxes_response(&holds))
+    }
+
+    async fn set_hold_on_mailboxes(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let mailbox_emails = requested_mailbox_emails(request);
+        let hold_name = element_text(request, "HoldId")
+            .or_else(|| element_text(request, "HoldName"))
+            .unwrap_or_else(|| "EWS Litigation Hold".to_string());
+        let query_text = discovery_query_text(request);
+        let enable = !element_text(request, "Action")
+            .unwrap_or_else(|| "CreateHold".to_string())
+            .to_ascii_lowercase()
+            .contains("release");
+        let holds = self
+            .store
+            .set_ews_hold_mailboxes(
+                principal,
+                &hold_name,
+                &query_text,
+                &mailbox_emails,
+                enable,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: if enable {
+                        "ews-set-hold".to_string()
+                    } else {
+                        "ews-release-hold".to_string()
+                    },
+                    subject: hold_name.clone(),
+                },
+            )
+            .await?;
+        Ok(set_hold_on_mailboxes_response(&holds, enable))
+    }
+
+    async fn get_non_indexable_item_details(&self, principal: &AccountPrincipal) -> Result<String> {
+        let reports = self
+            .store
+            .fetch_ews_non_indexable_reports(principal)
+            .await?;
+        Ok(get_non_indexable_item_details_response(&reports))
+    }
+
+    async fn get_non_indexable_item_statistics(
+        &self,
+        principal: &AccountPrincipal,
+    ) -> Result<String> {
+        let reports = self
+            .store
+            .fetch_ews_non_indexable_reports(principal)
+            .await?;
+        Ok(get_non_indexable_item_statistics_response(&reports))
+    }
+
+    async fn upload_items(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let item_ids = requested_transfer_item_ids(request);
+        let job = self
+            .store
+            .create_ews_transfer_job(
+                principal,
+                "import",
+                &item_ids,
+                serde_json::json!({ "operation": "UploadItems", "itemCount": item_ids.len() }),
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-upload-items".to_string(),
+                    subject: format!("{} items", item_ids.len()),
+                },
+            )
+            .await?;
+        Ok(transfer_job_response("UploadItems", &job))
+    }
+
+    async fn export_items(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let item_ids = requested_item_ids(request);
+        let job = self
+            .store
+            .create_ews_transfer_job(
+                principal,
+                "export",
+                &item_ids,
+                serde_json::json!({ "operation": "ExportItems", "itemCount": item_ids.len() }),
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-export-items".to_string(),
+                    subject: format!("{} items", item_ids.len()),
+                },
+            )
+            .await?;
+        Ok(transfer_job_response("ExportItems", &job))
+    }
+
     async fn get_rooms(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
             if let Some(room_list) = requested_room_list_address(request) {
@@ -7148,6 +7298,45 @@ fn requested_attachment_ids(request: &str) -> Vec<String> {
         .collect()
 }
 
+fn requested_mailbox_emails(request: &str) -> Vec<String> {
+    let mut emails = element_contents(request, "Mailbox")
+        .into_iter()
+        .filter_map(|mailbox| element_text(mailbox, "EmailAddress"))
+        .map(|email| email.trim().to_ascii_lowercase())
+        .filter(|email| !email.is_empty())
+        .collect::<Vec<_>>();
+    emails.sort();
+    emails.dedup();
+    emails
+}
+
+fn discovery_query_text(request: &str) -> String {
+    element_text(request, "Query")
+        .or_else(|| element_text(request, "SearchQuery"))
+        .or_else(|| element_text(request, "QueryString"))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn requested_transfer_item_ids(request: &str) -> Vec<String> {
+    let mut ids = requested_item_ids(request);
+    ids.extend(
+        element_contents(request, "Item")
+            .into_iter()
+            .filter_map(|item| {
+                element_text(item, "ItemId")
+                    .or_else(|| element_text(item, "SourceItemId"))
+                    .or_else(|| element_text(item, "Subject"))
+            })
+            .filter(|value| !value.trim().is_empty()),
+    );
+    if ids.is_empty() && request.contains("<t:Item") {
+        ids.push(format!("ews-upload:{}", Uuid::new_v4()));
+    }
+    ids
+}
+
 fn requested_mime_content(request: &str) -> bool {
     request.contains("item:MimeContent") || request.contains("MimeContent")
 }
@@ -7446,7 +7635,7 @@ fn sharing_metadata_entry_xml(
         concat!(
             "<t:SharingMetadata>",
             "<t:OwnerSmtpAddress>{owner}</t:OwnerSmtpAddress>",
-            "<t:FolderId Id=\"{folder_id}\"/>",
+            "<t:FolderId Id=\"{folder_id}\" ChangeKey=\"{change_key}\"/>",
             "<t:FolderClass>{folder_class}</t:FolderClass>",
             "<t:FolderName>{folder_name}</t:FolderName>",
             "<t:DataType>{data_type}</t:DataType>",
@@ -7456,6 +7645,7 @@ fn sharing_metadata_entry_xml(
         ),
         owner = escape_xml(&principal.email),
         folder_id = escape_xml(&collection.id),
+        change_key = folder_change_key(&collection.id),
         folder_class = ews_sharing_folder_class(&collection.kind),
         folder_name = escape_xml(&collection.display_name),
         data_type = ews_sharing_data_type(&collection.kind),
@@ -7471,19 +7661,41 @@ fn get_sharing_folder_response(collection: &CollaborationCollection) -> String {
             "<m:GetSharingFolderResponseMessage ResponseClass=\"Success\">",
             "<m:ResponseCode>NoError</m:ResponseCode>",
             "<m:SharingFolder>",
-            "<t:FolderId Id=\"{folder_id}\"/>",
+            "<t:FolderId Id=\"{folder_id}\" ChangeKey=\"{change_key}\"/>",
             "<t:DisplayName>{display_name}</t:DisplayName>",
             "<t:FolderClass>{folder_class}</t:FolderClass>",
             "<t:OwnerSmtpAddress>{owner}</t:OwnerSmtpAddress>",
+            "<t:PermissionLevel>{permission}</t:PermissionLevel>",
             "</m:SharingFolder>",
             "</m:GetSharingFolderResponseMessage>",
             "</m:ResponseMessages>",
             "</m:GetSharingFolderResponse>"
         ),
         folder_id = escape_xml(&collection.id),
+        change_key = folder_change_key(&collection.id),
         display_name = escape_xml(&collection.display_name),
         folder_class = ews_sharing_folder_class(&collection.kind),
         owner = escape_xml(&collection.owner_email),
+        permission = ews_permission_level(&collection.rights),
+    )
+}
+
+fn refresh_sharing_folder_response(collection: &CollaborationCollection) -> String {
+    format!(
+        concat!(
+            "<m:RefreshSharingFolderResponse>",
+            "<m:ResponseMessages>",
+            "<m:RefreshSharingFolderResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SharingFolderId>",
+            "<t:FolderId Id=\"{folder_id}\" ChangeKey=\"{change_key}\"/>",
+            "</m:SharingFolderId>",
+            "</m:RefreshSharingFolderResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:RefreshSharingFolderResponse>"
+        ),
+        folder_id = escape_xml(&collection.id),
+        change_key = folder_change_key(&collection.id),
     )
 }
 
@@ -8959,6 +9171,323 @@ fn retention_policy_tag_xml(tag: &EwsRetentionPolicyTag) -> String {
         is_visible = tag.is_visible,
         opted_into = tag.opted_into,
         is_archive = tag.action == "move_to_archive",
+    )
+}
+
+fn get_discovery_search_configuration_response(searches: &[EwsDiscoverySearchConfig]) -> String {
+    let searches_xml = searches
+        .iter()
+        .map(|search| {
+            format!(
+                concat!(
+                    "<t:DiscoverySearchConfiguration>",
+                    "<t:SearchId>{id}</t:SearchId>",
+                    "<t:SearchName>{name}</t:SearchName>",
+                    "<t:SearchQuery>{query}</t:SearchQuery>",
+                    "<t:LastModifiedTime>{updated_at}</t:LastModifiedTime>",
+                    "</t:DiscoverySearchConfiguration>"
+                ),
+                id = search.id,
+                name = escape_xml(&search.display_name),
+                query = escape_xml(&search.query_text),
+                updated_at = escape_xml(&search.updated_at),
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetDiscoverySearchConfigurationResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetDiscoverySearchConfigurationResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:DiscoverySearchConfigurations>{searches_xml}</m:DiscoverySearchConfigurations>",
+            "</m:GetDiscoverySearchConfigurationResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetDiscoverySearchConfigurationResponse>"
+        ),
+        searches_xml = searches_xml,
+    )
+}
+
+fn get_searchable_mailboxes_response(mailboxes: &[EwsSearchableMailbox]) -> String {
+    let mailboxes_xml = mailboxes
+        .iter()
+        .map(|mailbox| {
+            format!(
+                concat!(
+                    "<t:SearchableMailbox>",
+                    "<t:Guid>{id}</t:Guid>",
+                    "<t:PrimarySmtpAddress>{email}</t:PrimarySmtpAddress>",
+                    "<t:DisplayName>{display_name}</t:DisplayName>",
+                    "<t:IsExternalMailbox>false</t:IsExternalMailbox>",
+                    "<t:ExternalEmailAddress/>",
+                    "<t:IsMembershipGroup>false</t:IsMembershipGroup>",
+                    "<t:ReferenceId>{id}</t:ReferenceId>",
+                    "<t:LitigationHoldEnabled>{hold}</t:LitigationHoldEnabled>",
+                    "</t:SearchableMailbox>"
+                ),
+                id = mailbox.account_id,
+                email = escape_xml(&mailbox.email),
+                display_name = escape_xml(&mailbox.display_name),
+                hold = mailbox.litigation_hold_enabled,
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetSearchableMailboxesResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetSearchableMailboxesResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SearchableMailboxes>{mailboxes_xml}</m:SearchableMailboxes>",
+            "</m:GetSearchableMailboxesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetSearchableMailboxesResponse>"
+        ),
+        mailboxes_xml = mailboxes_xml,
+    )
+}
+
+fn search_mailboxes_response(result: &EwsDiscoverySearchResult) -> String {
+    let items_xml = result
+        .items
+        .iter()
+        .map(|item| {
+            format!(
+                concat!(
+                    "<t:SearchResultItem>",
+                    "<t:Id>{id}</t:Id>",
+                    "<t:MailboxGuid>{account_id}</t:MailboxGuid>",
+                    "<t:ItemId Id=\"message:{message_id}\"/>",
+                    "<t:Subject>{subject}</t:Subject>",
+                    "<t:Preview>{preview}</t:Preview>",
+                    "<t:Rank>{rank}</t:Rank>",
+                    "</t:SearchResultItem>"
+                ),
+                id = item.id,
+                account_id = item.account_id,
+                message_id = item.message_id,
+                subject = escape_xml(&item.subject),
+                preview = escape_xml(&item.preview),
+                rank = item.rank,
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:SearchMailboxesResponse>",
+            "<m:ResponseMessages>",
+            "<m:SearchMailboxesResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:SearchId>{search_id}</m:SearchId>",
+            "<m:JobId>{job_id}</m:JobId>",
+            "<m:SearchQuery>{query}</m:SearchQuery>",
+            "<m:ResultCount>{count}</m:ResultCount>",
+            "<m:SearchResult>{items_xml}</m:SearchResult>",
+            "</m:SearchMailboxesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:SearchMailboxesResponse>"
+        ),
+        search_id = result.search_id,
+        job_id = result.job_id,
+        query = escape_xml(&result.query_text),
+        count = result.result_count,
+        items_xml = items_xml,
+    )
+}
+
+fn get_hold_on_mailboxes_response(holds: &[EwsHoldMailbox]) -> String {
+    let holds_xml = holds.iter().map(hold_mailbox_xml).collect::<String>();
+    format!(
+        concat!(
+            "<m:GetHoldOnMailboxesResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetHoldOnMailboxesResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:MailboxHoldResult>{holds_xml}</m:MailboxHoldResult>",
+            "</m:GetHoldOnMailboxesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetHoldOnMailboxesResponse>"
+        ),
+        holds_xml = holds_xml,
+    )
+}
+
+fn set_hold_on_mailboxes_response(holds: &[EwsHoldMailbox], enabled: bool) -> String {
+    let holds_xml = holds.iter().map(hold_mailbox_xml).collect::<String>();
+    format!(
+        concat!(
+            "<m:SetHoldOnMailboxesResponse>",
+            "<m:ResponseMessages>",
+            "<m:SetHoldOnMailboxesResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Action>{action}</m:Action>",
+            "<m:MailboxHoldResult>{holds_xml}</m:MailboxHoldResult>",
+            "</m:SetHoldOnMailboxesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:SetHoldOnMailboxesResponse>"
+        ),
+        action = if enabled { "CreateHold" } else { "ReleaseHold" },
+        holds_xml = holds_xml,
+    )
+}
+
+fn hold_mailbox_xml(hold: &EwsHoldMailbox) -> String {
+    format!(
+        concat!(
+            "<t:MailboxHoldStatus>",
+            "<t:Mailbox>{email}</t:Mailbox>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "<t:HoldId>{hold_id}</t:HoldId>",
+            "<t:HoldName>{hold_name}</t:HoldName>",
+            "<t:Query>{query}</t:Query>",
+            "<t:IsOnHold>{active}</t:IsOnHold>",
+            "</t:MailboxHoldStatus>"
+        ),
+        email = escape_xml(&hold.email),
+        display_name = escape_xml(&hold.display_name),
+        hold_id = hold.hold_id.map(|id| id.to_string()).unwrap_or_default(),
+        hold_name = escape_xml(hold.hold_name.as_deref().unwrap_or_default()),
+        query = escape_xml(hold.query_text.as_deref().unwrap_or_default()),
+        active = hold.active,
+    )
+}
+
+fn get_non_indexable_item_details_response(reports: &[EwsNonIndexableReport]) -> String {
+    let reports_xml = reports
+        .iter()
+        .map(non_indexable_report_xml)
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetNonIndexableItemDetailsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetNonIndexableItemDetailsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:NonIndexableItemDetails>{reports_xml}</m:NonIndexableItemDetails>",
+            "</m:GetNonIndexableItemDetailsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetNonIndexableItemDetailsResponse>"
+        ),
+        reports_xml = reports_xml,
+    )
+}
+
+fn get_non_indexable_item_statistics_response(reports: &[EwsNonIndexableReport]) -> String {
+    let mut counts: HashMap<&str, usize> = HashMap::new();
+    for report in reports {
+        *counts.entry(&report.email).or_default() += 1;
+    }
+    let stats_xml = counts
+        .into_iter()
+        .map(|(email, count)| {
+            format!(
+                concat!(
+                    "<t:NonIndexableItemStatistic>",
+                    "<t:Mailbox>{email}</t:Mailbox>",
+                    "<t:ItemCount>{count}</t:ItemCount>",
+                    "</t:NonIndexableItemStatistic>"
+                ),
+                email = escape_xml(email),
+                count = count,
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetNonIndexableItemStatisticsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetNonIndexableItemStatisticsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:NonIndexableItemStatistics>{stats_xml}</m:NonIndexableItemStatistics>",
+            "</m:GetNonIndexableItemStatisticsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetNonIndexableItemStatisticsResponse>"
+        ),
+        stats_xml = stats_xml,
+    )
+}
+
+fn non_indexable_report_xml(report: &EwsNonIndexableReport) -> String {
+    format!(
+        concat!(
+            "<t:NonIndexableItemDetail>",
+            "<t:ItemId>{id}</t:ItemId>",
+            "<t:Mailbox>{email}</t:Mailbox>",
+            "<t:ItemType>{kind}</t:ItemType>",
+            "<t:ErrorDescription>{reason}</t:ErrorDescription>",
+            "<t:MessageId>{message_id}</t:MessageId>",
+            "<t:AttachmentId>{attachment_id}</t:AttachmentId>",
+            "<t:DetectedAt>{detected_at}</t:DetectedAt>",
+            "<t:IsResolved>{resolved}</t:IsResolved>",
+            "</t:NonIndexableItemDetail>"
+        ),
+        id = report.id,
+        email = escape_xml(&report.email),
+        kind = escape_xml(&report.report_kind),
+        reason = escape_xml(&report.reason),
+        message_id = report
+            .message_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        attachment_id = report
+            .attachment_id
+            .map(|id| id.to_string())
+            .unwrap_or_default(),
+        detected_at = escape_xml(&report.detected_at),
+        resolved = report.resolved,
+    )
+}
+
+fn transfer_job_response(operation: &str, job: &EwsTransferJob) -> String {
+    let entries_xml = job
+        .entries
+        .iter()
+        .map(|entry| {
+            format!(
+                concat!(
+                    "<t:TransferEntry>",
+                    "<t:EntryId>{id}</t:EntryId>",
+                    "<t:Ordinal>{ordinal}</t:Ordinal>",
+                    "<t:ItemKind>{kind}</t:ItemKind>",
+                    "<t:CanonicalId>{canonical_id}</t:CanonicalId>",
+                    "<t:SourceItemId>{source_item_id}</t:SourceItemId>",
+                    "<t:Status>{status}</t:Status>",
+                    "</t:TransferEntry>"
+                ),
+                id = entry.id,
+                ordinal = entry.ordinal,
+                kind = escape_xml(&entry.item_kind),
+                canonical_id = entry
+                    .canonical_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+                source_item_id = escape_xml(entry.source_item_id.as_deref().unwrap_or_default()),
+                status = escape_xml(&entry.status),
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:JobId>{job_id}</m:JobId>",
+            "<m:Direction>{direction}</m:Direction>",
+            "<m:Status>{status}</m:Status>",
+            "<m:TotalItems>{total}</m:TotalItems>",
+            "<m:TransferEntries>{entries_xml}</m:TransferEntries>",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation,
+        job_id = job.id,
+        direction = escape_xml(&job.direction),
+        status = escape_xml(&job.status),
+        total = job.total_items,
+        entries_xml = entries_xml,
     )
 }
 

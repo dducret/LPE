@@ -238,6 +238,85 @@ pub(crate) struct EwsRetentionPolicyTag {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsSearchableMailbox {
+    pub(crate) account_id: Uuid,
+    pub(crate) email: String,
+    pub(crate) display_name: String,
+    pub(crate) litigation_hold_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsDiscoverySearchConfig {
+    pub(crate) id: Uuid,
+    pub(crate) display_name: String,
+    pub(crate) query_text: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsDiscoverySearchItem {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) mailbox_message_id: Uuid,
+    pub(crate) message_id: Uuid,
+    pub(crate) subject: String,
+    pub(crate) preview: String,
+    pub(crate) rank: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsDiscoverySearchResult {
+    pub(crate) search_id: Uuid,
+    pub(crate) job_id: Uuid,
+    pub(crate) query_text: String,
+    pub(crate) result_count: usize,
+    pub(crate) items: Vec<EwsDiscoverySearchItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsHoldMailbox {
+    pub(crate) account_id: Uuid,
+    pub(crate) email: String,
+    pub(crate) display_name: String,
+    pub(crate) hold_id: Option<Uuid>,
+    pub(crate) hold_name: Option<String>,
+    pub(crate) query_text: Option<String>,
+    pub(crate) active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsNonIndexableReport {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) email: String,
+    pub(crate) report_kind: String,
+    pub(crate) reason: String,
+    pub(crate) message_id: Option<Uuid>,
+    pub(crate) attachment_id: Option<Uuid>,
+    pub(crate) detected_at: String,
+    pub(crate) resolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsTransferEntry {
+    pub(crate) id: Uuid,
+    pub(crate) ordinal: i32,
+    pub(crate) item_kind: String,
+    pub(crate) canonical_id: Option<Uuid>,
+    pub(crate) source_item_id: Option<String>,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsTransferJob {
+    pub(crate) id: Uuid,
+    pub(crate) direction: String,
+    pub(crate) status: String,
+    pub(crate) total_items: usize,
+    pub(crate) entries: Vec<EwsTransferEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EwsDelegatePreferences {
     pub(crate) meeting_request_delivery: String,
     pub(crate) receives_meeting_request_copy: bool,
@@ -558,6 +637,54 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<EwsRetentionPolicyTag>>;
+
+    fn fetch_ews_searchable_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsSearchableMailbox>>;
+
+    fn fetch_ews_discovery_search_configurations<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsDiscoverySearchConfig>>;
+
+    fn search_ews_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        query_text: &'a str,
+        mailbox_emails: &'a [String],
+        limit: usize,
+    ) -> StoreFuture<'a, EwsDiscoverySearchResult>;
+
+    fn fetch_ews_hold_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        mailbox_emails: &'a [String],
+    ) -> StoreFuture<'a, Vec<EwsHoldMailbox>>;
+
+    fn set_ews_hold_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        hold_name: &'a str,
+        query_text: &'a str,
+        mailbox_emails: &'a [String],
+        enable: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<EwsHoldMailbox>>;
+
+    fn fetch_ews_non_indexable_reports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsNonIndexableReport>>;
+
+    fn create_ews_transfer_job<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        direction: &'a str,
+        item_ids: &'a [String],
+        request_json: serde_json::Value,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsTransferJob>;
 
     fn upsert_ews_sharing_grant<'a>(
         &'a self,
@@ -1238,6 +1365,28 @@ fn ews_user_configuration_from_row(row: sqlx::postgres::PgRow) -> EwsUserConfigu
     }
 }
 
+fn ews_scope_emails(principal: &AccountPrincipal, mailbox_emails: &[String]) -> Vec<String> {
+    let mut emails = mailbox_emails
+        .iter()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if emails.is_empty() {
+        emails.push(principal.email.trim().to_ascii_lowercase());
+    }
+    emails.sort();
+    emails.dedup();
+    emails
+}
+
+fn parse_message_uuid(item_id: &str) -> Option<Uuid> {
+    let value = item_id
+        .trim()
+        .strip_prefix("message:")
+        .unwrap_or_else(|| item_id.trim());
+    Uuid::parse_str(value).ok()
+}
+
 impl ExchangeStore for Storage {
     fn fetch_ews_user_configuration<'a>(
         &'a self,
@@ -1480,6 +1629,543 @@ impl ExchangeStore for Storage {
                     })
                 })
                 .collect()
+        })
+    }
+
+    fn fetch_ews_searchable_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsSearchableMailbox>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                SELECT id, primary_email, display_name, litigation_hold_enabled
+                FROM accounts
+                WHERE tenant_id = $1
+                ORDER BY lower(primary_email), id
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsSearchableMailbox {
+                        account_id: row.try_get("id")?,
+                        email: row.try_get("primary_email")?,
+                        display_name: row.try_get("display_name")?,
+                        litigation_hold_enabled: row.try_get("litigation_hold_enabled")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn fetch_ews_discovery_search_configurations<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsDiscoverySearchConfig>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                SELECT id, display_name, query_text,
+                       to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                FROM discovery_searches
+                WHERE tenant_id = $1
+                ORDER BY updated_at DESC, id
+                LIMIT 100
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsDiscoverySearchConfig {
+                        id: row.try_get("id")?,
+                        display_name: row.try_get("display_name")?,
+                        query_text: row.try_get("query_text")?,
+                        updated_at: row.try_get("updated_at")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn search_ews_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        query_text: &'a str,
+        mailbox_emails: &'a [String],
+        limit: usize,
+    ) -> StoreFuture<'a, EwsDiscoverySearchResult> {
+        Box::pin(async move {
+            let scoped_emails = ews_scope_emails(principal, mailbox_emails);
+            let search_id = Uuid::new_v4();
+            let job_id = Uuid::new_v4();
+            let mut tx = self.pool().begin().await?;
+            sqlx::query(
+                r#"
+                INSERT INTO discovery_searches (
+                    id, tenant_id, display_name, query_text, scope_json, created_by_account_id
+                )
+                VALUES ($1, $2, $3, $4, $5, $6)
+                "#,
+            )
+            .bind(search_id)
+            .bind(principal.tenant_id)
+            .bind("EWS SearchMailboxes")
+            .bind(query_text.trim())
+            .bind(serde_json::json!({ "mailboxes": scoped_emails }))
+            .bind(principal.account_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO discovery_search_jobs (id, tenant_id, search_id, status, started_at)
+                VALUES ($1, $2, $3, 'running', NOW())
+                "#,
+            )
+            .bind(job_id)
+            .bind(principal.tenant_id)
+            .bind(search_id)
+            .execute(&mut *tx)
+            .await?;
+
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    a.id AS account_id,
+                    s.mailbox_message_id,
+                    s.message_id,
+                    s.subject_text,
+                    left(COALESCE(NULLIF(s.body_text, ''), s.attachment_text), 160) AS preview
+                FROM mail_search_documents s
+                JOIN accounts a
+                  ON a.tenant_id = s.tenant_id
+                 AND a.id = s.account_id
+                JOIN mailbox_messages mm
+                  ON mm.tenant_id = s.tenant_id
+                 AND mm.account_id = s.account_id
+                 AND mm.id = s.mailbox_message_id
+                WHERE s.tenant_id = $1
+                  AND lower(a.primary_email) = ANY($2)
+                  AND mm.visibility = 'visible'
+                  AND (
+                    $3::text = ''
+                    OR s.search_vector @@ websearch_to_tsquery('simple', $3)
+                  )
+                ORDER BY s.updated_at DESC, s.message_id DESC
+                LIMIT $4
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(
+                scoped_emails
+                    .iter()
+                    .map(|value| value.to_ascii_lowercase())
+                    .collect::<Vec<_>>(),
+            )
+            .bind(query_text.trim())
+            .bind(limit.max(1).min(100) as i64)
+            .fetch_all(&mut *tx)
+            .await?;
+
+            let mut items = Vec::new();
+            for (index, row) in rows.into_iter().enumerate() {
+                let item = EwsDiscoverySearchItem {
+                    id: Uuid::new_v4(),
+                    account_id: row.try_get("account_id")?,
+                    mailbox_message_id: row.try_get("mailbox_message_id")?,
+                    message_id: row.try_get("message_id")?,
+                    subject: row.try_get("subject_text")?,
+                    preview: row.try_get("preview")?,
+                    rank: index as i32,
+                };
+                sqlx::query(
+                    r#"
+                    INSERT INTO discovery_result_items (
+                        id, tenant_id, job_id, account_id, mailbox_message_id, message_id, rank, preview
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    "#,
+                )
+                .bind(item.id)
+                .bind(principal.tenant_id)
+                .bind(job_id)
+                .bind(item.account_id)
+                .bind(item.mailbox_message_id)
+                .bind(item.message_id)
+                .bind(item.rank)
+                .bind(&item.preview)
+                .execute(&mut *tx)
+                .await?;
+                items.push(item);
+            }
+            sqlx::query(
+                r#"
+                UPDATE discovery_search_jobs
+                SET status = 'completed',
+                    result_count = $3,
+                    completed_at = NOW(),
+                    updated_at = NOW()
+                WHERE tenant_id = $1 AND id = $2
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(job_id)
+            .bind(items.len() as i32)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+
+            Ok(EwsDiscoverySearchResult {
+                search_id,
+                job_id,
+                query_text: query_text.trim().to_string(),
+                result_count: items.len(),
+                items,
+            })
+        })
+    }
+
+    fn fetch_ews_hold_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        mailbox_emails: &'a [String],
+    ) -> StoreFuture<'a, Vec<EwsHoldMailbox>> {
+        Box::pin(async move {
+            let scoped_emails = ews_scope_emails(principal, mailbox_emails);
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    a.id AS account_id,
+                    a.primary_email,
+                    a.display_name,
+                    h.id AS hold_id,
+                    h.display_name AS hold_name,
+                    h.query_text,
+                    (h.id IS NOT NULL AND hm.released_at IS NULL AND h.status = 'active') AS active
+                FROM accounts a
+                LEFT JOIN compliance_hold_mailboxes hm
+                  ON hm.tenant_id = a.tenant_id
+                 AND hm.account_id = a.id
+                 AND hm.released_at IS NULL
+                LEFT JOIN compliance_holds h
+                  ON h.tenant_id = hm.tenant_id
+                 AND h.id = hm.hold_id
+                 AND h.status = 'active'
+                WHERE a.tenant_id = $1
+                  AND lower(a.primary_email) = ANY($2)
+                ORDER BY lower(a.primary_email), h.updated_at DESC NULLS LAST, h.id
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(
+                scoped_emails
+                    .iter()
+                    .map(|value| value.to_ascii_lowercase())
+                    .collect::<Vec<_>>(),
+            )
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsHoldMailbox {
+                        account_id: row.try_get("account_id")?,
+                        email: row.try_get("primary_email")?,
+                        display_name: row.try_get("display_name")?,
+                        hold_id: row.try_get("hold_id")?,
+                        hold_name: row.try_get("hold_name")?,
+                        query_text: row.try_get("query_text")?,
+                        active: row.try_get("active")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn set_ews_hold_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        hold_name: &'a str,
+        query_text: &'a str,
+        mailbox_emails: &'a [String],
+        enable: bool,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<EwsHoldMailbox>> {
+        Box::pin(async move {
+            let scoped_emails = ews_scope_emails(principal, mailbox_emails);
+            let normalized_hold_name = hold_name.trim();
+            let normalized_hold_name = if normalized_hold_name.is_empty() {
+                "EWS Litigation Hold"
+            } else {
+                normalized_hold_name
+            };
+            let mut tx = self.pool().begin().await?;
+            let account_rows = sqlx::query(
+                r#"
+                SELECT id
+                FROM accounts
+                WHERE tenant_id = $1
+                  AND lower(primary_email) = ANY($2)
+                ORDER BY lower(primary_email), id
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(
+                scoped_emails
+                    .iter()
+                    .map(|value| value.to_ascii_lowercase())
+                    .collect::<Vec<_>>(),
+            )
+            .fetch_all(&mut *tx)
+            .await?;
+            let account_ids = account_rows
+                .into_iter()
+                .map(|row| row.try_get("id"))
+                .collect::<std::result::Result<Vec<Uuid>, sqlx::Error>>()?;
+
+            if enable {
+                let hold_id = Uuid::new_v4();
+                sqlx::query(
+                    r#"
+                    INSERT INTO compliance_holds (
+                        id, tenant_id, display_name, query_text, status, created_by_account_id
+                    )
+                    VALUES ($1, $2, $3, $4, 'active', $5)
+                    "#,
+                )
+                .bind(hold_id)
+                .bind(principal.tenant_id)
+                .bind(normalized_hold_name)
+                .bind(query_text.trim())
+                .bind(principal.account_id)
+                .execute(&mut *tx)
+                .await?;
+                for account_id in &account_ids {
+                    sqlx::query(
+                        r#"
+                        INSERT INTO compliance_hold_mailboxes (
+                            tenant_id, hold_id, account_id, applied_by_account_id
+                        )
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (tenant_id, hold_id, account_id) DO NOTHING
+                        "#,
+                    )
+                    .bind(principal.tenant_id)
+                    .bind(hold_id)
+                    .bind(account_id)
+                    .bind(principal.account_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                sqlx::query(
+                    r#"
+                    UPDATE accounts
+                    SET litigation_hold_enabled = TRUE,
+                        litigation_hold_started_at = COALESCE(litigation_hold_started_at, NOW())
+                    WHERE tenant_id = $1 AND id = ANY($2)
+                    "#,
+                )
+                .bind(principal.tenant_id)
+                .bind(&account_ids)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query(
+                    r#"
+                    UPDATE compliance_hold_mailboxes hm
+                    SET released_at = NOW()
+                    FROM compliance_holds h
+                    WHERE hm.tenant_id = h.tenant_id
+                      AND hm.hold_id = h.id
+                      AND hm.tenant_id = $1
+                      AND hm.account_id = ANY($2)
+                      AND h.display_name = $3
+                      AND hm.released_at IS NULL
+                    "#,
+                )
+                .bind(principal.tenant_id)
+                .bind(&account_ids)
+                .bind(normalized_hold_name)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    r#"
+                    UPDATE compliance_holds
+                    SET status = 'released',
+                        released_by_account_id = $2,
+                        released_at = NOW(),
+                        updated_at = NOW()
+                    WHERE tenant_id = $1
+                      AND display_name = $3
+                      AND status = 'active'
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM compliance_hold_mailboxes hm
+                        WHERE hm.tenant_id = compliance_holds.tenant_id
+                          AND hm.hold_id = compliance_holds.id
+                          AND hm.released_at IS NULL
+                      )
+                    "#,
+                )
+                .bind(principal.tenant_id)
+                .bind(principal.account_id)
+                .bind(normalized_hold_name)
+                .execute(&mut *tx)
+                .await?;
+                sqlx::query(
+                    r#"
+                    UPDATE accounts a
+                    SET litigation_hold_enabled = FALSE,
+                        litigation_hold_started_at = NULL
+                    WHERE a.tenant_id = $1
+                      AND a.id = ANY($2)
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM compliance_hold_mailboxes hm
+                        JOIN compliance_holds h
+                          ON h.tenant_id = hm.tenant_id
+                         AND h.id = hm.hold_id
+                        WHERE hm.tenant_id = a.tenant_id
+                          AND hm.account_id = a.id
+                          AND hm.released_at IS NULL
+                          AND h.status = 'active'
+                      )
+                    "#,
+                )
+                .bind(principal.tenant_id)
+                .bind(&account_ids)
+                .execute(&mut *tx)
+                .await?;
+            }
+            tx.commit().await?;
+            self.append_audit_event(principal.tenant_id, audit).await?;
+            self.fetch_ews_hold_mailboxes(principal, &scoped_emails)
+                .await
+        })
+    }
+
+    fn fetch_ews_non_indexable_reports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsNonIndexableReport>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    r.id,
+                    r.account_id,
+                    a.primary_email,
+                    r.report_kind,
+                    r.reason,
+                    r.message_id,
+                    r.attachment_id,
+                    to_char(r.detected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS detected_at,
+                    r.resolved_at IS NOT NULL AS resolved
+                FROM non_indexable_item_reports r
+                JOIN accounts a
+                  ON a.tenant_id = r.tenant_id
+                 AND a.id = r.account_id
+                WHERE r.tenant_id = $1
+                ORDER BY r.detected_at DESC, r.id
+                LIMIT 200
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsNonIndexableReport {
+                        id: row.try_get("id")?,
+                        account_id: row.try_get("account_id")?,
+                        email: row.try_get("primary_email")?,
+                        report_kind: row.try_get("report_kind")?,
+                        reason: row.try_get("reason")?,
+                        message_id: row.try_get("message_id")?,
+                        attachment_id: row.try_get("attachment_id")?,
+                        detected_at: row.try_get("detected_at")?,
+                        resolved: row.try_get("resolved")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn create_ews_transfer_job<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        direction: &'a str,
+        item_ids: &'a [String],
+        request_json: serde_json::Value,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsTransferJob> {
+        Box::pin(async move {
+            let job_id = Uuid::new_v4();
+            let mut tx = self.pool().begin().await?;
+            sqlx::query(
+                r#"
+                INSERT INTO mailbox_item_transfer_jobs (
+                    id, tenant_id, account_id, direction, source_protocol, status,
+                    requested_by_account_id, request_json, total_items
+                )
+                VALUES ($1, $2, $3, $4, 'ews', 'requested', $5, $6, $7)
+                "#,
+            )
+            .bind(job_id)
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(direction)
+            .bind(principal.account_id)
+            .bind(&request_json)
+            .bind(item_ids.len() as i32)
+            .execute(&mut *tx)
+            .await?;
+
+            let mut entries = Vec::new();
+            for (ordinal, item_id) in item_ids.iter().enumerate() {
+                let canonical_id = parse_message_uuid(item_id);
+                let entry = EwsTransferEntry {
+                    id: Uuid::new_v4(),
+                    ordinal: ordinal as i32,
+                    item_kind: "message".to_string(),
+                    canonical_id,
+                    source_item_id: Some(item_id.clone()),
+                    status: "pending".to_string(),
+                };
+                sqlx::query(
+                    r#"
+                    INSERT INTO mailbox_item_transfer_entries (
+                        id, tenant_id, job_id, ordinal, item_kind, canonical_id, source_item_id, status
+                    )
+                    VALUES ($1, $2, $3, $4, 'message', $5, $6, 'pending')
+                    "#,
+                )
+                .bind(entry.id)
+                .bind(principal.tenant_id)
+                .bind(job_id)
+                .bind(entry.ordinal)
+                .bind(entry.canonical_id)
+                .bind(&entry.source_item_id)
+                .execute(&mut *tx)
+                .await?;
+                entries.push(entry);
+            }
+            tx.commit().await?;
+            self.append_audit_event(principal.tenant_id, audit).await?;
+            Ok(EwsTransferJob {
+                id: job_id,
+                direction: direction.to_string(),
+                status: "requested".to_string(),
+                total_items: item_ids.len(),
+                entries,
+            })
         })
     }
 

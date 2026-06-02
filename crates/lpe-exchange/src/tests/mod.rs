@@ -54,7 +54,9 @@ use crate::{
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::{
-        EwsDelegate, EwsRetentionPolicyTag, EwsUserConfiguration, EwsUserConfigurationKey,
+        EwsDelegate, EwsDiscoverySearchConfig, EwsDiscoverySearchItem, EwsDiscoverySearchResult,
+        EwsHoldMailbox, EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox,
+        EwsTransferEntry, EwsTransferJob, EwsUserConfiguration, EwsUserConfigurationKey,
         ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
         ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
         MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
@@ -487,6 +489,11 @@ struct FakeStore {
     ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
     ews_retention_policy_tags: Arc<Mutex<Vec<FakeRetentionPolicyTag>>>,
     ews_sharing_grants: Arc<Mutex<Vec<CollaborationGrant>>>,
+    ews_discovery_search_configs: Arc<Mutex<Vec<EwsDiscoverySearchConfig>>>,
+    ews_discovery_search_results: Arc<Mutex<Vec<EwsDiscoverySearchResult>>>,
+    ews_holds: Arc<Mutex<Vec<EwsHoldMailbox>>>,
+    ews_non_indexable_reports: Arc<Mutex<Vec<EwsNonIndexableReport>>>,
+    ews_transfer_jobs: Arc<Mutex<Vec<EwsTransferJob>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
@@ -1172,6 +1179,285 @@ impl ExchangeStore for FakeStore {
             })
             .collect();
         Box::pin(async move { Ok(tags) })
+    }
+
+    fn fetch_ews_searchable_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsSearchableMailbox>> {
+        let mut accounts = self.directory_accounts.lock().unwrap().clone();
+        accounts.push(AuthenticatedAccount {
+            tenant_id: principal.tenant_id,
+            account_id: principal.account_id,
+            email: principal.email.clone(),
+            display_name: principal.display_name.clone(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        });
+        let mut mailboxes = accounts
+            .into_iter()
+            .filter(|account| account.tenant_id == principal.tenant_id)
+            .map(|account| EwsSearchableMailbox {
+                account_id: account.account_id,
+                email: account.email,
+                display_name: account.display_name,
+                litigation_hold_enabled: false,
+            })
+            .collect::<Vec<_>>();
+        mailboxes.sort_by(|a, b| a.email.cmp(&b.email));
+        mailboxes.dedup_by(|a, b| a.account_id == b.account_id);
+        Box::pin(async move { Ok(mailboxes) })
+    }
+
+    fn fetch_ews_discovery_search_configurations<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsDiscoverySearchConfig>> {
+        let configs = self.ews_discovery_search_configs.lock().unwrap().clone();
+        Box::pin(async move { Ok(configs) })
+    }
+
+    fn search_ews_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        query_text: &'a str,
+        mailbox_emails: &'a [String],
+        limit: usize,
+    ) -> StoreFuture<'a, EwsDiscoverySearchResult> {
+        let scoped_emails = if mailbox_emails.is_empty() {
+            vec![principal.email.to_ascii_lowercase()]
+        } else {
+            mailbox_emails
+                .iter()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .collect()
+        };
+        let mut accounts = self.directory_accounts.lock().unwrap().clone();
+        accounts.push(AuthenticatedAccount {
+            tenant_id: principal.tenant_id,
+            account_id: principal.account_id,
+            email: principal.email.clone(),
+            display_name: principal.display_name.clone(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        });
+        let accounts = accounts
+            .into_iter()
+            .filter(|account| account.tenant_id == principal.tenant_id)
+            .map(|account| EwsSearchableMailbox {
+                account_id: account.account_id,
+                email: account.email.to_ascii_lowercase(),
+                display_name: account.display_name,
+                litigation_hold_enabled: false,
+            })
+            .collect::<Vec<_>>();
+        let scoped_account_id = accounts
+            .iter()
+            .find(|account| scoped_emails.iter().any(|email| email == &account.email))
+            .map(|account| account.account_id)
+            .unwrap_or(principal.account_id);
+        let query = query_text.trim().to_ascii_lowercase();
+        let emails = self.emails.lock().unwrap().clone();
+        let sink = self.ews_discovery_search_results.clone();
+        Box::pin(async move {
+            let mut items = emails
+                .into_iter()
+                .filter(|email| {
+                    query.is_empty()
+                        || email.subject.to_ascii_lowercase().contains(&query)
+                        || email.body_text.to_ascii_lowercase().contains(&query)
+                        || email.preview.to_ascii_lowercase().contains(&query)
+                })
+                .take(limit.max(1).min(100))
+                .enumerate()
+                .map(|(rank, email)| EwsDiscoverySearchItem {
+                    id: Uuid::new_v4(),
+                    account_id: scoped_account_id,
+                    mailbox_message_id: email.id,
+                    message_id: email.id,
+                    subject: email.subject,
+                    preview: email.preview,
+                    rank: rank as i32,
+                })
+                .collect::<Vec<_>>();
+            let result = EwsDiscoverySearchResult {
+                search_id: Uuid::new_v4(),
+                job_id: Uuid::new_v4(),
+                query_text: query_text.trim().to_string(),
+                result_count: items.len(),
+                items: std::mem::take(&mut items),
+            };
+            sink.lock().unwrap().push(result.clone());
+            Ok(result)
+        })
+    }
+
+    fn fetch_ews_hold_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        mailbox_emails: &'a [String],
+    ) -> StoreFuture<'a, Vec<EwsHoldMailbox>> {
+        let scoped_emails = if mailbox_emails.is_empty() {
+            vec![principal.email.to_ascii_lowercase()]
+        } else {
+            mailbox_emails
+                .iter()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .collect()
+        };
+        let holds = self
+            .ews_holds
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|hold| scoped_emails.iter().any(|email| email == &hold.email))
+            .cloned()
+            .collect::<Vec<_>>();
+        Box::pin(async move { Ok(holds) })
+    }
+
+    fn set_ews_hold_mailboxes<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        hold_name: &'a str,
+        query_text: &'a str,
+        mailbox_emails: &'a [String],
+        enable: bool,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Vec<EwsHoldMailbox>> {
+        let scoped_emails = if mailbox_emails.is_empty() {
+            vec![principal.email.to_ascii_lowercase()]
+        } else {
+            mailbox_emails
+                .iter()
+                .map(|value| value.trim().to_ascii_lowercase())
+                .collect()
+        };
+        let mut accounts = self.directory_accounts.lock().unwrap().clone();
+        accounts.push(AuthenticatedAccount {
+            tenant_id: principal.tenant_id,
+            account_id: principal.account_id,
+            email: principal.email.clone(),
+            display_name: principal.display_name.clone(),
+            expires_at: "2099-01-01T00:00:00Z".to_string(),
+        });
+        let accounts = accounts
+            .into_iter()
+            .filter(|account| account.tenant_id == principal.tenant_id)
+            .map(|account| EwsSearchableMailbox {
+                account_id: account.account_id,
+                email: account.email.to_ascii_lowercase(),
+                display_name: account.display_name,
+                litigation_hold_enabled: false,
+            })
+            .collect::<Vec<_>>();
+        let holds = self.ews_holds.clone();
+        let hold_name = hold_name.trim().to_string();
+        let query_text = query_text.trim().to_string();
+        Box::pin(async move {
+            let mut guard = holds.lock().unwrap();
+            if enable {
+                for account in accounts
+                    .into_iter()
+                    .filter(|account| scoped_emails.iter().any(|email| email == &account.email))
+                {
+                    guard.push(EwsHoldMailbox {
+                        account_id: account.account_id,
+                        email: account.email,
+                        display_name: account.display_name,
+                        hold_id: Some(Uuid::new_v4()),
+                        hold_name: Some(if hold_name.is_empty() {
+                            "EWS Litigation Hold".to_string()
+                        } else {
+                            hold_name.clone()
+                        }),
+                        query_text: Some(query_text.clone()),
+                        active: true,
+                    });
+                }
+            } else {
+                for hold in guard.iter_mut() {
+                    if scoped_emails.iter().any(|email| email == &hold.email)
+                        && hold
+                            .hold_name
+                            .as_deref()
+                            .is_some_and(|name| name == hold_name)
+                    {
+                        hold.active = false;
+                    }
+                }
+            }
+            Ok(guard
+                .iter()
+                .filter(|hold| scoped_emails.iter().any(|email| email == &hold.email))
+                .cloned()
+                .collect())
+        })
+    }
+
+    fn fetch_ews_non_indexable_reports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsNonIndexableReport>> {
+        let reports = self
+            .ews_non_indexable_reports
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|report| {
+                report.account_id == principal.account_id
+                    || self
+                        .directory_accounts
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|account| {
+                            account.tenant_id == principal.tenant_id
+                                && account.account_id == report.account_id
+                        })
+            })
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(reports) })
+    }
+
+    fn create_ews_transfer_job<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+        direction: &'a str,
+        item_ids: &'a [String],
+        _request_json: serde_json::Value,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsTransferJob> {
+        let jobs = self.ews_transfer_jobs.clone();
+        let direction = direction.to_string();
+        let item_ids = item_ids.to_vec();
+        Box::pin(async move {
+            let entries = item_ids
+                .iter()
+                .enumerate()
+                .map(|(ordinal, item_id)| EwsTransferEntry {
+                    id: Uuid::new_v4(),
+                    ordinal: ordinal as i32,
+                    item_kind: "message".to_string(),
+                    canonical_id: item_id
+                        .trim()
+                        .strip_prefix("message:")
+                        .unwrap_or_else(|| item_id.trim())
+                        .parse()
+                        .ok(),
+                    source_item_id: Some(item_id.clone()),
+                    status: "pending".to_string(),
+                })
+                .collect::<Vec<_>>();
+            let job = EwsTransferJob {
+                id: Uuid::new_v4(),
+                direction,
+                status: "requested".to_string(),
+                total_items: entries.len(),
+                entries,
+            };
+            jobs.lock().unwrap().push(job.clone());
+            Ok(job)
+        })
     }
 
     fn upsert_ews_sharing_grant<'a>(

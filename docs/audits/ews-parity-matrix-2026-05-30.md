@@ -40,20 +40,20 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetDiscoverySearchConfiguration` | Missing | New eDiscovery search configuration, compliance scopes, legal-hold policy rows | Compliance/admin search API over canonical mailbox/search data | EWS clients receive unsupported instead of discovery configuration | P4 |
-| `GetHoldOnMailboxes` | Missing | New legal hold policy/mailbox assignment state; existing `recoverable_items.legal_hold` is item lifecycle only | Compliance hold management API | No Exchange hold query behavior through EWS | P4 |
-| `GetNonIndexableItemDetails` | Missing | New non-indexable item diagnostics; existing attachment extraction jobs are not Exchange discovery reports | Search/index diagnostics API | No Exchange non-indexable report payloads | P4 |
-| `GetNonIndexableItemStatistics` | Missing | New aggregate non-indexable statistics derived from indexing/extraction state | Search/index diagnostics API | Unsupported instead of statistics | P4 |
-| `GetSearchableMailboxes` | Missing | Tenant account/mailbox directory plus compliance search scope grants | Admin/compliance mailbox discovery API | Unsupported instead of searchable mailbox list | P4 |
-| `SearchMailboxes` | Missing | Existing mailbox/search tables plus new compliance query/audit/result-set state | Compliance search API with Bcc-safe defaults and explicit protected-metadata access | No EWS discovery search results | P4 |
-| `SetHoldOnMailboxes` | Missing | New legal hold policy assignment and audit rows | Compliance hold mutation API | Cannot create/update Exchange-style holds through EWS | P4 |
+| `GetDiscoverySearchConfiguration` | Partial | `discovery_searches` | Compliance/admin search API over canonical mailbox/search data | Projects bounded same-tenant discovery search definitions; no Exchange compliance role/scope policy model through EWS | P4 |
+| `GetHoldOnMailboxes` | Partial | `compliance_holds`, `compliance_hold_mailboxes`, account litigation-hold fields | Compliance hold management API | Returns canonical same-tenant hold rows only; no Exchange In-Place Hold distribution state | P4 |
+| `GetNonIndexableItemDetails` | Partial | `non_indexable_item_reports` | Search/index diagnostics API | Projects bounded diagnostics without protected metadata; no Exchange crawl/report payload parity | P4 |
+| `GetNonIndexableItemStatistics` | Partial | `non_indexable_item_reports` | Search/index diagnostics API | Aggregates bounded report counts per mailbox; no Exchange crawl mailbox statistics | P4 |
+| `GetSearchableMailboxes` | Partial | Same-tenant `accounts` and litigation-hold fields | Admin/compliance mailbox discovery API | Lists same-tenant account mailboxes; no Exchange discovery-scope grants, external mailboxes, or federation | P4 |
+| `SearchMailboxes` | Partial | `discovery_searches`, `discovery_search_jobs`, `discovery_result_items`, `mail_search_documents` | Compliance search API with Bcc-safe defaults | Creates canonical search/job/result rows from Bcc-safe search documents; no Exchange preview/estimate/de-dup/refiner parity | P4 |
+| `SetHoldOnMailboxes` | Partial | `compliance_holds`, `compliance_hold_mailboxes`, account litigation-hold fields, audit rows | Compliance hold mutation API | Creates/releases bounded canonical hold rows; no Exchange hold policy distribution semantics | P4 |
 
 ## Mailbox Item Operations
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `ArchiveItem` | Missing | Existing mailboxes/messages can model a canonical Archive only if configured; no Exchange archive-mailbox model | Mail move API to canonical Archive plus archive policy rules | Unsupported; no Exchange archive mailbox or retention archive semantics | P2 |
-| `CreateItem` | Partial | `messages`, `mailbox_messages`, recipients, protected Bcc, blobs/MIME, contacts, calendars, tasks, submission tables | Draft/import/create APIs for mail, contacts, events, tasks, public-folder posts; canonical submission for send dispositions | Bounded item classes; no `AcceptSharingInvitation` special handling; no full Exchange property bag | P0 |
+| `CreateItem` | Partial | `messages`, `mailbox_messages`, recipients, protected Bcc, blobs/MIME, contacts, calendars, tasks, submission tables, contact/calendar grants | Draft/import/create APIs for mail, contacts, events, tasks, public-folder posts; canonical submission for send dispositions; bounded sharing invitation acceptance | Bounded item classes; `AcceptSharingInvitation` is supported only for same-tenant contact/calendar grants; no full Exchange property bag or sharing token store | P0 |
 | `CopyItem` | Partial | `messages`, `mailbox_messages`, `public_folder_items`, change log/tombstones | Canonical message copy API; canonical public-folder item clone API | Supports canonical message and public-folder item ids only; not full item-class copy parity | P1 |
 | `DeleteItem` | Partial | `mailbox_messages`, contacts/events/tasks, `recoverable_items`, `public_folder_items`, change log/tombstones | Canonical delete, Trash move, collaboration delete, and public-folder item delete APIs | Exchange delete types are mapped to LPE hard delete or Trash behavior; no full dumpster parity through EWS | P0 |
 | `FindItem` | Partial | Mail, contacts, calendar, task tables, public-folder item tables plus search projections | Canonical item list/query APIs | Bounded to mail/contacts/calendar/tasks/public-folder posts; Exchange views, property sets, folders, and archive stores are incomplete | P0 |
@@ -126,8 +126,8 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `UploadItems` | Missing | Mail/MIME/blob/folder data plus import job/audit state | Canonical bulk import API with Magika/blob validation and mailbox membership writes | Unsupported; no EWS streaming import | P2 |
-| `ExportItems` | Missing | Mail/MIME/blob/contact/calendar/task data | Canonical export API reconstructing messages from blobs and metadata | Unsupported; no EWS streaming export | P2 |
+| `UploadItems` | Partial | `mailbox_item_transfer_jobs`, `mailbox_item_transfer_entries` | Canonical bulk import job API with later Magika/blob validation and mailbox membership writes | Records bounded EWS import jobs and entries; no full Exchange streaming item import or MIME conversion | P2 |
+| `ExportItems` | Partial | `mailbox_item_transfer_jobs`, `mailbox_item_transfer_entries`, canonical item ids | Canonical export job API reconstructing messages from blobs and metadata | Records bounded EWS export jobs and entries; no full Exchange streaming item export payload | P2 |
 
 ## Delegate Management Operations
 
@@ -201,10 +201,10 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `CreateItem` with `AcceptSharingInvitation` | Missing | Contact/calendar grants plus invitation token/share metadata | Canonical sharing invitation acceptance API | Generic `CreateItem` exists, but sharing invitations are not handled as Exchange sharing objects | P2 |
-| `GetSharingFolder` | Explicitly unsupported | Sharing invitation/folder binding metadata plus grants | Canonical shared folder binding API | Explicit unsupported response | P2 |
-| `GetSharingMetadata` | Explicitly unsupported | Sharing metadata/token state | Canonical sharing metadata API | Explicit unsupported response | P2 |
-| `RefreshSharingFolder` | Missing | Shared folder binding metadata and remote sync state if federated sharing is supported | Canonical sharing refresh API | Unsupported | P3 |
+| `CreateItem` with `AcceptSharingInvitation` | Partial | `contact_book_grants`, `calendar_grants`, same-tenant account directory | Canonical sharing invitation acceptance API | Creates/updates same-tenant contact/calendar grants only; no Exchange invitation token, federation, mailbox-folder, or external sharing state | P2 |
+| `GetSharingFolder` | Partial | Contact/calendar collections and grants plus same-tenant account directory | Canonical shared folder binding API | Returns only accessible same-tenant contact/calendar folders; ungranted, cross-tenant, mailbox, and federated shares return parseable EWS errors | P2 |
+| `GetSharingMetadata` | Partial | Owned contact/calendar collections | Canonical sharing metadata projection | Emits bounded metadata for owned contact/calendar collections only; no Exchange tokens, mailbox sharing metadata, or federation discovery | P2 |
+| `RefreshSharingFolder` | Partial | Accessible contact/calendar collections and grants | Canonical shared folder visibility check | Verifies the shared contact/calendar folder is still accessible; no remote/federated refresh state | P3 |
 
 ## Synchronization Operations
 
@@ -259,13 +259,13 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 | --- | --- |
 | P0 | `CreateItem`, `DeleteItem`, `FindItem`, `GetItem`, `SendItem`, `UpdateItem`, `CreateFolder`, `DeleteFolder`, `FindFolder`, `GetFolder`, `CreateAttachment`, `GetAttachment`, `DeleteAttachment`, `ResolveNames`, `GetUserAvailability`, `GetInboxRules`, `UpdateInboxRules`, `GetEvents`, `Subscribe`, `Unsubscribe`, `SyncFolderHierarchy`, `SyncFolderItems`, `GetServerTimeZones` |
 | P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
-| P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `UploadItems`, `ExportItems`, `FindPeople`, `GetPersona`, `CreateItem` with `AcceptSharingInvitation`, `GetSharingFolder`, `GetSharingMetadata` |
-| P3 | `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport`, `RefreshSharingFolder` |
-| P4 | eDiscovery operations, `CreateManagedFolder`, `GetAppMarketplaceUrl`, Unified Messaging operations, Unified Contact Store operations |
+| P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `FindPeople`, `GetPersona` |
+| P3 | `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport` |
+| P4 | `CreateManagedFolder`, `GetAppMarketplaceUrl`, Unified Messaging operations, Unified Contact Store operations |
 
 ## Main Parity Gaps For Outlook And Native Clients
 
 1. The highest-value remaining P0/P1 gaps are conversation listing/expansion and any real-client mail-tip fields beyond invalid-recipient and OOF that prove necessary in Outlook testing.
 2. `SendItem`, inbox rules, reminders, room/resource discovery, bounded streaming notifications, and user configuration are now wired, but remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, or user-configuration semantics.
 3. EWS sync and notifications remain partial because current sync-state and subscription behavior is not a full Exchange-equivalent cursor, affinity, or push/streaming model.
-4. Most P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as Exchange eDiscovery, mail apps, Unified Messaging, and Unified Contact Store IM groups.
+4. Most P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as mail apps, Unified Messaging, and Unified Contact Store IM groups.

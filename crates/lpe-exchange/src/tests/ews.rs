@@ -4856,6 +4856,322 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
 }
 
 #[tokio::test]
+async fn ediscovery_configuration_and_searchable_mailboxes_project_canonical_compliance_state() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let foreign = AuthenticatedAccount {
+        tenant_id: Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb),
+        account_id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+        email: "mallory@example.test".to_string(),
+        display_name: "Mallory".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob, foreign])),
+        ews_discovery_search_configs: Arc::new(Mutex::new(vec![EwsDiscoverySearchConfig {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            display_name: "Case Alpha".to_string(),
+            query_text: "subject:alpha".to_string(),
+            updated_at: "2026-06-02T00:00:00Z".to_string(),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+              <s:Body><m:GetDiscoverySearchConfiguration /></s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetDiscoverySearchConfigurationResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:SearchName>Case Alpha</t:SearchName>"));
+    assert!(body.contains("<t:SearchQuery>subject:alpha</t:SearchQuery>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+              <s:Body><m:GetSearchableMailboxes /></s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetSearchableMailboxesResponse>"));
+    assert!(body.contains("<t:PrimarySmtpAddress>alice@example.test</t:PrimarySmtpAddress>"));
+    assert!(body.contains("<t:PrimarySmtpAddress>bob@example.test</t:PrimarySmtpAddress>"));
+    assert!(!body.contains("mallory@example.test"));
+}
+
+#[tokio::test]
+async fn search_mailboxes_records_canonical_discovery_search_results_without_bcc() {
+    let mut email = FakeStore::email(
+        "11111111-1111-1111-1111-111111111111",
+        "44444444-4444-4444-4444-444444444444",
+        "inbox",
+        "Alpha investigation",
+    );
+    email.preview = "Alpha body preview".to_string();
+    email.body_text = "Alpha body with searchable terms".to_string();
+    email.bcc.push(JmapEmailAddress {
+        display_name: Some("Hidden".to_string()),
+        address: "hidden@example.test".to_string(),
+    });
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: Arc::new(Mutex::new(vec![email])),
+        ews_discovery_search_results: results.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:SearchMailboxes>
+                  <m:SearchQueries>
+                    <t:MailboxQuery>
+                      <t:Query>Alpha</t:Query>
+                      <t:MailboxSearchScopes>
+                        <t:MailboxSearchScope><t:Mailbox>alice@example.test</t:Mailbox></t:MailboxSearchScope>
+                      </t:MailboxSearchScopes>
+                    </t:MailboxQuery>
+                  </m:SearchQueries>
+                </m:SearchMailboxes>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SearchMailboxesResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<m:ResultCount>1</m:ResultCount>"));
+    assert!(body.contains("<t:Subject>Alpha investigation</t:Subject>"));
+    assert!(!body.contains("hidden@example.test"));
+    let results = results.lock().unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].result_count, 1);
+}
+
+#[tokio::test]
+async fn hold_operations_use_canonical_compliance_hold_state() {
+    let alice = FakeStore::account();
+    let bob = AuthenticatedAccount {
+        tenant_id: alice.tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let holds = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(alice),
+        directory_accounts: Arc::new(Mutex::new(vec![bob])),
+        ews_holds: holds.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:SetHoldOnMailboxes>
+                  <m:Action>CreateHold</m:Action>
+                  <m:HoldId>case-alpha</m:HoldId>
+                  <m:Query>Alpha</m:Query>
+                  <m:Mailboxes><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></m:Mailboxes>
+                </m:SetHoldOnMailboxes>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SetHoldOnMailboxesResponse>"));
+    assert!(body.contains("<m:Action>CreateHold</m:Action>"));
+    assert!(body.contains("<t:Mailbox>bob@example.test</t:Mailbox>"));
+    assert!(body.contains("<t:IsOnHold>true</t:IsOnHold>"));
+    assert_eq!(holds.lock().unwrap().len(), 1);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetHoldOnMailboxes>
+                  <m:Mailboxes><t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox></m:Mailboxes>
+                </m:GetHoldOnMailboxes>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetHoldOnMailboxesResponse>"));
+    assert!(body.contains("<t:HoldName>case-alpha</t:HoldName>"));
+    assert!(body.contains("<t:Query>Alpha</t:Query>"));
+}
+
+#[tokio::test]
+async fn non_indexable_reports_project_canonical_search_diagnostics() {
+    let alice = FakeStore::account();
+    let foreign_account_id = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
+    let store = FakeStore {
+        session: Some(alice.clone()),
+        ews_non_indexable_reports: Arc::new(Mutex::new(vec![
+            EwsNonIndexableReport {
+                id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+                account_id: alice.account_id,
+                email: alice.email,
+                report_kind: "attachment".to_string(),
+                reason: "unsupported attachment type".to_string(),
+                message_id: Some(Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()),
+                attachment_id: Some(
+                    Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+                ),
+                detected_at: "2026-06-02T00:00:00Z".to_string(),
+                resolved: false,
+            },
+            EwsNonIndexableReport {
+                id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+                account_id: foreign_account_id,
+                email: "mallory@example.test".to_string(),
+                report_kind: "message".to_string(),
+                reason: "foreign".to_string(),
+                message_id: Some(Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap()),
+                attachment_id: None,
+                detected_at: "2026-06-02T00:00:00Z".to_string(),
+                resolved: false,
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetNonIndexableItemDetails /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetNonIndexableItemDetailsResponse>"));
+    assert!(body.contains("unsupported attachment type"));
+    assert!(!body.contains("mallory@example.test"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetNonIndexableItemStatistics /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetNonIndexableItemStatisticsResponse>"));
+    assert!(body.contains("<t:Mailbox>alice@example.test</t:Mailbox>"));
+    assert!(body.contains("<t:ItemCount>1</t:ItemCount>"));
+}
+
+#[tokio::test]
+async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
+    let jobs = Arc::new(Mutex::new(Vec::new()));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ews_transfer_jobs: jobs.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let message_id = "11111111-1111-1111-1111-111111111111";
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"
+                <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+                  <s:Body><m:ExportItems><m:ItemIds><t:ItemId Id="message:{message_id}"/></m:ItemIds></m:ExportItems></s:Body>
+                </s:Envelope>
+                "#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ExportItemsResponse>"));
+    assert!(body.contains("<m:Direction>export</m:Direction>"));
+    assert!(body.contains("<m:TotalItems>1</m:TotalItems>"));
+    assert!(body.contains(message_id));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:UploadItems>
+                  <m:Items><t:Item><t:Subject>Imported fixture</t:Subject></t:Item></m:Items>
+                </m:UploadItems>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UploadItemsResponse>"));
+    assert!(body.contains("<m:Direction>import</m:Direction>"));
+    assert!(body.contains("<m:TotalItems>1</m:TotalItems>"));
+    assert!(body.contains("Imported fixture"));
+
+    let jobs = jobs.lock().unwrap();
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs[0].direction, "export");
+    assert_eq!(jobs[1].direction, "import");
+}
+
+#[tokio::test]
 async fn find_conversation_groups_messages_by_canonical_thread_in_folder() {
     let inbox_id = "44444444-4444-4444-4444-444444444444";
     let archive_id = "55555555-5555-5555-5555-555555555555";
@@ -7568,8 +7884,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "ExportItems",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "bulk_transfer_operations_record_canonical_transfer_jobs",
     },
     EwsCatalogCoverage {
         operation: "FindConversation",
@@ -7628,8 +7944,9 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetDiscoverySearchConfiguration",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name:
+            "ediscovery_configuration_and_searchable_mailboxes_project_canonical_compliance_state",
     },
     EwsCatalogCoverage {
         operation: "GetEvents",
@@ -7643,8 +7960,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetHoldOnMailboxes",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "hold_operations_use_canonical_compliance_hold_state",
     },
     EwsCatalogCoverage {
         operation: "GetImItemList",
@@ -7678,13 +7995,13 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetNonIndexableItemDetails",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "non_indexable_reports_project_canonical_search_diagnostics",
     },
     EwsCatalogCoverage {
         operation: "GetNonIndexableItemStatistics",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "non_indexable_reports_project_canonical_search_diagnostics",
     },
     EwsCatalogCoverage {
         operation: "GetPasswordExpirationDate",
@@ -7718,8 +8035,9 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetSearchableMailboxes",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name:
+            "ediscovery_configuration_and_searchable_mailboxes_project_canonical_compliance_state",
     },
     EwsCatalogCoverage {
         operation: "GetServerTimeZones",
@@ -7843,8 +8161,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "SearchMailboxes",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "search_mailboxes_records_canonical_discovery_search_results_without_bcc",
     },
     EwsCatalogCoverage {
         operation: "SendItem",
@@ -7853,8 +8171,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "SetHoldOnMailboxes",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "hold_operations_use_canonical_compliance_hold_state",
     },
     EwsCatalogCoverage {
         operation: "SetImGroup",
@@ -7918,8 +8236,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "UploadItems",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "bulk_transfer_operations_record_canonical_transfer_jobs",
     },
 ];
 
