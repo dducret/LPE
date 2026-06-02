@@ -9,7 +9,13 @@ This matrix expands `docs/audits/ews-audit-2026-05-30.md` into one row for every
 
 Microsoft's operation catalog page was last updated on 2023-03-29 and was reviewed again for this matrix on 2026-06-02. The current `LPE` dispatcher surface was checked against `crates/lpe-exchange/src/service.rs` on the same date. This is a documentation parity matrix only. It does not add, remove, or change runtime behavior.
 
-`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` consumes this matrix as the local EWS operation catalog for automated compatibility gating. Every operation name listed in the matrix must have exactly one gate entry: either a named SOAP behavior test for implemented/partial operations or an explicit unsupported SOAP assertion for unsupported gaps.
+`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` owns a local snapshot of Microsoft's operation catalog from that page and checks this matrix against it. Every documented operation name must have exactly one gate entry: either a named SOAP behavior test for implemented/partial operations or an explicit unsupported SOAP assertion with a tracked reason for unsupported gaps.
+
+Current automated gate coverage:
+
+- Accounted catalog coverage: 96/96 documented operation names, 100.0%.
+- Behavioral EWS SOAP coverage: 78/96 operation names, 81.2%.
+- Explicit unsupported EWS SOAP coverage with tracked reasons: 18/96 operation names, 18.8%.
 
 ## Status And Priority Legend
 
@@ -265,7 +271,7 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 ## Main Parity Gaps For Outlook And Native Clients
 
-1. The highest-value remaining P0/P1 gaps are conversation listing/expansion and any real-client mail-tip fields beyond invalid-recipient and OOF that prove necessary in Outlook testing.
-2. `SendItem`, inbox rules, reminders, room/resource discovery, bounded streaming notifications, and user configuration are now wired, but remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, or user-configuration semantics.
-3. EWS sync and notifications remain partial because current sync-state and subscription behavior is not a full Exchange-equivalent cursor, affinity, or push/streaming model.
-4. Most remaining P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as message tracking reports and Unified Contact Store IM groups.
+1. The remaining operation-name blockers to 100% behavioral coverage are the 18 explicit unsupported operations listed as `Missing` or `Explicitly unsupported`: `AddDistributionGroupToImList`, `AddImContactToGroup`, `AddImGroup`, `AddNewImContactToGroup`, `AddNewTelUriContactToGroup`, `ArchiveItem`, `CreateManagedFolder`, `FindMessageTrackingReport`, `FindPeople`, `GetImItemList`, `GetImItems`, `GetMessageTrackingReport`, `GetPersona`, `RemoveContactFromImList`, `RemoveDistributionGroupFromImList`, `RemoveImContactFromGroup`, `RemoveImGroup`, and `SetImGroup`.
+2. The highest-value unsupported blockers are `ArchiveItem`, persona operations, and message tracking reports. UCS/IM operations and deprecated managed folders remain lower priority unless LPE explicitly adds those Exchange feature families.
+3. Many implemented operations remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, mail app, UM, user-configuration, sync, or identity semantics.
+4. Full Exchange parity still requires replacing bounded compatibility behavior with first-class canonical models where justified: archive mailbox semantics, linked persona aggregation, LPE/LPE-CT tracking reports, UCS IM groups, durable Exchange-equivalent sync/notification semantics, Exchange identity compatibility, and any Outlook-proven mail-tip or policy-tip fields beyond the bounded current surface.

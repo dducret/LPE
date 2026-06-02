@@ -7970,6 +7970,185 @@ struct EwsCatalogCoverage {
     test_name: &'static str,
 }
 
+const MICROSOFT_EWS_OPERATION_CATALOG_SOURCE: &str =
+    "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/ews-operations-in-exchange";
+
+const MICROSOFT_EWS_OPERATION_CATALOG_LAST_UPDATED: &str = "2023-03-29";
+
+const MICROSOFT_EWS_OPERATION_CATALOG: &[&str] = &[
+    "AddDelegate",
+    "AddDistributionGroupToImList",
+    "AddImContactToGroup",
+    "AddImGroup",
+    "AddNewImContactToGroup",
+    "AddNewTelUriContactToGroup",
+    "ApplyConversationAction",
+    "ArchiveItem",
+    "ConvertId",
+    "CopyFolder",
+    "CopyItem",
+    "CreateAttachment",
+    "CreateFolder",
+    "CreateFolderPath",
+    "CreateItem",
+    "CreateManagedFolder",
+    "CreateUserConfiguration",
+    "DeleteAttachment",
+    "DeleteFolder",
+    "DeleteItem",
+    "DeleteUserConfiguration",
+    "DisableApp",
+    "DisconnectPhoneCall",
+    "EmptyFolder",
+    "ExpandDL",
+    "ExportItems",
+    "FindConversation",
+    "FindFolder",
+    "FindItem",
+    "FindMessageTrackingReport",
+    "FindPeople",
+    "GetAppManifests",
+    "GetAppMarketplaceUrl",
+    "GetAttachment",
+    "GetClientAccessToken",
+    "GetConversationItems",
+    "GetDelegate",
+    "GetDiscoverySearchConfiguration",
+    "GetEvents",
+    "GetFolder",
+    "GetHoldOnMailboxes",
+    "GetImItemList",
+    "GetImItems",
+    "GetInboxRules",
+    "GetItem",
+    "GetMailTips",
+    "GetMessageTrackingReport",
+    "GetNonIndexableItemDetails",
+    "GetNonIndexableItemStatistics",
+    "GetPasswordExpirationDate",
+    "GetPersona",
+    "GetPhoneCallInformation",
+    "GetReminders",
+    "GetRoomLists",
+    "GetRooms",
+    "GetSearchableMailboxes",
+    "GetServerTimeZones",
+    "GetServiceConfiguration",
+    "GetSharingFolder",
+    "GetSharingMetadata",
+    "GetStreamingEvents",
+    "GetUserAvailability",
+    "GetUserConfiguration",
+    "GetUserOofSettings",
+    "GetUserPhoto",
+    "GetUserRetentionPolicyTags",
+    "InstallApp",
+    "MarkAllItemsAsRead",
+    "MarkAsJunk",
+    "MoveFolder",
+    "MoveItem",
+    "PerformReminderAction",
+    "PlayOnPhone",
+    "RefreshSharingFolder",
+    "RemoveContactFromImList",
+    "RemoveDelegate",
+    "RemoveDistributionGroupFromImList",
+    "RemoveImContactFromGroup",
+    "RemoveImGroup",
+    "ResolveNames",
+    "SearchMailboxes",
+    "SendItem",
+    "SetHoldOnMailboxes",
+    "SetImGroup",
+    "SetUserOofSettings",
+    "Subscribe",
+    "SyncFolderHierarchy",
+    "SyncFolderItems",
+    "UninstallApp",
+    "Unsubscribe",
+    "UpdateDelegate",
+    "UpdateFolder",
+    "UpdateInboxRules",
+    "UpdateItem",
+    "UpdateUserConfiguration",
+    "UploadItems",
+];
+
+const EWS_UNSUPPORTED_REASONS: &[(&str, &str)] = &[
+    (
+        "AddDistributionGroupToImList",
+        "Unified Contact Store distribution-list membership has no canonical LPE model.",
+    ),
+    (
+        "AddImContactToGroup",
+        "Unified Contact Store IM contact membership has no canonical LPE model.",
+    ),
+    (
+        "AddImGroup",
+        "Unified Contact Store IM groups have no canonical LPE model.",
+    ),
+    (
+        "AddNewImContactToGroup",
+        "Unified Contact Store IM contact creation has no canonical LPE model.",
+    ),
+    (
+        "AddNewTelUriContactToGroup",
+        "Unified Contact Store tel URI contacts have no canonical LPE model.",
+    ),
+    (
+        "ArchiveItem",
+        "Exchange archive-mailbox semantics are not represented by canonical mailbox state.",
+    ),
+    (
+        "CreateManagedFolder",
+        "Deprecated Exchange managed-folder behavior is superseded by canonical retention tags.",
+    ),
+    (
+        "FindMessageTrackingReport",
+        "Exchange tracking reports require a canonical LPE/LPE-CT trace API before EWS exposure.",
+    ),
+    (
+        "FindPeople",
+        "Persona aggregation is out of scope until canonical linked-person state exists.",
+    ),
+    (
+        "GetImItemList",
+        "Unified Contact Store IM list state has no canonical LPE model.",
+    ),
+    (
+        "GetImItems",
+        "Unified Contact Store IM items have no canonical LPE model.",
+    ),
+    (
+        "GetMessageTrackingReport",
+        "Exchange tracking report details require a canonical LPE/LPE-CT trace API before EWS exposure.",
+    ),
+    (
+        "GetPersona",
+        "Persona fetch is out of scope until canonical linked-person state exists.",
+    ),
+    (
+        "RemoveContactFromImList",
+        "Unified Contact Store IM list membership has no canonical LPE model.",
+    ),
+    (
+        "RemoveDistributionGroupFromImList",
+        "Unified Contact Store distribution-list membership has no canonical LPE model.",
+    ),
+    (
+        "RemoveImContactFromGroup",
+        "Unified Contact Store IM group membership has no canonical LPE model.",
+    ),
+    (
+        "RemoveImGroup",
+        "Unified Contact Store IM groups have no canonical LPE model.",
+    ),
+    (
+        "SetImGroup",
+        "Unified Contact Store IM groups have no canonical LPE model.",
+    ),
+];
+
 const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     EwsCatalogCoverage {
         operation: "AddDelegate",
@@ -8458,6 +8637,18 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
 #[tokio::test]
 async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
     let documented = documented_ews_operation_names();
+    assert_eq!(
+        MICROSOFT_EWS_OPERATION_CATALOG_SOURCE,
+        "https://learn.microsoft.com/en-us/exchange/client-developer/web-service-reference/ews-operations-in-exchange"
+    );
+    assert_eq!(MICROSOFT_EWS_OPERATION_CATALOG_LAST_UPDATED, "2023-03-29");
+
+    let parity_matrix = parity_matrix_ews_operation_names();
+    assert_eq!(
+        documented, parity_matrix,
+        "docs/audits/ews-parity-matrix-2026-05-30.md must list exactly the Microsoft EWS operation catalog snapshot"
+    );
+
     let mut covered = std::collections::BTreeSet::new();
     let mut duplicate_coverage = Vec::new();
     for entry in EWS_CATALOG_COVERAGE {
@@ -8471,7 +8662,20 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
     );
     assert_eq!(
         documented, covered,
-        "EWS operation catalog coverage manifest must match docs/audits/ews-parity-matrix-2026-05-30.md"
+        "EWS operation catalog coverage manifest must match the Microsoft EWS operation catalog snapshot"
+    );
+
+    let unsupported_reasons = unsupported_reason_map();
+    let mut duplicate_unsupported_reasons = Vec::new();
+    let mut seen_unsupported_reasons = std::collections::BTreeSet::new();
+    for (operation, _) in EWS_UNSUPPORTED_REASONS {
+        if !seen_unsupported_reasons.insert(*operation) {
+            duplicate_unsupported_reasons.push(*operation);
+        }
+    }
+    assert!(
+        duplicate_unsupported_reasons.is_empty(),
+        "duplicate EWS unsupported reasons: {duplicate_unsupported_reasons:?}"
     );
 
     let ews_tests_source = include_str!("ews.rs");
@@ -8493,6 +8697,30 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
         .filter(|entry| entry.kind == EwsCatalogCoverageKind::Unsupported)
         .copied()
         .collect();
+    let mut missing_unsupported_reasons = Vec::new();
+    for entry in &unsupported {
+        match unsupported_reasons.get(entry.operation) {
+            Some(reason) if !reason.trim().is_empty() => {}
+            _ => missing_unsupported_reasons.push(entry.operation),
+        }
+    }
+    assert!(
+        missing_unsupported_reasons.is_empty(),
+        "unsupported EWS operations must have a tracked reason: {missing_unsupported_reasons:?}"
+    );
+    let unsupported_operations = unsupported
+        .iter()
+        .map(|entry| entry.operation)
+        .collect::<std::collections::BTreeSet<_>>();
+    let extra_unsupported_reasons = unsupported_reasons
+        .keys()
+        .copied()
+        .filter(|operation| !unsupported_operations.contains(operation))
+        .collect::<Vec<_>>();
+    assert!(
+        extra_unsupported_reasons.is_empty(),
+        "unsupported reason table contains non-unsupported operations: {extra_unsupported_reasons:?}"
+    );
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -8505,33 +8733,37 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
             .handle(&bearer_headers(), request.as_bytes())
             .await
             .unwrap();
+        let reason = unsupported_reasons
+            .get(entry.operation)
+            .copied()
+            .unwrap_or("missing unsupported reason");
         assert_eq!(response.status(), StatusCode::OK, "{}", entry.operation);
         let body = response_text(response).await;
         assert!(
             body.contains(&format!("<m:{}Response>", entry.operation)),
-            "{} did not return an operation-shaped response: {body}",
-            entry.operation
+            "{} did not return an operation-shaped response for tracked gap `{reason}`: {body}",
+            entry.operation,
         );
         assert!(
             body.contains("ResponseClass=\"Error\""),
-            "{} did not return an explicit error response: {body}",
-            entry.operation
+            "{} did not return an explicit error response for tracked gap `{reason}`: {body}",
+            entry.operation,
         );
         assert!(
             body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"),
-            "{} did not return the unsupported EWS response code: {body}",
-            entry.operation
+            "{} did not return the unsupported EWS response code for tracked gap `{reason}`: {body}",
+            entry.operation,
         );
         assert!(
             body.contains("is not implemented by the EWS MVP"),
-            "{} did not document unsupported behavior in the SOAP payload: {body}",
-            entry.operation
+            "{} did not document unsupported behavior in the SOAP payload for tracked gap `{reason}`: {body}",
+            entry.operation,
         );
     }
 
     let behavioral_count = EWS_CATALOG_COVERAGE.len() - unsupported.len();
     println!(
-        "EWS catalog gate coverage: operation-name coverage {}/{} ({:.1}%); behavioral coverage {}/{} ({:.1}%); explicit unsupported coverage {}/{} ({:.1}%)",
+        "EWS catalog gate coverage: accounted coverage {}/{} ({:.1}%); behavioral coverage {}/{} ({:.1}%); explicit unsupported coverage {}/{} ({:.1}%)",
         EWS_CATALOG_COVERAGE.len(),
         documented.len(),
         percentage(EWS_CATALOG_COVERAGE.len(), documented.len()),
@@ -8545,6 +8777,14 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
 }
 
 fn documented_ews_operation_names() -> std::collections::BTreeSet<&'static str> {
+    MICROSOFT_EWS_OPERATION_CATALOG.iter().copied().collect()
+}
+
+fn unsupported_reason_map() -> std::collections::BTreeMap<&'static str, &'static str> {
+    EWS_UNSUPPORTED_REASONS.iter().copied().collect()
+}
+
+fn parity_matrix_ews_operation_names() -> std::collections::BTreeSet<&'static str> {
     include_str!("../../../../docs/audits/ews-parity-matrix-2026-05-30.md")
         .lines()
         .filter_map(|line| {

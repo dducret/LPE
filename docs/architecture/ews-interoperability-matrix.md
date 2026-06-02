@@ -133,11 +133,9 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 
 ## Current Partial Dispatcher Surface
 
-The current EWS dispatcher in `crates/lpe-exchange/src/service.rs` routes these operations to concrete handlers:
+The current EWS dispatcher in `crates/lpe-exchange/src/service.rs` routes 78 Microsoft catalog operation names to concrete bounded handlers. Those handlers cover mailbox item/folder/attachment paths, reminders, conversations, utilities, availability, bulk transfer, delegates, inbox rules, mail apps, mail tips, notifications, retention policy tags, service configuration, sharing, synchronization, time zones, Unified Messaging, and user configuration.
 
-`SyncFolderHierarchy`, `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, `SyncFolderItems`, `GetServerTimeZones`, `ResolveNames`, `GetUserAvailability`, `CreateItem`, `SendItem`, `UpdateItem`, `DeleteItem`, `MoveItem`, `CopyItem`, `MarkAllItemsAsRead`, `CreateFolder`, `CreateFolderPath`, `CopyFolder`, `EmptyFolder`, `MoveFolder`, `UpdateFolder`, `DeleteFolder`, `GetAttachment`, `CreateAttachment`, `DeleteAttachment`, `GetUserOofSettings`, `SetUserOofSettings`, `GetInboxRules`, `UpdateInboxRules`, `GetReminders`, `PerformReminderAction`, `ConvertId`, `GetMailTips`, `GetRooms`, `GetRoomLists`, `Subscribe`, `GetEvents`, `GetStreamingEvents`, `Unsubscribe`, `AddDelegate`, `GetDelegate`, `UpdateDelegate`, `RemoveDelegate`, `CreateUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration`, and `DeleteUserConfiguration`.
-
-These are all `partial` against Microsoft parity because LPE intentionally maps only bounded Exchange-compatible behavior to canonical state.
+These are all `partial` against Microsoft parity because LPE intentionally maps only bounded Exchange-compatible behavior to canonical state. The automated gate records 96/96 accounted Microsoft catalog operations, 78/96 behavioral SOAP-covered operations (81.2%), and 18/96 explicit unsupported SOAP-covered operations (18.8%) with tracked reasons.
 
 ## ConvertId Opaque-Id Strategy
 
@@ -147,11 +145,11 @@ Supported canonical families are `message:{uuid}`, `mailbox:{uuid}`, `contact:{u
 
 ## Explicit Unsupported Dispatcher Surface
 
-The dispatcher explicitly returns EWS-shaped unsupported responses for:
+The dispatcher has a dedicated explicit unsupported branch for:
 
-`FindPeople`, `ExpandDL`, `GetSharingMetadata`, and `GetSharingFolder`.
+`FindPeople`.
 
-All other Microsoft catalog operations currently fall through to the generic unsupported response and are marked `missing` in the matrix.
+The automated parity gate also sends SOAP requests for every remaining unsupported Microsoft catalog operation and verifies that they return parseable EWS unsupported responses. Each unsupported operation has a tracked reason in `crates/lpe-exchange/src/tests/ews.rs`.
 
 ## Highest-Value EWS Parity Work
 
@@ -166,6 +164,6 @@ Priority should favor practical Outlook and native-client behavior before broad 
 
 ## Verification
 
-The current EWS tests include coverage proving folder operations, `SendItem`, delegation, user configuration, inbox rules, reminders, rooms, `MarkAllItemsAsRead`, `GetMailTips`, `ConvertId`, and notification replay route through canonical store APIs or stateless compatibility codecs rather than Exchange-only folder, `Sent`, `Outbox`, delegate, user-config, rule, reminder, room-list, mail-tip, read-state, id, or notification state.
+The current EWS tests include coverage proving folder operations, `SendItem`, delegation, user configuration, inbox rules, reminders, rooms, sharing, eDiscovery, bulk transfer, mail apps, Unified Messaging, `MarkAllItemsAsRead`, conversations, `GetMailTips`, `GetServiceConfiguration`, retention tags, utilities, `ConvertId`, and notification replay route through canonical store APIs or stateless compatibility codecs rather than Exchange-only folder, `Sent`, `Outbox`, delegate, user-config, rule, reminder, room-list, mail-tip, read-state, id, or notification state.
 
-`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` also gates the full documented EWS operation catalog from `docs/audits/ews-parity-matrix-2026-05-30.md`: every documented operation name must have either a named SOAP behavior test or an explicit unsupported SOAP assertion.
+`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` gates the full documented EWS operation catalog from a local Microsoft catalog snapshot and verifies that `docs/audits/ews-parity-matrix-2026-05-30.md` still matches it. Every documented operation name must have either a named SOAP behavior test or an explicit unsupported SOAP assertion with a tracked reason.
