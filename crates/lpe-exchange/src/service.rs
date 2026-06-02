@@ -2969,62 +2969,73 @@ where
         request: &str,
     ) -> Result<String> {
         let result = async {
-            let mut changed = false;
+            let mut mutations = Vec::new();
             for operation in element_contents(request, "DeleteRuleOperation") {
                 let rule_id = element_text(operation, "RuleId")
                     .filter(|value| !value.trim().is_empty())
                     .ok_or_else(|| anyhow!("DeleteRuleOperation requires RuleId."))?;
-                self.store
-                    .delete_sieve_script(
-                        principal.account_id,
-                        &rule_id,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-update-inbox-rules-delete".to_string(),
-                            subject: rule_id.clone(),
-                        },
-                    )
-                    .await?;
-                changed = true;
+                mutations.push(EwsInboxRuleMutation::Delete { rule_id });
             }
             for operation in element_contents(request, "CreateRuleOperation") {
                 let rule = element_content(operation, "Rule").unwrap_or(operation);
                 let (name, active, sieve) = bounded_ews_rule_to_sieve(rule)?;
-                self.store
-                    .put_sieve_script(
-                        principal.account_id,
-                        &name,
-                        &sieve,
-                        active,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-update-inbox-rules-create".to_string(),
-                            subject: name.clone(),
-                        },
-                    )
-                    .await?;
-                changed = true;
+                mutations.push(EwsInboxRuleMutation::Put {
+                    name,
+                    active,
+                    sieve,
+                    audit_action: "ews-update-inbox-rules-create",
+                });
             }
             for operation in element_contents(request, "SetRuleOperation") {
                 let rule = element_content(operation, "Rule").unwrap_or(operation);
                 let (name, active, sieve) = bounded_ews_rule_to_sieve(rule)?;
-                self.store
-                    .put_sieve_script(
-                        principal.account_id,
-                        &name,
-                        &sieve,
-                        active,
-                        AuditEntryInput {
-                            actor: principal.email.clone(),
-                            action: "ews-update-inbox-rules-set".to_string(),
-                            subject: name.clone(),
-                        },
-                    )
-                    .await?;
-                changed = true;
+                mutations.push(EwsInboxRuleMutation::Put {
+                    name,
+                    active,
+                    sieve,
+                    audit_action: "ews-update-inbox-rules-set",
+                });
             }
-            if !changed && !request.contains("RemoveOutlookRuleBlob") {
+            if mutations.is_empty() && !request.contains("RemoveOutlookRuleBlob") {
                 bail!("UpdateInboxRules supports bounded create, set, and delete rule operations.");
+            }
+
+            for mutation in mutations {
+                match mutation {
+                    EwsInboxRuleMutation::Delete { rule_id } => {
+                        self.store
+                            .delete_sieve_script(
+                                principal.account_id,
+                                &rule_id,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-update-inbox-rules-delete".to_string(),
+                                    subject: rule_id.clone(),
+                                },
+                            )
+                            .await?;
+                    }
+                    EwsInboxRuleMutation::Put {
+                        name,
+                        active,
+                        sieve,
+                        audit_action,
+                    } => {
+                        self.store
+                            .put_sieve_script(
+                                principal.account_id,
+                                &name,
+                                &sieve,
+                                active,
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: audit_action.to_string(),
+                                    subject: name.clone(),
+                                },
+                            )
+                            .await?;
+                    }
+                }
             }
             Ok(simple_operation_success_response("UpdateInboxRules"))
         }
@@ -3060,9 +3071,27 @@ where
                 .or_else(|| element_text(request, "ReminderItemActionType"))
                 .or_else(|| element_text(request, "ReminderAction"))
                 .unwrap_or_default();
-            if !action.is_empty() && !action.eq_ignore_ascii_case("Dismiss") {
-                bail!("PerformReminderAction currently supports only Dismiss.");
+            let action = if action.is_empty() {
+                "Dismiss".to_string()
+            } else {
+                action
+            };
+            if !action.eq_ignore_ascii_case("Dismiss") && !action.eq_ignore_ascii_case("Snooze") {
+                bail!("PerformReminderAction currently supports only Dismiss and Snooze.");
             }
+            let snooze_until = if action.eq_ignore_ascii_case("Snooze") {
+                Some(
+                    element_text(request, "NewReminderTime")
+                        .or_else(|| element_text(request, "SnoozeUntil"))
+                        .or_else(|| element_text(request, "ReminderTime"))
+                        .filter(|value| !value.trim().is_empty())
+                        .ok_or_else(|| {
+                            anyhow!("PerformReminderAction Snooze requires a new reminder time.")
+                        })?,
+                )
+            } else {
+                None
+            };
             let reminder_ids = requested_item_ids(request);
             if reminder_ids.is_empty() {
                 bail!("PerformReminderAction requires reminder ItemId values.");
@@ -3077,7 +3106,13 @@ where
                                 principal.account_id,
                                 parsed.source_id,
                                 JmapEmailFollowupUpdate {
-                                    reminder_dismissed_at: Some("now".to_string()),
+                                    reminder_dismissed_at: if snooze_until.is_none() {
+                                        Some("now".to_string())
+                                    } else {
+                                        None
+                                    },
+                                    reminder_at: snooze_until.clone(),
+                                    reminder_set: snooze_until.as_ref().map(|_| true),
                                     ..JmapEmailFollowupUpdate::default()
                                 },
                                 AuditEntryInput {
@@ -3088,16 +3123,52 @@ where
                             )
                             .await?;
                     }
-                    "calendar" | "task" => {
-                        self.store
-                            .dismiss_reminder_occurrence(
-                                principal.account_id,
-                                &parsed.source_type,
-                                parsed.source_id,
-                                parsed.occurrence_start_at.as_deref(),
-                                "now",
-                            )
-                            .await?;
+                    "calendar" => {
+                        if let Some(reminder_at) = snooze_until.clone() {
+                            self.store
+                                .update_accessible_event_reminder(
+                                    principal.account_id,
+                                    parsed.source_id,
+                                    Some(true),
+                                    Some(reminder_at),
+                                    None,
+                                )
+                                .await?;
+                        } else {
+                            self.store
+                                .dismiss_reminder_occurrence(
+                                    principal.account_id,
+                                    &parsed.source_type,
+                                    parsed.source_id,
+                                    parsed.occurrence_start_at.as_deref(),
+                                    "now",
+                                )
+                                .await?;
+                        }
+                    }
+                    "task" => {
+                        if let Some(reminder_at) = snooze_until.clone() {
+                            self.store
+                                .update_accessible_task_reminder(
+                                    principal.account_id,
+                                    parsed.source_id,
+                                    Some(true),
+                                    Some(reminder_at),
+                                    None,
+                                    Some(true),
+                                )
+                                .await?;
+                        } else {
+                            self.store
+                                .dismiss_reminder_occurrence(
+                                    principal.account_id,
+                                    &parsed.source_type,
+                                    parsed.source_id,
+                                    parsed.occurrence_start_at.as_deref(),
+                                    "now",
+                                )
+                                .await?;
+                        }
                     }
                     _ => bail!("unsupported reminder source `{}`", parsed.source_type),
                 }
@@ -3485,6 +3556,19 @@ struct ParsedReminderItemId {
     occurrence_start_at: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+enum EwsInboxRuleMutation {
+    Delete {
+        rule_id: String,
+    },
+    Put {
+        name: String,
+        active: bool,
+        sieve: String,
+        audit_action: &'static str,
+    },
+}
+
 fn canonical_message_id_from_ews_id(id: &str) -> Option<Uuid> {
     id.strip_prefix("message:")
         .unwrap_or(id)
@@ -3520,6 +3604,20 @@ fn reminder_item_id(reminder: &ClientReminder) -> String {
 }
 
 fn bounded_ews_rule_to_sieve(rule: &str) -> Result<(String, bool, String)> {
+    if element_text(rule, "IsClientOnly")
+        .map(|value| value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        bail!("UpdateInboxRules does not support client-only Exchange rules.");
+    }
+    if rule.contains("RuleProviderData")
+        || rule.contains("RuleBlob")
+        || rule.contains("DeferredAction")
+        || rule.contains("DeferredActionMessage")
+    {
+        bail!("UpdateInboxRules does not support Exchange rule blobs or deferred-action data.");
+    }
+
     let name = element_text(rule, "DisplayName")
         .filter(|value| !value.trim().is_empty())
         .or_else(|| element_text(rule, "RuleId").filter(|value| !value.trim().is_empty()))

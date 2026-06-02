@@ -2674,22 +2674,109 @@ async fn inbox_rules_project_and_update_canonical_sieve_rules() {
         .unwrap()
         .iter()
         .any(|rule| rule.source_kind == "sieve_script" && rule.name == "Invoices"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:SetRuleOperation><t:Rule><t:RuleId>Invoices</t:RuleId><t:DisplayName>Invoices</t:DisplayName><t:IsEnabled>true</t:IsEnabled><t:Conditions><t:SubjectContainsWords><t:String>paid invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Paid</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:SetRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateInboxRulesResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let sieve = active_sieve_script.lock().unwrap().clone().unwrap();
+    assert!(sieve.contains(r#"header :contains "Subject" "paid invoice""#));
+    assert!(sieve.contains(r#"fileinto "Paid";"#));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:DeleteRuleOperation><t:RuleId>Reports</t:RuleId></t:DeleteRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateInboxRulesResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let rules = mailbox_rules.lock().unwrap();
+    assert!(!rules.iter().any(|rule| rule.name == "Reports"));
+    assert!(rules.iter().any(|rule| rule.name == "Invoices"));
+}
+
+#[tokio::test]
+async fn update_inbox_rules_rejects_exchange_only_rule_shapes_without_side_effects() {
+    let mailbox_rules = Arc::new(Mutex::new(vec![MailboxRule {
+        id: Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000012").unwrap(),
+        name: "Existing".to_string(),
+        is_active: true,
+        source_kind: "sieve_script".to_string(),
+        condition_summary: "subject contains report".to_string(),
+        action_summary: "fileinto Reports".to_string(),
+        supported_outlook_projection: true,
+        unsupported_exchange_features: Vec::new(),
+        size_octets: 64,
+        updated_at: "2026-05-07T12:00:00Z".to_string(),
+    }]));
+    let active_sieve_script = Arc::new(Mutex::new(None));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailbox_rules: mailbox_rules.clone(),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for request in [
+        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Client only</t:DisplayName><t:IsClientOnly>true</t:IsClientOnly><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Blob</t:DisplayName><t:RuleProviderData>AQID</t:RuleProviderData><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Deferred</t:DisplayName><t:DeferredActionMessage>AQID</t:DeferredActionMessage><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
+        br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Valid first</t:DisplayName><t:Conditions><t:SubjectContainsWords><t:String>valid</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Valid</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation><t:CreateRuleOperation><t:Rule><t:DisplayName>Unsupported second</t:DisplayName><t:IsClientOnly>true</t:IsClientOnly></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#.as_slice(),
+    ] {
+        let response = service.handle(&bearer_headers(), request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
+        assert!(body.contains("<m:UpdateInboxRulesResponse>"));
+        assert!(body.contains("ResponseClass=\"Error\""));
+        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+        assert_eq!(mailbox_rules.lock().unwrap().len(), 1);
+        assert!(mailbox_rules
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|rule| rule.name == "Existing"));
+        assert!(active_sieve_script.lock().unwrap().is_none());
+    }
 }
 
 #[tokio::test]
 async fn reminders_are_read_and_dismissed_from_canonical_reminder_state() {
     let reminder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000021").unwrap();
-    let reminders = Arc::new(Mutex::new(vec![ClientReminder {
-        source_type: "calendar".to_string(),
-        source_id: reminder_id,
-        occurrence_start_at: Some("2026-05-08T09:00:00Z".to_string()),
-        title: "Planning".to_string(),
-        due_at: Some("2026-05-08T10:00:00Z".to_string()),
-        reminder_at: "2026-05-08T08:45:00Z".to_string(),
-        dismissed_at: None,
-        completed_at: None,
-        status: "active".to_string(),
-    }]));
+    let task_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000022").unwrap();
+    let reminders = Arc::new(Mutex::new(vec![
+        ClientReminder {
+            source_type: "calendar".to_string(),
+            source_id: reminder_id,
+            occurrence_start_at: Some("2026-05-08T09:00:00Z".to_string()),
+            title: "Planning".to_string(),
+            due_at: Some("2026-05-08T10:00:00Z".to_string()),
+            reminder_at: "2026-05-08T08:45:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "active".to_string(),
+        },
+        ClientReminder {
+            source_type: "task".to_string(),
+            source_id: task_id,
+            occurrence_start_at: None,
+            title: "Follow up".to_string(),
+            due_at: Some("2026-05-08T12:00:00Z".to_string()),
+            reminder_at: "2026-05-08T11:30:00Z".to_string(),
+            dismissed_at: None,
+            completed_at: None,
+            status: "active".to_string(),
+        },
+    ]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         reminders: reminders.clone(),
@@ -2707,7 +2794,11 @@ async fn reminders_are_read_and_dismissed_from_canonical_reminder_state() {
     let body = response_text(response).await;
     assert!(body.contains("<m:GetRemindersResponse>"));
     assert!(body.contains("<t:Subject>Planning</t:Subject>"));
+    assert!(body.contains("<t:Subject>Follow up</t:Subject>"));
+    assert!(body.contains("<t:ReminderTime>2026-05-08T08:45:00Z</t:ReminderTime>"));
+    assert!(body.contains("<t:ReminderTime>2026-05-08T11:30:00Z</t:ReminderTime>"));
     assert!(body.contains(&format!("calendar:{reminder_id}:2026-05-08T09:00:00Z")));
+    assert!(body.contains(&format!("task:{task_id}")));
 
     let response = service
         .handle(
@@ -2724,6 +2815,116 @@ async fn reminders_are_read_and_dismissed_from_canonical_reminder_state() {
     let stored = reminders.lock().unwrap();
     assert_eq!(stored[0].status, "dismissed");
     assert_eq!(stored[0].dismissed_at.as_deref(), Some("now"));
+    assert_eq!(stored[1].status, "active");
+    assert!(stored[1].dismissed_at.is_none());
+}
+
+#[tokio::test]
+async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders() {
+    let account = FakeStore::account();
+    let event_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000023").unwrap();
+    let task_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000024").unwrap();
+    let task_list_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000025").unwrap();
+    let reminders = Arc::new(Mutex::new(vec![
+        ClientReminder {
+            source_type: "calendar".to_string(),
+            source_id: event_id,
+            occurrence_start_at: None,
+            title: "Standup".to_string(),
+            due_at: Some("2026-05-09T09:00:00Z".to_string()),
+            reminder_at: "2026-05-09T08:45:00Z".to_string(),
+            dismissed_at: Some("2026-05-09T08:46:00Z".to_string()),
+            completed_at: None,
+            status: "dismissed".to_string(),
+        },
+        ClientReminder {
+            source_type: "task".to_string(),
+            source_id: task_id,
+            occurrence_start_at: None,
+            title: "Ship notes".to_string(),
+            due_at: Some("2026-05-09T15:00:00Z".to_string()),
+            reminder_at: "2026-05-09T14:30:00Z".to_string(),
+            dismissed_at: Some("2026-05-09T14:31:00Z".to_string()),
+            completed_at: None,
+            status: "dismissed".to_string(),
+        },
+    ]));
+    let events = Arc::new(Mutex::new(vec![AccessibleEvent {
+        id: event_id,
+        uid: "event-uid".to_string(),
+        collection_id: "default".to_string(),
+        owner_account_id: account.account_id,
+        owner_email: account.email.clone(),
+        owner_display_name: account.display_name.clone(),
+        rights: FakeStore::rights(),
+        date: "2026-05-09".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 1,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "{}".to_string(),
+        title: "Standup".to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "[]".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    }]));
+    let tasks = Arc::new(Mutex::new(vec![FakeStore::task(
+        &task_id.to_string(),
+        &task_list_id.to_string(),
+        "Ship notes",
+    )]));
+    let store = FakeStore {
+        session: Some(account),
+        reminders: reminders.clone(),
+        events,
+        tasks,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="calendar:{event_id}"/></t:ReminderItemAction><t:ReminderItemAction><t:ActionType>Snooze</t:ActionType><t:NewReminderTime>2026-05-09T16:00:00Z</t:NewReminderTime><t:ItemId Id="task:{task_id}"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:PerformReminderActionResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let stored = reminders.lock().unwrap();
+    assert_eq!(stored.len(), 2);
+    assert!(stored
+        .iter()
+        .all(|reminder| reminder.reminder_at == "2026-05-09T16:00:00Z"));
+    assert!(stored
+        .iter()
+        .all(|reminder| reminder.dismissed_at.is_none()));
+    assert!(stored.iter().all(|reminder| reminder.status == "pending"));
+    drop(stored);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetReminders /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:Subject>Standup</t:Subject>"));
+    assert!(body.contains("<t:Subject>Ship notes</t:Subject>"));
+    assert!(body.contains("<t:ReminderTime>2026-05-09T16:00:00Z</t:ReminderTime>"));
 }
 
 #[tokio::test]

@@ -64,7 +64,7 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Attachment | `GetAttachment` | partial | Existing attachment fetch plus full attachment-shape support | blobs, blob_placements, attachments, mime_parts | content, MIME, permission, missing blob tests | attachment docs | Fetches bounded canonical attachment content |
 | Attachment | `DeleteAttachment` | partial | Existing attachment delete plus all supported parent kinds | attachments, blob retention metadata, change log | delete, retention, parent kind tests | attachment docs | Deletes supported canonical attachments |
 | Reminder | `GetReminders` | partial | Existing computed reminders API; full Exchange windowing and response-shape parity remain bounded | reminder_occurrence_dismissals plus calendar_events, tasks, and message follow-up reminder fields | due window, dismissed, cancelled/completed exclusion | reminders docs | Returns canonical calendar, task, and message follow-up reminders |
-| Reminder | `PerformReminderAction` | partial | Existing reminder dismissal APIs; snooze remains unsupported until canonical snooze state exists | reminder_occurrence_dismissals, task/event reminder metadata, mailbox message follow-up reminder dismissal | dismiss calendar/task/message reminders, unsupported snooze rejection | reminders docs | Dismisses canonical reminders only; does not create Exchange reminder state |
+| Reminder | `PerformReminderAction` | partial | Existing reminder dismissal and reminder-time update APIs; full Exchange reminder action parity remains bounded | reminder_occurrence_dismissals, task/event reminder metadata, mailbox message follow-up reminder dismissal | dismiss calendar/task reminders, snooze calendar/task reminders, unsupported action rejection | reminders docs | Dismisses or snoozes canonical calendar/task reminders without creating Exchange reminder state |
 | Conversation | `ApplyConversationAction` | missing | Conversation action API | lightweight thread ids or future threads table, messages, mail_change_log | move/delete/read/category action tests | conversation/thread docs | Applies supported conversation-wide actions consistently |
 | Conversation | `FindConversation` | missing | Conversation query API | message thread identifiers or threads table, search summaries | grouping, paging, folder scope tests | conversation docs | Lists conversations derived from canonical messages |
 | Conversation | `GetConversationItems` | missing | Conversation item expansion API | messages, mailbox_messages, thread state | expansion, Bcc-safe participants, permissions | conversation docs | Returns items in a canonical conversation |
@@ -153,7 +153,7 @@ Priority should favor practical Outlook and native-client behavior before broad 
 
 1. Widen `SendItem` only where real clients require additional Exchange disposition options, while preserving canonical submission.
 2. Widen `UpdateInboxRules` only for rule shapes that can map to canonical Sieve behavior.
-3. Add canonical reminder snooze state before supporting EWS snooze actions.
+3. Widen reminder action support only for additional actions that map to canonical reminder fields.
 4. Add explicit canonical room-list membership only if clients require more than the computed tenant room-list projection.
 5. Harden notification long-poll/streaming behavior while keeping replay based on canonical `mail_change_log`.
 6. Durable user-configuration blobs only if real Outlook/EWS clients require them.
