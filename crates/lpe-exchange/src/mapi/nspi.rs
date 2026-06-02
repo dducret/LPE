@@ -122,10 +122,27 @@ pub(in crate::mapi) fn endpoint_url_response(
     headers: &HeaderMap,
     path: &str,
 ) -> Response {
+    let url = public_endpoint_url(headers, path);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "nspi",
+        request_type = request_type,
+        mapi_request_id = request_id,
+        endpoint_url_path = path,
+        endpoint_url = %url,
+        host = %safe_header(headers, "host").unwrap_or_default(),
+        client_application = %safe_header(headers, "x-clientapplication").unwrap_or_default(),
+        client_info = %safe_header(headers, "x-clientinfo").unwrap_or_default(),
+        client_flow_key = %client_flow_key(&safe_header(headers, "x-clientinfo").unwrap_or_default()),
+        client_request_id = %safe_header(headers, "client-request-id").unwrap_or_default(),
+        trace_id = %safe_header(headers, "x-trace-id").unwrap_or_default(),
+        message = "rca debug nspi endpoint url"
+    );
     let mut body = Vec::new();
     write_u32(&mut body, 0);
     write_u32(&mut body, 0);
-    write_utf16z(&mut body, &public_endpoint_url(headers, path));
+    write_utf16z(&mut body, &url);
     write_u32(&mut body, 0);
     mapi_response(request_type, request_id, 0, body, None)
 }

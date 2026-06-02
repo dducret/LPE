@@ -374,7 +374,6 @@ fn bounded_search_content_clause(property_tag: u32, value: &str) -> Result<Value
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => "subject",
         PID_TAG_BODY_W | PID_TAG_BODY_STRING8 | PID_TAG_BODY_HTML_W => "body",
         PID_TAG_SENDER_NAME_W | PID_TAG_SENDER_EMAIL_ADDRESS_W => "sender",
-        PID_NAME_KEYWORDS_TAG => "category",
         _ => return Err(EC_SEARCH_UNSUPPORTED),
     };
     Ok(json!({
@@ -568,6 +567,10 @@ fn rop_property_restriction(field: &str, relop: u8, value: &Value) -> Result<Vec
             0
         }),
         "hasAttachment" => MapiValue::Bool(value.as_bool().ok_or(EC_SEARCH_UNSUPPORTED)?),
+        "category" => MapiValue::MultiString(vec![value
+            .as_str()
+            .ok_or(EC_SEARCH_UNSUPPORTED)?
+            .to_string()]),
         "receivedAt" => {
             let value = value.as_str().ok_or(EC_SEARCH_UNSUPPORTED)?;
             MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))

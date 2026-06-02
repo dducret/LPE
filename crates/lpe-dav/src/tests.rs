@@ -217,12 +217,19 @@ impl FakeStore {
             time: "09:30".to_string(),
             time_zone: String::new(),
             duration_minutes: 0,
+            all_day: false,
+            status: String::new(),
+            sequence: 0,
             recurrence_rule: "FREQ=WEEKLY;COUNT=4;BYDAY=TH".to_string(),
+            recurrence_json: String::new(),
+            recurrence_exceptions_json: String::new(),
             title: title.to_string(),
             location: String::new(),
+            organizer_json: String::new(),
             attendees: String::new(),
             attendees_json: "[]".to_string(),
             notes: String::new(),
+            body_html: String::new(),
         }
     }
 
@@ -488,12 +495,19 @@ impl DavStore for FakeStore {
                 time: input.time,
                 time_zone: input.time_zone,
                 duration_minutes: input.duration_minutes,
+                all_day: input.all_day,
+                status: input.status,
+                sequence: input.sequence,
                 recurrence_rule: input.recurrence_rule,
+                recurrence_json: input.recurrence_json,
+                recurrence_exceptions_json: input.recurrence_exceptions_json,
                 title: input.title,
                 location: input.location,
+                organizer_json: input.organizer_json,
                 attendees: input.attendees,
                 attendees_json: input.attendees_json,
                 notes: input.notes,
+                body_html: input.body_html,
             };
             events.retain(|entry| entry.id != event.id);
             events.push(event.clone());
@@ -575,12 +589,19 @@ impl DavStore for FakeStore {
                     time: input.time,
                     time_zone: input.time_zone,
                     duration_minutes: input.duration_minutes,
+                    all_day: input.all_day,
+                    status: input.status,
+                    sequence: input.sequence,
                     recurrence_rule: input.recurrence_rule,
+                    recurrence_json: input.recurrence_json,
+                    recurrence_exceptions_json: input.recurrence_exceptions_json,
                     title: input.title,
                     location: input.location,
+                    organizer_json: input.organizer_json,
                     attendees: input.attendees,
                     attendees_json: input.attendees_json,
                     notes: input.notes,
+                    body_html: input.body_html,
                 };
                 events.retain(|entry| entry.id != event.id);
                 events.push(event.clone());

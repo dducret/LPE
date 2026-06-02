@@ -6359,11 +6359,44 @@ fn append_search_property_bool(
     restriction.push(value as u8);
 }
 
+fn append_search_property_u32(restriction: &mut Vec<u8>, property_tag: u32, relop: u8, value: u32) {
+    restriction.extend_from_slice(&[0x04, relop]);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.extend_from_slice(&value.to_le_bytes());
+}
+
 fn append_search_property_i64(restriction: &mut Vec<u8>, property_tag: u32, relop: u8, value: i64) {
     restriction.extend_from_slice(&[0x04, relop]);
     restriction.extend_from_slice(&property_tag.to_le_bytes());
     restriction.extend_from_slice(&property_tag.to_le_bytes());
     restriction.extend_from_slice(&value.to_le_bytes());
+}
+
+fn append_search_property_string(
+    restriction: &mut Vec<u8>,
+    property_tag: u32,
+    relop: u8,
+    value: &str,
+) {
+    restriction.extend_from_slice(&[0x04, relop]);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    append_mapi_utf16_property(restriction, property_tag, value);
+}
+
+fn append_search_property_multi_string(
+    restriction: &mut Vec<u8>,
+    property_tag: u32,
+    relop: u8,
+    values: &[&str],
+) {
+    restriction.extend_from_slice(&[0x04, relop]);
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.extend_from_slice(&property_tag.to_le_bytes());
+    restriction.extend_from_slice(&(values.len() as u32).to_le_bytes());
+    for value in values {
+        restriction.extend_from_slice(&utf16z(value));
+    }
 }
 
 fn append_search_property_binary(

@@ -515,6 +515,9 @@ fn log_mapi_transport_connection(
     let user_agent = mapi::safe_header(headers, "user-agent").unwrap_or_default();
     let client_application = mapi::safe_header(headers, "x-clientapplication").unwrap_or_default();
     let client_info = mapi::safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let (request_guid, request_counter) = mapi::guid_counter_debug(&mapi_request_id);
+    let (client_info_guid, client_info_counter) = mapi::guid_counter_debug(&client_info);
+    let client_flow_key = mapi::client_flow_key(&client_info);
     let x_mapi_http_capability =
         mapi::safe_header(headers, "x-mapihttpcapability").unwrap_or_default();
     let request_content_type = mapi::safe_header(headers, "content-type").unwrap_or_default();
@@ -555,6 +558,11 @@ fn log_mapi_transport_connection(
             user_agent = %user_agent,
             client_application = %client_application,
             client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
             x_mapi_http_capability = %x_mapi_http_capability,
             request_content_type = %request_content_type,
             request_host = %request_host,
@@ -594,6 +602,11 @@ fn log_mapi_transport_connection(
             user_agent = %user_agent,
             client_application = %client_application,
             client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
             x_mapi_http_capability = %x_mapi_http_capability,
             request_content_type = %request_content_type,
             request_host = %request_host,

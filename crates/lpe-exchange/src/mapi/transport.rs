@@ -741,6 +741,9 @@ fn log_mapi_session_disconnect(
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
     let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let (request_guid, request_counter) = guid_counter_debug(request_id);
+    let (client_info_guid, client_info_counter) = guid_counter_debug(&client_info);
+    let client_flow_key = client_flow_key(&client_info);
     let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
     let host = safe_header(headers, "host").unwrap_or_default();
     let session_cookie_debug = cookie_value_debug(Some(session_id));
@@ -764,6 +767,33 @@ fn log_mapi_session_disconnect(
         && request_type == "Disconnect"
         && post_hierarchy_summary.content_sync_configure_observed
         && all_sync_sources_completed;
+    let nspi_address_book_probe_only = endpoint == MapiEndpoint::Nspi
+        && request_type == "Unbind"
+        && session.execute_request_count == 0
+        && session.request_count <= 4
+        && session.handles.is_empty()
+        && sync_source_count == 0
+        && notification_subscription_count == 0;
+    let outlook_profile_stage = if clean_client_close_after_sync {
+        "emsmdb_store_sync_completed"
+    } else if nspi_address_book_probe_only {
+        "nspi_address_book_probe_only_no_emsmdb_in_session"
+    } else if endpoint == MapiEndpoint::Nspi {
+        "nspi_address_book_session"
+    } else if endpoint == MapiEndpoint::Emsmdb && session.logon_identity.is_some() {
+        "emsmdb_store_session"
+    } else {
+        "mapi_session"
+    };
+    let next_expected_client_step = if nspi_address_book_probe_only {
+        "client_may_open_emsmdb_connect_or_stop_due_to_profile_selection"
+    } else if clean_client_close_after_sync {
+        "client_reconnect_or_idle"
+    } else if endpoint == MapiEndpoint::Emsmdb && session.logon_identity.is_none() {
+        "emsmdb_logon"
+    } else {
+        "client_next_request"
+    };
 
     tracing::info!(
         rca_debug = true,
@@ -797,6 +827,11 @@ fn log_mapi_session_disconnect(
         client_request_id = %client_request_id,
         client_application = %client_application,
         client_info = %client_info,
+        client_flow_key = %client_flow_key,
+        request_guid = %request_guid,
+        request_counter = %request_counter,
+        client_info_guid = %client_info_guid,
+        client_info_counter = %client_info_counter,
         user_agent = %user_agent,
         host = %host,
         handle_count = session.handles.len(),
@@ -837,6 +872,9 @@ fn log_mapi_session_disconnect(
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
+        nspi_address_book_probe_only,
+        outlook_profile_stage = %outlook_profile_stage,
+        next_expected_client_step = %next_expected_client_step,
         recent_execute_summaries = %recent_execute_summaries,
         "rca debug mapi session disconnect"
     );
@@ -861,6 +899,11 @@ fn log_mapi_session_disconnect(
         trace_id = %trace_id,
         client_request_id = %client_request_id,
         client_info = %client_info,
+        client_flow_key = %client_flow_key,
+        request_guid = %request_guid,
+        request_counter = %request_counter,
+        client_info_guid = %client_info_guid,
+        client_info_counter = %client_info_counter,
         user_agent = %user_agent,
         host = %host,
         response_status_code = 0u32,
@@ -896,6 +939,9 @@ fn log_mapi_session_disconnect(
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
+        nspi_address_book_probe_only,
+        outlook_profile_stage = %outlook_profile_stage,
+        next_expected_client_step = %next_expected_client_step,
         "rca debug mapi disconnect wire contract"
     );
     tracing::info!(
@@ -916,6 +962,11 @@ fn log_mapi_session_disconnect(
             logon_identity.mailbox_guid == principal.account_id.to_string()
                 && logon_identity.replica_guid
                     == hex_preview(&STORE_REPLICA_GUID, STORE_REPLICA_GUID.len()),
+        client_flow_key = %client_flow_key,
+        request_guid = %request_guid,
+        request_counter = %request_counter,
+        client_info_guid = %client_info_guid,
+        client_info_counter = %client_info_counter,
         transport_contract_ok = true,
         response_body_contract_ok = true,
         cookies_invalidated = true,
@@ -937,6 +988,9 @@ fn log_mapi_session_disconnect(
         completed_sync_checkpoint_summaries = %completed_sync_checkpoint_summaries,
         partial_scope_checkpoint_not_stored_count,
         partial_scope_checkpoint_not_stored_expected,
+        nspi_address_book_probe_only,
+        outlook_profile_stage = %outlook_profile_stage,
+        next_expected_client_step = %next_expected_client_step,
         "rca debug mapi disconnect verdict"
     );
 
@@ -1411,6 +1465,29 @@ pub(in crate::mapi) fn is_guid_counter_header(value: &str) -> bool {
         && Uuid::parse_str(guid).is_ok()
 }
 
+pub(crate) fn guid_counter_debug(value: &str) -> (String, String) {
+    let Some((raw_guid, counter)) = value.rsplit_once(':') else {
+        return (String::new(), String::new());
+    };
+    let guid = raw_guid
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or(raw_guid);
+    if Uuid::parse_str(guid).is_err() {
+        return (String::new(), String::new());
+    }
+    (guid.to_ascii_lowercase(), counter.to_string())
+}
+
+pub(crate) fn client_flow_key(client_info: &str) -> String {
+    let (guid, _) = guid_counter_debug(client_info);
+    if guid.is_empty() {
+        String::new()
+    } else {
+        format!("{:016x}", mapi_payload_fingerprint(guid.as_bytes()))
+    }
+}
+
 pub(in crate::mapi) fn client_info(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-clientinfo")
@@ -1622,6 +1699,9 @@ pub(in crate::mapi) fn log_mapi_connection(
     let client_request_id = safe_header(headers, "client-request-id").unwrap_or_default();
     let client_application = safe_header(headers, "x-clientapplication").unwrap_or_default();
     let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let (request_guid, request_counter) = guid_counter_debug(request_id);
+    let (client_info_guid, client_info_counter) = guid_counter_debug(&client_info);
+    let client_flow_key = client_flow_key(&client_info);
     let trace_id = safe_header(headers, "x-trace-id").unwrap_or_default();
     let user_agent = safe_header(headers, "user-agent").unwrap_or_default();
     let host = safe_header(headers, "host").unwrap_or_default();
@@ -1650,6 +1730,11 @@ pub(in crate::mapi) fn log_mapi_connection(
             client_request_id = %client_request_id,
             client_application = %client_application,
             client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
             trace_id = %trace_id,
             user_agent = %user_agent,
             host = %host,
@@ -1679,6 +1764,11 @@ pub(in crate::mapi) fn log_mapi_connection(
             client_request_id = %client_request_id,
             client_application = %client_application,
             client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
             trace_id = %trace_id,
             user_agent = %user_agent,
             host = %host,

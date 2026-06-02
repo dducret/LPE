@@ -269,7 +269,9 @@ non-canonical LPE state.
   Attachment-presence criteria accept either the bounded boolean property
   restriction or the Outlook-style existence restriction for
   `PidTagHasAttachments`; both serialize back from canonical JSON as the
-  bounded property form.
+  bounded property form. Category keywords serialize as
+  `PidNameKeywords` `PtypMultipleString` values so accepted canonical category
+  criteria remain round-trippable through `RopGetSearchCriteria`.
   `RopSetSearchCriteria` updates only existing
   user-saved search folders by translating that subset into canonical
   `scope_json` and `restriction_json` with `kind = "mapi_bounded"`.
@@ -278,6 +280,19 @@ non-canonical LPE state.
   folders, and any criteria that cannot round-trip through canonical JSON
   return parseable ROP-specific errors without creating a MAPI-local
   search-folder store.
+- The current `[MS-OXOSRCH]` parity audit for bounded search criteria is:
+  `RES_AND` over supported leaves is accepted and flattened into canonical JSON;
+  `RES_CONTENT` is accepted only for subject, body, and sender text;
+  `RES_PROPERTY` is accepted only for equality on read, flag status,
+  attachment presence, category, sender, subject, and body plus received-date
+  equality or inclusive bounds; `RES_BITMASK` is accepted only for the read bit
+  in `PidTagMessageFlags`; and `RES_EXIST` is accepted only for
+  `PidTagHasAttachments`. `RES_OR`, `RES_NOT`, `RES_SIZE`,
+  `RES_COMPAREPROPS`, `RES_SUBRESTRICTION`, `RES_COMMENT`, `RES_COUNT`,
+  recipient display predicates, Bcc-related predicates, Exchange template BLOBs,
+  and arbitrary Microsoft search-folder definition blobs remain rejected with
+  parseable `RopSetSearchCriteria` / `RopGetSearchCriteria` errors until a
+  canonical evaluator and serializer are explicitly documented.
 - Delegate and free/busy objects are canonical projections over
   `calendar_grants`, `sender_rights`, and `calendar_events`. LPE does not create
   Exchange public-folder free/busy state or protocol-local delegate data-folder
@@ -467,7 +482,7 @@ not by itself authorize broad client publication.
 | Non-mailbox recursive purge | Deferred until canonical folder lifecycle semantics and interoperability evidence are complete. `RopEmptyFolder` is bounded to hard-deleting visible memberships in the target canonical mailbox folder through the canonical tombstone/change-log path. `RopHardDeleteMessagesAndSubfolders` recurses only through canonical mailbox descendants and does not delete non-mailbox objects. Public-folder whole-folder purge returns a parseable not-supported ROP error; public-folder item delete/move/copy remains item-scoped through canonical public-folder APIs. |
 | Recoverable Items / dumpster ROP exposure | Bounded MAPI Recoverable Items Root, Deletions, Versions, and Purges virtual folders project canonical `recoverable_items` lifecycle state for browse, restore, and purge only. `RopMoveCopyMessages` move from a concrete recoverable subfolder uses canonical recoverable restore, `RopMoveCopyMessages` copy returns a parseable not-supported error, `RopDeleteMessages` on recoverable folders returns partial completion without purging because LPE does not implement Exchange's Deletions-to-Purges soft-delete progression, purge and empty-folder on Deletions, Versions, or Purges use canonical recoverable purge, Recoverable Items Root message mutation and purge calls return parseable not-supported errors, retention/legal-hold failures return partial completion, and recovery state stays out of normal mailbox hierarchy/content sync. `RopGetContentsTable` with `SoftDeletes` (`0x20`) returns a parseable not-supported ROP error because canonical LPE hard delete/Trash purge removes normal folder membership and writes `recoverable_items` rows instead of keeping folder-local soft-deleted rows. `OpenSoftDeleted`, complete Exchange dumpster folder parity, and any MAPI-local dumpster store remain unsupported. Versions and Purges are bounded virtual projections over canonical lifecycle rows; LPE does not claim Exchange copy-on-write Versions behavior or full Purges post-recovery parity. |
 | Sync move import | `RopSynchronizationImportMessageMove` uses the documented length-prefixed source folder/source message request shape. LPE derives the destination mailbox from the synchronization collector folder and ignores client-supplied destination message-id/change-number values as durable identifiers, so imported moves converge through canonical mailbox membership move state instead of creating MAPI-local identity truth. |
-| Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, category, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
+| Full search-folder parity | Partially implemented. Bounded `RopSetSearchCriteria` / `RopGetSearchCriteria` support exists only for canonical `mapi_bounded` JSON over folder scope, unread, flagged, attachment presence including `PidTagHasAttachments` existence probes, `PidNameKeywords` category property equality, sender, subject/body text, and received-date bounds. Full Microsoft template BLOB parity, arbitrary restriction trees, recipient/Bcc predicates, and secondary sender/recipient reminder promotion remain deferred. |
 | Rules and deferred actions | Partially implemented. `RopGetRulesTable` projects canonical Sieve-backed mailbox rules for Outlook profile visibility. Bounded `RopModifyRules` support writes only generated canonical Sieve rules for cleanly mapped move/delete/mark-read/forward/redirect/stop-processing mutations. Exchange rule blobs, client-only rules, provider-specific predicates, delegate rule templates, deferred-action provider data, and `RopUpdateDeferredActionMessages` remain unsupported; no MAPI-local rule store is allowed and rejected deferred actions do not activate Sieve. |
 | Folder permission mutation | Partially implemented. `RopModifyPermissions` maps bounded same-tenant account ACL rows to canonical `mailbox_delegation_grants` for mail folders and canonical `calendar_grants` for default, owned custom, and share-right delegated calendar folders, with audit and change-log writes; Exchange-only ACL subjects and MAPI-local ACL storage remain unsupported. |
 | Full notification registration and delivery | Partially implemented through session-local pending events with bounded folder/message/table payloads and canonical change-cursor replay. Cross-process notification replay remains deferred; clients must re-register after reconnect or worker movement and use normal sync to converge. |

@@ -247,10 +247,12 @@ or protocol-owned rule tables.
 MAPI `RopSetSearchCriteria` writes only existing user-saved `search_folders`
 rows and only when the request maps to the documented `mapi_bounded` JSON
 subset in `scope_json` and `restriction_json`: folder scope, unread, flagged,
-attachment presence, category, sender, subject/body text, and received-date
-bounds. `RopGetSearchCriteria` reads the same canonical JSON. Unsupported
-criteria return protocol errors instead of creating a MAPI-local search-folder
-store.
+attachment presence including `PidTagHasAttachments` existence probes, category
+property equality, sender, subject/body text, and received-date bounds.
+`RopGetSearchCriteria` reads the same canonical JSON. Unsupported criteria,
+including disjunction, negation, size, recipient/Bcc predicates, Exchange
+template BLOBs, and arbitrary Microsoft search-definition blobs, return protocol
+errors instead of creating a MAPI-local search-folder store.
 Common Views navigation shortcut FAI messages are persisted as
 `mapi_navigation_shortcuts` rows with durable MAPI identity rows using
 `object_kind = 'navigation_shortcut'`. The table stores only the bounded

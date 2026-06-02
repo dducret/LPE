@@ -59,8 +59,9 @@ pub(crate) mod wire;
 pub(crate) use crate::mapi::{
     session::{create_rpc_emsmdb_context, execute_rpc_emsmdb_rops},
     transport::{
-        debug_payload_preview_hex, handle_mapi, mapi_error_response, mapi_response_payload_bytes,
-        request_cookie_transport_debug, safe_header, MapiEndpoint,
+        client_flow_key, debug_payload_preview_hex, guid_counter_debug, handle_mapi,
+        mapi_error_response, mapi_response_payload_bytes, request_cookie_transport_debug,
+        safe_header, MapiEndpoint,
     },
 };
 
