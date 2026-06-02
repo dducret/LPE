@@ -861,6 +861,15 @@ pub trait ExchangeStore: AccountAuthStore {
         query: ReminderQuery,
     ) -> StoreFuture<'a, Vec<ClientReminder>>;
 
+    fn dismiss_reminder_occurrence<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_type: &'a str,
+        source_id: Uuid,
+        occurrence_start_at: Option<&'a str>,
+        dismissed_at: &'a str,
+    ) -> StoreFuture<'a, ()>;
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -1046,6 +1055,15 @@ pub trait ExchangeStore: AccountAuthStore {
         input: SubmitMessageInput,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage>;
+
+    fn submit_draft_message<'a>(
+        &'a self,
+        account_id: Uuid,
+        draft_message_id: Uuid,
+        submitted_by_account_id: Uuid,
+        source: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage>;
 
     fn submit_message<'a>(
         &'a self,
@@ -2327,6 +2345,7 @@ impl ExchangeStore for Storage {
                     log.object_kind,
                     log.object_id,
                     log.mailbox_id,
+                    NULLIF(log.summary_json->>'messageId', '')::uuid AS message_id,
                     log.change_kind,
                     log.modseq,
                     log.summary_json,
@@ -3088,6 +3107,26 @@ impl ExchangeStore for Storage {
         Box::pin(async move { self.query_client_reminders(account_id, query).await })
     }
 
+    fn dismiss_reminder_occurrence<'a>(
+        &'a self,
+        account_id: Uuid,
+        source_type: &'a str,
+        source_id: Uuid,
+        occurrence_start_at: Option<&'a str>,
+        dismissed_at: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            self.dismiss_reminder_occurrence(
+                account_id,
+                source_type,
+                source_id,
+                occurrence_start_at.unwrap_or_default(),
+                dismissed_at,
+            )
+            .await
+        })
+    }
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -3483,6 +3522,26 @@ impl ExchangeStore for Storage {
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, SavedDraftMessage> {
         Box::pin(async move { self.save_draft_message(input, audit).await })
+    }
+
+    fn submit_draft_message<'a>(
+        &'a self,
+        account_id: Uuid,
+        draft_message_id: Uuid,
+        submitted_by_account_id: Uuid,
+        source: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage> {
+        Box::pin(async move {
+            self.submit_draft_message(
+                account_id,
+                draft_message_id,
+                submitted_by_account_id,
+                source,
+                audit,
+            )
+            .await
+        })
     }
 
     fn submit_message<'a>(
@@ -4257,6 +4316,12 @@ fn mapi_notification_event_from_change_row(
                 row.try_get("parent_display_name").ok(),
                 None,
             ))
+            .map(|event| {
+                event.with_canonical_ids(
+                    row.try_get::<Uuid, _>("object_id").ok(),
+                    row.try_get::<Uuid, _>("object_id").ok(),
+                )
+            })
         }
         "mailbox_message" | "attachment" => {
             let folder_id = mapi_folder_id_from_role_or_identity(
@@ -4282,6 +4347,12 @@ fn mapi_notification_event_from_change_row(
                 row.try_get("source_display_name").ok(),
                 row.try_get("message_subject").ok(),
             ))
+            .map(|event| {
+                event.with_canonical_ids(
+                    row.try_get::<Uuid, _>("mailbox_id").ok(),
+                    row.try_get::<Uuid, _>("message_id").ok(),
+                )
+            })
         }
         _ => None,
     }

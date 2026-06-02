@@ -22,6 +22,8 @@ pub(crate) struct MapiNotificationEvent {
     pub(in crate::mapi) folder_id: u64,
     pub(in crate::mapi) message_id: Option<u64>,
     pub(in crate::mapi) old_folder_id: Option<u64>,
+    pub(in crate::mapi) canonical_folder_id: Option<uuid::Uuid>,
+    pub(in crate::mapi) canonical_message_id: Option<uuid::Uuid>,
     pub(in crate::mapi) kind: MapiNotificationKind,
     pub(in crate::mapi) event_mask: u16,
     pub(in crate::mapi) change_cursor: Option<i64>,
@@ -41,6 +43,8 @@ impl MapiNotificationEvent {
             folder_id,
             message_id,
             old_folder_id: None,
+            canonical_folder_id: None,
+            canonical_message_id: None,
             kind: MapiNotificationKind::Content,
             event_mask: MapiNotificationEventMask::TableModified.as_u16(),
             change_cursor: None,
@@ -60,6 +64,8 @@ impl MapiNotificationEvent {
             folder_id,
             message_id: changed_folder_id,
             old_folder_id: None,
+            canonical_folder_id: None,
+            canonical_message_id: None,
             kind: MapiNotificationKind::Hierarchy,
             event_mask: MapiNotificationEventMask::TableModified.as_u16(),
             change_cursor: None,
@@ -93,6 +99,8 @@ impl MapiNotificationEvent {
             folder_id,
             message_id,
             old_folder_id,
+            canonical_folder_id: None,
+            canonical_message_id: None,
             kind,
             event_mask,
             change_cursor: Some(change_cursor),
@@ -108,6 +116,32 @@ impl MapiNotificationEvent {
             parent_display_name,
             message_subject,
         }
+    }
+
+    pub(crate) fn with_canonical_ids(
+        mut self,
+        canonical_folder_id: Option<uuid::Uuid>,
+        canonical_message_id: Option<uuid::Uuid>,
+    ) -> Self {
+        self.canonical_folder_id = canonical_folder_id;
+        self.canonical_message_id = canonical_message_id;
+        self
+    }
+
+    pub(crate) fn change_cursor(&self) -> Option<i64> {
+        self.change_cursor
+    }
+
+    pub(crate) fn canonical_folder_id(&self) -> Option<uuid::Uuid> {
+        self.canonical_folder_id
+    }
+
+    pub(crate) fn canonical_message_id(&self) -> Option<uuid::Uuid> {
+        self.canonical_message_id
+    }
+
+    pub(crate) fn change_kind(&self) -> Option<&str> {
+        self.change_kind.as_deref()
     }
 
     fn has_extended_details(&self) -> bool {

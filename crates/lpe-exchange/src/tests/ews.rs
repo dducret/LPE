@@ -1839,7 +1839,6 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
     let service = ExchangeService::new(store);
 
     for operation in [
-        "GetRoomLists",
         "FindPeople",
         "ExpandDL",
         "GetDelegate",
@@ -2557,6 +2556,313 @@ async fn set_user_oof_settings_disables_active_sieve_script() {
 }
 
 #[tokio::test]
+async fn send_item_submits_existing_draft_through_canonical_submission() {
+    let draft_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000001").unwrap();
+    let drafts_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000002").unwrap();
+    let sent_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000003").unwrap();
+    let submitted_draft_messages = Arc::new(Mutex::new(Vec::new()));
+    let submitted_messages = Arc::new(Mutex::new(Vec::new()));
+    let emails = Arc::new(Mutex::new(vec![FakeStore::email(
+        &draft_id.to_string(),
+        &drafts_id.to_string(),
+        "drafts",
+        "Draft to send",
+    )]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        emails: emails.clone(),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(&drafts_id.to_string(), "drafts", "Drafts"),
+            FakeStore::mailbox(&sent_id.to_string(), "sent", "Sent"),
+        ])),
+        submitted_draft_messages: submitted_draft_messages.clone(),
+        submitted_messages: submitted_messages.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:SendItem><m:ItemIds><t:ItemId Id="message:{draft_id}"/></m:ItemIds></m:SendItem></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SendItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(*submitted_draft_messages.lock().unwrap(), vec![draft_id]);
+    let submitted = submitted_messages.lock().unwrap();
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(submitted[0].draft_message_id, Some(draft_id));
+    assert_eq!(submitted[0].source, "ews-senditem");
+    let stored = emails.lock().unwrap();
+    assert!(!stored.iter().any(|email| email.id == draft_id));
+    assert!(stored.iter().any(|email| email.mailbox_role == "sent"));
+    assert!(!stored.iter().any(|email| email.mailbox_role == "outbox"));
+}
+
+#[tokio::test]
+async fn inbox_rules_project_and_update_canonical_sieve_rules() {
+    let mailbox_rules = Arc::new(Mutex::new(vec![MailboxRule {
+        id: Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000011").unwrap(),
+        name: "Reports".to_string(),
+        is_active: true,
+        source_kind: "sieve_script".to_string(),
+        condition_summary: "subject contains report".to_string(),
+        action_summary: "fileinto Reports".to_string(),
+        supported_outlook_projection: true,
+        unsupported_exchange_features: Vec::new(),
+        size_octets: 64,
+        updated_at: "2026-05-07T12:00:00Z".to_string(),
+    }]));
+    let active_sieve_script = Arc::new(Mutex::new(None));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailbox_rules: mailbox_rules.clone(),
+        active_sieve_script: active_sieve_script.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetInboxRules /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetInboxRulesResponse>"));
+    assert!(body.contains("<t:RuleId>Reports</t:RuleId>"));
+    assert!(body.contains("<t:IsNotSupported>false</t:IsNotSupported>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UpdateInboxRules><m:Operations><t:CreateRuleOperation><t:Rule><t:DisplayName>Invoices</t:DisplayName><t:IsEnabled>true</t:IsEnabled><t:Conditions><t:SubjectContainsWords><t:String>invoice</t:String></t:SubjectContainsWords></t:Conditions><t:Actions><t:MoveToFolder><t:DisplayName>Invoices</t:DisplayName></t:MoveToFolder></t:Actions></t:Rule></t:CreateRuleOperation></m:Operations></m:UpdateInboxRules></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateInboxRulesResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let sieve = active_sieve_script.lock().unwrap().clone().unwrap();
+    assert!(sieve.contains(r#"header :contains "Subject" "invoice""#));
+    assert!(sieve.contains(r#"fileinto "Invoices";"#));
+    assert!(mailbox_rules
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|rule| rule.source_kind == "sieve_script" && rule.name == "Invoices"));
+}
+
+#[tokio::test]
+async fn reminders_are_read_and_dismissed_from_canonical_reminder_state() {
+    let reminder_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000021").unwrap();
+    let reminders = Arc::new(Mutex::new(vec![ClientReminder {
+        source_type: "calendar".to_string(),
+        source_id: reminder_id,
+        occurrence_start_at: Some("2026-05-08T09:00:00Z".to_string()),
+        title: "Planning".to_string(),
+        due_at: Some("2026-05-08T10:00:00Z".to_string()),
+        reminder_at: "2026-05-08T08:45:00Z".to_string(),
+        dismissed_at: None,
+        completed_at: None,
+        status: "active".to_string(),
+    }]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        reminders: reminders.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetReminders /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetRemindersResponse>"));
+    assert!(body.contains("<t:Subject>Planning</t:Subject>"));
+    assert!(body.contains(&format!("calendar:{reminder_id}:2026-05-08T09:00:00Z")));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:PerformReminderAction><m:ReminderItemActions><t:ReminderItemAction><t:ActionType>Dismiss</t:ActionType><t:ItemId Id="calendar:{reminder_id}:2026-05-08T09:00:00Z"/></t:ReminderItemAction></m:ReminderItemActions></m:PerformReminderAction></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:PerformReminderActionResponse>"));
+    let stored = reminders.lock().unwrap();
+    assert_eq!(stored[0].status, "dismissed");
+    assert_eq!(stored[0].dismissed_at.as_deref(), Some("now"));
+}
+
+#[tokio::test]
+async fn rooms_are_projected_from_canonical_directory_entries() {
+    let extra_address_book_entries = Arc::new(Mutex::new(vec![ExchangeAddressBookEntry {
+        id: Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000031").unwrap(),
+        display_name: "Room 101".to_string(),
+        email: "room101@example.test".to_string(),
+        entry_kind: ExchangeAddressBookEntryKind::Account,
+        directory_kind: ExchangeAddressBookDirectoryKind::Room,
+        member_emails: Vec::new(),
+    }]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        extra_address_book_entries: extra_address_book_entries.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetRooms /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetRoomsResponse>"));
+    assert!(body.contains("<t:Name>Room 101</t:Name>"));
+    assert!(body.contains("<t:EmailAddress>room101@example.test</t:EmailAddress>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetRoomLists /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetRoomListsResponse>"));
+    assert!(body.contains("<t:EmailAddress>rooms@example.test</t:EmailAddress>"));
+    assert_eq!(extra_address_book_entries.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn pull_and_streaming_notifications_replay_canonical_sql_change_cursor() {
+    let mailbox_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000041").unwrap();
+    let message_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000042").unwrap();
+    let mapi_notification_cursor = Arc::new(Mutex::new(Some(7)));
+    let mapi_notification_polls = Arc::new(Mutex::new(vec![
+        MapiNotificationPoll {
+            event_pending: true,
+            cursor: Some(8),
+            events: vec![MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                1,
+                1,
+                Some(2),
+                None,
+                8,
+                9,
+                None,
+                None,
+                "created".to_string(),
+                Some("Inbox".to_string()),
+                None,
+                Some("Hello".to_string()),
+            )
+            .with_canonical_ids(Some(mailbox_id), Some(message_id))],
+        },
+        MapiNotificationPoll {
+            event_pending: true,
+            cursor: Some(9),
+            events: vec![MapiNotificationEvent::canonical(
+                MapiNotificationKind::Content,
+                1,
+                1,
+                Some(2),
+                None,
+                9,
+                10,
+                None,
+                None,
+                "created".to_string(),
+                Some("Inbox".to_string()),
+                None,
+                Some("Hello again".to_string()),
+            )
+            .with_canonical_ids(Some(mailbox_id), Some(message_id))],
+        },
+    ]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mapi_notification_cursor: mapi_notification_cursor.clone(),
+        mapi_notification_polls: mapi_notification_polls.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:Subscribe><m:PullSubscriptionRequest><t:SubscribeToAllFolders>true</t:SubscribeToAllFolders><t:EventTypes><t:EventType>NewMailEvent</t:EventType></t:EventTypes><t:Timeout>30</t:Timeout></m:PullSubscriptionRequest></m:Subscribe></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:SubscribeResponse>"));
+    assert!(body.contains(":7</m:Watermark>"));
+    let subscription_id = test_xml_text(&body, "SubscriptionId").unwrap();
+    let watermark = test_xml_text(&body, "Watermark").unwrap();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetEventsResponse>"));
+    assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
+    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetStreamingEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>lpe:{subscription_id}:all:8</m:Watermark></m:GetStreamingEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetStreamingEventsResponse>"));
+    assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
+    assert!(mapi_notification_polls.lock().unwrap().is_empty());
+}
+
+fn test_xml_text(xml: &str, local_name: &str) -> Option<String> {
+    let open = format!(":{local_name}>");
+    let close = format!("</");
+    let start = xml.find(&open)? + open.len();
+    let rest = &xml[start..];
+    let end = rest.find(&close)?;
+    Some(rest[..end].trim().to_string())
+}
+
+#[tokio::test]
 async fn set_user_oof_settings_errors_use_single_response_message_shape() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2600,13 +2906,10 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
     let service = ExchangeService::new(store);
 
     for operation in [
-        "SendItem",
         "GetMailTips",
-        "GetInboxRules",
         "ConvertId",
         "FindConversation",
         "GetConversationItems",
-        "GetStreamingEvents",
     ] {
         let request = format!(
             concat!(

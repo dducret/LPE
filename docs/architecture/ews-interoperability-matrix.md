@@ -48,7 +48,7 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Mailbox item | `GetItem` | partial | Existing item read API plus full property-shape and item-class mapper | canonical item tables, MIME, attachments, custom properties if added | property shape, body, MIME, attachment, unsupported id tests | EWS property mapping docs | Reads LPE-prefixed canonical ids only |
 | Mailbox item | `MarkAllItemsAsRead` | missing | Mailbox bulk read-state API | mailbox_messages read state, mail_change_log | bulk read/unread, modseq, IMAP/JMAP convergence | mailbox read-state docs | Marks all visible items in a folder read or unread |
 | Mailbox item | `MoveItem` | partial | Existing move API plus full item-class and recoverable/public-folder semantics | mailbox_messages, tombstones, public_folder_items, change log | move, copy-delete public-folder behavior, sync replay | EWS mailbox operation docs | Moves canonical messages and bounded public-folder posts only |
-| Mailbox item | `SendItem` | missing | Draft submit API over canonical draft ids | messages, mailbox_messages, submission_queue, submission_recipients, Sent copy | send saved draft, Bcc protection, Sent visibility, retry/idempotency | submission docs and EWS docs | Sends an existing canonical draft through LPE submission |
+| Mailbox item | `SendItem` | partial | Existing draft submit API over canonical draft ids; full Exchange saved-item options remain bounded | messages, mailbox_messages, submission_queue, submission_recipients, Sent copy | send saved draft, Bcc protection, Sent visibility, retry/idempotency | submission docs and EWS docs | Sends an existing canonical draft through LPE submission; no EWS `Outbox` or EWS-only `Sent` state is created |
 | Mailbox item | `UpdateItem` | partial | Existing update API plus full property and item-class mutation | canonical item tables, custom property table if widened, change log | property mutation matrix, recurrence, categories, read/flag tests | EWS property/update docs | Updates bounded contact, event, task, message read/flag, and public-folder post fields |
 | Folder | `CreateFolder` | partial | Existing mailbox/public-folder create plus full folder-class support | mailboxes, public_folders, change log | protected folder, public-folder ACL, duplicate name tests | folder mapping docs | Creates custom mail folders and child public folders only |
 | Folder | `CreateFolderPath` | missing | Atomic folder-path creation API | mailboxes/public_folders with parent chain, change log | nested creation, rollback, duplicate segments | folder hierarchy docs | Creates a path of canonical folders or fails without partial client surprise |
@@ -63,8 +63,8 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Attachment | `CreateAttachment` | partial | Existing attachment create plus item attachments if scoped | blobs, blob_placements, attachments, mime_parts, calendar_event_attachments | Magika validation, file attachment, item attachment rejection/coverage | attachment docs and EWS docs | Adds validated file attachments to supported message parents |
 | Attachment | `GetAttachment` | partial | Existing attachment fetch plus full attachment-shape support | blobs, blob_placements, attachments, mime_parts | content, MIME, permission, missing blob tests | attachment docs | Fetches bounded canonical attachment content |
 | Attachment | `DeleteAttachment` | partial | Existing attachment delete plus all supported parent kinds | attachments, blob retention metadata, change log | delete, retention, parent kind tests | attachment docs | Deletes supported canonical attachments |
-| Reminder | `GetReminders` | missing | Computed reminders API | reminder_occurrence_dismissals plus calendar_events and tasks reminder fields | due window, dismissed, cancelled/completed exclusion | reminders docs | Returns active reminders for canonical events and tasks |
-| Reminder | `PerformReminderAction` | missing | Reminder dismissal/snooze API | reminder_occurrence_dismissals, task/event reminder metadata | dismiss, snooze if scoped, recurrence instance tests | reminders docs | Dismisses or snoozes canonical reminders |
+| Reminder | `GetReminders` | partial | Existing computed reminders API; full Exchange windowing and response-shape parity remain bounded | reminder_occurrence_dismissals plus calendar_events, tasks, and message follow-up reminder fields | due window, dismissed, cancelled/completed exclusion | reminders docs | Returns canonical calendar, task, and message follow-up reminders |
+| Reminder | `PerformReminderAction` | partial | Existing reminder dismissal APIs; snooze remains unsupported until canonical snooze state exists | reminder_occurrence_dismissals, task/event reminder metadata, mailbox message follow-up reminder dismissal | dismiss calendar/task/message reminders, unsupported snooze rejection | reminders docs | Dismisses canonical reminders only; does not create Exchange reminder state |
 | Conversation | `ApplyConversationAction` | missing | Conversation action API | lightweight thread ids or future threads table, messages, mail_change_log | move/delete/read/category action tests | conversation/thread docs | Applies supported conversation-wide actions consistently |
 | Conversation | `FindConversation` | missing | Conversation query API | message thread identifiers or threads table, search summaries | grouping, paging, folder scope tests | conversation docs | Lists conversations derived from canonical messages |
 | Conversation | `GetConversationItems` | missing | Conversation item expansion API | messages, mailbox_messages, thread state | expansion, Bcc-safe participants, permissions | conversation docs | Returns items in a canonical conversation |
@@ -75,8 +75,8 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Utilities | `ResolveNames` | partial | Existing address-book/contact resolution plus full GAL/persona templates | accounts, contacts, groups, grants | ambiguous ranking, DL/contact/account, hidden entries | address book docs | Resolves authenticated account, tenant directory, and accessible contacts |
 | Utilities | `GetPasswordExpirationDate` | missing | Account credential policy API | password policy and credential expiry metadata | local password, external auth, no-expiry tests | auth/admin docs | Returns password expiry only for credential types with canonical expiry |
 | Availability | `GetUserAvailability` | partial | Existing free/busy API plus attendee scope and richer suggestions | calendar_events, calendar_grants, delegation/free-busy state | free/busy visibility, cross-tenant denial, suggestion tests | calendar availability docs | Returns bounded free/busy for accessible calendar state |
-| Availability | `GetRoomLists` | unsupported | N/A | N/A | Unsupported-response test should remain until room-list API exists | EWS unsupported list | Returns parseable unsupported response |
-| Availability | `GetRooms` | missing | Room directory API | account directory kind, room-list membership if added | room list filtering, hidden room tests | room/equipment docs | Lists room mailboxes from canonical directory state |
+| Availability | `GetRoomLists` | partial | Existing directory projection; explicit room-list membership remains missing until canonical room-list state exists | accounts.directory_kind; computed tenant room-list projection only | room-list projection, empty directory tests, no Exchange-only room-list rows | EWS availability docs | Returns a computed tenant room list when canonical rooms exist |
+| Availability | `GetRooms` | partial | Existing room directory projection; explicit room-list filtering remains bounded | account directory kind, room-list membership if added | room list filtering, hidden room tests | room/equipment docs | Lists room mailboxes from canonical directory state |
 | Availability | `GetUserOofSettings` | partial | Existing vacation settings projection | sieve_scripts, sieve_vacation_responses | disabled/enabled/scheduled round-trip tests | OOF/Sieve docs | Projects canonical Sieve vacation as EWS OOF |
 | Availability | `SetUserOofSettings` | partial | Existing vacation settings mutation | sieve_scripts, sieve_vacation_responses, audit | scheduled/external audience/idempotency tests | OOF/Sieve docs | Updates canonical vacation state, not an EWS-local OOF table |
 | Bulk transfer | `UploadItems` | missing | Bulk import API over canonical MIME/items | messages, MIME, attachments, contacts/events/tasks if scoped, import audit | MIME import, malformed payload, idempotency tests | import/export docs | Imports streamed items only after canonical validation |
@@ -85,8 +85,8 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Delegate | `GetDelegate` | unsupported | N/A | N/A | Unsupported-response test should remain until delegate EWS model exists | EWS unsupported list | Returns parseable unsupported response |
 | Delegate | `UpdateDelegate` | missing | Delegation mutation API | mailbox_delegation_grants, calendar_grants, sender_rights, audit | update delegate rights, convergence with MAPI | delegation docs | Updates canonical delegate rights |
 | Delegate | `RemoveDelegate` | missing | Delegation mutation API | mailbox_delegation_grants, calendar_grants, sender_rights, audit | remove delegate, stale access denial | delegation docs | Removes canonical delegate rights |
-| Inbox rules | `GetInboxRules` | missing | Rules API over Sieve-backed mailbox rules | sieve_scripts plus rule projection metadata | get bounded rules, unsupported blobs | Sieve/rules docs | Returns Outlook-compatible projection of canonical rules |
-| Inbox rules | `UpdateInboxRules` | missing | Rules mutation API over Sieve-backed mailbox rules | sieve_scripts, change log, audit | create/update/delete bounded rules, unsupported action rejection | Sieve/rules docs | Mutates only rules that map to canonical Sieve behavior |
+| Inbox rules | `GetInboxRules` | partial | Existing rules API over Sieve-backed mailbox rules; Exchange rule blobs/client-only rules remain unsupported | sieve_scripts plus rule projection metadata | get bounded rules, unsupported blobs | Sieve/rules docs | Returns Outlook-compatible projection of canonical Sieve rules |
+| Inbox rules | `UpdateInboxRules` | partial | Existing rules mutation API over Sieve-backed mailbox rules for bounded subject/fileinto and discard projections | sieve_scripts, change log, audit | create/update/delete bounded rules, unsupported action rejection | Sieve/rules docs | Mutates only rules that map to canonical Sieve behavior; no Exchange rule store is created |
 | Mail app | `DisableApp` | missing | Outlook add-in management API if scoped | mail app catalog/install state | disable app, tenant/user scope tests | mail app docs | Disables an installed app if app management is in scope |
 | Mail app | `GetAppManifests` | missing | Outlook add-in catalog API if scoped | app manifests, tenant policy, user install state | manifest listing and policy tests | mail app docs | Returns available add-in manifests |
 | Mail app | `GetAppMarketplaceUrl` | missing | Add-in marketplace policy API if scoped | tenant app marketplace policy | configured URL and disabled tests | mail app docs | Returns configured marketplace URL or unsupported |
@@ -96,9 +96,9 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Mail tips | `GetMailTips` | missing | Recipient policy/tips API | accounts, groups, OOF, moderation/quota policy if scoped | OOF, invalid recipient, large audience tests | mail tips docs | Returns recipient compose warnings from canonical policy |
 | Message tracking | `FindMessageTrackingReport` | missing | Traceability API bridged to LPE-CT | submission_queue, submission_events, LPE-CT trace/bounce data | submitted message lookup, authz, CT boundary tests | LPE-CT traceability docs | Finds tracking reports without making LPE core own SMTP perimeter state |
 | Message tracking | `GetMessageTrackingReport` | missing | Traceability API bridged to LPE-CT | submission_events plus LPE-CT delivery trace | delivery detail, DSN, permission tests | LPE-CT traceability docs | Shows delivery trace from canonical submission and CT relay state |
-| Notification | `GetEvents` | partial | Existing pull event API plus durable subscription replay | current in-process registry; needs durable subscriptions and mail_change_log cursor linkage | replay, expiry, cross-process, folder event tests | notification docs | Returns queued/fallback pull events today |
-| Notification | `GetStreamingEvents` | missing | Streaming notification API | durable/session notification cursors, mail_change_log replay | long-poll/stream, reconnect, timeout tests | notification docs | Streams item/folder events for supported subscriptions |
-| Notification | `Subscribe` | partial | Existing pull subscribe plus push/streaming and durable state | current in-process registry; needs durable subscriptions | pull/push/stream request tests, watermark tests | notification docs | Accepts bounded pull subscriptions only |
+| Notification | `GetEvents` | partial | Existing pull event API with canonical `mail_change_log` cursor replay; full Exchange push/affinity semantics remain bounded | mail_change_log plus short-lived request-local compatibility registry | replay, expiry, cross-process, folder event tests | notification docs | Returns durable canonical change-log notifications before compatibility fallbacks |
+| Notification | `GetStreamingEvents` | partial | Existing bounded streaming-event response over the same canonical replay path; true long-held streaming delivery remains bounded | mail_change_log; no Exchange subscription table | long-poll/stream, reconnect, timeout tests | notification docs | Returns currently available canonical events in EWS streaming response shape |
+| Notification | `Subscribe` | partial | Existing pull subscribe seeded from canonical notification cursor; push remains unsupported and no EWS subscription table is created | mail_change_log cursor plus short-lived request-local compatibility registry | pull/push/stream request tests, watermark tests | notification docs | Accepts bounded pull subscriptions and watermarks canonical replay cursors |
 | Notification | `Unsubscribe` | partial | Existing unsubscribe plus durable lifecycle cleanup | current in-process registry; needs durable subscription rows | unsubscribe, missing id, expiry tests | notification docs | Removes bounded in-process subscriptions |
 | Persona | `FindPeople` | unsupported | N/A | N/A | Unsupported-response test should remain until persona API exists | EWS unsupported list | Returns parseable unsupported response |
 | Persona | `GetPersona` | missing | Persona/contact aggregation API | contacts, accounts, possible linked persona rows | aggregation, privacy, tenant scope tests | persona/address-book docs | Returns linked-person details if canonical persona support exists |
@@ -135,7 +135,7 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 
 The current EWS dispatcher in `crates/lpe-exchange/src/service.rs` routes these operations to concrete handlers:
 
-`SyncFolderHierarchy`, `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, `SyncFolderItems`, `GetServerTimeZones`, `ResolveNames`, `GetUserAvailability`, `CreateItem`, `UpdateItem`, `DeleteItem`, `MoveItem`, `CopyItem`, `CreateFolder`, `DeleteFolder`, `GetAttachment`, `CreateAttachment`, `DeleteAttachment`, `GetUserOofSettings`, `SetUserOofSettings`, `Subscribe`, `GetEvents`, and `Unsubscribe`.
+`SyncFolderHierarchy`, `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, `SyncFolderItems`, `GetServerTimeZones`, `ResolveNames`, `GetUserAvailability`, `CreateItem`, `SendItem`, `UpdateItem`, `DeleteItem`, `MoveItem`, `CopyItem`, `CreateFolder`, `DeleteFolder`, `GetAttachment`, `CreateAttachment`, `DeleteAttachment`, `GetUserOofSettings`, `SetUserOofSettings`, `GetInboxRules`, `UpdateInboxRules`, `GetReminders`, `PerformReminderAction`, `GetRooms`, `GetRoomLists`, `Subscribe`, `GetEvents`, `GetStreamingEvents`, and `Unsubscribe`.
 
 These are all `partial` against Microsoft parity because LPE intentionally maps only bounded Exchange-compatible behavior to canonical state.
 
@@ -143,7 +143,7 @@ These are all `partial` against Microsoft parity because LPE intentionally maps 
 
 The dispatcher explicitly returns EWS-shaped unsupported responses for:
 
-`GetRoomLists`, `FindPeople`, `ExpandDL`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, and `GetSharingFolder`.
+`FindPeople`, `ExpandDL`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, and `GetSharingFolder`.
 
 All other Microsoft catalog operations currently fall through to the generic unsupported response and are marked `missing` in the matrix.
 
@@ -151,13 +151,13 @@ All other Microsoft catalog operations currently fall through to the generic uns
 
 Priority should favor practical Outlook and native-client behavior before broad Exchange feature emulation:
 
-1. `SendItem` over canonical drafts and submission.
-2. `GetInboxRules` and `UpdateInboxRules` over Sieve-backed rules.
-3. `GetReminders` and `PerformReminderAction` over computed reminder state.
-4. `GetRooms` and then `GetRoomLists` from room/equipment directory state.
-5. Durable notification subscriptions and `GetStreamingEvents`.
+1. Widen `SendItem` only where real clients require additional Exchange disposition options, while preserving canonical submission.
+2. Widen `UpdateInboxRules` only for rule shapes that can map to canonical Sieve behavior.
+3. Add canonical reminder snooze state before supporting EWS snooze actions.
+4. Add explicit canonical room-list membership only if clients require more than the computed tenant room-list projection.
+5. Harden notification long-poll/streaming behavior while keeping replay based on canonical `mail_change_log`.
 6. Durable user-configuration blobs only if real Outlook/EWS clients require them.
 
 ## Verification
 
-This is a planning matrix only. No code was implemented for this matrix.
+The current EWS tests include coverage proving `SendItem`, inbox rules, reminders, rooms, and notification replay route through canonical store APIs rather than Exchange-only `Sent`, `Outbox`, rule, reminder, room-list, or notification state.

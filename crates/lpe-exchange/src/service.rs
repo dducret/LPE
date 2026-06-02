@@ -22,10 +22,11 @@ use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    ClientTask, CollaborationCollection, CreatePublicFolderInput, JmapEmail, JmapEmailAddress,
-    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, PublicFolder, PublicFolderItem,
-    Storage, SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientTaskInput, UpsertPublicFolderItemInput,
+    ClientReminder, ClientTask, CollaborationCollection, CreatePublicFolderInput, JmapEmail,
+    JmapEmailAddress, JmapEmailFollowupUpdate, JmapImportedEmailInput, JmapMailbox,
+    JmapMailboxCreateInput, MailboxRule, PublicFolder, PublicFolderItem, ReminderQuery, Storage,
+    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientTaskInput, UpsertPublicFolderItemInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -780,6 +781,7 @@ where
             "ResolveNames" => self.resolve_names(&principal, &body).await?,
             "GetUserAvailability" => self.get_user_availability(&principal, &body).await?,
             "CreateItem" => self.create_item(&principal, &body).await?,
+            "SendItem" => self.send_item(&principal, &body).await?,
             "UpdateItem" => self.update_item(&principal, &body).await?,
             "DeleteItem" => self.delete_item(&principal, &body).await?,
             "MoveItem" => self.move_item(&principal, &body).await?,
@@ -791,10 +793,16 @@ where
             "DeleteAttachment" => self.delete_attachment(&principal, &body).await?,
             "GetUserOofSettings" => self.get_user_oof_settings(&principal).await?,
             "SetUserOofSettings" => self.set_user_oof_settings(&principal, &body).await?,
+            "GetInboxRules" => self.get_inbox_rules(&principal).await?,
+            "UpdateInboxRules" => self.update_inbox_rules(&principal, &body).await?,
+            "GetReminders" => self.get_reminders(&principal, &body).await?,
+            "PerformReminderAction" => self.perform_reminder_action(&principal, &body).await?,
             "Subscribe" => self.subscribe(&principal, &body).await?,
             "GetEvents" => self.get_events(&principal, &body).await?,
+            "GetStreamingEvents" => self.get_streaming_events(&principal, &body).await?,
             "Unsubscribe" => self.unsubscribe(&body).await?,
-            "GetRoomLists" => unsupported_operation_response("GetRoomLists"),
+            "GetRooms" => self.get_rooms(&principal, &body).await?,
+            "GetRoomLists" => self.get_room_lists(&principal).await?,
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => unsupported_operation_response("ExpandDL"),
             "GetDelegate" => unsupported_operation_response("GetDelegate"),
@@ -2917,6 +2925,206 @@ where
         }))
     }
 
+    async fn send_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let draft_ids = requested_item_ids(request)
+                .into_iter()
+                .filter_map(|id| canonical_message_id_from_ews_id(&id))
+                .collect::<Vec<_>>();
+            if draft_ids.is_empty() {
+                bail!("SendItem requires at least one message ItemId.");
+            }
+            for draft_id in draft_ids {
+                self.store
+                    .submit_draft_message(
+                        principal.account_id,
+                        draft_id,
+                        principal.account_id,
+                        "ews-senditem",
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-senditem".to_string(),
+                            subject: draft_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+            Ok(simple_operation_success_response("SendItem"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("SendItem", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn get_inbox_rules(&self, principal: &AccountPrincipal) -> Result<String> {
+        let rules = self.store.list_mailbox_rules(principal.account_id).await?;
+        Ok(get_inbox_rules_response(&rules))
+    }
+
+    async fn update_inbox_rules(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let mut changed = false;
+            for operation in element_contents(request, "DeleteRuleOperation") {
+                let rule_id = element_text(operation, "RuleId")
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| anyhow!("DeleteRuleOperation requires RuleId."))?;
+                self.store
+                    .delete_sieve_script(
+                        principal.account_id,
+                        &rule_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-update-inbox-rules-delete".to_string(),
+                            subject: rule_id.clone(),
+                        },
+                    )
+                    .await?;
+                changed = true;
+            }
+            for operation in element_contents(request, "CreateRuleOperation") {
+                let rule = element_content(operation, "Rule").unwrap_or(operation);
+                let (name, active, sieve) = bounded_ews_rule_to_sieve(rule)?;
+                self.store
+                    .put_sieve_script(
+                        principal.account_id,
+                        &name,
+                        &sieve,
+                        active,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-update-inbox-rules-create".to_string(),
+                            subject: name.clone(),
+                        },
+                    )
+                    .await?;
+                changed = true;
+            }
+            for operation in element_contents(request, "SetRuleOperation") {
+                let rule = element_content(operation, "Rule").unwrap_or(operation);
+                let (name, active, sieve) = bounded_ews_rule_to_sieve(rule)?;
+                self.store
+                    .put_sieve_script(
+                        principal.account_id,
+                        &name,
+                        &sieve,
+                        active,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-update-inbox-rules-set".to_string(),
+                            subject: name.clone(),
+                        },
+                    )
+                    .await?;
+                changed = true;
+            }
+            if !changed && !request.contains("RemoveOutlookRuleBlob") {
+                bail!("UpdateInboxRules supports bounded create, set, and delete rule operations.");
+            }
+            Ok(simple_operation_success_response("UpdateInboxRules"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "UpdateInboxRules",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn get_reminders(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let include_inactive = element_text(request, "IncludeDismissedReminders")
+            .map(|value| value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let reminders = self
+            .store
+            .query_client_reminders(principal.account_id, ReminderQuery { include_inactive })
+            .await?;
+        Ok(get_reminders_response(&reminders))
+    }
+
+    async fn perform_reminder_action(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let action = element_text(request, "ActionType")
+                .or_else(|| element_text(request, "ReminderItemActionType"))
+                .or_else(|| element_text(request, "ReminderAction"))
+                .unwrap_or_default();
+            if !action.is_empty() && !action.eq_ignore_ascii_case("Dismiss") {
+                bail!("PerformReminderAction currently supports only Dismiss.");
+            }
+            let reminder_ids = requested_item_ids(request);
+            if reminder_ids.is_empty() {
+                bail!("PerformReminderAction requires reminder ItemId values.");
+            }
+            for reminder_id in reminder_ids {
+                let parsed = parse_reminder_item_id(&reminder_id)
+                    .ok_or_else(|| anyhow!("unsupported reminder ItemId `{reminder_id}`"))?;
+                match parsed.source_type.as_str() {
+                    "mail" | "message" => {
+                        self.store
+                            .update_jmap_email_followup_flags(
+                                principal.account_id,
+                                parsed.source_id,
+                                JmapEmailFollowupUpdate {
+                                    reminder_dismissed_at: Some("now".to_string()),
+                                    ..JmapEmailFollowupUpdate::default()
+                                },
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-perform-reminder-action".to_string(),
+                                    subject: parsed.source_id.to_string(),
+                                },
+                            )
+                            .await?;
+                    }
+                    "calendar" | "task" => {
+                        self.store
+                            .dismiss_reminder_occurrence(
+                                principal.account_id,
+                                &parsed.source_type,
+                                parsed.source_id,
+                                parsed.occurrence_start_at.as_deref(),
+                                "now",
+                            )
+                            .await?;
+                    }
+                    _ => bail!("unsupported reminder source `{}`", parsed.source_type),
+                }
+            }
+            Ok(simple_operation_success_response("PerformReminderAction"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "PerformReminderAction",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn get_rooms(&self, principal: &AccountPrincipal, _request: &str) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(get_rooms_response(&entries))
+    }
+
+    async fn get_room_lists(&self, principal: &AccountPrincipal) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(get_room_lists_response(principal, &entries))
+    }
+
     async fn subscribe(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         if element_content(request, "PullSubscriptionRequest").is_none() {
             return Ok(operation_error_response(
@@ -2937,6 +3145,18 @@ where
         let previous_watermark = element_text(request, "Watermark")
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| notification_watermark(&subscription_id, None, 0));
+
+        if let Some(response) = self
+            .durable_events_response(
+                "GetEvents",
+                principal,
+                &subscription_id,
+                &previous_watermark,
+            )
+            .await?
+        {
+            return Ok(response);
+        }
 
         if let Some((events, has_more)) =
             pull_notifications_since(&subscription_id, &previous_watermark)
@@ -2993,6 +3213,101 @@ where
         ))
     }
 
+    async fn get_streaming_events(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let subscription_id = element_text(request, "SubscriptionId")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_subscription_id(principal.account_id, request));
+        let previous_watermark = element_text(request, "Watermark")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| notification_watermark(&subscription_id, None, 0));
+        if let Some(response) = self
+            .durable_events_response(
+                "GetStreamingEvents",
+                principal,
+                &subscription_id,
+                &previous_watermark,
+            )
+            .await?
+        {
+            return Ok(response);
+        }
+        Ok(get_streaming_events_status_response(
+            &subscription_id,
+            &previous_watermark,
+        ))
+    }
+
+    async fn durable_events_response(
+        &self,
+        operation: &str,
+        principal: &AccountPrincipal,
+        subscription_id: &str,
+        previous_watermark: &str,
+    ) -> Result<Option<String>> {
+        let after_cursor = notification_watermark_sequence(previous_watermark).unwrap_or(0) as i64;
+        let poll = self
+            .store
+            .poll_mapi_notifications(principal.account_id, after_cursor)
+            .await?;
+        let event_pending = poll.event_pending;
+        let cursor = poll.cursor;
+        let mut notifications = Vec::new();
+        for event in poll.events {
+            let Some(mailbox_id) = event.canonical_folder_id() else {
+                continue;
+            };
+            let Some(item_id) = event.canonical_message_id() else {
+                continue;
+            };
+            let sequence = event
+                .change_cursor()
+                .unwrap_or_else(|| cursor.unwrap_or(after_cursor))
+                .max(0) as u64;
+            let kind = match event.change_kind().unwrap_or_default() {
+                "deleted" | "destroyed" | "removed" => EwsNotificationKind::Deleted,
+                "created" | "inserted" | "new" => EwsNotificationKind::NewMail,
+                _ => EwsNotificationKind::Created,
+            };
+            notifications.push(EwsQueuedNotification {
+                sequence,
+                kind,
+                item_id,
+                mailbox_id,
+                change_key: sequence.to_string(),
+                timestamp: "1970-01-01T00:00:00Z".to_string(),
+            });
+        }
+        if !notifications.is_empty() {
+            return Ok(Some(match operation {
+                "GetStreamingEvents" => get_streaming_events_queued_response(
+                    subscription_id,
+                    previous_watermark,
+                    &notifications,
+                    event_pending && notifications.len() >= 100,
+                ),
+                _ => get_events_queued_response(
+                    subscription_id,
+                    previous_watermark,
+                    &notifications,
+                    event_pending && notifications.len() >= 100,
+                ),
+            }));
+        }
+        if cursor.is_some_and(|cursor| cursor > after_cursor) {
+            return Ok(Some(match operation {
+                "GetStreamingEvents" => {
+                    get_streaming_events_status_response(subscription_id, previous_watermark)
+                }
+                _ => get_events_status_response(subscription_id, previous_watermark),
+            }));
+        }
+        Ok(None)
+    }
+
     async fn unsubscribe(&self, request: &str) -> Result<String> {
         let subscription_id = element_text(request, "SubscriptionId").unwrap_or_default();
         if subscription_id.trim().is_empty() {
@@ -3018,8 +3333,14 @@ where
         let event_types = requested_notification_event_types(request);
         let requested_watermark =
             element_text(request, "Watermark").filter(|value| !value.trim().is_empty());
+        let current_cursor = self
+            .store
+            .fetch_mapi_notification_cursor(principal.account_id)
+            .await?
+            .unwrap_or(0)
+            .max(0) as u64;
         let watermark = requested_watermark.clone().unwrap_or_else(|| {
-            notification_watermark(&subscription_id, folder_marker.as_deref(), 0)
+            notification_watermark(&subscription_id, folder_marker.as_deref(), current_cursor)
         });
         let seed_after_sequence = requested_watermark
             .as_deref()
@@ -3155,6 +3476,96 @@ fn decode_utf16_body(body: &[u8], little_endian: bool) -> Result<String> {
 struct ParsedMailbox {
     address: String,
     display_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ParsedReminderItemId {
+    source_type: String,
+    source_id: Uuid,
+    occurrence_start_at: Option<String>,
+}
+
+fn canonical_message_id_from_ews_id(id: &str) -> Option<Uuid> {
+    id.strip_prefix("message:")
+        .unwrap_or(id)
+        .split(':')
+        .next()
+        .and_then(|value| Uuid::parse_str(value).ok())
+}
+
+fn parse_reminder_item_id(id: &str) -> Option<ParsedReminderItemId> {
+    let mut parts = id.splitn(3, ':');
+    let source_type = parts.next()?.to_ascii_lowercase();
+    let source_id = Uuid::parse_str(parts.next()?).ok()?;
+    let occurrence_start_at = parts
+        .next()
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
+    Some(ParsedReminderItemId {
+        source_type,
+        source_id,
+        occurrence_start_at,
+    })
+}
+
+fn reminder_item_id(reminder: &ClientReminder) -> String {
+    if let Some(occurrence_start_at) = reminder.occurrence_start_at.as_deref() {
+        format!(
+            "{}:{}:{}",
+            reminder.source_type, reminder.source_id, occurrence_start_at
+        )
+    } else {
+        format!("{}:{}", reminder.source_type, reminder.source_id)
+    }
+}
+
+fn bounded_ews_rule_to_sieve(rule: &str) -> Result<(String, bool, String)> {
+    let name = element_text(rule, "DisplayName")
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| element_text(rule, "RuleId").filter(|value| !value.trim().is_empty()))
+        .unwrap_or_else(|| format!("ews-rule-{}", Uuid::new_v4()));
+    let active = element_text(rule, "IsEnabled")
+        .map(|value| !value.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+    let subject = element_content(rule, "SubjectContainsWords")
+        .and_then(|content| element_text(content, "String"))
+        .filter(|value| !value.trim().is_empty());
+    let target = element_content(rule, "MoveToFolder")
+        .and_then(|content| {
+            element_text(content, "DisplayName")
+                .or_else(|| element_text(content, "Name"))
+                .or_else(|| attribute_value_after(content, "FolderId", "Id").map(str::to_string))
+        })
+        .unwrap_or_else(|| "Inbox".to_string());
+    let sieve = if let Some(subject) = subject {
+        format!(
+            concat!(
+                "require [\"fileinto\"];\n",
+                "if header :contains \"Subject\" \"{subject}\" {{\n",
+                "  fileinto \"{target}\";\n",
+                "  stop;\n",
+                "}}\n"
+            ),
+            subject = escape_sieve_string(&subject),
+            target = escape_sieve_string(&target),
+        )
+    } else if rule.contains("<t:Delete") || rule.contains("<Delete") {
+        concat!(
+            "require [\"discard\"];\n",
+            "if true {\n",
+            "  discard;\n",
+            "  stop;\n",
+            "}\n"
+        )
+        .to_string()
+    } else {
+        bail!("UpdateInboxRules supports subject contains with move-to-folder or delete.");
+    };
+    Ok((name, active, sieve))
+}
+
+fn escape_sieve_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 fn parse_create_message_input(
@@ -5488,6 +5899,168 @@ fn delete_folder_success_response() -> String {
     .to_string()
 }
 
+fn simple_operation_success_response(operation: &str) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation
+    )
+}
+
+fn get_inbox_rules_response(rules: &[MailboxRule]) -> String {
+    let mut rules_xml = String::new();
+    for (index, rule) in rules.iter().enumerate() {
+        rules_xml.push_str(&format!(
+            concat!(
+                "<t:Rule>",
+                "<t:RuleId>{id}</t:RuleId>",
+                "<t:DisplayName>{name}</t:DisplayName>",
+                "<t:Priority>{priority}</t:Priority>",
+                "<t:IsEnabled>{enabled}</t:IsEnabled>",
+                "<t:IsNotSupported>{unsupported}</t:IsNotSupported>",
+                "<t:IsInError>false</t:IsInError>",
+                "</t:Rule>"
+            ),
+            id = escape_xml(&rule.name),
+            name = escape_xml(&rule.name),
+            priority = index + 1,
+            enabled = if rule.is_active { "true" } else { "false" },
+            unsupported = if rule.supported_outlook_projection {
+                "false"
+            } else {
+                "true"
+            },
+        ));
+    }
+    format!(
+        concat!(
+            "<m:GetInboxRulesResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetInboxRulesResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:OutlookRuleBlobExists>false</m:OutlookRuleBlobExists>",
+            "<m:InboxRules>{rules_xml}</m:InboxRules>",
+            "</m:GetInboxRulesResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetInboxRulesResponse>"
+        ),
+        rules_xml = rules_xml
+    )
+}
+
+fn get_reminders_response(reminders: &[ClientReminder]) -> String {
+    let mut reminders_xml = String::new();
+    for reminder in reminders {
+        let reminder_id = reminder_item_id(reminder);
+        reminders_xml.push_str(&format!(
+            concat!(
+                "<t:Reminder>",
+                "<t:Subject>{title}</t:Subject>",
+                "<t:Location/>",
+                "<t:ReminderTime>{reminder_at}</t:ReminderTime>",
+                "<t:StartDate>{start_at}</t:StartDate>",
+                "<t:EndDate>{due_at}</t:EndDate>",
+                "<t:ItemId Id=\"{id}\" ChangeKey=\"{status}\"/>",
+                "</t:Reminder>"
+            ),
+            title = escape_xml(&reminder.title),
+            reminder_at = escape_xml(&reminder.reminder_at),
+            start_at = escape_xml(
+                reminder
+                    .occurrence_start_at
+                    .as_deref()
+                    .or(reminder.due_at.as_deref())
+                    .unwrap_or(&reminder.reminder_at)
+            ),
+            due_at = escape_xml(reminder.due_at.as_deref().unwrap_or(&reminder.reminder_at)),
+            id = escape_xml(&reminder_id),
+            status = escape_xml(&reminder.status),
+        ));
+    }
+    format!(
+        concat!(
+            "<m:GetRemindersResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetRemindersResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Reminders>{reminders_xml}</m:Reminders>",
+            "</m:GetRemindersResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetRemindersResponse>"
+        ),
+        reminders_xml = reminders_xml
+    )
+}
+
+fn get_rooms_response(entries: &[ExchangeAddressBookEntry]) -> String {
+    let mut rooms_xml = String::new();
+    for entry in entries
+        .iter()
+        .filter(|entry| entry.directory_kind == ExchangeAddressBookDirectoryKind::Room)
+    {
+        rooms_xml.push_str(&format!(
+            "<t:Room><t:Id><t:Name>{name}</t:Name><t:EmailAddress>{email}</t:EmailAddress></t:Id></t:Room>",
+            name = escape_xml(&entry.display_name),
+            email = escape_xml(&entry.email),
+        ));
+    }
+    format!(
+        concat!(
+            "<m:GetRoomsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetRoomsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Rooms>{rooms_xml}</m:Rooms>",
+            "</m:GetRoomsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetRoomsResponse>"
+        ),
+        rooms_xml = rooms_xml
+    )
+}
+
+fn get_room_lists_response(
+    principal: &AccountPrincipal,
+    entries: &[ExchangeAddressBookEntry],
+) -> String {
+    let has_rooms = entries
+        .iter()
+        .any(|entry| entry.directory_kind == ExchangeAddressBookDirectoryKind::Room);
+    let room_lists_xml = if has_rooms {
+        let domain = principal
+            .email
+            .split_once('@')
+            .map(|(_, domain)| domain)
+            .unwrap_or("local");
+        format!(
+            "<t:Address><t:Name>Rooms</t:Name><t:EmailAddress>rooms@{domain}</t:EmailAddress><t:RoutingType>SMTP</t:RoutingType><t:MailboxType>PublicDL</t:MailboxType></t:Address>",
+            domain = escape_xml(domain),
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        concat!(
+            "<m:GetRoomListsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetRoomListsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:RoomLists>{room_lists_xml}</m:RoomLists>",
+            "</m:GetRoomListsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetRoomListsResponse>"
+        ),
+        room_lists_xml = room_lists_xml
+    )
+}
+
 fn subscribe_success_response(subscription_id: &str, watermark: &str) -> String {
     format!(
         concat!(
@@ -5539,6 +6112,20 @@ fn get_events_queued_response(
     )
 }
 
+fn get_streaming_events_queued_response(
+    subscription_id: &str,
+    previous_watermark: &str,
+    events: &[EwsQueuedNotification],
+    has_more: bool,
+) -> String {
+    get_events_queued_response(subscription_id, previous_watermark, events, has_more)
+        .replace("GetEventsResponse", "GetStreamingEventsResponse")
+        .replace(
+            "GetEventsResponseMessage",
+            "GetStreamingEventsResponseMessage",
+        )
+}
+
 fn queued_notification_event_xml(subscription_id: &str, event: &EwsQueuedNotification) -> String {
     let event_name = match event.kind {
         EwsNotificationKind::Created => "CreatedEvent",
@@ -5568,7 +6155,14 @@ fn queued_notification_event_xml(subscription_id: &str, event: &EwsQueuedNotific
 
 fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -> String {
     let folder_marker = notification_watermark_folder_marker(previous_watermark);
-    let next_watermark = notification_watermark(subscription_id, folder_marker.as_deref(), 1);
+    let previous_sequence = notification_watermark_sequence(previous_watermark).unwrap_or(0);
+    let next_sequence = if previous_sequence == 0 {
+        1
+    } else {
+        previous_sequence
+    };
+    let next_watermark =
+        notification_watermark(subscription_id, folder_marker.as_deref(), next_sequence);
     format!(
         concat!(
             "<m:GetEventsResponse>",
@@ -5591,6 +6185,15 @@ fn get_events_status_response(subscription_id: &str, previous_watermark: &str) -
         previous_watermark = escape_xml(previous_watermark),
         next_watermark = escape_xml(&next_watermark),
     )
+}
+
+fn get_streaming_events_status_response(subscription_id: &str, previous_watermark: &str) -> String {
+    get_events_status_response(subscription_id, previous_watermark)
+        .replace("GetEventsResponse", "GetStreamingEventsResponse")
+        .replace(
+            "GetEventsResponseMessage",
+            "GetStreamingEventsResponseMessage",
+        )
 }
 
 fn get_events_new_mail_response(

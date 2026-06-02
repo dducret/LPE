@@ -37,6 +37,7 @@ use uuid::Uuid;
 
 use crate::{
     mapi::{
+        notifications::{MapiNotificationEvent, MapiNotificationKind},
         permissions::{rights_from_grant, MapiFolderPermission},
         properties::{
             MapiNamedProperty, MapiNamedPropertyKind, FIRST_NAMED_PROPERTY_ID,
@@ -441,6 +442,7 @@ struct FakeStore {
     attachment_contents: Arc<Mutex<HashMap<String, ActiveSyncAttachmentContent>>>,
     created_attachments: Arc<Mutex<Vec<AttachmentUploadInput>>>,
     submitted_messages: Arc<Mutex<Vec<SubmitMessageInput>>>,
+    submitted_draft_messages: Arc<Mutex<Vec<Uuid>>>,
     cancelled_submissions: Arc<Mutex<Vec<Uuid>>>,
     submission_cancel_results: Arc<Mutex<HashMap<Uuid, CancelSubmissionResult>>>,
     deleted_emails: Arc<Mutex<Vec<Uuid>>>,
@@ -457,6 +459,7 @@ struct FakeStore {
     updated_mailboxes: Arc<Mutex<Vec<JmapMailboxUpdateInput>>>,
     destroyed_mailboxes: Arc<Mutex<Vec<Uuid>>>,
     directory_accounts: Arc<Mutex<Vec<AuthenticatedAccount>>>,
+    extra_address_book_entries: Arc<Mutex<Vec<ExchangeAddressBookEntry>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
@@ -2219,6 +2222,7 @@ impl ExchangeStore for FakeStore {
                 member_emails: group_alias_members.get(id).cloned().unwrap_or_default(),
             },
         ));
+        entries.extend(self.extra_address_book_entries.lock().unwrap().clone());
         entries.sort_by(|left, right| {
             left.display_name
                 .cmp(&right.display_name)
@@ -3094,6 +3098,29 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(reminders) })
     }
 
+    fn dismiss_reminder_occurrence<'a>(
+        &'a self,
+        _account_id: Uuid,
+        source_type: &'a str,
+        source_id: Uuid,
+        occurrence_start_at: Option<&'a str>,
+        dismissed_at: &'a str,
+    ) -> StoreFuture<'a, ()> {
+        let occurrence_start_at = occurrence_start_at.map(str::to_string);
+        let dismissed_at = dismissed_at.to_string();
+        let source_type = source_type.to_string();
+        let mut reminders = self.reminders.lock().unwrap();
+        for reminder in reminders.iter_mut().filter(|reminder| {
+            reminder.source_type == source_type
+                && reminder.source_id == source_id
+                && reminder.occurrence_start_at == occurrence_start_at
+        }) {
+            reminder.dismissed_at = Some(dismissed_at.clone());
+            reminder.status = "dismissed".to_string();
+        }
+        Box::pin(async move { Ok(()) })
+    }
+
     fn create_jmap_mailbox<'a>(
         &'a self,
         input: JmapMailboxCreateInput,
@@ -3853,6 +3880,74 @@ impl ExchangeStore for FakeStore {
                 delivery_status: "draft".to_string(),
             })
         })
+    }
+
+    fn submit_draft_message<'a>(
+        &'a self,
+        account_id: Uuid,
+        draft_message_id: Uuid,
+        submitted_by_account_id: Uuid,
+        source: &'a str,
+        audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, SubmittedMessage> {
+        self.submitted_draft_messages
+            .lock()
+            .unwrap()
+            .push(draft_message_id);
+        let draft = self
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|email| email.id == draft_message_id)
+            .cloned();
+        let Some(draft) = draft else {
+            return Box::pin(async move { Err(anyhow::anyhow!("draft message not found")) });
+        };
+        let input = SubmitMessageInput {
+            draft_message_id: Some(draft_message_id),
+            account_id,
+            submitted_by_account_id,
+            source: source.to_string(),
+            from_display: draft.from_display,
+            from_address: draft.from_address,
+            sender_display: draft.sender_display,
+            sender_address: draft.sender_address,
+            to: draft
+                .to
+                .into_iter()
+                .map(|recipient| SubmittedRecipientInput {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect(),
+            cc: draft
+                .cc
+                .into_iter()
+                .map(|recipient| SubmittedRecipientInput {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect(),
+            bcc: draft
+                .bcc
+                .into_iter()
+                .map(|recipient| SubmittedRecipientInput {
+                    address: recipient.address,
+                    display_name: recipient.display_name,
+                })
+                .collect(),
+            subject: draft.subject,
+            body_text: draft.body_text,
+            body_html_sanitized: draft.body_html_sanitized,
+            internet_message_id: draft.internet_message_id,
+            mime_blob_ref: draft.mime_blob_ref,
+            size_octets: draft.size_octets,
+            unread: Some(draft.unread),
+            flagged: Some(draft.flagged),
+            attachments: Vec::new(),
+        };
+        self.submit_message(input, audit)
     }
 
     fn submit_message<'a>(
