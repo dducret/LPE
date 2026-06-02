@@ -1332,6 +1332,7 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         | MapiObject::HierarchyTable { folder_id, .. }
         | MapiObject::ContentsTable { folder_id, .. }
         | MapiObject::PendingMessage { folder_id, .. }
+        | MapiObject::PendingAssociatedMessage { folder_id, .. }
         | MapiObject::PendingContact { folder_id, .. }
         | MapiObject::PendingEvent { folder_id, .. }
         | MapiObject::PendingTask { folder_id, .. }

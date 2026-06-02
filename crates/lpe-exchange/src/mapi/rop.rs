@@ -866,6 +866,7 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
         }
         Some(MapiObject::Message { .. })
         | Some(MapiObject::PublicFolderItem { .. })
+        | Some(MapiObject::PendingAssociatedMessage { .. })
         | Some(MapiObject::PendingMessage { .. }) => default_message_property_tags(),
         _ => default_folder_property_tags(),
     };
@@ -1989,6 +1990,11 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
         ),
         Some(MapiObject::PendingMessage { folder_id, .. }) => (
             "pending_message",
+            format!("{folder_id:#018x}"),
+            String::new(),
+        ),
+        Some(MapiObject::PendingAssociatedMessage { folder_id, .. }) => (
+            "pending_associated_message",
             format!("{folder_id:#018x}"),
             String::new(),
         ),
@@ -3315,6 +3321,11 @@ impl RopRequest {
         }
         let bytes = self.payload.get(..8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
+    }
+
+    pub(in crate::mapi) fn create_message_associated(&self) -> bool {
+        matches!(RopId::from_u8(self.rop_id), Some(RopId::CreateMessage))
+            && self.payload.get(8).is_some_and(|flag| *flag != 0)
     }
 
     pub(in crate::mapi) fn abort_submit_folder_id(&self) -> Option<u64> {

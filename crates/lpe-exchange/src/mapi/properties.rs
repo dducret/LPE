@@ -5583,7 +5583,8 @@ pub(in crate::mapi) fn apply_mapi_property_values(
             properties.extend(values);
             Ok(())
         }
-        Some(MapiObject::PendingContact { properties, .. })
+        Some(MapiObject::PendingAssociatedMessage { properties, .. })
+        | Some(MapiObject::PendingContact { properties, .. })
         | Some(MapiObject::PendingEvent { properties, .. })
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })
@@ -5637,7 +5638,8 @@ pub(in crate::mapi) fn delete_mapi_properties(
             }
             Ok(())
         }
-        Some(MapiObject::PendingContact { properties, .. })
+        Some(MapiObject::PendingAssociatedMessage { properties, .. })
+        | Some(MapiObject::PendingContact { properties, .. })
         | Some(MapiObject::PendingEvent { properties, .. })
         | Some(MapiObject::PendingTask { properties, .. })
         | Some(MapiObject::PendingNote { properties, .. })

@@ -1180,6 +1180,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::RecoverableItem { .. } => "recoverable_item",
         MapiObject::PublicFolderItem { .. } => "public_folder_item",
         MapiObject::PendingMessage { .. } => "pending_message",
+        MapiObject::PendingAssociatedMessage { .. } => "pending_associated_message",
         MapiObject::PendingContact { .. } => "pending_contact",
         MapiObject::PendingEvent { .. } => "pending_event",
         MapiObject::PendingTask { .. } => "pending_task",

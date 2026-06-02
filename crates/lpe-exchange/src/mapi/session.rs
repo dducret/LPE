@@ -171,6 +171,10 @@ pub(in crate::mapi) enum MapiObject {
         properties: HashMap<u32, MapiValue>,
         recipients: Vec<PendingRecipient>,
     },
+    PendingAssociatedMessage {
+        folder_id: u64,
+        properties: HashMap<u32, MapiValue>,
+    },
     PendingContact {
         folder_id: u64,
         properties: HashMap<u32, MapiValue>,
@@ -966,6 +970,7 @@ impl MapiObject {
             | MapiObject::RecoverableItem { folder_id, .. }
             | MapiObject::PublicFolderItem { folder_id, .. }
             | MapiObject::PendingMessage { folder_id, .. }
+            | MapiObject::PendingAssociatedMessage { folder_id, .. }
             | MapiObject::PendingContact { folder_id, .. }
             | MapiObject::PendingEvent { folder_id, .. }
             | MapiObject::PendingTask { folder_id, .. }

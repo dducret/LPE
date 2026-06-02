@@ -1855,6 +1855,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::RecoverableItem { .. }) => "recoverable_item",
         Some(MapiObject::PublicFolderItem { .. }) => "public_folder_item",
         Some(MapiObject::PendingMessage { .. }) => "pending_message",
+        Some(MapiObject::PendingAssociatedMessage { .. }) => "pending_associated_message",
         Some(MapiObject::PendingContact { .. }) => "pending_contact",
         Some(MapiObject::PendingEvent { .. }) => "pending_event",
         Some(MapiObject::PendingTask { .. }) => "pending_task",
@@ -5547,51 +5548,62 @@ where
                     continue;
                 }
 
-                let pending_object = match snapshot
-                    .collaboration_folder_for_id(folder_id)
-                    .map(|folder| folder.kind)
-                {
-                    Some(MapiCollaborationFolderKind::Contacts) => MapiObject::PendingContact {
+                let pending_object = if request.create_message_associated()
+                    && !matches!(
+                        folder_id,
+                        COMMON_VIEWS_FOLDER_ID | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+                    ) {
+                    MapiObject::PendingAssociatedMessage {
                         folder_id,
                         properties: HashMap::new(),
-                    },
-                    Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
-                        folder_id,
-                        properties: HashMap::new(),
-                    },
-                    None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
-                        folder_id,
-                        properties: HashMap::new(),
-                    },
-                    Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
-                        folder_id,
-                        properties: HashMap::new(),
-                    },
-                    _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
-                        folder_id,
-                        properties: HashMap::new(),
-                    },
-                    _ if folder_id == JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
-                        folder_id,
-                        properties: HashMap::new(),
-                    },
-                    _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
-                        MapiObject::PendingConversationAction {
+                    }
+                } else {
+                    match snapshot
+                        .collaboration_folder_for_id(folder_id)
+                        .map(|folder| folder.kind)
+                    {
+                        Some(MapiCollaborationFolderKind::Contacts) => MapiObject::PendingContact {
                             folder_id,
                             properties: HashMap::new(),
-                        }
-                    }
-                    _ if folder_id == COMMON_VIEWS_FOLDER_ID => {
-                        MapiObject::PendingNavigationShortcut {
+                        },
+                        Some(MapiCollaborationFolderKind::Calendar) => MapiObject::PendingEvent {
                             folder_id,
                             properties: HashMap::new(),
+                        },
+                        None if folder_id == CALENDAR_FOLDER_ID => MapiObject::PendingEvent {
+                            folder_id,
+                            properties: HashMap::new(),
+                        },
+                        Some(MapiCollaborationFolderKind::Task) => MapiObject::PendingTask {
+                            folder_id,
+                            properties: HashMap::new(),
+                        },
+                        _ if folder_id == NOTES_FOLDER_ID => MapiObject::PendingNote {
+                            folder_id,
+                            properties: HashMap::new(),
+                        },
+                        _ if folder_id == JOURNAL_FOLDER_ID => MapiObject::PendingJournalEntry {
+                            folder_id,
+                            properties: HashMap::new(),
+                        },
+                        _ if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID => {
+                            MapiObject::PendingConversationAction {
+                                folder_id,
+                                properties: HashMap::new(),
+                            }
                         }
+                        _ if folder_id == COMMON_VIEWS_FOLDER_ID => {
+                            MapiObject::PendingNavigationShortcut {
+                                folder_id,
+                                properties: HashMap::new(),
+                            }
+                        }
+                        _ => MapiObject::PendingMessage {
+                            folder_id,
+                            properties: HashMap::new(),
+                            recipients: Vec::new(),
+                        },
                     }
-                    _ => MapiObject::PendingMessage {
-                        folder_id,
-                        properties: HashMap::new(),
-                        recipients: Vec::new(),
-                    },
                 };
                 let handle =
                     session.allocate_output_handle(request.output_handle_index, pending_object);
@@ -6439,6 +6451,31 @@ where
                         ));
                         continue;
                     }
+                    Some(MapiObject::PendingAssociatedMessage {
+                        folder_id,
+                        properties,
+                    }) => {
+                        let message_id = transient_associated_message_id(folder_id, &properties);
+                        session.handles.insert(
+                            handle,
+                            MapiObject::Message {
+                                folder_id,
+                                message_id,
+                            },
+                        );
+                        record_sync_upload_content_change(
+                            session,
+                            folder_id,
+                            message_id,
+                            mapi_mailstore::change_number_for_store_id(message_id),
+                            true,
+                            false,
+                        );
+                        responses.extend_from_slice(&rop_save_changes_message_response(
+                            &request, message_id,
+                        ));
+                        continue;
+                    }
                     Some(MapiObject::PublicFolderItem {
                         folder_id,
                         item_id,
@@ -6595,6 +6632,20 @@ where
                     continue;
                 };
                 if pending_message_is_sync_metadata_only(&properties, &recipients) {
+                    if folder_id == TRASH_FOLDER_ID {
+                        let message_id = transient_associated_message_id(folder_id, &properties);
+                        session.handles.insert(
+                            handle,
+                            MapiObject::Message {
+                                folder_id,
+                                message_id,
+                            },
+                        );
+                        responses.extend_from_slice(&rop_save_changes_message_response(
+                            &request, message_id,
+                        ));
+                        continue;
+                    }
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -10971,6 +11022,20 @@ where
                     }
                     continue;
                 }
+                if import_flag & 0x10 != 0 {
+                    let pending_object = MapiObject::PendingAssociatedMessage {
+                        folder_id,
+                        properties: property_values.into_iter().collect(),
+                    };
+                    let handle =
+                        session.allocate_output_handle(request.output_handle_index, pending_object);
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_message_change_response(&request),
+                    );
+                    output_handles.push(handle);
+                    continue;
+                }
                 if message_id != 0
                     && message_for_id(folder_id, message_id, mailboxes, emails).is_some()
                 {
@@ -11230,12 +11295,14 @@ where
                     continue;
                 }
 
+                let parent_id =
+                    imported_hierarchy_parent_mailbox_id(&hierarchy_values, _folder_id, mailboxes);
                 match store
                     .create_jmap_mailbox(
                         JmapMailboxCreateInput {
                             account_id: principal.account_id,
                             name: display_name.clone(),
-                            parent_id: None,
+                            parent_id,
                             sort_order: None,
                             is_subscribed: true,
                         },
@@ -11298,6 +11365,9 @@ where
                 let mut partial_completion = false;
                 let hard_delete = request.import_delete_hard_delete();
                 for message_id in request.import_delete_message_ids() {
+                    if transient_client_local_message_id(message_id) {
+                        continue;
+                    }
                     if let Some(note) = snapshot.note_for_id(folder_id, message_id) {
                         if store
                             .delete_mapi_note(principal.account_id, note.canonical_id)
@@ -11507,11 +11577,21 @@ where
                 }
             }
             Some(RopId::SynchronizationImportReadStateChanges) => {
-                let folder_id = input_object(session, &handle_slots, &request)
-                    .and_then(MapiObject::folder_id)
-                    .unwrap_or(INBOX_FOLDER_ID);
+                let Some(folder_id) =
+                    input_object(session, &handle_slots, &request).and_then(MapiObject::folder_id)
+                else {
+                    responses.extend_from_slice(&rop_error_response(
+                        0x80,
+                        request.response_handle_index(),
+                        0x8004_010F,
+                    ));
+                    continue;
+                };
                 let mut partial_completion = false;
                 for (message_id, unread) in request.import_read_state_changes() {
+                    if transient_client_local_message_id(message_id) {
+                        continue;
+                    }
                     let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
                     else {
                         partial_completion = true;
@@ -12868,6 +12948,7 @@ fn first_fast_transfer_marker(request: &RopRequest) -> Option<u32> {
 fn fast_transfer_destination_target_folder_id(object: &MapiObject) -> Option<u64> {
     match object {
         MapiObject::PendingMessage { folder_id, .. }
+        | MapiObject::PendingAssociatedMessage { folder_id, .. }
         | MapiObject::PendingContact { folder_id, .. }
         | MapiObject::PendingEvent { folder_id, .. }
         | MapiObject::PendingTask { folder_id, .. }
@@ -12918,6 +12999,7 @@ fn apply_fast_transfer_destination_properties(
 ) -> Option<()> {
     let properties = match session.handles.get_mut(&target_handle)? {
         MapiObject::PendingMessage { properties, .. }
+        | MapiObject::PendingAssociatedMessage { properties, .. }
         | MapiObject::PendingContact { properties, .. }
         | MapiObject::PendingEvent { properties, .. }
         | MapiObject::PendingTask { properties, .. }
@@ -13300,6 +13382,54 @@ fn pending_message_is_sync_metadata_only(
                     | PID_TAG_CHANGE_KEY
                     | PID_TAG_PREDECESSOR_CHANGE_LIST
             )
+        })
+}
+
+fn transient_associated_message_id(folder_id: u64, properties: &HashMap<u32, MapiValue>) -> u64 {
+    imported_message_source_key(properties)
+        .as_deref()
+        .and_then(source_key_global_counter)
+        .map(crate::mapi::identity::mapi_store_id)
+        .unwrap_or_else(|| {
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER.saturating_add(
+                    crate::mapi::identity::global_counter_from_store_id(folder_id).unwrap_or(1),
+                ),
+            )
+        })
+}
+
+fn transient_client_local_message_id(message_id: u64) -> bool {
+    crate::mapi::identity::global_counter_from_store_id(message_id)
+        .is_some_and(|counter| counter > crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER)
+}
+
+fn imported_hierarchy_parent_mailbox_id(
+    hierarchy_values: &[(u32, MapiValue)],
+    collector_folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> Option<Uuid> {
+    hierarchy_values
+        .iter()
+        .find_map(|(tag, value)| match (tag, value) {
+            (tag, MapiValue::Binary(bytes)) if *tag == PID_TAG_PARENT_SOURCE_KEY => {
+                Some(bytes.as_slice())
+            }
+            _ => None,
+        })
+        .and_then(|parent_source_key| {
+            mailboxes
+                .iter()
+                .find(|mailbox| {
+                    mapi_mailstore::source_key_for_mailbox_folder(mailbox) == parent_source_key
+                })
+                .map(|mailbox| mailbox.id)
+        })
+        .or_else(|| {
+            mailboxes
+                .iter()
+                .find(|mailbox| mapi_folder_id(mailbox) == collector_folder_id)
+                .map(|mailbox| mailbox.id)
         })
 }
 

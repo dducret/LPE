@@ -26159,7 +26159,7 @@ async fn mapi_over_http_save_message_replaces_out_of_range_import_source_key() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_save_message_rejects_sync_metadata_only_import() {
+async fn mapi_over_http_save_message_acknowledges_trash_sync_metadata_only_import() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -26222,11 +26222,8 @@ async fn mapi_over_http_save_message_rejects_sync_metadata_only_import() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
     assert!(contains_bytes(
-        &response_rops,
-        &[0x0C, 0x01, 0x02, 0x01, 0x04, 0x80]
-    ));
-    assert!(!contains_bytes(
         &response_rops,
         &mapi_wire_id_bytes(out_of_range_object_id)
     ));
@@ -26236,6 +26233,157 @@ async fn mapi_over_http_save_message_rejects_sync_metadata_only_import() {
         .unwrap()
         .values()
         .any(|object_id| *object_id == out_of_range_object_id));
+}
+
+#[tokio::test]
+async fn mapi_over_http_associated_message_uploads_do_not_create_visible_items() {
+    let inbox_id = Uuid::parse_str("55555555-5555-4555-9555-555555555501").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &inbox_id.to_string(),
+            "inbox",
+            "Inbox",
+        )])),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+
+    let mut inbox_values = Vec::new();
+    append_mapi_utf16_property(&mut inbox_values, 0x001A_001F, "IPM.Configuration");
+    append_mapi_utf16_property(&mut inbox_values, PID_TAG_SUBJECT_W, "Outlook view state");
+    let mut inbox_rops = Vec::new();
+    append_rop_create_associated_message(&mut inbox_rops, 0, 1, test_mapi_folder_id(5));
+    append_rop_set_properties(&mut inbox_rops, 1, 2, &inbox_values);
+    append_rop_save_changes_message(&mut inbox_rops, 1, 1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&inbox_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert_eq!(imported_emails.lock().unwrap().len(), 0);
+
+    renew_mapi_request_id(&mut execute_headers);
+    let mut calendar_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut calendar_values,
+        0x001A_001F,
+        "IPM.Configuration.Calendar",
+    );
+    append_mapi_utf16_property(
+        &mut calendar_values,
+        PID_TAG_SUBJECT_W,
+        "Calendar view state",
+    );
+    let mut calendar_rops = Vec::new();
+    append_rop_create_associated_message(
+        &mut calendar_rops,
+        0,
+        1,
+        crate::mapi::identity::CALENDAR_FOLDER_ID,
+    );
+    append_rop_set_properties(&mut calendar_rops, 1, 2, &calendar_values);
+    append_rop_save_changes_message(&mut calendar_rops, 1, 1);
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&calendar_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_associated_message_does_not_create_visible_item() {
+    let out_of_range_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 42,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let imported_emails = store.imported_emails.clone();
+    let events = store.events.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut property_values = Vec::new();
+    append_mapi_binary_property(
+        &mut property_values,
+        PID_TAG_SOURCE_KEY,
+        &crate::mapi::identity::source_key_for_object_id(out_of_range_object_id),
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Configuration.Calendar",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "Calendar sync view state",
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+        0x72, 0x00, 0x02, 0x03, // RopSynchronizationImportMessageChange
+    ]);
+    rops.push(0x10);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&property_values);
+    rops.extend_from_slice(&[0x0C, 0x00, 0x01, 0x03, 0x00]);
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x72, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x0C, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &mapi_wire_id_bytes(out_of_range_object_id)
+    ));
+    assert!(imported_emails.lock().unwrap().is_empty());
+    assert!(events.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -26528,6 +26676,159 @@ async fn mapi_over_http_sync_import_delete_and_read_state_use_canonical_store() 
 }
 
 #[tokio::test]
+async fn mapi_over_http_sync_import_read_state_requires_valid_handle() {
+    let message_id = "42424242-4242-4242-4242-424242424250";
+    let mut email = FakeStore::email(
+        message_id,
+        "55555555-5555-5555-5555-555555555555",
+        "inbox",
+        "Read import invalid handle",
+    );
+    email.unread = true;
+    let emails = Arc::new(Mutex::new(vec![email]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-5555-5555-555555555555",
+            "inbox",
+            "Inbox",
+        )])),
+        emails: emails.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![
+        0x80, 0x00, 0x02, // RopSynchronizationImportReadStateChanges, invalid input handle 2
+    ];
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, test_mapi_message_id(message_id));
+    rops.push(1);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x80, 0x02, 0x0F, 0x01, 0x04, 0x80]
+    ));
+    assert!(emails.lock().unwrap()[0].unread);
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_delete_ignores_transient_trash_artifact() {
+    let out_of_range_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 43,
+    );
+    let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            &trash_id.to_string(),
+            "trash",
+            "Deleted Items",
+        )])),
+        ..Default::default()
+    };
+    let deleted_emails = store.deleted_emails.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::TRASH_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+        0x74, 0x00, 0x02, // RopSynchronizationImportDeletes
+        0x02,
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, out_of_range_object_id);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 0]));
+    assert!(deleted_emails.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapi_over_http_sync_import_read_state_ignores_transient_associated_artifact() {
+    let out_of_range_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 44,
+    );
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        calendar_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "calendar", "Calendar",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::CALENDAR_FOLDER_ID);
+    rops.extend_from_slice(&[
+        0x7E, 0x00, 0x01, 0x02, 0x01, // RopSynchronizationOpenCollector
+        0x80, 0x00, 0x02, // RopSynchronizationImportReadStateChanges
+    ]);
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    append_mapi_wire_id(&mut rops, out_of_range_object_id);
+    rops.push(1);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x80, 0x02, 0, 0, 0, 0, 0]));
+}
+
+#[tokio::test]
 async fn mapi_over_http_sync_import_hard_delete_reports_partial_when_retention_blocks_delete() {
     let message_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
     let inbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
@@ -26803,15 +27104,22 @@ async fn mapi_over_http_sync_import_move_uses_canonical_store() {
 
 #[tokio::test]
 async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox() {
+    let parent_id = Uuid::parse_str("99999999-9999-4999-9999-999999999999").unwrap();
+    let parent_folder_id = test_mapi_folder_id(0x1999);
+    crate::mapi::identity::remember_mapi_identity(parent_id, parent_folder_id);
     let store = FakeStore {
         session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            "55555555-5555-5555-5555-555555555555",
-            "inbox",
-            "Inbox",
-        )])),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox"),
+            FakeStore::mailbox(&parent_id.to_string(), "custom", "Projects"),
+        ])),
         ..Default::default()
     };
+    store
+        .mapi_identities
+        .lock()
+        .unwrap()
+        .insert(parent_id, parent_folder_id);
     let created_mailboxes = store.created_mailboxes.clone();
     let service = ExchangeService::new(store);
     let connect = service
@@ -26830,7 +27138,11 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
         .to_string();
 
     let mut hierarchy_values = Vec::new();
-    append_mapi_binary_property(&mut hierarchy_values, 0x65E1_0102, &[]);
+    append_mapi_binary_property(
+        &mut hierarchy_values,
+        0x65E1_0102,
+        &mapi_mailstore::source_key_for_store_id(parent_folder_id),
+    );
     append_mapi_binary_property(
         &mut hierarchy_values,
         0x65E0_0102,
@@ -26872,6 +27184,10 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
     assert_eq!(
         created_mailboxes.lock().unwrap()[0].name,
         "Imported Sync Folder"
+    );
+    assert_eq!(
+        created_mailboxes.lock().unwrap()[0].parent_id,
+        Some(parent_id)
     );
 }
 
