@@ -1942,363 +1942,8 @@ async fn pull_subscription_get_events_and_unsubscribe_return_status_flow() {
 }
 
 #[tokio::test]
-async fn pull_subscription_get_events_returns_created_for_empty_watermarked_mailbox() {
+async fn pull_subscription_get_events_does_not_synthesize_mailbox_events() {
     let mailbox_id = "12121212-1212-1212-1212-121212121212";
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            mailbox_id, "inbox", "Inbox",
-        )])),
-        ..Default::default()
-    };
-    let service = ExchangeService::new(store);
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"
-            <s:Envelope>
-              <s:Body>
-                <m:Subscribe>
-                  <m:PullSubscriptionRequest>
-                    <t:FolderIds><t:DistinguishedFolderId Id="inbox"/></t:FolderIds>
-                    <t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes>
-                    <t:Timeout>10</t:Timeout>
-                  </m:PullSubscriptionRequest>
-                </m:Subscribe>
-              </s:Body>
-            </s:Envelope>
-            "#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    let subscription_id = body
-        .split("<m:SubscriptionId>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:SubscriptionId>").next())
-        .unwrap()
-        .to_string();
-    let watermark = body
-        .split("<m:Watermark>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:Watermark>").next())
-        .unwrap()
-        .to_string();
-
-    let request = format!(
-        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
-    );
-    let response = service
-        .handle(&bearer_headers(), request.as_bytes())
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<m:GetEventsResponse>"));
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:CreatedEvent>"));
-    assert!(!body.contains("<t:StatusEvent>"));
-    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
-    assert!(body.contains("ChangeKey=\"notification\""));
-}
-
-#[tokio::test]
-async fn pull_subscription_get_events_returns_queued_create_after_subscribe() {
-    let mailbox_id = "55555555-5555-5555-5555-555555555555";
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            mailbox_id, "inbox", "Inbox",
-        )])),
-        ..Default::default()
-    };
-    let service = ExchangeService::new(store);
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"
-            <s:Envelope>
-              <s:Body>
-                <m:Subscribe>
-                  <m:PullSubscriptionRequest>
-                    <t:FolderIds><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:FolderIds>
-                    <t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes>
-                    <t:Timeout>10</t:Timeout>
-                  </m:PullSubscriptionRequest>
-                </m:Subscribe>
-              </s:Body>
-            </s:Envelope>
-            "#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    let subscription_id = body
-        .split("<m:SubscriptionId>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:SubscriptionId>").next())
-        .unwrap()
-        .to_string();
-    let watermark = body
-        .split("<m:Watermark>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:Watermark>").next())
-        .unwrap()
-        .to_string();
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"
-            <s:Envelope>
-              <s:Body>
-                <m:CreateItem MessageDisposition="SaveOnly">
-                  <m:SavedItemFolderId><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></m:SavedItemFolderId>
-                  <m:Items><t:Message><t:Subject>RCA pull create</t:Subject></t:Message></m:Items>
-                </m:CreateItem>
-              </s:Body>
-            </s:Envelope>
-            "#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-
-    let request = format!(
-        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
-    );
-    let response = service
-        .handle(&bearer_headers(), request.as_bytes())
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<t:CreatedEvent>"));
-    assert!(body.contains("<t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\""));
-    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
-    assert!(!body.contains("<t:StatusEvent>"));
-}
-
-#[tokio::test]
-async fn pull_subscription_get_events_returns_queued_delete_after_subscribe() {
-    let mailbox_id = "66666666-6666-6666-6666-666666666666";
-    let message_id = "77777777-7777-7777-7777-777777777777";
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            mailbox_id, "inbox", "Inbox",
-        )])),
-        emails: Arc::new(Mutex::new(vec![FakeStore::email(
-            message_id,
-            mailbox_id,
-            "inbox",
-            "RCA pull delete",
-        )])),
-        ..Default::default()
-    };
-    let service = ExchangeService::new(store);
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"
-            <s:Envelope>
-              <s:Body>
-                <m:Subscribe>
-                  <m:PullSubscriptionRequest>
-                    <t:FolderIds><t:FolderId Id="mailbox:66666666-6666-6666-6666-666666666666"/></t:FolderIds>
-                    <t:EventTypes><t:EventType>DeletedEvent</t:EventType></t:EventTypes>
-                    <t:Timeout>10</t:Timeout>
-                  </m:PullSubscriptionRequest>
-                </m:Subscribe>
-              </s:Body>
-            </s:Envelope>
-            "#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    let subscription_id = body
-        .split("<m:SubscriptionId>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:SubscriptionId>").next())
-        .unwrap()
-        .to_string();
-    let watermark = body
-        .split("<m:Watermark>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:Watermark>").next())
-        .unwrap()
-        .to_string();
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="message:77777777-7777-7777-7777-777777777777"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-
-    let request = format!(
-        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
-    );
-    let response = service
-        .handle(&bearer_headers(), request.as_bytes())
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<t:DeletedEvent>"));
-    assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
-    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
-    assert!(!body.contains("<t:StatusEvent>"));
-}
-
-#[tokio::test]
-async fn pull_subscription_watermark_replays_delete_after_resubscribe() {
-    let mailbox_id = "88888888-8888-8888-8888-888888888888";
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
-            mailbox_id, "inbox", "Inbox",
-        )])),
-        ..Default::default()
-    };
-    let service = ExchangeService::new(store);
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"
-            <s:Envelope>
-              <s:Body>
-                <m:Subscribe>
-                  <m:PullSubscriptionRequest>
-                    <t:FolderIds><t:FolderId Id="mailbox:88888888-8888-8888-8888-888888888888"/></t:FolderIds>
-                    <t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes>
-                    <t:Timeout>10</t:Timeout>
-                  </m:PullSubscriptionRequest>
-                </m:Subscribe>
-              </s:Body>
-            </s:Envelope>
-            "#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    let subscription_id = body
-        .split("<m:SubscriptionId>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:SubscriptionId>").next())
-        .unwrap()
-        .to_string();
-    let watermark = body
-        .split("<m:Watermark>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:Watermark>").next())
-        .unwrap()
-        .to_string();
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"
-            <s:Envelope>
-              <s:Body>
-                <m:CreateItem MessageDisposition="SaveOnly">
-                  <m:SavedItemFolderId><t:FolderId Id="mailbox:88888888-8888-8888-8888-888888888888"/></m:SavedItemFolderId>
-                  <m:Items><t:Message><t:Subject>RCA replay delete</t:Subject></t:Message></m:Items>
-                </m:CreateItem>
-              </s:Body>
-            </s:Envelope>
-            "#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-
-    let request = format!(
-        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
-    );
-    let response = service
-        .handle(&bearer_headers(), request.as_bytes())
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<t:CreatedEvent>"));
-    let created_watermark = body
-        .split("<t:CreatedEvent>")
-        .nth(1)
-        .and_then(|rest| rest.split("<t:Watermark>").nth(1))
-        .and_then(|rest| rest.split("</t:Watermark>").next())
-        .unwrap()
-        .to_string();
-
-    let response = service
-        .handle(
-            &bearer_headers(),
-            br#"<s:Envelope><s:Body><m:DeleteItem DeleteType="HardDelete"><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:DeleteItem></s:Body></s:Envelope>"#,
-        )
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-
-    let subscribe = format!(
-        r#"
-        <s:Envelope>
-          <s:Body>
-            <m:Subscribe>
-              <m:PullSubscriptionRequest>
-                <t:FolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></t:FolderIds>
-                <t:EventTypes><t:EventType>DeletedEvent</t:EventType></t:EventTypes>
-                <t:Watermark>{created_watermark}</t:Watermark>
-                <t:Timeout>10</t:Timeout>
-              </m:PullSubscriptionRequest>
-            </m:Subscribe>
-          </s:Body>
-        </s:Envelope>
-        "#
-    );
-    let response = service
-        .handle(&bearer_headers(), subscribe.as_bytes())
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    let replay_subscription_id = body
-        .split("<m:SubscriptionId>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:SubscriptionId>").next())
-        .unwrap()
-        .to_string();
-    let replay_watermark = body
-        .split("<m:Watermark>")
-        .nth(1)
-        .and_then(|rest| rest.split("</m:Watermark>").next())
-        .unwrap()
-        .to_string();
-    assert_eq!(replay_watermark, created_watermark);
-
-    let request = format!(
-        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{replay_subscription_id}</m:SubscriptionId><m:Watermark>{replay_watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
-    );
-    let response = service
-        .handle(&bearer_headers(), request.as_bytes())
-        .await
-        .unwrap();
-    let body = response_text(response).await;
-    assert!(body.contains("<t:DeletedEvent>"));
-    assert!(body.contains("<t:ItemId Id=\"message:99999999-9999-9999-9999-999999999999\""));
-    assert!(!body.contains("<t:CreatedEvent>"));
-}
-
-#[tokio::test]
-async fn pull_subscription_get_events_returns_new_mail_for_watermarked_mailbox() {
-    let mailbox_id = "13131313-1313-1313-1313-131313131313";
     let message_id = "14141414-1414-1414-1414-141414141414";
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2324,7 +1969,7 @@ async fn pull_subscription_get_events_returns_new_mail_for_watermarked_mailbox()
                 <m:Subscribe>
                   <m:PullSubscriptionRequest>
                     <t:FolderIds><t:DistinguishedFolderId Id="inbox"/></t:FolderIds>
-                    <t:EventTypes><t:EventType>NewMailEvent</t:EventType></t:EventTypes>
+                    <t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes>
                     <t:Timeout>10</t:Timeout>
                   </m:PullSubscriptionRequest>
                 </m:Subscribe>
@@ -2358,10 +2003,191 @@ async fn pull_subscription_get_events_returns_new_mail_for_watermarked_mailbox()
     let body = response_text(response).await;
     assert!(body.contains("<m:GetEventsResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
-    assert!(body.contains("<t:CreatedEvent>"));
+    assert!(body.contains("<t:StatusEvent>"));
+    assert!(!body.contains("<t:CreatedEvent>"));
+    assert!(!body.contains("<t:NewMailEvent>"));
+    assert!(!body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
+}
+
+#[tokio::test]
+async fn pull_subscription_get_events_replays_canonical_changes_after_restart() {
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let mailbox_uuid = Uuid::parse_str(mailbox_id).unwrap();
+    let mapi_notification_cursor = Arc::new(Mutex::new(Some(7)));
+    let mapi_notification_polls = Arc::new(Mutex::new(vec![MapiNotificationPoll {
+        event_pending: true,
+        cursor: Some(8),
+        events: vec![MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            1,
+            1,
+            Some(2),
+            None,
+            8,
+            9,
+            None,
+            None,
+            "created".to_string(),
+            Some("Inbox".to_string()),
+            None,
+            Some("RCA pull create".to_string()),
+        )
+        .with_canonical_ids(Some(mailbox_uuid), Some(message_id))],
+    }]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        mapi_notification_cursor: mapi_notification_cursor.clone(),
+        mapi_notification_polls: mapi_notification_polls.clone(),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:Subscribe>
+                  <m:PullSubscriptionRequest>
+                    <t:FolderIds><t:FolderId Id="mailbox:55555555-5555-5555-5555-555555555555"/></t:FolderIds>
+                    <t:EventTypes><t:EventType>CreatedEvent</t:EventType></t:EventTypes>
+                    <t:Timeout>10</t:Timeout>
+                  </m:PullSubscriptionRequest>
+                </m:Subscribe>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let subscription_id = test_xml_text(&body, "SubscriptionId").unwrap();
+    let watermark = test_xml_text(&body, "Watermark").unwrap();
+    assert!(watermark.ends_with(":7"));
+
+    let restarted_service = ExchangeService::new(store);
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+    );
+    let response = restarted_service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
     assert!(body.contains("<t:NewMailEvent>"));
     assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
     assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
+    assert!(!body.contains("<t:StatusEvent>"));
+    assert!(mapi_notification_polls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn pull_subscription_get_events_replays_canonical_delete() {
+    let mailbox_id = "66666666-6666-6666-6666-666666666666";
+    let message_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+    let mailbox_uuid = Uuid::parse_str(mailbox_id).unwrap();
+    let mapi_notification_polls = Arc::new(Mutex::new(vec![MapiNotificationPoll {
+        event_pending: true,
+        cursor: Some(4),
+        events: vec![MapiNotificationEvent::canonical(
+            MapiNotificationKind::Content,
+            1,
+            1,
+            Some(2),
+            None,
+            4,
+            5,
+            None,
+            None,
+            "deleted".to_string(),
+            Some("Inbox".to_string()),
+            None,
+            Some("RCA pull delete".to_string()),
+        )
+        .with_canonical_ids(Some(mailbox_uuid), Some(message_id))],
+    }]));
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        mapi_notification_cursor: Arc::new(Mutex::new(Some(3))),
+        mapi_notification_polls,
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope>
+              <s:Body>
+                <m:Subscribe>
+                  <m:PullSubscriptionRequest>
+                    <t:FolderIds><t:FolderId Id="mailbox:66666666-6666-6666-6666-666666666666"/></t:FolderIds>
+                    <t:EventTypes><t:EventType>DeletedEvent</t:EventType></t:EventTypes>
+                    <t:Timeout>10</t:Timeout>
+                  </m:PullSubscriptionRequest>
+                </m:Subscribe>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    let subscription_id = test_xml_text(&body, "SubscriptionId").unwrap();
+    let watermark = test_xml_text(&body, "Watermark").unwrap();
+
+    let request = format!(
+        r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>{watermark}</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+    );
+    let response = service
+        .handle(&bearer_headers(), request.as_bytes())
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:DeletedEvent>"));
+    assert!(body.contains(&format!("<t:ItemId Id=\"message:{message_id}\"")));
+    assert!(body.contains(&format!("<t:ParentFolderId Id=\"mailbox:{mailbox_id}\"")));
+    assert!(!body.contains("<t:StatusEvent>"));
+}
+
+#[tokio::test]
+async fn pull_subscription_expired_watermark_returns_parseable_error() {
+    let mailbox_id = "88888888-8888-8888-8888-888888888888";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            mailbox_id, "inbox", "Inbox",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let subscription_id = "00000000-0000-4000-8000-000000000888";
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:GetEvents><m:SubscriptionId>{subscription_id}</m:SubscriptionId><m:Watermark>lpe:{subscription_id}:all:99</m:Watermark></m:GetEvents></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetEventsResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidWatermark</m:ResponseCode>"));
+    assert!(body.contains("canonical change-log retention"));
 }
 
 #[tokio::test]
