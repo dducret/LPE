@@ -33818,6 +33818,33 @@ async fn mapi_over_http_store_get_properties_list_advertises_calendar_default_en
 }
 
 #[tokio::test]
+async fn mapi_over_http_store_get_properties_specific_returns_calendar_default_entry_id() {
+    let mut rops = vec![0xFE, 0x00, 0x00, 0x01]; // Private-mailbox RopLogon.
+    let legacy_dn = format!(
+        "/o=LPE/ou=Exchange Administrative Group/cn=Recipients/cn={}\0",
+        FakeStore::account().email
+    );
+    rops.extend_from_slice(&0x0100_0004u32.to_le_bytes());
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.extend_from_slice(&(legacy_dn.len() as u16).to_le_bytes());
+    rops.extend_from_slice(legacy_dn.as_bytes());
+    append_rop_get_properties_specific(&mut rops, 1, &[0x36D0_0102]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[u32::MAX, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
+    mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("store Calendar default EntryID GetProps should return a standard row");
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap(),
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_root_get_properties_all_lists_calendar_default_entry_id() {
     let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Root.
     append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
@@ -33857,6 +33884,27 @@ async fn mapi_over_http_root_get_properties_list_advertises_calendar_default_ent
 }
 
 #[tokio::test]
+async fn mapi_over_http_root_get_properties_specific_returns_calendar_default_entry_id() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Root.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::ROOT_FOLDER_ID);
+    rops.push(0);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x36D0_0102]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
+    mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("Root Calendar default EntryID GetProps should return a standard row");
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap(),
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_inbox_get_properties_all_lists_calendar_default_entry_id() {
     let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Inbox.
     append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
@@ -33892,6 +33940,27 @@ async fn mapi_over_http_inbox_get_properties_list_advertises_calendar_default_en
     assert!(contains_bytes(
         &response_rops,
         &0x36D0_0102u32.to_le_bytes()
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_inbox_get_properties_specific_returns_calendar_default_entry_id() {
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01]; // RopOpenFolder Inbox.
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::INBOX_FOLDER_ID);
+    rops.push(0);
+    append_rop_get_properties_specific(&mut rops, 1, &[0x36D0_0102]);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x07, 0x01, 0, 0, 0, 0]));
+    mapi_get_properties_specific_standard_row_offset(&response_rops, 1)
+        .expect("Inbox Calendar default EntryID GetProps should return a standard row");
+    assert!(contains_bytes(
+        &response_rops,
+        &crate::mapi::identity::long_term_id_from_object_id(
+            crate::mapi::identity::CALENDAR_FOLDER_ID,
+        )
+        .unwrap(),
     ));
 }
 

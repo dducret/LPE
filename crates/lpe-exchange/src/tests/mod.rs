@@ -6138,6 +6138,25 @@ fn mapi_last_binary_property(bytes: &[u8], property_tag: u32) -> Option<&[u8]> {
     bytes.get(offset + 8..offset + 8 + length as usize)
 }
 
+fn mapi_get_properties_specific_standard_row_offset(
+    bytes: &[u8],
+    handle_index: u8,
+) -> Result<usize, String> {
+    let marker = [0x07, handle_index, 0, 0, 0, 0];
+    let offset = bytes
+        .windows(marker.len())
+        .position(|window| window == marker)
+        .ok_or("missing successful RopGetPropertiesSpecific response")?;
+    match bytes.get(offset + marker.len()) {
+        Some(0) => Ok(offset + marker.len()),
+        Some(1) => Err("RopGetPropertiesSpecific returned flagged property row".to_string()),
+        Some(value) => Err(format!(
+            "RopGetPropertiesSpecific returned unknown property row kind {value:#04x}"
+        )),
+        None => Err("RopGetPropertiesSpecific response is missing property row kind".to_string()),
+    }
+}
+
 fn mapi_sync_manifest_message_state(bytes: &[u8], subject: &str) -> Option<(u32, u32)> {
     let subject = subject.as_bytes();
     let subject_start = bytes

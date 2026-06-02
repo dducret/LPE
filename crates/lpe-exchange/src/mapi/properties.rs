@@ -1084,7 +1084,7 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
     mailbox_guid: Uuid,
 ) -> Option<MapiValue> {
     let property_tag = canonical_property_storage_tag(property_tag);
-    if mailbox.role == "inbox" {
+    if matches!(mapi_folder_id(mailbox), ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
         if let Some(value) =
             special_folder_identification_property_value(mailbox_guid, property_tag)
         {

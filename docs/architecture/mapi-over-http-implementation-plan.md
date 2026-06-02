@@ -762,6 +762,10 @@ whether `RopGetReceiveFolder(IPM.Appointment)` resolves to the Calendar FID, and
 whether the exact hierarchy-table property set requested by Outlook included
 decodeable Calendar `PidTagEntryId`, `PidTagSourceKey`, and `PidTagFolderId`
 values.
+`RopGetPropertiesSpecific` on Root must return the same canonical
+`PidTagIpmAppointmentEntryId` binary value as Inbox; advertising the property in
+Root `GetPropertiesAll` or `GetPropertiesList` is insufficient if the specific
+property read later returns a flagged missing value.
 Outlook client Event Viewer entries such as `WebRequestSemaphore_Open_Error`
 and `FindExtensionForRequestFailed` are not server-visible protocol failures by
 themselves. Server-side RCA must correlate them against LPE Autodiscover and

@@ -2609,7 +2609,7 @@ fn serialize_session_folder_row(
             continue;
         }
 
-        if folder_id == INBOX_FOLDER_ID {
+        if matches!(folder_id, ROOT_FOLDER_ID | INBOX_FOLDER_ID) {
             if let Some(value) =
                 special_folder_identification_property_value(principal.account_id, *column)
             {

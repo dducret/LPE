@@ -778,6 +778,7 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "ADD CONSTRAINT mail_change_log_object_shape_check",
             "ADD CONSTRAINT tombstones_object_shape_check",
             "CREATE INDEX IF NOT EXISTS mail_change_log_recoverable_item_idx",
+            "recoverable_shape_constraint_ok",
             "pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'",
             "pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'",
             "(summary_json ->> 'sourceMailboxMessageId') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'",
