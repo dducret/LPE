@@ -2562,12 +2562,17 @@ async fn send_item_submits_existing_draft_through_canonical_submission() {
     let sent_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000003").unwrap();
     let submitted_draft_messages = Arc::new(Mutex::new(Vec::new()));
     let submitted_messages = Arc::new(Mutex::new(Vec::new()));
-    let emails = Arc::new(Mutex::new(vec![FakeStore::email(
+    let mut draft = FakeStore::email(
         &draft_id.to_string(),
         &drafts_id.to_string(),
         "drafts",
         "Draft to send",
-    )]));
+    );
+    draft.bcc.push(JmapEmailAddress {
+        address: "protected@example.test".to_string(),
+        display_name: Some("Protected Recipient".to_string()),
+    });
+    let emails = Arc::new(Mutex::new(vec![draft]));
     let store = FakeStore {
         session: Some(FakeStore::account()),
         emails: emails.clone(),
@@ -2596,14 +2601,23 @@ async fn send_item_submits_existing_draft_through_canonical_submission() {
     let body = response_text(response).await;
     assert!(body.contains("<m:SendItemResponse>"));
     assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(!body.contains("protected@example.test"));
     assert_eq!(*submitted_draft_messages.lock().unwrap(), vec![draft_id]);
     let submitted = submitted_messages.lock().unwrap();
     assert_eq!(submitted.len(), 1);
     assert_eq!(submitted[0].draft_message_id, Some(draft_id));
     assert_eq!(submitted[0].source, "ews-senditem");
+    assert_eq!(submitted[0].bcc.len(), 1);
+    assert_eq!(submitted[0].bcc[0].address, "protected@example.test");
     let stored = emails.lock().unwrap();
     assert!(!stored.iter().any(|email| email.id == draft_id));
-    assert!(stored.iter().any(|email| email.mailbox_role == "sent"));
+    assert!(stored.iter().any(|email| {
+        email.mailbox_role == "sent"
+            && email
+                .bcc
+                .iter()
+                .any(|recipient| recipient.address == "protected@example.test")
+    }));
     assert!(!stored.iter().any(|email| email.mailbox_role == "outbox"));
 }
 
