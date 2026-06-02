@@ -96,6 +96,285 @@ async fn sync_folder_hierarchy_lists_contact_and_calendar_folders() {
 }
 
 #[tokio::test]
+async fn create_folder_path_creates_nested_mailboxes_and_sync_reports_changes() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body>
+              <m:CreateFolderPath>
+                <m:ParentFolderId><t:DistinguishedFolderId Id="msgfolderroot"/></m:ParentFolderId>
+                <m:RelativeFolderPath>
+                  <t:Folder><t:DisplayName>Projects</t:DisplayName></t:Folder>
+                  <t:Folder><t:DisplayName>RCA Sync</t:DisplayName></t:Folder>
+                </m:RelativeFolderPath>
+              </m:CreateFolderPath>
+            </s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateFolderPathResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:DisplayName>Projects</t:DisplayName>"));
+    assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
+    let created = store.created_mailboxes.lock().unwrap().clone();
+    assert_eq!(created.len(), 2);
+    assert_eq!(created[0].name, "Projects");
+    assert_eq!(created[1].name, "RCA Sync");
+    assert!(created[1].parent_id.is_some());
+    assert_eq!(
+        store
+            .mapi_sync_changes
+            .lock()
+            .unwrap()
+            .changed_mailbox_ids
+            .len(),
+        2
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SyncFolderHierarchy /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<t:DisplayName>Projects</t:DisplayName>"));
+    assert!(body.contains("<t:DisplayName>RCA Sync</t:DisplayName>"));
+}
+
+#[tokio::test]
+async fn copy_move_and_update_folder_use_canonical_mailbox_changes() {
+    let source_id = "11111111-1111-1111-1111-111111111111";
+    let target_id = "22222222-2222-2222-2222-222222222222";
+    let child_id = "33333333-3333-3333-3333-333333333333";
+    let message_id = "99999999-9999-9999-9999-999999999999";
+    let mut child = FakeStore::mailbox(child_id, "custom", "Child");
+    child.parent_id = Some(Uuid::parse_str(source_id).unwrap());
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(source_id, "custom", "Source"),
+            FakeStore::mailbox(target_id, "custom", "Target"),
+            child,
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            message_id,
+            source_id,
+            "custom",
+            "Folder payload",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:CopyFolder><m:ToFolderId><t:FolderId Id="mailbox:{target_id}"/></m:ToFolderId><m:FolderIds><t:FolderId Id="mailbox:{source_id}"/></m:FolderIds></m:CopyFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CopyFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(store.created_mailboxes.lock().unwrap().len(), 2);
+    let copied_emails = store.copied_emails.lock().unwrap().clone();
+    assert_eq!(copied_emails.len(), 1);
+    assert_eq!(copied_emails[0].0, Uuid::parse_str(message_id).unwrap());
+    assert_ne!(copied_emails[0].1, Uuid::parse_str(source_id).unwrap());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:MoveFolder><m:ToFolderId><t:FolderId Id="mailbox:{target_id}"/></m:ToFolderId><m:FolderIds><t:FolderId Id="mailbox:{child_id}"/></m:FolderIds></m:MoveFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MoveFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        store.updated_mailboxes.lock().unwrap()[0].parent_id,
+        Some(Some(Uuid::parse_str(target_id).unwrap()))
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{source_id}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Renamed Source</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateFolderResponse>"));
+    assert!(body.contains("<t:DisplayName>Renamed Source</t:DisplayName>"));
+    assert!(store
+        .mapi_sync_changes
+        .lock()
+        .unwrap()
+        .changed_mailbox_ids
+        .contains(&Uuid::parse_str(source_id).unwrap()));
+}
+
+#[tokio::test]
+async fn empty_folder_deletes_messages_and_subfolders_through_canonical_paths() {
+    let parent_id = "11111111-1111-1111-1111-111111111111";
+    let child_id = "22222222-2222-2222-2222-222222222222";
+    let parent_message_id = "33333333-3333-3333-3333-333333333333";
+    let child_message_id = "44444444-4444-4444-4444-444444444444";
+    let mut child = FakeStore::mailbox(child_id, "custom", "Child");
+    child.parent_id = Some(Uuid::parse_str(parent_id).unwrap());
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(parent_id, "custom", "Parent"),
+            child,
+        ])),
+        emails: Arc::new(Mutex::new(vec![
+            FakeStore::email(parent_message_id, parent_id, "custom", "Parent payload"),
+            FakeStore::email(child_message_id, child_id, "custom", "Child payload"),
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:EmptyFolder DeleteSubFolders="true" DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="mailbox:{parent_id}"/></m:FolderIds></m:EmptyFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:EmptyFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        store.deleted_emails.lock().unwrap().as_slice(),
+        &[
+            Uuid::parse_str(parent_message_id).unwrap(),
+            Uuid::parse_str(child_message_id).unwrap()
+        ]
+    );
+    assert_eq!(
+        store.destroyed_mailboxes.lock().unwrap().as_slice(),
+        &[Uuid::parse_str(child_id).unwrap()]
+    );
+}
+
+#[tokio::test]
+async fn folder_operations_preserve_system_and_public_folder_boundaries() {
+    let inbox_id = "11111111-1111-1111-1111-111111111111";
+    let target_id = "22222222-2222-2222-2222-222222222222";
+    let public_root_id = "aaaaaaaa-1111-1111-1111-111111111111";
+    let public_child_id = "aaaaaaaa-2222-2222-2222-222222222222";
+    let public_item_id = "aaaaaaaa-3333-3333-3333-333333333333";
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(inbox_id, "inbox", "Inbox"),
+            FakeStore::mailbox(target_id, "custom", "Target"),
+        ])),
+        public_folders: Arc::new(Mutex::new(vec![
+            FakeStore::public_folder(public_root_id, None, "Shared"),
+            FakeStore::public_folder(public_child_id, Some(public_root_id), "Team"),
+        ])),
+        public_folder_items: Arc::new(Mutex::new(vec![FakeStore::public_folder_item(
+            public_item_id,
+            public_child_id,
+            "Public payload",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="mailbox:{inbox_id}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Inbox2</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateFolderResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(store.updated_mailboxes.lock().unwrap().is_empty());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:UpdateFolder><m:FolderChanges><t:FolderChange><t:FolderId Id="public-folder:{public_child_id}"/><t:Updates><t:SetFolderField><t:FieldURI FieldURI="folder:DisplayName"/><t:Folder><t:DisplayName>Renamed Team</t:DisplayName></t:Folder></t:SetFolderField></t:Updates></t:FolderChange></m:FolderChanges></m:UpdateFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UpdateFolderResponse>"));
+    assert!(body.contains("<t:DisplayName>Renamed Team</t:DisplayName>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:EmptyFolder DeleteSubFolders="false" DeleteType="HardDelete"><m:FolderIds><t:FolderId Id="public-folder:{public_child_id}"/></m:FolderIds></m:EmptyFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:EmptyFolderResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        store.deleted_public_folder_items.lock().unwrap().as_slice(),
+        &[Uuid::parse_str(public_item_id).unwrap()]
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:MoveFolder><m:ToFolderId><t:FolderId Id="public-folder:{public_root_id}"/></m:ToFolderId><m:FolderIds><t:FolderId Id="public-folder:{public_child_id}"/></m:FolderIds></m:MoveFolder></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MoveFolderResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("canonical public-folder reparenting"));
+}
+
+#[tokio::test]
 async fn get_folder_returns_msgfolderroot() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -1039,7 +1318,7 @@ async fn get_user_availability_returns_suggestions_when_requested() {
 }
 
 #[tokio::test]
-async fn write_operations_return_ews_unsupported_errors() {
+async fn update_folder_requires_supported_change_payload() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         ..Default::default()
@@ -1841,7 +2120,6 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
     for operation in [
         "FindPeople",
         "ExpandDL",
-        "GetDelegate",
         "GetSharingMetadata",
         "GetSharingFolder",
     ] {
@@ -1858,6 +2136,250 @@ async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn delegate_operations_use_canonical_permissions_and_preferences() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Delegate User".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate.clone()])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let add_response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:AddDelegate>
+                  <m:Mailbox><t:EmailAddress>alice@example.test</t:EmailAddress></m:Mailbox>
+                  <m:DelegateUsers>
+                    <t:DelegateUser>
+                      <t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId>
+                      <t:DelegatePermissions>
+                        <t:CalendarFolderPermissionLevel>Editor</t:CalendarFolderPermissionLevel>
+                        <t:InboxFolderPermissionLevel>Reviewer</t:InboxFolderPermissionLevel>
+                      </t:DelegatePermissions>
+                      <t:ReceiveCopiesOfMeetingMessages>true</t:ReceiveCopiesOfMeetingMessages>
+                      <t:ViewPrivateItems>true</t:ViewPrivateItems>
+                    </t:DelegateUser>
+                  </m:DelegateUsers>
+                  <m:DeliverMeetingRequests>DelegatesAndMe</m:DeliverMeetingRequests>
+                </m:AddDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(add_response.status(), StatusCode::OK);
+    let add_body = response_text(add_response).await;
+    assert!(add_body.contains("<m:AddDelegateResponse>"));
+    assert!(add_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(add_body
+        .contains("<t:CalendarFolderPermissionLevel>Editor</t:CalendarFolderPermissionLevel>"));
+    assert!(
+        add_body.contains("<t:InboxFolderPermissionLevel>Reviewer</t:InboxFolderPermissionLevel>")
+    );
+
+    {
+        let delegates = store.ews_delegates.lock().unwrap();
+        let stored = delegates.first().expect("delegate should be stored");
+        assert_eq!(stored.grantee_account_id, delegate.account_id);
+        assert!(stored.inbox_rights.may_read);
+        assert!(!stored.inbox_rights.may_write);
+        assert!(stored.calendar_rights.may_read);
+        assert!(stored.calendar_rights.may_write);
+        assert!(stored.calendar_rights.may_delete);
+        assert!(stored.may_send_on_behalf);
+        assert!(!stored.may_send_as);
+        assert_eq!(
+            stored.preferences.meeting_request_delivery,
+            "delegate_and_owner"
+        );
+        assert!(stored.preferences.receives_meeting_request_copy);
+        assert!(stored.preferences.may_view_private_items);
+    }
+
+    let get_response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:GetDelegate>
+                  <m:Mailbox><t:EmailAddress>alice@example.test</t:EmailAddress></m:Mailbox>
+                  <m:UserIds><t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId></m:UserIds>
+                </m:GetDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let get_body = response_text(get_response).await;
+    assert!(get_body.contains("<m:GetDelegateResponse>"));
+    assert!(get_body.contains("<t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress>"));
+    assert!(get_body.contains("<t:ViewPrivateItems>true</t:ViewPrivateItems>"));
+
+    let update_response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:UpdateDelegate>
+                  <m:DelegateUsers>
+                    <t:DelegateUser>
+                      <t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId>
+                      <t:DelegatePermissions>
+                        <t:CalendarFolderPermissionLevel>Reviewer</t:CalendarFolderPermissionLevel>
+                        <t:InboxFolderPermissionLevel>Editor</t:InboxFolderPermissionLevel>
+                      </t:DelegatePermissions>
+                      <t:ReceiveCopiesOfMeetingMessages>false</t:ReceiveCopiesOfMeetingMessages>
+                      <t:ViewPrivateItems>false</t:ViewPrivateItems>
+                    </t:DelegateUser>
+                  </m:DelegateUsers>
+                  <m:DeliverMeetingRequests>DelegatesOnly</m:DeliverMeetingRequests>
+                </m:UpdateDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let update_body = response_text(update_response).await;
+    assert!(update_body.contains("<m:UpdateDelegateResponse>"));
+    assert!(update_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    {
+        let delegates = store.ews_delegates.lock().unwrap();
+        let stored = delegates.first().expect("delegate should remain stored");
+        assert!(stored.inbox_rights.may_write);
+        assert!(!stored.calendar_rights.may_write);
+        assert_eq!(stored.preferences.meeting_request_delivery, "delegate_only");
+        assert!(!stored.preferences.receives_meeting_request_copy);
+        assert!(!stored.preferences.may_view_private_items);
+    }
+
+    let remove_response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:RemoveDelegate>
+                  <m:UserIds><t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId></m:UserIds>
+                </m:RemoveDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let remove_body = response_text(remove_response).await;
+    assert!(remove_body.contains("<m:RemoveDelegateResponse>"));
+    assert!(remove_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(store.ews_delegates.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn delegate_add_rejects_cross_tenant_delegate() {
+    let other_tenant_delegate = AuthenticatedAccount {
+        tenant_id: Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap(),
+        account_id: Uuid::parse_str("dddddddd-dddd-dddd-dddd-dddddddddddd").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Other Tenant Delegate".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![other_tenant_delegate])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:AddDelegate>
+                  <m:DelegateUsers>
+                    <t:DelegateUser>
+                      <t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId>
+                      <t:DelegatePermissions><t:CalendarFolderPermissionLevel>Reviewer</t:CalendarFolderPermissionLevel></t:DelegatePermissions>
+                    </t:DelegateUser>
+                  </m:DelegateUsers>
+                </m:AddDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:AddDelegateResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(store.ews_delegates.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn delegate_add_rejects_unsupported_exchange_only_permission_shapes() {
+    let delegate = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "delegate@example.test".to_string(),
+        display_name: "Delegate User".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![delegate])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types">
+              <s:Body>
+                <m:AddDelegate>
+                  <m:DelegateUsers>
+                    <t:DelegateUser>
+                      <t:UserId><t:PrimarySmtpAddress>delegate@example.test</t:PrimarySmtpAddress></t:UserId>
+                      <t:DelegatePermissions>
+                        <t:CalendarFolderPermissionLevel>Custom</t:CalendarFolderPermissionLevel>
+                        <t:ContactsFolderPermissionLevel>Editor</t:ContactsFolderPermissionLevel>
+                      </t:DelegatePermissions>
+                    </t:DelegateUser>
+                  </m:DelegateUsers>
+                </m:AddDelegate>
+              </s:Body>
+            </s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:AddDelegateResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("ContactsFolderPermissionLevel") || body.contains("Custom"));
+    assert!(store.ews_delegates.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -2990,6 +3512,57 @@ async fn perform_reminder_action_snoozes_calendar_and_task_canonical_reminders()
 }
 
 #[tokio::test]
+async fn get_mail_tips_projects_directory_and_oof_without_local_tip_state() {
+    let recipient = AuthenticatedAccount {
+        tenant_id: FakeStore::account().tenant_id,
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        email: "bob@example.test".to_string(),
+        display_name: "Bob Recipient".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![recipient])),
+        active_sieve_script: Arc::new(Mutex::new(Some(
+            r#"require ["vacation"]; vacation :days 3 "Back Monday";"#.to_string(),
+        ))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body>
+              <m:GetMailTips>
+                <m:SendingAs><t:EmailAddress>alice@example.test</t:EmailAddress></m:SendingAs>
+                <m:Recipients>
+                  <t:Mailbox><t:EmailAddress>bob@example.test</t:EmailAddress></t:Mailbox>
+                  <t:Mailbox><t:EmailAddress>missing@example.test</t:EmailAddress></t:Mailbox>
+                </m:Recipients>
+                <m:MailTipsRequested>InvalidRecipient OutOfOfficeMessage</m:MailTipsRequested>
+              </m:GetMailTips>
+            </s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetMailTipsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:Name>Bob Recipient</t:Name>"));
+    assert!(body.contains("<t:MailboxType>Mailbox</t:MailboxType>"));
+    assert!(body.contains("<t:Message>Back Monday</t:Message>"));
+    assert!(body.contains("<t:EmailAddress>missing@example.test</t:EmailAddress>"));
+    assert!(body.contains("<t:MailboxType>Unknown</t:MailboxType>"));
+    assert!(body.contains("<t:InvalidRecipient>true</t:InvalidRecipient>"));
+}
+
+#[tokio::test]
 async fn rooms_are_projected_from_canonical_directory_entries() {
     let room_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000031").unwrap();
     let equipment_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-000000000032").unwrap();
@@ -3254,6 +3827,182 @@ async fn set_user_oof_settings_errors_use_single_response_message_shape() {
 }
 
 #[tokio::test]
+async fn convert_id_round_trips_supported_canonical_object_families() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let canonical_ids = [
+        (
+            "AlternateId",
+            "message:99999999-9999-9999-9999-999999999999",
+        ),
+        (
+            "AlternateId",
+            "mailbox:55555555-5555-5555-5555-555555555555",
+        ),
+        (
+            "AlternateId",
+            "contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+        ),
+        ("AlternateId", "event:cccccccc-cccc-cccc-cccc-cccccccccccc"),
+        ("AlternateId", "task:eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+        (
+            "AlternateId",
+            "attachment:99999999-9999-9999-9999-999999999999:abababab-abab-abab-abab-abababababab",
+        ),
+        (
+            "AlternatePublicFolderId",
+            "public-folder:bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
+        ),
+        (
+            "AlternatePublicFolderItemId",
+            "public-folder-item:abababab-abab-abab-abab-abababababab",
+        ),
+    ];
+    let source_ids = canonical_ids
+        .iter()
+        .map(|(element, id)| format!(r#"<t:{element} Format="EwsId" Id="{id}"/>"#))
+        .collect::<String>();
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:ConvertId DestinationFormat="OwaId"><m:SourceIds>{source_ids}</m:SourceIds></m:ConvertId></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ConvertIdResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(
+        body.matches("Format=\"OwaId\"").count(),
+        canonical_ids.len()
+    );
+    assert!(body.contains("<t:AlternatePublicFolderId Format=\"OwaId\""));
+    assert!(body.contains("<t:AlternatePublicFolderItemId Format=\"OwaId\""));
+    assert!(body.contains("LPEEWS1."));
+    for (_, id) in canonical_ids {
+        assert!(!body.contains(&format!("Id=\"{id}\"")));
+    }
+
+    let source_ids = convert_id_response_sources(&body)
+        .into_iter()
+        .map(|(element, format, id)| format!(r#"<t:{element} Format="{format}" Id="{id}"/>"#))
+        .collect::<String>();
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:ConvertId DestinationFormat="EwsId"><m:SourceIds>{source_ids}</m:SourceIds></m:ConvertId></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ConvertIdResponse>"));
+    assert_eq!(
+        body.matches("Format=\"EwsId\"").count(),
+        canonical_ids.len()
+    );
+    for (_, id) in canonical_ids {
+        assert!(body.contains(&format!("Id=\"{id}\"")));
+    }
+}
+
+#[tokio::test]
+async fn convert_id_round_trips_hex_entry_id_attachment_payload() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let attachment_id =
+        "attachment:99999999-9999-9999-9999-999999999999:abababab-abab-abab-abab-abababababab";
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:ConvertId DestinationFormat="HexEntryId"><m:SourceIds><t:AlternateId Format="EwsId" Id="{attachment_id}"/></m:SourceIds></m:ConvertId></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ConvertIdResponse>"));
+    assert!(body.contains("Format=\"HexEntryId\""));
+    let (_, _, hex_id) = convert_id_response_sources(&body)
+        .into_iter()
+        .next()
+        .expect("hex ConvertId response id");
+    assert!(hex_id.chars().all(|value| value.is_ascii_hexdigit()));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:ConvertId DestinationFormat="EwsId"><m:SourceIds><t:AlternateId Format="HexEntryId" Id="{hex_id}"/></m:SourceIds></m:ConvertId></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ConvertIdResponse>"));
+    assert!(body.contains(&format!("Id=\"{attachment_id}\"")));
+}
+
+fn convert_id_response_sources(body: &str) -> Vec<(String, String, String)> {
+    [
+        "AlternateId",
+        "AlternatePublicFolderId",
+        "AlternatePublicFolderItemId",
+    ]
+    .into_iter()
+    .flat_map(|element| {
+        convert_id_response_sources_for_element(body, element)
+            .into_iter()
+            .map(move |(format, id)| (element.to_string(), format, id))
+    })
+    .collect()
+}
+
+fn convert_id_response_sources_for_element(body: &str, element: &str) -> Vec<(String, String)> {
+    let mut values = Vec::new();
+    let mut rest = body;
+    while let Some(index) = rest.find(&format!("<t:{element}")) {
+        rest = &rest[index..];
+        let Some(end) = rest.find('>') else {
+            break;
+        };
+        let tag = &rest[..end];
+        let format = test_attr(tag, "Format").unwrap_or_default();
+        let id = test_attr(tag, "Id").unwrap_or_default();
+        if !format.is_empty() && !id.is_empty() {
+            values.push((format, id));
+        }
+        rest = &rest[end + 1..];
+    }
+    values
+}
+
+fn test_attr(tag: &str, attr: &str) -> Option<String> {
+    let start = tag.find(&format!("{attr}=\""))? + attr.len() + 2;
+    let end = tag[start..].find('"')?;
+    Some(tag[start..start + end].to_string())
+}
+
+#[tokio::test]
 async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -3261,12 +4010,7 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
     };
     let service = ExchangeService::new(store);
 
-    for operation in [
-        "GetMailTips",
-        "ConvertId",
-        "FindConversation",
-        "GetConversationItems",
-    ] {
+    for operation in ["FindConversation", "GetConversationItems"] {
         let request = format!(
             concat!(
                 "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
@@ -5239,6 +5983,91 @@ async fn copy_item_copies_custom_mailbox_message_to_target_folder() {
 }
 
 #[tokio::test]
+async fn mark_all_items_as_read_updates_canonical_mailbox_message_flags() {
+    let mailbox_id = "55555555-5555-5555-5555-555555555555";
+    let other_mailbox_id = "66666666-6666-6666-6666-666666666666";
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let other_message_id = Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap();
+    let mut unread = FakeStore::email(
+        &message_id.to_string(),
+        mailbox_id,
+        "custom",
+        "Unread payload",
+    );
+    unread.unread = true;
+    let mut other = FakeStore::email(
+        &other_message_id.to_string(),
+        other_mailbox_id,
+        "custom",
+        "Other payload",
+    );
+    other.unread = true;
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox(mailbox_id, "custom", "RCA Sync"),
+            FakeStore::mailbox(other_mailbox_id, "custom", "Other"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![unread, other])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:MarkAllItemsAsRead><m:ReadFlag>true</m:ReadFlag><m:FolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></m:FolderIds></m:MarkAllItemsAsRead></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MarkAllItemsAsReadResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    let emails = store.emails.lock().unwrap().clone();
+    assert!(
+        !emails
+            .iter()
+            .find(|email| email.id == message_id)
+            .unwrap()
+            .unread
+    );
+    assert!(
+        emails
+            .iter()
+            .find(|email| email.id == other_message_id)
+            .unwrap()
+            .unread
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            format!(
+                r#"<s:Envelope><s:Body><m:MarkAllItemsAsRead><m:ReadFlag>false</m:ReadFlag><m:FolderIds><t:FolderId Id="mailbox:{mailbox_id}"/></m:FolderIds></m:MarkAllItemsAsRead></s:Body></s:Envelope>"#
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:MarkAllItemsAsReadResponse>"));
+    assert!(
+        store
+            .emails
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|email| email.id == message_id)
+            .unwrap()
+            .unread
+    );
+}
+
+#[tokio::test]
 async fn copy_item_copies_public_folder_item_to_target_public_folder() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -5421,4 +6250,614 @@ async fn find_item_returns_calendar_items_from_canonical_store() {
     assert!(body.contains("event:cccccccc-cccc-cccc-cccc-cccccccccccc"));
     assert!(body.contains("<t:Start>2026-05-04T09:30:00Z</t:Start>"));
     assert!(body.contains("<t:End>2026-05-04T10:15:00Z</t:End>"));
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EwsCatalogCoverageKind {
+    Behavioral,
+    Unsupported,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EwsCatalogCoverage {
+    operation: &'static str,
+    kind: EwsCatalogCoverageKind,
+    test_name: &'static str,
+}
+
+const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
+    EwsCatalogCoverage {
+        operation: "AddDelegate",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delegate_operations_use_canonical_permissions_and_preferences",
+    },
+    EwsCatalogCoverage {
+        operation: "AddDistributionGroupToImList",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "AddImContactToGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "AddImGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "AddNewImContactToGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "AddNewTelUriContactToGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "ApplyConversationAction",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "ArchiveItem",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "ConvertId",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "convert_id_round_trips_supported_canonical_object_families",
+    },
+    EwsCatalogCoverage {
+        operation: "CopyFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "copy_move_and_update_folder_use_canonical_mailbox_changes",
+    },
+    EwsCatalogCoverage {
+        operation: "CopyItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "copy_item_copies_custom_mailbox_message_to_target_folder",
+    },
+    EwsCatalogCoverage {
+        operation: "CreateAttachment",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "create_attachment_validates_and_adds_canonical_attachment",
+    },
+    EwsCatalogCoverage {
+        operation: "CreateFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "create_folder_uses_canonical_mailbox_store",
+    },
+    EwsCatalogCoverage {
+        operation: "CreateFolderPath",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "create_folder_path_creates_nested_mailboxes_and_sync_reports_changes",
+    },
+    EwsCatalogCoverage {
+        operation: "CreateItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "create_item_saveonly_stores_message_as_canonical_draft",
+    },
+    EwsCatalogCoverage {
+        operation: "CreateManagedFolder",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "CreateUserConfiguration",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "user_configuration_create_get_update_and_delete_use_canonical_storage",
+    },
+    EwsCatalogCoverage {
+        operation: "DeleteAttachment",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delete_attachment_removes_canonical_attachment_reference",
+    },
+    EwsCatalogCoverage {
+        operation: "DeleteFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delete_folder_uses_canonical_mailbox_destroy",
+    },
+    EwsCatalogCoverage {
+        operation: "DeleteItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delete_item_hard_deletes_canonical_message",
+    },
+    EwsCatalogCoverage {
+        operation: "DeleteUserConfiguration",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "user_configuration_create_get_update_and_delete_use_canonical_storage",
+    },
+    EwsCatalogCoverage {
+        operation: "DisableApp",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "DisconnectPhoneCall",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "EmptyFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "empty_folder_deletes_messages_and_subfolders_through_canonical_paths",
+    },
+    EwsCatalogCoverage {
+        operation: "ExpandDL",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+    },
+    EwsCatalogCoverage {
+        operation: "ExportItems",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "FindConversation",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "FindFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "find_folder_lists_contact_and_calendar_folders",
+    },
+    EwsCatalogCoverage {
+        operation: "FindItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "find_item_lists_custom_mailbox_messages",
+    },
+    EwsCatalogCoverage {
+        operation: "FindMessageTrackingReport",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "FindPeople",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+    },
+    EwsCatalogCoverage {
+        operation: "GetAppManifests",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetAppMarketplaceUrl",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetAttachment",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_attachment_returns_canonical_attachment_content",
+    },
+    EwsCatalogCoverage {
+        operation: "GetClientAccessToken",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetConversationItems",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetDelegate",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delegate_operations_use_canonical_permissions_and_preferences",
+    },
+    EwsCatalogCoverage {
+        operation: "GetDiscoverySearchConfiguration",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetEvents",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "pull_subscription_get_events_replays_canonical_changes_after_restart",
+    },
+    EwsCatalogCoverage {
+        operation: "GetFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_folder_returns_multiple_supported_folder_kinds",
+    },
+    EwsCatalogCoverage {
+        operation: "GetHoldOnMailboxes",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetImItemList",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetImItems",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetInboxRules",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "inbox_rules_project_and_update_canonical_sieve_rules",
+    },
+    EwsCatalogCoverage {
+        operation: "GetItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_item_returns_custom_mailbox_message_body",
+    },
+    EwsCatalogCoverage {
+        operation: "GetMailTips",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_mail_tips_projects_directory_and_oof_without_local_tip_state",
+    },
+    EwsCatalogCoverage {
+        operation: "GetMessageTrackingReport",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetNonIndexableItemDetails",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetNonIndexableItemStatistics",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetPasswordExpirationDate",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetPersona",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetPhoneCallInformation",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetReminders",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "reminders_are_read_and_dismissed_from_canonical_reminder_state",
+    },
+    EwsCatalogCoverage {
+        operation: "GetRoomLists",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "rooms_are_projected_from_canonical_directory_entries",
+    },
+    EwsCatalogCoverage {
+        operation: "GetRooms",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "rooms_are_projected_from_canonical_directory_entries",
+    },
+    EwsCatalogCoverage {
+        operation: "GetSearchableMailboxes",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetServerTimeZones",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_server_time_zones_returns_minimal_definitions",
+    },
+    EwsCatalogCoverage {
+        operation: "GetServiceConfiguration",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetSharingFolder",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+    },
+    EwsCatalogCoverage {
+        operation: "GetSharingMetadata",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+    },
+    EwsCatalogCoverage {
+        operation: "GetStreamingEvents",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "pull_and_streaming_notifications_replay_canonical_sql_change_cursor",
+    },
+    EwsCatalogCoverage {
+        operation: "GetUserAvailability",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_user_availability_returns_canonical_busy_events",
+    },
+    EwsCatalogCoverage {
+        operation: "GetUserConfiguration",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "user_configuration_create_get_update_and_delete_use_canonical_storage",
+    },
+    EwsCatalogCoverage {
+        operation: "GetUserOofSettings",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_user_oof_settings_projects_canonical_sieve_vacation",
+    },
+    EwsCatalogCoverage {
+        operation: "GetUserPhoto",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "GetUserRetentionPolicyTags",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "InstallApp",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "MarkAllItemsAsRead",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mark_all_items_as_read_updates_canonical_mailbox_message_flags",
+    },
+    EwsCatalogCoverage {
+        operation: "MarkAsJunk",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "MoveFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "copy_move_and_update_folder_use_canonical_mailbox_changes",
+    },
+    EwsCatalogCoverage {
+        operation: "MoveItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "move_item_moves_custom_mailbox_message_to_target_folder",
+    },
+    EwsCatalogCoverage {
+        operation: "PerformReminderAction",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "reminders_are_read_and_dismissed_from_canonical_reminder_state",
+    },
+    EwsCatalogCoverage {
+        operation: "PlayOnPhone",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "RefreshSharingFolder",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "RemoveContactFromImList",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "RemoveDelegate",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delegate_operations_use_canonical_permissions_and_preferences",
+    },
+    EwsCatalogCoverage {
+        operation: "RemoveDistributionGroupFromImList",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "RemoveImContactFromGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "RemoveImGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "ResolveNames",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "resolve_names_returns_tenant_directory_account_match",
+    },
+    EwsCatalogCoverage {
+        operation: "SearchMailboxes",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "SendItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "send_item_submits_existing_draft_through_canonical_submission",
+    },
+    EwsCatalogCoverage {
+        operation: "SetHoldOnMailboxes",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "SetImGroup",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "SetUserOofSettings",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "set_user_oof_settings_writes_canonical_sieve_vacation",
+    },
+    EwsCatalogCoverage {
+        operation: "Subscribe",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "pull_subscription_get_events_and_unsubscribe_return_status_flow",
+    },
+    EwsCatalogCoverage {
+        operation: "SyncFolderHierarchy",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "sync_folder_hierarchy_lists_contact_and_calendar_folders",
+    },
+    EwsCatalogCoverage {
+        operation: "SyncFolderItems",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "sync_folder_items_returns_contacts_from_canonical_store",
+    },
+    EwsCatalogCoverage {
+        operation: "UninstallApp",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+    EwsCatalogCoverage {
+        operation: "Unsubscribe",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "pull_subscription_get_events_and_unsubscribe_return_status_flow",
+    },
+    EwsCatalogCoverage {
+        operation: "UpdateDelegate",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "delegate_operations_use_canonical_permissions_and_preferences",
+    },
+    EwsCatalogCoverage {
+        operation: "UpdateFolder",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "copy_move_and_update_folder_use_canonical_mailbox_changes",
+    },
+    EwsCatalogCoverage {
+        operation: "UpdateInboxRules",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "inbox_rules_project_and_update_canonical_sieve_rules",
+    },
+    EwsCatalogCoverage {
+        operation: "UpdateItem",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "update_item_updates_message_read_and_flag_state",
+    },
+    EwsCatalogCoverage {
+        operation: "UpdateUserConfiguration",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "user_configuration_create_get_update_and_delete_use_canonical_storage",
+    },
+    EwsCatalogCoverage {
+        operation: "UploadItems",
+        kind: EwsCatalogCoverageKind::Unsupported,
+        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+    },
+];
+
+#[tokio::test]
+async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
+    let documented = documented_ews_operation_names();
+    let mut covered = std::collections::BTreeSet::new();
+    let mut duplicate_coverage = Vec::new();
+    for entry in EWS_CATALOG_COVERAGE {
+        if !covered.insert(entry.operation) {
+            duplicate_coverage.push(entry.operation);
+        }
+    }
+    assert!(
+        duplicate_coverage.is_empty(),
+        "duplicate EWS catalog coverage entries: {duplicate_coverage:?}"
+    );
+    assert_eq!(
+        documented, covered,
+        "EWS operation catalog coverage manifest must match docs/audits/ews-parity-matrix-2026-05-30.md"
+    );
+
+    let ews_tests_source = include_str!("ews.rs");
+    let mut missing_behavior_tests = Vec::new();
+    for entry in EWS_CATALOG_COVERAGE {
+        if entry.kind == EwsCatalogCoverageKind::Behavioral
+            && !ews_tests_source.contains(&format!("async fn {}(", entry.test_name))
+        {
+            missing_behavior_tests.push((entry.operation, entry.test_name));
+        }
+    }
+    assert!(
+        missing_behavior_tests.is_empty(),
+        "implemented EWS operations must name an existing SOAP behavior test: {missing_behavior_tests:?}"
+    );
+
+    let unsupported: Vec<_> = EWS_CATALOG_COVERAGE
+        .iter()
+        .filter(|entry| entry.kind == EwsCatalogCoverageKind::Unsupported)
+        .copied()
+        .collect();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    for entry in &unsupported {
+        let request = ews_catalog_gate_soap_request(entry.operation);
+        let response = service
+            .handle(&bearer_headers(), request.as_bytes())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{}", entry.operation);
+        let body = response_text(response).await;
+        assert!(
+            body.contains(&format!("<m:{}Response>", entry.operation)),
+            "{} did not return an operation-shaped response: {body}",
+            entry.operation
+        );
+        assert!(
+            body.contains("ResponseClass=\"Error\""),
+            "{} did not return an explicit error response: {body}",
+            entry.operation
+        );
+        assert!(
+            body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"),
+            "{} did not return the unsupported EWS response code: {body}",
+            entry.operation
+        );
+        assert!(
+            body.contains("is not implemented by the EWS MVP"),
+            "{} did not document unsupported behavior in the SOAP payload: {body}",
+            entry.operation
+        );
+    }
+
+    let behavioral_count = EWS_CATALOG_COVERAGE.len() - unsupported.len();
+    println!(
+        "EWS catalog gate coverage: operation-name coverage {}/{} ({:.1}%); behavioral coverage {}/{} ({:.1}%); explicit unsupported coverage {}/{} ({:.1}%)",
+        EWS_CATALOG_COVERAGE.len(),
+        documented.len(),
+        percentage(EWS_CATALOG_COVERAGE.len(), documented.len()),
+        behavioral_count,
+        documented.len(),
+        percentage(behavioral_count, documented.len()),
+        unsupported.len(),
+        documented.len(),
+        percentage(unsupported.len(), documented.len())
+    );
+}
+
+fn documented_ews_operation_names() -> std::collections::BTreeSet<&'static str> {
+    include_str!("../../../../docs/audits/ews-parity-matrix-2026-05-30.md")
+        .lines()
+        .filter_map(|line| {
+            let rest = line.strip_prefix("| `")?;
+            let (operation, _) = rest.split_once('`')?;
+            Some(operation)
+        })
+        .collect()
+}
+
+fn ews_catalog_gate_soap_request(operation: &str) -> String {
+    format!(
+        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages" xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"><s:Body><m:{operation}/></s:Body></s:Envelope>"#
+    )
+}
+
+fn percentage(part: usize, total: usize) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        (part as f64 * 100.0) / total as f64
+    }
 }

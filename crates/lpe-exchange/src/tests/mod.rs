@@ -17,8 +17,8 @@ use lpe_storage::{
     PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
     ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
     SenderDelegationRight, SieveScriptDocument, Storage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientContactInput,
-    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
+    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
     UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
     UpsertSearchFolderInput,
 };
@@ -54,13 +54,13 @@ use crate::{
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::{
-        EwsUserConfiguration, EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind,
-        ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore, MapiCheckpointKind,
-        MapiContentTableQuery, MapiContentTableQueryResult, MapiContentTableSortField,
-        MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityLookupRecord,
-        MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping,
-        MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsUserConfigurationInput,
+        EwsDelegate, EwsUserConfiguration, EwsUserConfigurationKey,
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
+        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
+        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -484,6 +484,7 @@ struct FakeStore {
     mapi_notification_cursor: Arc<Mutex<Option<i64>>>,
     mapi_notification_polls: Arc<Mutex<Vec<MapiNotificationPoll>>>,
     ews_user_configurations: Arc<Mutex<Vec<EwsUserConfiguration>>>,
+    ews_delegates: Arc<Mutex<Vec<EwsDelegate>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
@@ -1142,6 +1143,78 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move { Ok(deleted) })
     }
 
+    fn fetch_ews_delegates<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<EwsDelegate>> {
+        let delegates = self
+            .ews_delegates
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|delegate| delegate.owner_account_id == owner_account_id)
+            .cloned()
+            .collect();
+        Box::pin(async move { Ok(delegates) })
+    }
+
+    fn upsert_ews_delegate<'a>(
+        &'a self,
+        input: UpsertEwsDelegateInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsDelegate> {
+        let principal = self.session.clone().unwrap_or_else(FakeStore::account);
+        let grantee = self
+            .directory_accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|account| {
+                account.tenant_id == principal.tenant_id
+                    && account.email.eq_ignore_ascii_case(&input.grantee_email)
+            })
+            .cloned();
+        Box::pin(async move {
+            let Some(grantee) = grantee else {
+                anyhow::bail!("delegate account not found in tenant")
+            };
+            let delegate = EwsDelegate {
+                owner_account_id: input.owner_account_id,
+                grantee_account_id: grantee.account_id,
+                grantee_email: grantee.email.to_ascii_lowercase(),
+                grantee_display_name: grantee.display_name,
+                inbox_rights: input.inbox_rights,
+                calendar_rights: input.calendar_rights,
+                may_send_on_behalf: input.may_send_on_behalf,
+                may_send_as: false,
+                preferences: input.preferences,
+            };
+            let mut delegates = self.ews_delegates.lock().unwrap();
+            delegates.retain(|existing| {
+                !(existing.owner_account_id == delegate.owner_account_id
+                    && existing.grantee_account_id == delegate.grantee_account_id)
+            });
+            delegates.push(delegate.clone());
+            Ok(delegate)
+        })
+    }
+
+    fn remove_ews_delegate<'a>(
+        &'a self,
+        owner_account_id: Uuid,
+        grantee_account_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        let mut delegates = self.ews_delegates.lock().unwrap();
+        let before = delegates.len();
+        delegates.retain(|delegate| {
+            !(delegate.owner_account_id == owner_account_id
+                && delegate.grantee_account_id == grantee_account_id)
+        });
+        let deleted = delegates.len() != before;
+        Box::pin(async move { Ok(deleted) })
+    }
+
     fn fetch_or_allocate_mapi_identities<'a>(
         &'a self,
         _account_id: Uuid,
@@ -1302,6 +1375,36 @@ impl ExchangeStore for FakeStore {
         folder.sort_order = input.sort_order;
         self.public_folders.lock().unwrap().push(folder.clone());
         Box::pin(async move { Ok(folder) })
+    }
+
+    fn update_public_folder<'a>(
+        &'a self,
+        input: UpdatePublicFolderInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, PublicFolder> {
+        if let Err(error) = Self::ensure_public_folder_tree_owner(input.account_id) {
+            return Box::pin(async move { Err(error) });
+        }
+        let updated = {
+            let mut folders = self.public_folders.lock().unwrap();
+            folders
+                .iter_mut()
+                .find(|folder| folder.id == input.folder_id && folder.lifecycle_state == "active")
+                .map(|folder| {
+                    if let Some(display_name) = input.display_name.clone() {
+                        folder.display_name = display_name;
+                    }
+                    if let Some(folder_class) = input.folder_class.clone() {
+                        folder.folder_class = folder_class;
+                    }
+                    if let Some(sort_order) = input.sort_order {
+                        folder.sort_order = sort_order;
+                    }
+                    folder.change_counter += 1;
+                    folder.clone()
+                })
+        };
+        Box::pin(async move { updated.ok_or_else(|| anyhow::anyhow!("public folder not found")) })
     }
 
     fn delete_public_folder<'a>(
@@ -3233,8 +3336,17 @@ impl ExchangeStore for FakeStore {
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, JmapMailbox> {
         self.created_mailboxes.lock().unwrap().push(input.clone());
+        let mailbox_id = if self.mailboxes.lock().unwrap().is_empty() {
+            Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap()
+        } else {
+            Uuid::from_u128(
+                0x44444444_4444_4444_4444_444444444400
+                    + self.mailboxes.lock().unwrap().len() as u128
+                    + 1,
+            )
+        };
         let mailbox = JmapMailbox {
-            id: Uuid::parse_str("44444444-4444-4444-4444-444444444444").unwrap(),
+            id: mailbox_id,
             parent_id: input.parent_id,
             role: "custom".to_string(),
             name: input.name,
@@ -3245,6 +3357,11 @@ impl ExchangeStore for FakeStore {
             is_subscribed: input.is_subscribed,
         };
         self.mailboxes.lock().unwrap().push(mailbox.clone());
+        self.mapi_sync_changes
+            .lock()
+            .unwrap()
+            .changed_mailbox_ids
+            .push(mailbox.id);
         Box::pin(async move { Ok(mailbox) })
     }
 
@@ -3269,6 +3386,11 @@ impl ExchangeStore for FakeStore {
         }
         mailbox.modseq += 1;
         let mailbox = mailbox.clone();
+        self.mapi_sync_changes
+            .lock()
+            .unwrap()
+            .changed_mailbox_ids
+            .push(mailbox.id);
         Box::pin(async move { Ok(mailbox) })
     }
 
@@ -3279,6 +3401,15 @@ impl ExchangeStore for FakeStore {
         _audit: lpe_storage::AuditEntryInput,
     ) -> StoreFuture<'a, ()> {
         self.destroyed_mailboxes.lock().unwrap().push(mailbox_id);
+        self.mailboxes
+            .lock()
+            .unwrap()
+            .retain(|mailbox| mailbox.id != mailbox_id);
+        self.mapi_sync_changes
+            .lock()
+            .unwrap()
+            .changed_mailbox_ids
+            .push(mailbox_id);
         Box::pin(async move { Ok(()) })
     }
 

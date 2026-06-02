@@ -9,6 +9,8 @@ This matrix expands `docs/audits/ews-audit-2026-05-30.md` into one row for every
 
 Microsoft's operation catalog page was last updated on 2023-03-29 and was reviewed again for this matrix on 2026-06-02. The current `LPE` dispatcher surface was checked against `crates/lpe-exchange/src/service.rs` on the same date. This is a documentation parity matrix only. It does not add, remove, or change runtime behavior.
 
+`crates/lpe-exchange/src/tests/ews.rs::ews_catalog_gate_covers_documented_operations_and_unsupported_gaps` consumes this matrix as the local EWS operation catalog for automated compatibility gating. Every operation name listed in the matrix must have exactly one gate entry: either a named SOAP behavior test for implemented/partial operations or an explicit unsupported SOAP assertion for unsupported gaps.
+
 ## Status And Priority Legend
 
 | Value | Meaning |
@@ -56,7 +58,7 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 | `DeleteItem` | Partial | `mailbox_messages`, contacts/events/tasks, `recoverable_items`, `public_folder_items`, change log/tombstones | Canonical delete, Trash move, collaboration delete, and public-folder item delete APIs | Exchange delete types are mapped to LPE hard delete or Trash behavior; no full dumpster parity through EWS | P0 |
 | `FindItem` | Partial | Mail, contacts, calendar, task tables, public-folder item tables plus search projections | Canonical item list/query APIs | Bounded to mail/contacts/calendar/tasks/public-folder posts; Exchange views, property sets, folders, and archive stores are incomplete | P0 |
 | `GetItem` | Partial | Mail, MIME/body/attachment, contacts, calendar, task, public-folder item tables | Canonical item fetch/export APIs | LPE-prefixed ids and bounded property projection; no full Exchange opaque IDs or property bag | P0 |
-| `MarkAllItemsAsRead` | Missing | `mailbox_messages` read state and change log | Canonical mailbox scoped flag mutation API | Unsupported; clients cannot bulk mark read through EWS | P1 |
+| `MarkAllItemsAsRead` | Partial | `mailbox_messages` read state and change log | Canonical mailbox scoped query plus message flag update API | Supports bounded mailbox folders only; public-folder per-user read state remains unsupported through this operation | P1 |
 | `MoveItem` | Partial | `mailbox_messages`, target `mailboxes`, `public_folder_items`, change log/tombstones | Canonical message move API; canonical public-folder item clone/delete API | Supports canonical message and public-folder item ids only; not full item-class move parity | P1 |
 | `SendItem` | Partial | Draft messages, submission tables, sender rights, authoritative `Sent` membership | Canonical submit-existing-draft API | Sends supported canonical draft ids through LPE submission; no EWS-local `Outbox` or parallel `Sent`; full Exchange saved-item options remain bounded | P0 |
 | `UpdateItem` | Partial | Message flags/keywords, contacts, calendar, task rows, public-folder items, change log | Canonical update APIs for flags/read state, collaboration objects, and public-folder posts | Mail updates are limited mainly to read/flag state; no full Exchange item property mutation | P0 |
@@ -66,15 +68,15 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
 | `CreateFolder` | Partial | `mailboxes`, `public_folders`, subscriptions, change log | Canonical mailbox create API; canonical public-folder child create API | Custom mail folders and child public folders only; no full folder class, archive, or managed folder behavior | P0 |
-| `CreateFolderPath` | Missing | `mailboxes` hierarchy rows | Canonical recursive mailbox create API | Unsupported; clients must create one folder at a time through supported paths | P2 |
+| `CreateFolderPath` | Partial | `mailboxes`, `public_folders`, change log | Canonical mailbox create API; canonical public-folder child create API | Creates/reuses bounded path segments only; no full Exchange rollback or folder-class parity | P2 |
 | `CreateManagedFolder` | Missing | New managed-folder/retention policy state | Retention policy API if this deprecated Exchange feature becomes scoped | Unsupported deprecated Exchange behavior | P4 |
-| `CopyFolder` | Missing | `mailboxes`, mailbox contents for recursive copy if allowed | Canonical folder copy API with bounded user-folder scope | Unsupported through EWS | P2 |
+| `CopyFolder` | Partial | `mailboxes`, mailbox contents, `public_folders`, `public_folder_items`, change log | Canonical mailbox create/message copy APIs; canonical public-folder child/item APIs | Copies bounded custom mailbox and public-folder trees; system folders are rejected | P2 |
 | `DeleteFolder` | Partial | `mailboxes`, `public_folders`, change log/tombstones | Canonical mailbox destroy API; canonical public-folder delete API | Canonical deletable mailbox and public folders only; protected/system behavior follows LPE storage rules | P0 |
-| `EmptyFolder` | Missing | `mailbox_messages`, `recoverable_items`, change log/tombstones | Canonical folder purge API | Unsupported; clients cannot purge folder contents through EWS | P1 |
+| `EmptyFolder` | Partial | `mailbox_messages`, `recoverable_items`, `public_folder_items`, change log/tombstones | Canonical mailbox scoped delete API; canonical public-folder item delete API | Empties bounded mailbox/public-folder contents; optional subfolder deletion is limited to canonical deletable subfolders | P1 |
 | `FindFolder` | Partial | `mailboxes`, contact books, calendars, task lists, public folders, search folders, and grants | Canonical folder/collection projection API | No full Exchange hierarchy including archive, voice, and complete search-folder behavior | P0 |
 | `GetFolder` | Partial | Same as `FindFolder` | Canonical folder/collection fetch API | Unsupported distinguished ids return folder errors; bounded properties | P0 |
-| `MoveFolder` | Missing | `mailboxes` parent/name fields, change log | Canonical mailbox update/move API | Unsupported through EWS | P2 |
-| `UpdateFolder` | Missing | `mailboxes` mutable display/parent/subscription fields, change log | Canonical mailbox update API | Unsupported; clients cannot rename/update folders through EWS | P1 |
+| `MoveFolder` | Partial | `mailboxes` parent fields, change log | Canonical mailbox update/move API | Moves bounded custom mailbox folders; public-folder move is explicitly rejected until canonical reparenting exists | P2 |
+| `UpdateFolder` | Partial | `mailboxes`, `public_folders`, change log | Canonical mailbox update API; canonical public-folder update API | Updates bounded `DisplayName` only; protected/system folders are rejected | P1 |
 
 ## Attachment Operations
 
@@ -103,7 +105,7 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `ConvertId` | Missing | MAPI/EWS identity projection rows if Exchange-compatible alternate ids are supported | Canonical id conversion service over LPE/EWS/MAPI ids | Unsupported; LPE exposes prefixed canonical ids instead of Exchange opaque id formats | P1 |
+| `ConvertId` | Partial | No SQL; stateless opaque ids encode canonical LPE EWS family/id payloads | Canonical EWS id codec over supported LPE object families | Supports deterministic opaque alternate ids for canonical message, folder, contact, event, task, attachment, and public-folder ids; no Exchange identity table or full MAPI EntryId parity | P1 |
 | `ExpandDL` | Explicitly unsupported | Existing aliases/groups may help; full distribution-list membership model may need more SQL | Canonical directory/group expansion API | Explicit unsupported EWS response; no DL expansion through EWS | P2 |
 | `GetUserPhoto` | Missing | New account/contact photo blob metadata | Directory/profile photo API | Unsupported; no EWS SOAP/REST photo payload | P3 |
 | `MarkAsJunk` | Missing | New junk classification or mailbox rule state; possible LPE-CT spam feedback integration | Canonical junk-report/move API plus LPE-CT feedback boundary | Unsupported; no EWS junk reporting or block/safe sender behavior | P2 |
@@ -131,10 +133,10 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `AddDelegate` | Missing | `mailbox_delegation_grants`, `calendar_grants`, `sender_rights`, audit/change rows | Canonical delegation/free-busy/send-on-behalf API | Unsupported; clients cannot create Exchange delegates through EWS | P1 |
-| `GetDelegate` | Explicitly unsupported | Same as `AddDelegate` | Canonical delegate read API | Explicit unsupported response | P1 |
-| `UpdateDelegate` | Missing | Same as `AddDelegate` | Canonical delegate mutation API | Unsupported | P1 |
-| `RemoveDelegate` | Missing | Same as `AddDelegate` plus tombstones/change rows | Canonical delegate removal API | Unsupported | P1 |
+| `AddDelegate` | Partial | `mailbox_delegation_grants`, `calendar_grants`, `sender_rights`, `delegate_preferences`, audit/change rows | Bounded canonical delegation/free-busy/send-on-behalf API | Supports same-tenant Inbox/Calendar delegate grants, send-on-behalf, meeting delivery copy/private preferences; Exchange-only folder permission shapes are rejected | P1 |
+| `GetDelegate` | Partial | Same as `AddDelegate` | Bounded canonical delegate read API | Returns bounded canonical delegate projection only; no Exchange-only delegate folders | P1 |
+| `UpdateDelegate` | Partial | Same as `AddDelegate` | Bounded canonical delegate mutation API | Updates only canonical Inbox/Calendar grants, send-on-behalf, and preferences | P1 |
+| `RemoveDelegate` | Partial | Same as `AddDelegate` plus tombstones/change rows | Bounded canonical delegate removal API | Removes canonical delegate grants, sender rights, and preferences; no protocol-local delegate state | P1 |
 
 ## Inbox Rules Operations
 
@@ -158,7 +160,7 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `GetMailTips` | Missing | Directory/accounts, OOF/vacation, mailbox quota, recipient policy data; new custom mail-tip state if supported | Compose-recipient advisory API | Unsupported; clients get no oversized-recipient, OOF, external, or policy tips through EWS | P1 |
+| `GetMailTips` | Partial | Directory/accounts/contacts/groups plus canonical Sieve vacation state | Compose-recipient advisory API over canonical directory and OOF state | Supports invalid-recipient and OOF tips only; no quota, moderation, policy, or custom Exchange mail-tip state | P1 |
 
 ## Message Tracking Operations
 
@@ -256,14 +258,14 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 | Priority | Operations |
 | --- | --- |
 | P0 | `CreateItem`, `DeleteItem`, `FindItem`, `GetItem`, `SendItem`, `UpdateItem`, `CreateFolder`, `DeleteFolder`, `FindFolder`, `GetFolder`, `CreateAttachment`, `GetAttachment`, `DeleteAttachment`, `ResolveNames`, `GetUserAvailability`, `GetInboxRules`, `UpdateInboxRules`, `GetEvents`, `Subscribe`, `Unsubscribe`, `SyncFolderHierarchy`, `SyncFolderItems`, `GetServerTimeZones` |
-| P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `FindConversation`, `GetConversationItems`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `AddDelegate`, `GetDelegate`, `UpdateDelegate`, `RemoveDelegate`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
+| P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `FindConversation`, `GetConversationItems`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
 | P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `ApplyConversationAction`, `ExpandDL`, `MarkAsJunk`, `UploadItems`, `ExportItems`, `FindPeople`, `GetPersona`, `GetUserRetentionPolicyTags`, `GetServiceConfiguration`, `CreateItem` with `AcceptSharingInvitation`, `GetSharingFolder`, `GetSharingMetadata` |
 | P3 | `GetUserPhoto`, `GetPasswordExpirationDate`, `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport`, `RefreshSharingFolder` |
 | P4 | eDiscovery operations, `CreateManagedFolder`, `GetAppMarketplaceUrl`, Unified Messaging operations, Unified Contact Store operations |
 
 ## Main Parity Gaps For Outlook And Native Clients
 
-1. The highest-value remaining P0/P1 gaps are `MarkAllItemsAsRead`, `EmptyFolder`, `UpdateFolder`, `ConvertId`, delegate management, and mail tips.
+1. The highest-value remaining P0/P1 gaps are conversation listing/expansion and any real-client mail-tip fields beyond invalid-recipient and OOF that prove necessary in Outlook testing.
 2. `SendItem`, inbox rules, reminders, room/resource discovery, bounded streaming notifications, and user configuration are now wired, but remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, or user-configuration semantics.
 3. EWS sync and notifications remain partial because current sync-state and subscription behavior is not a full Exchange-equivalent cursor, affinity, or push/streaming model.
 4. Most P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as Exchange eDiscovery, mail apps, Unified Messaging, and Unified Contact Store IM groups.

@@ -10,7 +10,10 @@ use axum::{
     routing::{any, on, MethodFilter},
     Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+use base64::{
+    engine::general_purpose::{STANDARD as BASE64_STANDARD, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use lpe_core::sieve::{Action, Statement};
 use lpe_magika::{
     Detector, ExpectedKind, IngressContext, PolicyDecision, SystemDetector, ValidationRequest,
@@ -22,11 +25,12 @@ use lpe_storage::{
     serialize_calendar_participants_metadata, AccessibleContact, AccessibleEvent,
     ActiveSyncAttachment, ActiveSyncAttachmentContent, AttachmentUploadInput, AuditEntryInput,
     CalendarOrganizerMetadata, CalendarParticipantMetadata, CalendarParticipantsMetadata,
-    ClientReminder, ClientTask, CollaborationCollection, CreatePublicFolderInput, JmapEmail,
-    JmapEmailAddress, JmapEmailFollowupUpdate, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, MailboxRule, PublicFolder, PublicFolderItem, ReminderQuery, Storage,
-    SubmitMessageInput, SubmittedRecipientInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientTaskInput, UpsertPublicFolderItemInput,
+    ClientReminder, ClientTask, CollaborationCollection, CollaborationRights,
+    CreatePublicFolderInput, JmapEmail, JmapEmailAddress, JmapEmailFollowupUpdate,
+    JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    MailboxRule, PublicFolder, PublicFolderItem, ReminderQuery, Storage, SubmitMessageInput,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput, UpsertPublicFolderItemInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -43,9 +47,9 @@ use crate::{
     mapi::{self, MapiEndpoint},
     ntlm,
     store::{
-        EwsUserConfiguration, EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind,
-        ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore,
-        UpsertEwsUserConfigurationInput,
+        EwsDelegate, EwsDelegatePreferences, EwsUserConfiguration, EwsUserConfigurationKey,
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -757,7 +761,13 @@ where
             "DeleteItem" => self.delete_item(&principal, &body).await?,
             "MoveItem" => self.move_item(&principal, &body).await?,
             "CopyItem" => self.copy_item(&principal, &body).await?,
+            "MarkAllItemsAsRead" => self.mark_all_items_as_read(&principal, &body).await?,
             "CreateFolder" => self.create_folder(&principal, &body).await?,
+            "CreateFolderPath" => self.create_folder_path(&principal, &body).await?,
+            "CopyFolder" => self.copy_folder(&principal, &body).await?,
+            "EmptyFolder" => self.empty_folder(&principal, &body).await?,
+            "MoveFolder" => self.move_folder(&principal, &body).await?,
+            "UpdateFolder" => self.update_folder(&principal, &body).await?,
             "DeleteFolder" => self.delete_folder(&principal, &body).await?,
             "GetAttachment" => self.get_attachment(&principal, &body).await?,
             "CreateAttachment" => self.create_attachment(&principal, &body).await?,
@@ -774,9 +784,14 @@ where
             "Unsubscribe" => self.unsubscribe(&body).await?,
             "GetRooms" => self.get_rooms(&principal, &body).await?,
             "GetRoomLists" => self.get_room_lists(&principal).await?,
+            "ConvertId" => self.convert_id(&body).await?,
+            "GetMailTips" => self.get_mail_tips(&principal, &body).await?,
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => unsupported_operation_response("ExpandDL"),
-            "GetDelegate" => unsupported_operation_response("GetDelegate"),
+            "AddDelegate" => self.add_delegate(&principal, &body).await?,
+            "GetDelegate" => self.get_delegate(&principal, &body).await?,
+            "UpdateDelegate" => self.update_delegate(&principal, &body).await?,
+            "RemoveDelegate" => self.remove_delegate(&principal, &body).await?,
             "GetUserConfiguration" => self.get_user_configuration(&principal, &body).await?,
             "CreateUserConfiguration" => self.create_user_configuration(&principal, &body).await?,
             "UpdateUserConfiguration" => self.update_user_configuration(&principal, &body).await?,
@@ -942,6 +957,192 @@ where
                 &error.to_string(),
             )),
         }
+    }
+
+    async fn add_delegate(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        if let Err(error) = validate_delegate_mailbox_owner(principal, request) {
+            return Ok(operation_error_response(
+                "AddDelegate",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            ));
+        }
+        let delivery = match parse_delegate_meeting_delivery(request) {
+            Ok(delivery) => delivery,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "AddDelegate",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                ))
+            }
+        };
+        let users = match parse_ews_delegate_users(principal, request, &delivery) {
+            Ok(users) => users,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "AddDelegate",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                ))
+            }
+        };
+        self.mutate_ews_delegates("AddDelegate", &principal.email, users, true)
+            .await
+    }
+
+    async fn update_delegate(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        if let Err(error) = validate_delegate_mailbox_owner(principal, request) {
+            return Ok(operation_error_response(
+                "UpdateDelegate",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            ));
+        }
+        let delivery = match parse_delegate_meeting_delivery(request) {
+            Ok(delivery) => delivery,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "UpdateDelegate",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                ))
+            }
+        };
+        let users = match parse_ews_delegate_users(principal, request, &delivery) {
+            Ok(users) => users,
+            Err(error) => {
+                return Ok(operation_error_response(
+                    "UpdateDelegate",
+                    "ErrorInvalidOperation",
+                    &error.to_string(),
+                ))
+            }
+        };
+        self.mutate_ews_delegates("UpdateDelegate", &principal.email, users, true)
+            .await
+    }
+
+    async fn get_delegate(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        if let Err(error) = validate_delegate_mailbox_owner(principal, request) {
+            return Ok(operation_error_response(
+                "GetDelegate",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            ));
+        }
+        let requested_emails = parse_delegate_user_id_emails(request);
+        let requested = requested_emails
+            .iter()
+            .map(|email| email.to_ascii_lowercase())
+            .collect::<HashSet<_>>();
+        let delegates = self
+            .store
+            .fetch_ews_delegates(principal.account_id)
+            .await?
+            .into_iter()
+            .filter(|delegate| {
+                requested.is_empty()
+                    || requested.contains(&delegate.grantee_email.to_ascii_lowercase())
+            })
+            .collect::<Vec<_>>();
+        Ok(get_delegate_response(&delegates))
+    }
+
+    async fn remove_delegate(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        if let Err(error) = validate_delegate_mailbox_owner(principal, request) {
+            return Ok(operation_error_response(
+                "RemoveDelegate",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            ));
+        }
+        let emails = parse_delegate_user_id_emails(request);
+        if emails.is_empty() {
+            return Ok(operation_error_response(
+                "RemoveDelegate",
+                "ErrorInvalidOperation",
+                "RemoveDelegate requires at least one UserId.",
+            ));
+        }
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        let mut response_messages = String::new();
+        for email in emails {
+            let Some(entry) = entries
+                .iter()
+                .find(|entry| entry.email.eq_ignore_ascii_case(&email))
+            else {
+                response_messages.push_str(&delegate_error_response_message(
+                    "ErrorItemNotFound",
+                    "Delegate account was not found in the tenant.",
+                ));
+                continue;
+            };
+            match self
+                .store
+                .remove_ews_delegate(
+                    principal.account_id,
+                    entry.id,
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-remove-delegate".to_string(),
+                        subject: email.clone(),
+                    },
+                )
+                .await
+            {
+                Ok(true) => response_messages.push_str(
+                    "<m:DelegateUserResponseMessageType ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode></m:DelegateUserResponseMessageType>",
+                ),
+                Ok(false) => response_messages.push_str(&delegate_error_response_message(
+                    "ErrorItemNotFound",
+                    "Delegate was not found.",
+                )),
+                Err(error) => response_messages.push_str(&delegate_error_response_message(
+                    ews_error_code_or(&error, "ErrorInvalidOperation"),
+                    &error.to_string(),
+                )),
+            }
+        }
+        Ok(delegate_operation_response(
+            "RemoveDelegate",
+            &response_messages,
+        ))
+    }
+
+    async fn mutate_ews_delegates(
+        &self,
+        operation: &str,
+        actor_email: &str,
+        users: Vec<UpsertEwsDelegateInput>,
+        include_delegate: bool,
+    ) -> Result<String> {
+        let mut response_messages = String::new();
+        for user in users {
+            let subject = user.grantee_email.clone();
+            match self
+                .store
+                .upsert_ews_delegate(
+                    user,
+                    AuditEntryInput {
+                        actor: actor_email.to_string(),
+                        action: format!("ews-{}", operation.to_ascii_lowercase()),
+                        subject,
+                    },
+                )
+                .await
+            {
+                Ok(delegate) => response_messages.push_str(&delegate_success_response_message(
+                    &delegate,
+                    include_delegate,
+                )),
+                Err(error) => response_messages.push_str(&delegate_error_response_message(
+                    ews_error_code_or(&error, "ErrorInvalidOperation"),
+                    &error.to_string(),
+                )),
+            }
+        }
+        Ok(delegate_operation_response(operation, &response_messages))
     }
 
     pub(crate) async fn handle_mapi(
@@ -2899,6 +3100,59 @@ where
         }))
     }
 
+    async fn mark_all_items_as_read(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            if !requested_public_folder_ids(request).is_empty() {
+                bail!("MarkAllItemsAsRead currently supports canonical mailbox folders only.");
+            }
+            let folder_ids = self
+                .requested_mailbox_folder_ids(principal, request)
+                .await?;
+            if folder_ids.is_empty() {
+                bail!("MarkAllItemsAsRead requires a mailbox folder id.");
+            }
+            let read_flag = element_text(request, "ReadFlag")
+                .map(|value| !value.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
+            for folder_id in folder_ids {
+                let message_ids = self
+                    .store
+                    .query_jmap_email_ids(principal.account_id, Some(folder_id), None, 0, 10_000)
+                    .await?
+                    .ids;
+                for message_id in message_ids {
+                    self.store
+                        .update_jmap_email_flags(
+                            principal.account_id,
+                            message_id,
+                            Some(!read_flag),
+                            None,
+                            AuditEntryInput {
+                                actor: principal.email.clone(),
+                                action: "ews-mark-all-items-as-read".to_string(),
+                                subject: message_id.to_string(),
+                            },
+                        )
+                        .await?;
+                }
+            }
+            Ok(simple_operation_success_response("MarkAllItemsAsRead"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "MarkAllItemsAsRead",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            )
+        }))
+    }
+
     async fn requested_mailbox_folder_ids(
         &self,
         principal: &AccountPrincipal,
@@ -2978,6 +3232,578 @@ where
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("CreateFolder", "ErrorInvalidOperation", &error.to_string())
         }))
+    }
+
+    async fn create_folder_path(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let segments = requested_folder_path_segments(request);
+            if segments.is_empty() {
+                bail!("CreateFolderPath requires at least one folder DisplayName.");
+            }
+            if let Some(parent_folder_id) =
+                requested_public_folder_ids_in(request, "ParentFolderId")
+                    .into_iter()
+                    .next()
+            {
+                let mut created = Vec::new();
+                let mut parent_id = parent_folder_id;
+                for segment in segments {
+                    let existing = self
+                        .store
+                        .fetch_public_folder_children(principal.account_id, parent_id)
+                        .await?
+                        .into_iter()
+                        .find(|folder| folder.display_name.eq_ignore_ascii_case(&segment));
+                    let folder = match existing {
+                        Some(folder) => folder,
+                        None => {
+                            self.store
+                                .create_public_folder_child(
+                                    CreatePublicFolderInput {
+                                        account_id: principal.account_id,
+                                        parent_folder_id: parent_id,
+                                        display_name: segment.clone(),
+                                        folder_class: "IPF.Note".to_string(),
+                                        sort_order: 0,
+                                    },
+                                    AuditEntryInput {
+                                        actor: principal.email.clone(),
+                                        action: "ews-create-public-folder-path".to_string(),
+                                        subject: segment,
+                                    },
+                                )
+                                .await?
+                        }
+                    };
+                    parent_id = folder.id;
+                    created.push(public_folder_xml(&folder, folder.parent_folder_id, 0, 0));
+                }
+                return Ok(folders_operation_success_response(
+                    "CreateFolderPath",
+                    created.join(""),
+                ));
+            }
+
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            let mut parent_id = requested_mailbox_folder_ids_in(request, "ParentFolderId")
+                .into_iter()
+                .next()
+                .or_else(|| {
+                    requested_mailbox_role_in(request, "ParentFolderId").and_then(|role| {
+                        mailboxes
+                            .iter()
+                            .find(|mailbox| mailbox.role == role)
+                            .map(|mailbox| mailbox.id)
+                    })
+                });
+            let mut current = mailboxes;
+            let mut created = Vec::new();
+            for segment in segments {
+                let existing = current
+                    .iter()
+                    .find(|mailbox| {
+                        mailbox.parent_id == parent_id
+                            && mailbox.name.eq_ignore_ascii_case(&segment)
+                    })
+                    .cloned();
+                let mailbox = match existing {
+                    Some(mailbox) => mailbox,
+                    None => {
+                        self.store
+                            .create_jmap_mailbox(
+                                JmapMailboxCreateInput {
+                                    account_id: principal.account_id,
+                                    name: segment.clone(),
+                                    parent_id,
+                                    sort_order: None,
+                                    is_subscribed: true,
+                                },
+                                AuditEntryInput {
+                                    actor: principal.email.clone(),
+                                    action: "ews-create-folder-path".to_string(),
+                                    subject: segment,
+                                },
+                            )
+                            .await?
+                    }
+                };
+                parent_id = Some(mailbox.id);
+                created.push(mailbox_folder_xml(&mailbox));
+                current = self
+                    .store
+                    .fetch_jmap_mailboxes(principal.account_id)
+                    .await?;
+            }
+
+            Ok(folders_operation_success_response(
+                "CreateFolderPath",
+                created.join(""),
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "CreateFolderPath",
+                "ErrorInvalidOperation",
+                &error.to_string(),
+            )
+        }))
+    }
+
+    async fn copy_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            if !requested_public_folder_ids(request).is_empty() {
+                let target_parent_id = requested_public_folder_ids_in(request, "ToFolderId")
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| anyhow!("CopyFolder requires a public folder target."))?;
+                let mut copied = Vec::new();
+                for source_id in requested_public_folder_ids_in(request, "FolderIds") {
+                    let folder = self
+                        .copy_public_folder_tree(principal, source_id, target_parent_id)
+                        .await?;
+                    copied.push(public_folder_xml(&folder, folder.parent_folder_id, 0, 0));
+                }
+                return Ok(folders_operation_success_response(
+                    "CopyFolder",
+                    copied.join(""),
+                ));
+            }
+
+            let target_parent_id = requested_mailbox_folder_ids_in(request, "ToFolderId")
+                .into_iter()
+                .next();
+            let mailbox_ids = requested_mailbox_folder_ids_in(request, "FolderIds");
+            if mailbox_ids.is_empty() {
+                bail!("CopyFolder requires at least one mailbox FolderId.");
+            }
+            let mut copied = Vec::new();
+            for source_id in mailbox_ids {
+                let mailbox = self
+                    .copy_mailbox_folder_tree(principal, source_id, target_parent_id)
+                    .await?;
+                copied.push(mailbox_folder_xml(&mailbox));
+            }
+            Ok(folders_operation_success_response(
+                "CopyFolder",
+                copied.join(""),
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("CopyFolder", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn empty_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let delete_subfolders = request.contains("DeleteSubFolders=\"true\"")
+                || request.contains("DeleteSubFolders=\"1\"");
+            let public_folder_ids = requested_public_folder_ids_in(request, "FolderIds");
+            if !public_folder_ids.is_empty() {
+                for folder_id in public_folder_ids {
+                    self.empty_public_folder(principal, folder_id, delete_subfolders)
+                        .await?;
+                }
+                return Ok(simple_operation_success_response("EmptyFolder"));
+            }
+
+            let mailbox_ids = requested_mailbox_folder_ids_in(request, "FolderIds");
+            if mailbox_ids.is_empty() {
+                bail!("EmptyFolder requires at least one mailbox or public folder id.");
+            }
+            for mailbox_id in mailbox_ids {
+                self.empty_mailbox_folder(principal, mailbox_id, delete_subfolders)
+                    .await?;
+            }
+            Ok(simple_operation_success_response("EmptyFolder"))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("EmptyFolder", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn move_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            if !requested_public_folder_ids(request).is_empty() {
+                bail!("MoveFolder for public folders is unsupported until canonical public-folder reparenting exists.");
+            }
+            let target_parent_id = requested_mailbox_folder_ids_in(request, "ToFolderId")
+                .into_iter()
+                .next();
+            let mailbox_ids = requested_mailbox_folder_ids_in(request, "FolderIds");
+            if mailbox_ids.is_empty() {
+                bail!("MoveFolder requires at least one mailbox FolderId.");
+            }
+            let mailboxes = self.store.fetch_jmap_mailboxes(principal.account_id).await?;
+            let mut moved = Vec::new();
+            for mailbox_id in mailbox_ids {
+                let mailbox = mailbox_by_id(&mailboxes, mailbox_id)?;
+                ensure_custom_mailbox(mailbox)?;
+                let updated = self
+                    .store
+                    .update_jmap_mailbox(
+                        JmapMailboxUpdateInput {
+                            account_id: principal.account_id,
+                            mailbox_id,
+                            name: None,
+                            parent_id: Some(target_parent_id),
+                            sort_order: None,
+                            is_subscribed: None,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-move-folder".to_string(),
+                            subject: mailbox_id.to_string(),
+                        },
+                    )
+                    .await?;
+                moved.push(mailbox_folder_xml(&updated));
+            }
+            Ok(folders_operation_success_response("MoveFolder", moved.join("")))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("MoveFolder", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn update_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let display_name = element_text(request, "DisplayName")
+                .ok_or_else(|| anyhow!("UpdateFolder currently requires DisplayName."))?;
+            if let Some(folder_id) = requested_public_folder_ids(request).into_iter().next() {
+                let folder = self
+                    .store
+                    .update_public_folder(
+                        UpdatePublicFolderInput {
+                            account_id: principal.account_id,
+                            folder_id,
+                            display_name: Some(display_name),
+                            folder_class: None,
+                            sort_order: None,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-update-public-folder".to_string(),
+                            subject: folder_id.to_string(),
+                        },
+                    )
+                    .await?;
+                return Ok(folders_operation_success_response(
+                    "UpdateFolder",
+                    public_folder_xml(&folder, folder.parent_folder_id, 0, 0),
+                ));
+            }
+
+            let folder_id = requested_mailbox_folder_ids(request)
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow!("UpdateFolder requires a mailbox FolderId."))?;
+            let mailboxes = self
+                .store
+                .fetch_jmap_mailboxes(principal.account_id)
+                .await?;
+            ensure_custom_mailbox(mailbox_by_id(&mailboxes, folder_id)?)?;
+            let mailbox = self
+                .store
+                .update_jmap_mailbox(
+                    JmapMailboxUpdateInput {
+                        account_id: principal.account_id,
+                        mailbox_id: folder_id,
+                        name: Some(display_name),
+                        parent_id: None,
+                        sort_order: None,
+                        is_subscribed: None,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-update-folder".to_string(),
+                        subject: folder_id.to_string(),
+                    },
+                )
+                .await?;
+            Ok(folders_operation_success_response(
+                "UpdateFolder",
+                mailbox_folder_xml(&mailbox),
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("UpdateFolder", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn copy_mailbox_folder_tree(
+        &self,
+        principal: &AccountPrincipal,
+        source_id: Uuid,
+        target_parent_id: Option<Uuid>,
+    ) -> Result<JmapMailbox> {
+        let mailboxes = self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?;
+        ensure_custom_mailbox(mailbox_by_id(&mailboxes, source_id)?)?;
+        let mut stack = vec![(source_id, target_parent_id)];
+        let mut root = None;
+        while let Some((current_id, parent_id)) = stack.pop() {
+            let current = mailbox_by_id(&mailboxes, current_id)?.clone();
+            ensure_custom_mailbox(&current)?;
+            let copied = self
+                .store
+                .create_jmap_mailbox(
+                    JmapMailboxCreateInput {
+                        account_id: principal.account_id,
+                        name: current.name.clone(),
+                        parent_id,
+                        sort_order: Some(current.sort_order),
+                        is_subscribed: current.is_subscribed,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-copy-folder".to_string(),
+                        subject: current_id.to_string(),
+                    },
+                )
+                .await?;
+            if current_id == source_id {
+                root = Some(copied.clone());
+            }
+            let message_ids = self
+                .store
+                .query_jmap_email_ids(principal.account_id, Some(current_id), None, 0, 10_000)
+                .await?
+                .ids;
+            for message_id in message_ids {
+                self.store
+                    .copy_jmap_email(
+                        principal.account_id,
+                        message_id,
+                        copied.id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-copy-folder-message".to_string(),
+                            subject: message_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+            for child in mailboxes
+                .iter()
+                .filter(|mailbox| mailbox.parent_id == Some(current_id))
+            {
+                stack.push((child.id, Some(copied.id)));
+            }
+        }
+        root.ok_or_else(|| anyhow!("mailbox folder not found"))
+    }
+
+    async fn empty_mailbox_folder(
+        &self,
+        principal: &AccountPrincipal,
+        folder_id: Uuid,
+        delete_subfolders: bool,
+    ) -> Result<()> {
+        let mailboxes = self
+            .store
+            .fetch_jmap_mailboxes(principal.account_id)
+            .await?;
+        mailbox_by_id(&mailboxes, folder_id)?;
+        let mut folder_ids = vec![folder_id];
+        if delete_subfolders {
+            let mut index = 0;
+            while index < folder_ids.len() {
+                let current_id = folder_ids[index];
+                for child in mailboxes
+                    .iter()
+                    .filter(|mailbox| mailbox.parent_id == Some(current_id))
+                {
+                    ensure_custom_mailbox(child)?;
+                    folder_ids.push(child.id);
+                }
+                index += 1;
+            }
+        }
+        for current_id in &folder_ids {
+            let message_ids = self
+                .store
+                .query_jmap_email_ids(principal.account_id, Some(*current_id), None, 0, 10_000)
+                .await?
+                .ids;
+            for message_id in message_ids {
+                self.store
+                    .delete_jmap_email_from_mailbox(
+                        principal.account_id,
+                        *current_id,
+                        message_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-empty-folder-message".to_string(),
+                            subject: message_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+        }
+        if delete_subfolders {
+            for child_id in folder_ids.into_iter().skip(1).rev() {
+                self.store
+                    .destroy_jmap_mailbox(
+                        principal.account_id,
+                        child_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-empty-folder-delete-subfolder".to_string(),
+                            subject: child_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn copy_public_folder_tree(
+        &self,
+        principal: &AccountPrincipal,
+        source_id: Uuid,
+        target_parent_id: Uuid,
+    ) -> Result<PublicFolder> {
+        let mut stack = vec![(source_id, target_parent_id)];
+        let mut root = None;
+        while let Some((current_id, parent_id)) = stack.pop() {
+            let current = self
+                .store
+                .fetch_public_folder(principal.account_id, current_id)
+                .await?;
+            let copied = self
+                .store
+                .create_public_folder_child(
+                    CreatePublicFolderInput {
+                        account_id: principal.account_id,
+                        parent_folder_id: parent_id,
+                        display_name: current.display_name.clone(),
+                        folder_class: current.folder_class.clone(),
+                        sort_order: current.sort_order,
+                    },
+                    AuditEntryInput {
+                        actor: principal.email.clone(),
+                        action: "ews-copy-public-folder".to_string(),
+                        subject: current_id.to_string(),
+                    },
+                )
+                .await?;
+            if current_id == source_id {
+                root = Some(copied.clone());
+            }
+            let items = self
+                .store
+                .fetch_public_folder_items(principal.account_id, current_id)
+                .await?;
+            for item in items {
+                self.store
+                    .upsert_public_folder_item(
+                        UpsertPublicFolderItemInput {
+                            id: None,
+                            account_id: principal.account_id,
+                            public_folder_id: copied.id,
+                            item_kind: item.item_kind,
+                            message_class: item.message_class,
+                            subject: item.subject,
+                            body_text: item.body_text,
+                            body_html_sanitized: item.body_html_sanitized,
+                            source_payload_json: item.source_payload_json,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-copy-public-folder-item".to_string(),
+                            subject: item.id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+            for child in self
+                .store
+                .fetch_public_folder_children(principal.account_id, current_id)
+                .await?
+            {
+                stack.push((child.id, copied.id));
+            }
+        }
+        root.ok_or_else(|| anyhow!("public folder not found"))
+    }
+
+    async fn empty_public_folder(
+        &self,
+        principal: &AccountPrincipal,
+        folder_id: Uuid,
+        delete_subfolders: bool,
+    ) -> Result<()> {
+        let mut folder_ids = vec![folder_id];
+        if delete_subfolders {
+            let mut index = 0;
+            while index < folder_ids.len() {
+                let current_id = folder_ids[index];
+                for child in self
+                    .store
+                    .fetch_public_folder_children(principal.account_id, current_id)
+                    .await?
+                {
+                    folder_ids.push(child.id);
+                }
+                index += 1;
+            }
+        }
+        for current_id in &folder_ids {
+            let items = self
+                .store
+                .fetch_public_folder_items(principal.account_id, *current_id)
+                .await?;
+            for item in items {
+                self.store
+                    .delete_public_folder_item(
+                        principal.account_id,
+                        *current_id,
+                        item.id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-empty-public-folder-item".to_string(),
+                            subject: item.id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+        }
+        if delete_subfolders {
+            for child_id in folder_ids.into_iter().skip(1).rev() {
+                self.store
+                    .delete_public_folder(
+                        principal.account_id,
+                        child_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-empty-public-folder-delete-subfolder".to_string(),
+                            subject: child_id.to_string(),
+                        },
+                    )
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     async fn delete_folder(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
@@ -3289,6 +4115,85 @@ where
                 "ErrorInvalidOperation",
                 &error.to_string(),
             )
+        }))
+    }
+
+    async fn convert_id(&self, request: &str) -> Result<String> {
+        let result = async {
+            let destination_format =
+                attribute_value_after(request, "ConvertId", "DestinationFormat")
+                    .or_else(|| {
+                        attribute_value_after(request, "ConvertIdRequest", "DestinationFormat")
+                    })
+                    .unwrap_or("EwsId");
+            let source_ids = requested_convert_ids(request);
+            if source_ids.is_empty() {
+                bail!("ConvertId requires at least one source id.");
+            }
+
+            let mut converted = String::new();
+            for source in source_ids {
+                let canonical = canonical_ews_object_id_from_convert_source(&source)?;
+                let output = convert_canonical_ews_object_id(&canonical, destination_format)?;
+                converted.push_str(&convert_id_xml(&output));
+            }
+
+            Ok(convert_id_success_response(converted))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("ConvertId", "ErrorInvalidId", &error.to_string())
+        }))
+    }
+
+    async fn get_mail_tips(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let recipients = requested_mail_tips_recipients(request);
+            if recipients.is_empty() {
+                bail!("GetMailTips requires at least one recipient Mailbox.");
+            }
+            let requested_tips = requested_mail_tips(request);
+            let entries = self.store.fetch_address_book_entries(principal).await?;
+            let mut recipient_tips = Vec::new();
+            for recipient in recipients {
+                let entry = entries
+                    .iter()
+                    .find(|entry| entry.email.eq_ignore_ascii_case(&recipient));
+                let oof = if requested_tips.contains("OutOfOfficeMessage") {
+                    if let Some(entry) = entry
+                        .filter(|entry| entry.entry_kind == ExchangeAddressBookEntryKind::Account)
+                    {
+                        self.store
+                            .fetch_active_sieve_script(entry.id)
+                            .await?
+                            .and_then(|script| {
+                                let projection =
+                                    oof_projection_from_script(Some(script.content.as_str()));
+                                (projection.state != EwsOofState::Disabled)
+                                    .then_some(projection.text_body)
+                            })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                recipient_tips.push(MailTipProjection {
+                    recipient,
+                    display_name: entry.map(|entry| entry.display_name.clone()),
+                    recipient_type: entry.map(|entry| entry.entry_kind),
+                    invalid_recipient: entry.is_none()
+                        && requested_tips.contains("InvalidRecipient"),
+                    out_of_office_message: oof,
+                });
+            }
+            Ok(get_mail_tips_response(&recipient_tips))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response("GetMailTips", "ErrorInvalidOperation", &error.to_string())
         }))
     }
 
@@ -3659,12 +4564,391 @@ fn parse_ews_user_configuration_dictionary(request: &str) -> Result<serde_json::
     Ok(serde_json::Value::Object(object))
 }
 
+fn validate_delegate_mailbox_owner(principal: &AccountPrincipal, request: &str) -> Result<()> {
+    let Some(mailbox) = element_content(request, "Mailbox") else {
+        return Ok(());
+    };
+    let Some(email) = element_text(mailbox, "EmailAddress")
+        .or_else(|| element_text(mailbox, "PrimarySmtpAddress"))
+    else {
+        return Ok(());
+    };
+    if email.eq_ignore_ascii_case(&principal.email) {
+        Ok(())
+    } else {
+        bail!("EWS delegate operations are owner-bound to the authenticated mailbox")
+    }
+}
+
+fn parse_delegate_meeting_delivery(request: &str) -> Result<EwsDelegatePreferences> {
+    let mut preferences = EwsDelegatePreferences::default();
+    if let Some(value) = element_text(request, "DeliverMeetingRequests") {
+        preferences.meeting_request_delivery = match value.trim() {
+            "DelegatesOnly" => "delegate_only",
+            "DelegatesAndMe" | "DelegatesAndSendInformationToMe" => "delegate_and_owner",
+            other => bail!("unsupported DeliverMeetingRequests value {other}"),
+        }
+        .to_string();
+    }
+    Ok(preferences)
+}
+
+fn parse_ews_delegate_users(
+    principal: &AccountPrincipal,
+    request: &str,
+    delivery: &EwsDelegatePreferences,
+) -> Result<Vec<UpsertEwsDelegateInput>> {
+    let mut users = Vec::new();
+    for user in element_contents(request, "DelegateUser") {
+        users.push(parse_ews_delegate_user(principal, user, delivery)?);
+    }
+    if users.is_empty() {
+        bail!("DelegateUsers must contain at least one DelegateUser");
+    }
+    Ok(users)
+}
+
+fn parse_ews_delegate_user(
+    principal: &AccountPrincipal,
+    user: &str,
+    delivery: &EwsDelegatePreferences,
+) -> Result<UpsertEwsDelegateInput> {
+    let user_id = element_content(user, "UserId").unwrap_or(user);
+    let grantee_email = element_text(user_id, "PrimarySmtpAddress")
+        .or_else(|| element_text(user_id, "EmailAddress"))
+        .map(|email| email.trim().to_ascii_lowercase())
+        .filter(|email| !email.is_empty())
+        .ok_or_else(|| anyhow!("Delegate UserId PrimarySmtpAddress is required"))?;
+    if grantee_email.eq_ignore_ascii_case(&principal.email) {
+        bail!("self-delegation is not supported");
+    }
+    let permissions = element_content(user, "DelegatePermissions").unwrap_or("");
+    reject_unsupported_delegate_permissions(permissions)?;
+    let inbox_rights = parse_delegate_permission_level(permissions, "InboxFolderPermissionLevel")?;
+    let calendar_rights =
+        parse_delegate_permission_level(permissions, "CalendarFolderPermissionLevel")?;
+    if !inbox_rights.may_read && !calendar_rights.may_read {
+        bail!("at least one Inbox or Calendar delegate permission is required");
+    }
+    let mut preferences = delivery.clone();
+    if let Some(value) = element_text(user, "ReceiveCopiesOfMeetingMessages") {
+        preferences.receives_meeting_request_copy = parse_xml_bool(&value)?;
+    }
+    if let Some(value) = element_text(user, "ViewPrivateItems") {
+        preferences.may_view_private_items = parse_xml_bool(&value)?;
+    }
+    Ok(UpsertEwsDelegateInput {
+        owner_account_id: principal.account_id,
+        grantee_email,
+        inbox_rights,
+        calendar_rights,
+        may_send_on_behalf: true,
+        preferences,
+    })
+}
+
+fn parse_delegate_permission_level(permissions: &str, field: &str) -> Result<CollaborationRights> {
+    let level = element_text(permissions, field).unwrap_or_else(|| "None".to_string());
+    match level.trim() {
+        "" | "None" => Ok(collaboration_rights(false, false, false, false)),
+        "Reviewer" => Ok(collaboration_rights(true, false, false, false)),
+        "Author" | "Editor" => Ok(collaboration_rights(true, true, true, false)),
+        "Custom" => bail!("{field} Custom is Exchange-only and cannot map to canonical rights"),
+        other => bail!("unsupported {field} value {other}"),
+    }
+}
+
+fn reject_unsupported_delegate_permissions(permissions: &str) -> Result<()> {
+    for field in [
+        "ContactsFolderPermissionLevel",
+        "TasksFolderPermissionLevel",
+        "NotesFolderPermissionLevel",
+        "JournalFolderPermissionLevel",
+    ] {
+        let Some(level) = element_text(permissions, field) else {
+            continue;
+        };
+        if !matches!(level.trim(), "" | "None") {
+            bail!("{field} is not supported by the bounded LPE EWS delegate adapter");
+        }
+    }
+    Ok(())
+}
+
+fn collaboration_rights(
+    may_read: bool,
+    may_write: bool,
+    may_delete: bool,
+    may_share: bool,
+) -> CollaborationRights {
+    CollaborationRights {
+        may_read,
+        may_write,
+        may_delete,
+        may_share,
+    }
+}
+
+fn parse_delegate_user_id_emails(request: &str) -> Vec<String> {
+    element_contents(request, "UserId")
+        .into_iter()
+        .filter_map(|user_id| {
+            element_text(user_id, "PrimarySmtpAddress")
+                .or_else(|| element_text(user_id, "EmailAddress"))
+        })
+        .map(|email| email.trim().to_ascii_lowercase())
+        .filter(|email| !email.is_empty())
+        .collect()
+}
+
 fn canonical_message_id_from_ews_id(id: &str) -> Option<Uuid> {
     id.strip_prefix("message:")
         .unwrap_or(id)
         .split(':')
         .next()
         .and_then(|value| Uuid::parse_str(value).ok())
+}
+
+#[derive(Debug, Clone)]
+struct ConvertIdSource {
+    id: String,
+    format: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct CanonicalEwsObjectId {
+    family: &'static str,
+    id: String,
+}
+
+#[derive(Debug, Clone)]
+struct ConvertIdOutput {
+    family: &'static str,
+    format: &'static str,
+    id: String,
+}
+
+#[derive(Debug, Clone)]
+struct MailTipProjection {
+    recipient: String,
+    display_name: Option<String>,
+    recipient_type: Option<ExchangeAddressBookEntryKind>,
+    invalid_recipient: bool,
+    out_of_office_message: Option<String>,
+}
+
+fn requested_convert_ids(request: &str) -> Vec<ConvertIdSource> {
+    [
+        "AlternateId",
+        "AlternatePublicFolderId",
+        "AlternatePublicFolderItemId",
+        "ItemId",
+        "FolderId",
+        "AttachmentId",
+    ]
+    .into_iter()
+    .flat_map(|tag| convert_id_sources_for_tag(request, tag))
+    .collect()
+}
+
+fn requested_mail_tips_recipients(request: &str) -> Vec<String> {
+    element_content(request, "RecipientMailboxes")
+        .or_else(|| element_content(request, "Recipients"))
+        .map(|mailboxes| {
+            element_contents(mailboxes, "Mailbox")
+                .into_iter()
+                .filter_map(parse_mailbox)
+                .map(|mailbox| mailbox.address.trim().to_ascii_lowercase())
+                .filter(|address| !address.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn requested_mail_tips(request: &str) -> HashSet<String> {
+    element_content(request, "MailTipsRequested")
+        .map(|value| {
+            value
+                .split(|ch: char| ch.is_whitespace() || ch == ',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| {
+            ["InvalidRecipient", "OutOfOfficeMessage"]
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        })
+}
+
+fn convert_id_sources_for_tag(request: &str, local_name: &str) -> Vec<ConvertIdSource> {
+    let mut values = Vec::new();
+    let mut rest = request;
+    while let Some(tag_start) = rest.find('<') {
+        let tag_text = rest[tag_start + 1..].trim_start();
+        if tag_text.starts_with('/') || tag_text.starts_with('?') || tag_text.starts_with('!') {
+            rest = &tag_text[1..];
+            continue;
+        }
+        let Some(tag_end) = tag_text.find('>') else {
+            break;
+        };
+        let open_tag = &tag_text[..tag_end];
+        let Some(qualified_name) = open_tag
+            .split(|value: char| value.is_whitespace() || value == '/')
+            .next()
+        else {
+            break;
+        };
+        if qualified_name.rsplit(':').next() == Some(local_name) {
+            if let Some(id) = attribute_value(open_tag, "Id") {
+                values.push(ConvertIdSource {
+                    id: id.to_string(),
+                    format: attribute_value(open_tag, "Format").map(str::to_string),
+                });
+            }
+        }
+        rest = &tag_text[tag_end + 1..];
+    }
+    values
+}
+
+fn canonical_ews_object_id_from_convert_source(
+    source: &ConvertIdSource,
+) -> Result<CanonicalEwsObjectId> {
+    let id = if source
+        .format
+        .as_deref()
+        .is_some_and(|format| format.eq_ignore_ascii_case("HexEntryId"))
+    {
+        decode_hex_entry_id(&source.id)?
+    } else {
+        source.id.clone()
+    };
+    if let Some(payload) = id.strip_prefix("LPEEWS1.") {
+        let decoded = URL_SAFE_NO_PAD
+            .decode(payload.as_bytes())
+            .map_err(|_| anyhow!("opaque ConvertId source is not valid base64url"))?;
+        let decoded = String::from_utf8(decoded)
+            .map_err(|_| anyhow!("opaque ConvertId source is not valid UTF-8"))?;
+        return canonical_ews_object_id_from_payload(&decoded);
+    }
+    canonical_ews_object_id_from_canonical_id(&id)
+}
+
+fn canonical_ews_object_id_from_payload(payload: &str) -> Result<CanonicalEwsObjectId> {
+    let Some(rest) = payload.strip_prefix("lpeews:v1:") else {
+        bail!("opaque ConvertId source has an unsupported version")
+    };
+    canonical_ews_object_id_from_canonical_id(rest)
+}
+
+fn canonical_ews_object_id_from_canonical_id(id: &str) -> Result<CanonicalEwsObjectId> {
+    let (family, rest) = id
+        .split_once(':')
+        .ok_or_else(|| anyhow!("ConvertId source id is not a supported LPE EWS id"))?;
+    match family {
+        "message" | "mailbox" | "contact" | "event" | "task" | "public-folder"
+        | "public-folder-item" => {
+            Uuid::parse_str(rest)
+                .map_err(|_| anyhow!("ConvertId source id has an invalid UUID"))?;
+            Ok(CanonicalEwsObjectId {
+                family: canonical_ews_family(family)?,
+                id: id.to_string(),
+            })
+        }
+        "attachment" => {
+            let (message_id, attachment_id) = rest.split_once(':').ok_or_else(|| {
+                anyhow!("attachment ConvertId source must include parent and attachment ids")
+            })?;
+            Uuid::parse_str(message_id)
+                .map_err(|_| anyhow!("attachment ConvertId source has an invalid parent id"))?;
+            Uuid::parse_str(attachment_id)
+                .map_err(|_| anyhow!("attachment ConvertId source has an invalid attachment id"))?;
+            Ok(CanonicalEwsObjectId {
+                family: "attachment",
+                id: id.to_string(),
+            })
+        }
+        _ => bail!("ConvertId source id family `{family}` is not supported"),
+    }
+}
+
+fn canonical_ews_family(family: &str) -> Result<&'static str> {
+    match family {
+        "message" => Ok("message"),
+        "mailbox" => Ok("mailbox"),
+        "contact" => Ok("contact"),
+        "event" => Ok("event"),
+        "task" => Ok("task"),
+        "public-folder" => Ok("public-folder"),
+        "public-folder-item" => Ok("public-folder-item"),
+        _ => bail!("unsupported ConvertId family `{family}`"),
+    }
+}
+
+fn convert_canonical_ews_object_id(
+    canonical: &CanonicalEwsObjectId,
+    destination_format: &str,
+) -> Result<ConvertIdOutput> {
+    let format = normalize_convert_id_format(destination_format)?;
+    let id = if format == "EwsId" {
+        canonical.id.clone()
+    } else {
+        let opaque = opaque_ews_id(&canonical.id);
+        if format == "HexEntryId" {
+            encode_hex_entry_id(&opaque)
+        } else {
+            opaque
+        }
+    };
+    Ok(ConvertIdOutput {
+        family: canonical.family,
+        format,
+        id,
+    })
+}
+
+fn normalize_convert_id_format(format: &str) -> Result<&'static str> {
+    match format {
+        value if value.eq_ignore_ascii_case("EwsId") => Ok("EwsId"),
+        value if value.eq_ignore_ascii_case("EwsLegacyId") => Ok("EwsLegacyId"),
+        value if value.eq_ignore_ascii_case("OwaId") => Ok("OwaId"),
+        value if value.eq_ignore_ascii_case("EntryId") => Ok("EntryId"),
+        value if value.eq_ignore_ascii_case("HexEntryId") => Ok("HexEntryId"),
+        value if value.eq_ignore_ascii_case("StoreId") => Ok("StoreId"),
+        _ => bail!("ConvertId destination format `{format}` is not supported"),
+    }
+}
+
+fn opaque_ews_id(canonical_id: &str) -> String {
+    format!(
+        "LPEEWS1.{}",
+        URL_SAFE_NO_PAD.encode(format!("lpeews:v1:{canonical_id}").as_bytes())
+    )
+}
+
+fn encode_hex_entry_id(value: &str) -> String {
+    value
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect()
+}
+
+fn decode_hex_entry_id(value: &str) -> Result<String> {
+    if value.len() % 2 != 0 {
+        bail!("HexEntryId source has an odd number of characters");
+    }
+    let mut bytes = Vec::new();
+    for index in (0..value.len()).step_by(2) {
+        let byte = u8::from_str_radix(&value[index..index + 2], 16)
+            .map_err(|_| anyhow!("HexEntryId source contains non-hex characters"))?;
+        bytes.push(byte);
+    }
+    String::from_utf8(bytes).map_err(|_| anyhow!("HexEntryId source is not valid UTF-8"))
 }
 
 fn parse_reminder_item_id(id: &str) -> Option<ParsedReminderItemId> {
@@ -5058,6 +6342,34 @@ fn requested_public_folder_ids(request: &str) -> Vec<Uuid> {
         .collect()
 }
 
+fn requested_public_folder_ids_in(request: &str, wrapper: &str) -> Vec<Uuid> {
+    element_content(request, wrapper)
+        .map(requested_public_folder_ids)
+        .unwrap_or_default()
+}
+
+fn requested_mailbox_folder_ids_in(request: &str, wrapper: &str) -> Vec<Uuid> {
+    element_content(request, wrapper)
+        .map(requested_mailbox_folder_ids)
+        .unwrap_or_default()
+}
+
+fn requested_mailbox_role_in(request: &str, wrapper: &str) -> Option<&'static str> {
+    element_content(request, wrapper).and_then(requested_mailbox_role)
+}
+
+fn requested_folder_path_segments(request: &str) -> Vec<String> {
+    element_content(request, "RelativeFolderPath")
+        .map(|path| {
+            element_contents(path, "DisplayName")
+                .into_iter()
+                .map(xml_text)
+                .filter(|value| !value.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn requested_sync_collection_id(request: &str, kind: &str, default_id: &str) -> String {
     if let Some(collection_id) = requested_collection_id_in(request, "SyncFolderId") {
         return collection_id.to_string();
@@ -5840,6 +7152,91 @@ fn create_item_success_response(message_id: Uuid, delivery_status: &str) -> Stri
     )
 }
 
+fn delegate_operation_response(operation: &str, response_messages: &str) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>{response_messages}</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation,
+        response_messages = response_messages,
+    )
+}
+
+fn get_delegate_response(delegates: &[EwsDelegate]) -> String {
+    let response_messages = delegates
+        .iter()
+        .map(|delegate| delegate_success_response_message(delegate, true))
+        .collect::<String>();
+    delegate_operation_response("GetDelegate", &response_messages)
+}
+
+fn delegate_success_response_message(delegate: &EwsDelegate, include_delegate: bool) -> String {
+    let delegate_xml = include_delegate
+        .then(|| ews_delegate_user_xml(delegate))
+        .unwrap_or_default();
+    format!(
+        concat!(
+            "<m:DelegateUserResponseMessageType ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{delegate_xml}",
+            "</m:DelegateUserResponseMessageType>"
+        ),
+        delegate_xml = delegate_xml,
+    )
+}
+
+fn delegate_error_response_message(code: &str, message: &str) -> String {
+    format!(
+        concat!(
+            "<m:DelegateUserResponseMessageType ResponseClass=\"Error\">",
+            "<m:MessageText>{message}</m:MessageText>",
+            "<m:ResponseCode>{code}</m:ResponseCode>",
+            "</m:DelegateUserResponseMessageType>"
+        ),
+        code = escape_xml(code),
+        message = escape_xml(message),
+    )
+}
+
+fn ews_delegate_user_xml(delegate: &EwsDelegate) -> String {
+    format!(
+        concat!(
+            "<m:DelegateUser>",
+            "<t:UserId>",
+            "<t:SID>{grantee_account_id}</t:SID>",
+            "<t:PrimarySmtpAddress>{email}</t:PrimarySmtpAddress>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "</t:UserId>",
+            "<t:DelegatePermissions>",
+            "<t:CalendarFolderPermissionLevel>{calendar_level}</t:CalendarFolderPermissionLevel>",
+            "<t:InboxFolderPermissionLevel>{inbox_level}</t:InboxFolderPermissionLevel>",
+            "</t:DelegatePermissions>",
+            "<t:ReceiveCopiesOfMeetingMessages>{receives_copies}</t:ReceiveCopiesOfMeetingMessages>",
+            "<t:ViewPrivateItems>{view_private}</t:ViewPrivateItems>",
+            "</m:DelegateUser>"
+        ),
+        grantee_account_id = delegate.grantee_account_id,
+        email = escape_xml(&delegate.grantee_email),
+        display_name = escape_xml(&delegate.grantee_display_name),
+        calendar_level = ews_delegate_permission_level(&delegate.calendar_rights),
+        inbox_level = ews_delegate_permission_level(&delegate.inbox_rights),
+        receives_copies = delegate.preferences.receives_meeting_request_copy,
+        view_private = delegate.preferences.may_view_private_items,
+    )
+}
+
+fn ews_delegate_permission_level(rights: &CollaborationRights) -> &'static str {
+    if !rights.may_read {
+        "None"
+    } else if rights.may_write || rights.may_delete || rights.may_share {
+        "Editor"
+    } else {
+        "Reviewer"
+    }
+}
+
 fn create_public_folder_item_success_response(item: &PublicFolderItem) -> String {
     format!(
         concat!(
@@ -6090,6 +7487,23 @@ fn create_public_folder_success_response(folder: &PublicFolder) -> String {
     )
 }
 
+fn folders_operation_success_response(operation: &str, folders: String) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Folders>{folders}</m:Folders>",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation,
+        folders = folders,
+    )
+}
+
 fn delete_folder_success_response() -> String {
     concat!(
         "<m:DeleteFolderResponse>",
@@ -6115,6 +7529,36 @@ fn simple_operation_success_response(operation: &str) -> String {
             "</m:{operation}Response>"
         ),
         operation = operation
+    )
+}
+
+fn convert_id_success_response(alternate_ids: String) -> String {
+    format!(
+        concat!(
+            "<m:ConvertIdResponse>",
+            "<m:ResponseMessages>",
+            "<m:ConvertIdResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{alternate_ids}",
+            "</m:ConvertIdResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:ConvertIdResponse>"
+        ),
+        alternate_ids = alternate_ids,
+    )
+}
+
+fn convert_id_xml(output: &ConvertIdOutput) -> String {
+    let element = match output.family {
+        "public-folder" => "AlternatePublicFolderId",
+        "public-folder-item" => "AlternatePublicFolderItemId",
+        _ => "AlternateId",
+    };
+    format!(
+        "<t:{element} Format=\"{format}\" Id=\"{id}\"/>",
+        element = element,
+        format = escape_xml(output.format),
+        id = escape_xml(&output.id),
     )
 }
 
@@ -6270,6 +7714,74 @@ fn get_inbox_rules_response(rules: &[MailboxRule]) -> String {
             "</m:GetInboxRulesResponse>"
         ),
         rules_xml = rules_xml
+    )
+}
+
+fn get_mail_tips_response(tips: &[MailTipProjection]) -> String {
+    let tips_xml = tips.iter().map(mail_tip_xml).collect::<String>();
+    format!(
+        concat!(
+            "<m:GetMailTipsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetMailTipsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:ResponseMessage ResponseClass=\"Success\"><m:ResponseCode>NoError</m:ResponseCode></m:ResponseMessage>",
+            "<m:MailTips>{tips_xml}</m:MailTips>",
+            "</m:GetMailTipsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetMailTipsResponse>"
+        ),
+        tips_xml = tips_xml,
+    )
+}
+
+fn mail_tip_xml(tip: &MailTipProjection) -> String {
+    let mailbox_type = tip
+        .recipient_type
+        .map(|kind| match kind {
+            ExchangeAddressBookEntryKind::Account => "Mailbox",
+            ExchangeAddressBookEntryKind::Contact => "Contact",
+            ExchangeAddressBookEntryKind::DistributionList => "PublicDL",
+        })
+        .unwrap_or("Unknown");
+    let display_name = tip.display_name.as_deref().unwrap_or(&tip.recipient);
+    let invalid = if tip.invalid_recipient {
+        "<t:InvalidRecipient>true</t:InvalidRecipient>"
+    } else {
+        "<t:InvalidRecipient>false</t:InvalidRecipient>"
+    };
+    let oof = tip
+        .out_of_office_message
+        .as_deref()
+        .map(|message| {
+            format!(
+                concat!(
+                    "<t:OutOfOffice>",
+                    "<t:ReplyBody><t:Message>{message}</t:Message></t:ReplyBody>",
+                    "</t:OutOfOffice>"
+                ),
+                message = escape_xml(message),
+            )
+        })
+        .unwrap_or_else(|| "<t:OutOfOffice/>".to_string());
+    format!(
+        concat!(
+            "<t:MailTips>",
+            "<t:RecipientAddress>",
+            "<t:Name>{name}</t:Name>",
+            "<t:EmailAddress>{email}</t:EmailAddress>",
+            "<t:RoutingType>SMTP</t:RoutingType>",
+            "<t:MailboxType>{mailbox_type}</t:MailboxType>",
+            "</t:RecipientAddress>",
+            "{invalid}",
+            "{oof}",
+            "</t:MailTips>"
+        ),
+        name = escape_xml(display_name),
+        email = escape_xml(&tip.recipient),
+        mailbox_type = mailbox_type,
+        invalid = invalid,
+        oof = oof,
     )
 }
 
@@ -7096,6 +8608,21 @@ fn public_folder_xml(
 
 fn folder_change_key(id: &str) -> String {
     format!("ck-{id}")
+}
+
+fn mailbox_by_id(mailboxes: &[JmapMailbox], mailbox_id: Uuid) -> Result<&JmapMailbox> {
+    mailboxes
+        .iter()
+        .find(|mailbox| mailbox.id == mailbox_id)
+        .ok_or_else(|| anyhow!("mailbox folder not found"))
+}
+
+fn ensure_custom_mailbox(mailbox: &JmapMailbox) -> Result<()> {
+    if mailbox.role == "custom" {
+        Ok(())
+    } else {
+        bail!("system mailbox folders cannot be moved, copied, updated, or deleted as subfolders")
+    }
 }
 
 fn contact_change_key(contact: &AccessibleContact, sync_version: Option<&str>) -> String {
