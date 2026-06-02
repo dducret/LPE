@@ -246,10 +246,10 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `CreateUserConfiguration` | Missing | New bounded user-configuration blob/key-value table if allowed | Canonical user/client configuration API with strict scope limits | Unsupported; Outlook clients cannot persist Exchange user configuration blobs through EWS | P1 |
-| `DeleteUserConfiguration` | Missing | Same as `CreateUserConfiguration` plus tombstones/change rows | Canonical user/client configuration API | Unsupported | P1 |
-| `GetUserConfiguration` | Explicitly unsupported | Same as `CreateUserConfiguration` | Canonical user/client configuration API | Explicit unsupported response | P1 |
-| `UpdateUserConfiguration` | Missing | Same as `CreateUserConfiguration` | Canonical user/client configuration API | Unsupported | P1 |
+| `CreateUserConfiguration` | Partial | `account_client_configurations` keyed by account, optional mailbox/public-folder scope, config class, and config name | Canonical user/client configuration API with strict scope limits | Stores bounded dictionary, XML, and binary payloads; no Exchange arbitrary user-configuration store is introduced | P1 |
+| `DeleteUserConfiguration` | Partial | Same as `CreateUserConfiguration` | Canonical user/client configuration API | Deletes canonical user configuration blobs; missing rows return EWS item-not-found errors | P1 |
+| `GetUserConfiguration` | Partial | Same as `CreateUserConfiguration` | Canonical user/client configuration API | Returns bounded dictionary, XML, and binary payloads from canonical storage | P1 |
+| `UpdateUserConfiguration` | Partial | Same as `CreateUserConfiguration` plus audit/modseq update | Canonical user/client configuration API | Replaces bounded canonical payloads and advances canonical modseq | P1 |
 
 ## Priority Summary
 
@@ -263,7 +263,7 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 ## Main Parity Gaps For Outlook And Native Clients
 
-1. The highest-value remaining P0/P1 gaps are `MarkAllItemsAsRead`, `EmptyFolder`, `UpdateFolder`, `ConvertId`, delegate management, mail tips, and user configuration.
-2. `SendItem`, inbox rules, reminders, room/resource discovery, and bounded streaming notifications are now wired, but remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, or notification semantics.
+1. The highest-value remaining P0/P1 gaps are `MarkAllItemsAsRead`, `EmptyFolder`, `UpdateFolder`, `ConvertId`, delegate management, and mail tips.
+2. `SendItem`, inbox rules, reminders, room/resource discovery, bounded streaming notifications, and user configuration are now wired, but remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, or user-configuration semantics.
 3. EWS sync and notifications remain partial because current sync-state and subscription behavior is not a full Exchange-equivalent cursor, affinity, or push/streaming model.
 4. Most P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as Exchange eDiscovery, mail apps, Unified Messaging, and Unified Contact Store IM groups.

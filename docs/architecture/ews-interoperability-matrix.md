@@ -126,16 +126,16 @@ For `partial` and `missing` rows, the planning columns identify the canonical LP
 | Unified Contact Store | `RemoveDistributionGroupFromImList` | missing | IM list API if scoped | contact_group_members | remove distribution group tests | UCS docs | Removes canonical external/directory group membership |
 | Unified Contact Store | `RemoveImGroup` | missing | IM group API if scoped | contact_groups, contact_group_members | remove group tests | UCS docs | Deletes canonical IM groups and memberships |
 | Unified Contact Store | `SetImGroup` | missing | IM group API if scoped | contact_groups | rename/update group tests | UCS docs | Updates canonical IM groups |
-| User configuration | `CreateUserConfiguration` | missing | User configuration blob API if Outlook requires it | account_client_configurations keyed by account/folder/name | create blob, quota, folder scope tests | user configuration docs | Stores bounded user config only if canonical state is approved |
-| User configuration | `DeleteUserConfiguration` | missing | User configuration blob API if Outlook requires it | account_client_configurations | delete and missing-row tests | user configuration docs | Deletes canonical user config blobs |
-| User configuration | `GetUserConfiguration` | unsupported | N/A | N/A | Unsupported-response test should remain until user config API exists | EWS unsupported list | Returns parseable unsupported response |
-| User configuration | `UpdateUserConfiguration` | missing | User configuration blob API if Outlook requires it | account_client_configurations, change/audit if scoped | update, concurrency, quota tests | user configuration docs | Updates canonical user config blobs |
+| User configuration | `CreateUserConfiguration` | partial | Existing user configuration blob API | account_client_configurations keyed by account/folder/name | create account and mailbox scoped blobs, dictionary/XML/binary payload tests | user configuration docs | Stores bounded user config in canonical `account_client_configurations` |
+| User configuration | `DeleteUserConfiguration` | partial | Existing user configuration blob API | account_client_configurations | delete and missing-row tests | user configuration docs | Deletes canonical user config blobs |
+| User configuration | `GetUserConfiguration` | partial | Existing user configuration blob API | account_client_configurations keyed by account/folder/name | get all/selective properties, missing-row tests | user configuration docs | Returns bounded dictionary, XML, and binary payloads from canonical storage |
+| User configuration | `UpdateUserConfiguration` | partial | Existing user configuration blob API | account_client_configurations, audit | update dictionary/XML/binary payload tests | user configuration docs | Updates canonical user config blobs and advances canonical modseq |
 
 ## Current Partial Dispatcher Surface
 
 The current EWS dispatcher in `crates/lpe-exchange/src/service.rs` routes these operations to concrete handlers:
 
-`SyncFolderHierarchy`, `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, `SyncFolderItems`, `GetServerTimeZones`, `ResolveNames`, `GetUserAvailability`, `CreateItem`, `SendItem`, `UpdateItem`, `DeleteItem`, `MoveItem`, `CopyItem`, `CreateFolder`, `DeleteFolder`, `GetAttachment`, `CreateAttachment`, `DeleteAttachment`, `GetUserOofSettings`, `SetUserOofSettings`, `GetInboxRules`, `UpdateInboxRules`, `GetReminders`, `PerformReminderAction`, `GetRooms`, `GetRoomLists`, `Subscribe`, `GetEvents`, `GetStreamingEvents`, and `Unsubscribe`.
+`SyncFolderHierarchy`, `FindFolder`, `GetFolder`, `FindItem`, `GetItem`, `SyncFolderItems`, `GetServerTimeZones`, `ResolveNames`, `GetUserAvailability`, `CreateItem`, `SendItem`, `UpdateItem`, `DeleteItem`, `MoveItem`, `CopyItem`, `CreateFolder`, `DeleteFolder`, `GetAttachment`, `CreateAttachment`, `DeleteAttachment`, `GetUserOofSettings`, `SetUserOofSettings`, `GetInboxRules`, `UpdateInboxRules`, `GetReminders`, `PerformReminderAction`, `GetRooms`, `GetRoomLists`, `Subscribe`, `GetEvents`, `GetStreamingEvents`, `Unsubscribe`, `CreateUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration`, and `DeleteUserConfiguration`.
 
 These are all `partial` against Microsoft parity because LPE intentionally maps only bounded Exchange-compatible behavior to canonical state.
 
@@ -143,7 +143,7 @@ These are all `partial` against Microsoft parity because LPE intentionally maps 
 
 The dispatcher explicitly returns EWS-shaped unsupported responses for:
 
-`FindPeople`, `ExpandDL`, `GetDelegate`, `GetUserConfiguration`, `GetSharingMetadata`, and `GetSharingFolder`.
+`FindPeople`, `ExpandDL`, `GetDelegate`, `GetSharingMetadata`, and `GetSharingFolder`.
 
 All other Microsoft catalog operations currently fall through to the generic unsupported response and are marked `missing` in the matrix.
 
