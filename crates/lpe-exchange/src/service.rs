@@ -33,6 +33,7 @@ use lpe_storage::{
     UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
     UpsertPublicFolderItemInput,
 };
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -49,10 +50,11 @@ use crate::{
     ntlm,
     store::{
         EwsDelegate, EwsDelegatePreferences, EwsDiscoverySearchConfig, EwsDiscoverySearchResult,
-        EwsHoldMailbox, EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox,
-        EwsTransferJob, EwsUserConfiguration, EwsUserConfigurationKey,
-        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        EwsHoldMailbox, EwsMailAppManifest, EwsMailAppTokenEvent, EwsNonIndexableReport,
+        EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferJob, EwsUnifiedMessagingCall,
+        EwsUserConfiguration, EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind,
+        ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -808,6 +810,15 @@ where
             }
             "UploadItems" => self.upload_items(&principal, &body).await?,
             "ExportItems" => self.export_items(&principal, &body).await?,
+            "GetAppManifests" => self.get_app_manifests(&principal).await?,
+            "GetAppMarketplaceUrl" => self.get_app_marketplace_url(&principal).await?,
+            "InstallApp" => self.install_app(&principal, &body).await?,
+            "DisableApp" => self.disable_app(&principal, &body).await?,
+            "UninstallApp" => self.uninstall_app(&principal, &body).await?,
+            "GetClientAccessToken" => self.get_client_access_token(&principal, &body).await?,
+            "PlayOnPhone" => self.play_on_phone(&principal, &body).await?,
+            "GetPhoneCallInformation" => self.get_phone_call_information(&principal, &body).await?,
+            "DisconnectPhoneCall" => self.disconnect_phone_call(&principal, &body).await?,
             "FindPeople" => unsupported_operation_response("FindPeople"),
             "ExpandDL" => self.expand_dl(&principal, &body).await?,
             "AddDelegate" => self.add_delegate(&principal, &body).await?,
@@ -968,6 +979,257 @@ where
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("MarkAsJunk", "ErrorInvalidOperation", &error.to_string())
         }))
+    }
+
+    async fn get_app_manifests(&self, principal: &AccountPrincipal) -> Result<String> {
+        let manifests = self.store.fetch_ews_mail_app_manifests(principal).await?;
+        Ok(get_app_manifests_response(&manifests))
+    }
+
+    async fn get_app_marketplace_url(&self, principal: &AccountPrincipal) -> Result<String> {
+        let policy = self
+            .store
+            .fetch_ews_app_marketplace_policy(principal)
+            .await?;
+        if !policy.enabled {
+            return Ok(operation_error_response(
+                "GetAppMarketplaceUrl",
+                "ErrorInvalidOperation",
+                "Exchange marketplace federation is not enabled for this tenant.",
+            ));
+        }
+        let Some(url) = policy.url.filter(|url| !url.trim().is_empty()) else {
+            return Ok(operation_error_response(
+                "GetAppMarketplaceUrl",
+                "ErrorInvalidOperation",
+                "No canonical mail app marketplace URL is configured.",
+            ));
+        };
+        Ok(get_app_marketplace_url_response(&url))
+    }
+
+    async fn install_app(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let Some(app_id) = mail_app_id_from_request(request) else {
+            return Ok(operation_error_response(
+                "InstallApp",
+                "ErrorInvalidOperation",
+                "InstallApp requires an AppId value.",
+            ));
+        };
+        match self
+            .store
+            .install_ews_mail_app(
+                principal,
+                &app_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-install-mail-app".to_string(),
+                    subject: app_id.clone(),
+                },
+            )
+            .await
+        {
+            Ok(install) => Ok(mail_app_state_response(
+                "InstallApp",
+                &install.app_id,
+                &install.status,
+            )),
+            Err(error) => Ok(mail_app_operation_error_response("InstallApp", &error)),
+        }
+    }
+
+    async fn disable_app(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let Some(app_id) = mail_app_id_from_request(request) else {
+            return Ok(operation_error_response(
+                "DisableApp",
+                "ErrorInvalidOperation",
+                "DisableApp requires an AppId value.",
+            ));
+        };
+        match self
+            .store
+            .disable_ews_mail_app(
+                principal,
+                &app_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-disable-mail-app".to_string(),
+                    subject: app_id.clone(),
+                },
+            )
+            .await
+        {
+            Ok(install) => Ok(mail_app_state_response(
+                "DisableApp",
+                &install.app_id,
+                &install.status,
+            )),
+            Err(error) => Ok(mail_app_operation_error_response("DisableApp", &error)),
+        }
+    }
+
+    async fn uninstall_app(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let Some(app_id) = mail_app_id_from_request(request) else {
+            return Ok(operation_error_response(
+                "UninstallApp",
+                "ErrorInvalidOperation",
+                "UninstallApp requires an AppId value.",
+            ));
+        };
+        match self
+            .store
+            .uninstall_ews_mail_app(
+                principal,
+                &app_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-uninstall-mail-app".to_string(),
+                    subject: app_id.clone(),
+                },
+            )
+            .await
+        {
+            Ok(install) => Ok(mail_app_state_response(
+                "UninstallApp",
+                &install.app_id,
+                &install.status,
+            )),
+            Err(error) => Ok(mail_app_operation_error_response("UninstallApp", &error)),
+        }
+    }
+
+    async fn get_client_access_token(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let Some(app_id) = mail_app_id_from_request(request) else {
+            return Ok(operation_error_response(
+                "GetClientAccessToken",
+                "ErrorInvalidOperation",
+                "GetClientAccessToken requires an AppId value.",
+            ));
+        };
+        let scopes = requested_mail_app_token_scopes(request);
+        let token = format!("ews-app-token:{}", Uuid::new_v4());
+        let mut hasher = Sha256::new();
+        hasher.update(token.as_bytes());
+        let token_hash = format!("{:x}", hasher.finalize());
+        match self
+            .store
+            .issue_ews_mail_app_token(
+                principal,
+                &app_id,
+                &token_hash,
+                &scopes,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-issue-mail-app-token".to_string(),
+                    subject: format!("{}:{}", app_id, scopes.join(",")),
+                },
+            )
+            .await
+        {
+            Ok(event) => Ok(get_client_access_token_response(&event, &token, &scopes)),
+            Err(error) => Ok(mail_app_operation_error_response(
+                "GetClientAccessToken",
+                &error,
+            )),
+        }
+    }
+
+    async fn play_on_phone(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let phone_number = element_text(request, "DialString")
+            .or_else(|| element_text(request, "PhoneNumber"))
+            .or_else(|| element_text(request, "PhoneNumberString"))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let message_id = requested_item_ids(request)
+            .into_iter()
+            .find_map(|id| canonical_message_id_from_ews_id(&id));
+        match self
+            .store
+            .create_ews_unified_messaging_call(
+                principal,
+                phone_number.as_deref(),
+                message_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-play-on-phone".to_string(),
+                    subject: phone_number
+                        .clone()
+                        .unwrap_or_else(|| "default".to_string()),
+                },
+            )
+            .await
+        {
+            Ok(call) => Ok(play_on_phone_response(&call)),
+            Err(error) => Ok(operation_error_response(
+                "PlayOnPhone",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )),
+        }
+    }
+
+    async fn get_phone_call_information(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let Some(call_id) = phone_call_id_from_request(request) else {
+            return Ok(operation_error_response(
+                "GetPhoneCallInformation",
+                "ErrorInvalidOperation",
+                "GetPhoneCallInformation requires a PhoneCallId value.",
+            ));
+        };
+        match self
+            .store
+            .fetch_ews_unified_messaging_call(principal, &call_id)
+            .await?
+        {
+            Some(call) => Ok(phone_call_information_response(&call)),
+            None => Ok(operation_error_response(
+                "GetPhoneCallInformation",
+                "ErrorItemNotFound",
+                "Unified Messaging call was not found.",
+            )),
+        }
+    }
+
+    async fn disconnect_phone_call(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let Some(call_id) = phone_call_id_from_request(request) else {
+            return Ok(operation_error_response(
+                "DisconnectPhoneCall",
+                "ErrorInvalidOperation",
+                "DisconnectPhoneCall requires a PhoneCallId value.",
+            ));
+        };
+        match self
+            .store
+            .disconnect_ews_unified_messaging_call(
+                principal,
+                &call_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-disconnect-phone-call".to_string(),
+                    subject: call_id.clone(),
+                },
+            )
+            .await?
+        {
+            Some(call) => Ok(disconnect_phone_call_response(&call)),
+            None => Ok(operation_error_response(
+                "DisconnectPhoneCall",
+                "ErrorItemNotFound",
+                "Unified Messaging call was not found or is already complete.",
+            )),
+        }
     }
 
     async fn get_user_configuration(
@@ -5409,6 +5671,37 @@ fn canonical_message_id_from_ews_id(id: &str) -> Option<Uuid> {
         .and_then(|value| Uuid::parse_str(value).ok())
 }
 
+fn mail_app_id_from_request(request: &str) -> Option<String> {
+    element_text(request, "AppId")
+        .or_else(|| element_text(request, "Id"))
+        .or_else(|| element_text(request, "ID"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn requested_mail_app_token_scopes(request: &str) -> Vec<String> {
+    let mut scopes = element_contents(request, "TokenScope")
+        .into_iter()
+        .chain(element_contents(request, "Scope"))
+        .map(xml_text)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if scopes.is_empty() {
+        scopes.push("ews".to_string());
+    }
+    scopes.sort();
+    scopes.dedup();
+    scopes
+}
+
+fn phone_call_id_from_request(request: &str) -> Option<String> {
+    element_text(request, "PhoneCallId")
+        .or_else(|| element_text(request, "CallId"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 #[derive(Debug, Clone)]
 struct ConvertIdSource {
     id: String,
@@ -8864,6 +9157,213 @@ fn simple_operation_success_response(operation: &str) -> String {
         ),
         operation = operation
     )
+}
+
+fn get_app_manifests_response(manifests: &[EwsMailAppManifest]) -> String {
+    let manifests_xml = manifests
+        .iter()
+        .map(|manifest| {
+            format!(
+                concat!(
+                    "<t:AppManifest>",
+                    "<t:AppId>{app_id}</t:AppId>",
+                    "<t:DisplayName>{display_name}</t:DisplayName>",
+                    "<t:ProviderName>{provider_name}</t:ProviderName>",
+                    "<t:Version>{version}</t:Version>",
+                    "<t:Status>{status}</t:Status>",
+                    "<t:ManifestXml>{manifest_xml}</t:ManifestXml>",
+                    "</t:AppManifest>"
+                ),
+                app_id = escape_xml(&manifest.app_id),
+                display_name = escape_xml(&manifest.display_name),
+                provider_name = escape_xml(&manifest.provider_name),
+                version = escape_xml(&manifest.version),
+                status = escape_xml(
+                    manifest
+                        .installation_status
+                        .as_deref()
+                        .unwrap_or("available")
+                ),
+                manifest_xml = escape_xml(&manifest.manifest_xml),
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetAppManifestsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetAppManifestsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Manifests>{manifests_xml}</m:Manifests>",
+            "</m:GetAppManifestsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetAppManifestsResponse>"
+        ),
+        manifests_xml = manifests_xml,
+    )
+}
+
+fn get_app_marketplace_url_response(url: &str) -> String {
+    format!(
+        concat!(
+            "<m:GetAppMarketplaceUrlResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetAppMarketplaceUrlResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:AppMarketplaceUrl>{url}</m:AppMarketplaceUrl>",
+            "</m:GetAppMarketplaceUrlResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetAppMarketplaceUrlResponse>"
+        ),
+        url = escape_xml(url),
+    )
+}
+
+fn mail_app_state_response(operation: &str, app_id: &str, status: &str) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:AppId>{app_id}</m:AppId>",
+            "<m:Status>{status}</m:Status>",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation,
+        app_id = escape_xml(app_id),
+        status = escape_xml(status),
+    )
+}
+
+fn get_client_access_token_response(
+    event: &EwsMailAppTokenEvent,
+    token: &str,
+    scopes: &[String],
+) -> String {
+    let scopes_xml = scopes
+        .iter()
+        .map(|scope| format!("<t:Scope>{}</t:Scope>", escape_xml(scope)))
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetClientAccessTokenResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetClientAccessTokenResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Token>",
+            "<t:TokenId>{token_id}</t:TokenId>",
+            "<t:AppId>{app_id}</t:AppId>",
+            "<t:TokenValue>{token}</t:TokenValue>",
+            "<t:IssuedAt>{issued_at}</t:IssuedAt>",
+            "<t:ExpiresAt>{expires_at}</t:ExpiresAt>",
+            "<t:Scopes>{scopes_xml}</t:Scopes>",
+            "</m:Token>",
+            "</m:GetClientAccessTokenResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetClientAccessTokenResponse>"
+        ),
+        token_id = event.id,
+        app_id = escape_xml(&event.app_id),
+        token = escape_xml(token),
+        issued_at = escape_xml(&event.issued_at),
+        expires_at = escape_xml(&event.expires_at),
+        scopes_xml = scopes_xml,
+    )
+}
+
+fn play_on_phone_response(call: &EwsUnifiedMessagingCall) -> String {
+    format!(
+        concat!(
+            "<m:PlayOnPhoneResponse>",
+            "<m:ResponseMessages>",
+            "<m:PlayOnPhoneResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{call_xml}",
+            "</m:PlayOnPhoneResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:PlayOnPhoneResponse>"
+        ),
+        call_xml = unified_messaging_call_xml(call),
+    )
+}
+
+fn phone_call_information_response(call: &EwsUnifiedMessagingCall) -> String {
+    format!(
+        concat!(
+            "<m:GetPhoneCallInformationResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetPhoneCallInformationResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{call_xml}",
+            "</m:GetPhoneCallInformationResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetPhoneCallInformationResponse>"
+        ),
+        call_xml = unified_messaging_call_xml(call),
+    )
+}
+
+fn disconnect_phone_call_response(call: &EwsUnifiedMessagingCall) -> String {
+    format!(
+        concat!(
+            "<m:DisconnectPhoneCallResponse>",
+            "<m:ResponseMessages>",
+            "<m:DisconnectPhoneCallResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{call_xml}",
+            "</m:DisconnectPhoneCallResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:DisconnectPhoneCallResponse>"
+        ),
+        call_xml = unified_messaging_call_xml(call),
+    )
+}
+
+fn unified_messaging_call_xml(call: &EwsUnifiedMessagingCall) -> String {
+    let phone_number = call
+        .phone_number
+        .as_ref()
+        .map(|value| format!("<t:PhoneNumber>{}</t:PhoneNumber>", escape_xml(value)))
+        .unwrap_or_default();
+    let message_id = call
+        .message_id
+        .map(|value| format!("<t:ItemId Id=\"message:{value}\"/>"))
+        .unwrap_or_default();
+    format!(
+        concat!(
+            "<m:PhoneCallInformation>",
+            "<t:PhoneCallId>{call_id}</t:PhoneCallId>",
+            "<t:CallKind>{call_kind}</t:CallKind>",
+            "<t:CallState>{status}</t:CallState>",
+            "{phone_number}",
+            "{message_id}",
+            "<t:RequestedAt>{requested_at}</t:RequestedAt>",
+            "<t:UpdatedAt>{updated_at}</t:UpdatedAt>",
+            "</m:PhoneCallInformation>"
+        ),
+        call_id = escape_xml(&call.call_id),
+        call_kind = escape_xml(&call.call_kind),
+        status = escape_xml(&call.status),
+        phone_number = phone_number,
+        message_id = message_id,
+        requested_at = escape_xml(&call.requested_at),
+        updated_at = escape_xml(&call.updated_at),
+    )
+}
+
+fn mail_app_operation_error_response(operation: &str, error: &anyhow::Error) -> String {
+    let message = error.to_string();
+    let code = if message.contains("not found") {
+        "ErrorItemNotFound"
+    } else if message.contains("access is not granted") {
+        "ErrorAccessDenied"
+    } else {
+        "ErrorInvalidOperation"
+    };
+    operation_error_response(operation, code, &message)
 }
 
 fn mark_as_junk_success_response(moved_item_ids: String) -> String {

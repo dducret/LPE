@@ -54,15 +54,17 @@ use crate::{
         rpc_proxy_in_channel_response_for_endpoint_query_with_store, ExchangeService,
     },
     store::{
-        EwsDelegate, EwsDiscoverySearchConfig, EwsDiscoverySearchItem, EwsDiscoverySearchResult,
-        EwsHoldMailbox, EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox,
-        EwsTransferEntry, EwsTransferJob, EwsUserConfiguration, EwsUserConfigurationKey,
-        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
-        ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
-        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
-        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
-        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        EwsAppMarketplacePolicy, EwsDelegate, EwsDiscoverySearchConfig, EwsDiscoverySearchItem,
+        EwsDiscoverySearchResult, EwsHoldMailbox, EwsMailAppInstall, EwsMailAppManifest,
+        EwsMailAppTokenEvent, EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox,
+        EwsTransferEntry, EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration,
+        EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
+        ExchangeAddressBookEntryKind, ExchangeStore, MapiCheckpointKind, MapiContentTableQuery,
+        MapiContentTableQueryResult, MapiContentTableSortField, MapiCustomPropertyObjectKind,
+        MapiCustomPropertyValue, MapiIdentityLookupRecord, MapiIdentityObjectKind,
+        MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
+        MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -494,6 +496,11 @@ struct FakeStore {
     ews_holds: Arc<Mutex<Vec<EwsHoldMailbox>>>,
     ews_non_indexable_reports: Arc<Mutex<Vec<EwsNonIndexableReport>>>,
     ews_transfer_jobs: Arc<Mutex<Vec<EwsTransferJob>>>,
+    ews_mail_app_manifests: Arc<Mutex<Vec<FakeMailAppManifest>>>,
+    ews_mail_app_installations: Arc<Mutex<Vec<FakeMailAppInstallation>>>,
+    ews_mail_app_token_events: Arc<Mutex<Vec<EwsMailAppTokenEvent>>>,
+    ews_app_marketplace_policy: Arc<Mutex<EwsAppMarketplacePolicy>>,
+    ews_unified_messaging_calls: Arc<Mutex<Vec<FakeUnifiedMessagingCall>>>,
     next_mapi_global_counter: Arc<Mutex<u64>>,
     omit_principal_from_directory: bool,
     fail_query_jmap_email_ids: bool,
@@ -508,6 +515,28 @@ struct FakeRetentionPolicyTag {
     tenant_id: Uuid,
     assigned_account_id: Option<Uuid>,
     tag: EwsRetentionPolicyTag,
+}
+
+#[derive(Clone)]
+struct FakeMailAppManifest {
+    tenant_id: Uuid,
+    manifest: EwsMailAppManifest,
+}
+
+#[derive(Clone)]
+struct FakeMailAppInstallation {
+    tenant_id: Uuid,
+    account_id: Uuid,
+    catalog_id: Uuid,
+    app_id: String,
+    status: String,
+}
+
+#[derive(Clone)]
+struct FakeUnifiedMessagingCall {
+    tenant_id: Uuid,
+    account_id: Uuid,
+    call: EwsUnifiedMessagingCall,
 }
 
 #[derive(Default)]
@@ -1458,6 +1487,254 @@ impl ExchangeStore for FakeStore {
             jobs.lock().unwrap().push(job.clone());
             Ok(job)
         })
+    }
+
+    fn fetch_ews_mail_app_manifests<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsMailAppManifest>> {
+        let installations = self.ews_mail_app_installations.lock().unwrap().clone();
+        let mut manifests = self
+            .ews_mail_app_manifests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.tenant_id == principal.tenant_id)
+            .map(|entry| {
+                let mut manifest = entry.manifest.clone();
+                manifest.installation_status = installations
+                    .iter()
+                    .find(|install| {
+                        install.tenant_id == principal.tenant_id
+                            && install.account_id == principal.account_id
+                            && install.catalog_id == manifest.catalog_id
+                            && install.status != "uninstalled"
+                    })
+                    .map(|install| install.status.clone());
+                manifest
+            })
+            .collect::<Vec<_>>();
+        manifests.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+        Box::pin(async move { Ok(manifests) })
+    }
+
+    fn fetch_ews_app_marketplace_policy<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, EwsAppMarketplacePolicy> {
+        let policy = self.ews_app_marketplace_policy.lock().unwrap().clone();
+        Box::pin(async move { Ok(policy) })
+    }
+
+    fn install_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall> {
+        let Some(manifest) = self
+            .ews_mail_app_manifests
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.tenant_id == principal.tenant_id && entry.manifest.app_id == app_id)
+            .map(|entry| entry.manifest.clone())
+        else {
+            return Box::pin(async move { Err(anyhow::anyhow!("mail app not found")) });
+        };
+        let mut installs = self.ews_mail_app_installations.lock().unwrap();
+        if let Some(install) = installs.iter_mut().find(|install| {
+            install.tenant_id == principal.tenant_id
+                && install.account_id == principal.account_id
+                && install.catalog_id == manifest.catalog_id
+                && install.status != "uninstalled"
+        }) {
+            install.status = "installed".to_string();
+        } else {
+            installs.push(FakeMailAppInstallation {
+                tenant_id: principal.tenant_id,
+                account_id: principal.account_id,
+                catalog_id: manifest.catalog_id,
+                app_id: app_id.to_string(),
+                status: "installed".to_string(),
+            });
+        }
+        let install = EwsMailAppInstall {
+            catalog_id: manifest.catalog_id,
+            app_id: app_id.to_string(),
+            status: "installed".to_string(),
+        };
+        Box::pin(async move { Ok(install) })
+    }
+
+    fn disable_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall> {
+        let mut installs = self.ews_mail_app_installations.lock().unwrap();
+        let updated = installs.iter_mut().find(|install| {
+            install.tenant_id == principal.tenant_id
+                && install.account_id == principal.account_id
+                && install.app_id == app_id
+                && install.status != "uninstalled"
+        });
+        let Some(install) = updated else {
+            return Box::pin(
+                async move { Err(anyhow::anyhow!("mail app installation not found")) },
+            );
+        };
+        install.status = "disabled".to_string();
+        let install = EwsMailAppInstall {
+            catalog_id: install.catalog_id,
+            app_id: install.app_id.clone(),
+            status: install.status.clone(),
+        };
+        Box::pin(async move { Ok(install) })
+    }
+
+    fn uninstall_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall> {
+        let mut installs = self.ews_mail_app_installations.lock().unwrap();
+        let updated = installs.iter_mut().find(|install| {
+            install.tenant_id == principal.tenant_id
+                && install.account_id == principal.account_id
+                && install.app_id == app_id
+                && install.status != "uninstalled"
+        });
+        let Some(install) = updated else {
+            return Box::pin(
+                async move { Err(anyhow::anyhow!("mail app installation not found")) },
+            );
+        };
+        install.status = "uninstalled".to_string();
+        let catalog_id = install.catalog_id;
+        let install = EwsMailAppInstall {
+            catalog_id,
+            app_id: install.app_id.clone(),
+            status: install.status.clone(),
+        };
+        self.ews_mail_app_token_events
+            .lock()
+            .unwrap()
+            .retain(|event| event.catalog_id != catalog_id);
+        Box::pin(async move { Ok(install) })
+    }
+
+    fn issue_ews_mail_app_token<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        _token_hash: &'a str,
+        _scopes: &'a [String],
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppTokenEvent> {
+        let installed = self
+            .ews_mail_app_installations
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|install| {
+                install.tenant_id == principal.tenant_id
+                    && install.account_id == principal.account_id
+                    && install.app_id == app_id
+                    && install.status == "installed"
+            })
+            .cloned();
+        let Some(install) = installed else {
+            return Box::pin(async move {
+                Err(anyhow::anyhow!(
+                    "mail app token access is not granted for an installed app"
+                ))
+            });
+        };
+        let event = EwsMailAppTokenEvent {
+            id: Uuid::new_v4(),
+            catalog_id: install.catalog_id,
+            app_id: app_id.to_string(),
+            issued_at: "2026-05-30T12:00:00Z".to_string(),
+            expires_at: "2026-05-30T12:05:00Z".to_string(),
+        };
+        self.ews_mail_app_token_events
+            .lock()
+            .unwrap()
+            .push(event.clone());
+        Box::pin(async move { Ok(event) })
+    }
+
+    fn create_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        phone_number: Option<&'a str>,
+        message_id: Option<Uuid>,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsUnifiedMessagingCall> {
+        let mut calls = self.ews_unified_messaging_calls.lock().unwrap();
+        let call = EwsUnifiedMessagingCall {
+            id: Uuid::new_v4(),
+            call_id: format!("ews-call-{}", calls.len() + 1),
+            call_kind: "play_on_phone".to_string(),
+            status: "requested".to_string(),
+            phone_number: phone_number.map(ToString::to_string),
+            message_id,
+            requested_at: "2026-05-30T12:00:00Z".to_string(),
+            updated_at: "2026-05-30T12:00:00Z".to_string(),
+        };
+        calls.push(FakeUnifiedMessagingCall {
+            tenant_id: principal.tenant_id,
+            account_id: principal.account_id,
+            call: call.clone(),
+        });
+        Box::pin(async move { Ok(call) })
+    }
+
+    fn fetch_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        call_id: &'a str,
+    ) -> StoreFuture<'a, Option<EwsUnifiedMessagingCall>> {
+        let call = self
+            .ews_unified_messaging_calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| {
+                entry.tenant_id == principal.tenant_id
+                    && entry.account_id == principal.account_id
+                    && entry.call.call_id == call_id
+            })
+            .map(|entry| entry.call.clone());
+        Box::pin(async move { Ok(call) })
+    }
+
+    fn disconnect_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        call_id: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, Option<EwsUnifiedMessagingCall>> {
+        let call = self
+            .ews_unified_messaging_calls
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|entry| {
+                entry.tenant_id == principal.tenant_id
+                    && entry.account_id == principal.account_id
+                    && entry.call.call_id == call_id
+                    && entry.call.status == "requested"
+            })
+            .map(|entry| {
+                entry.call.status = "cancelled".to_string();
+                entry.call.updated_at = "2026-05-30T12:01:00Z".to_string();
+                entry.call.clone()
+            });
+        Box::pin(async move { Ok(call) })
     }
 
     fn upsert_ews_sharing_grant<'a>(

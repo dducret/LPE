@@ -5172,6 +5172,220 @@ async fn bulk_transfer_operations_record_canonical_transfer_jobs() {
 }
 
 #[tokio::test]
+async fn mail_app_operations_use_canonical_catalog_install_and_token_state() {
+    let account = FakeStore::account();
+    let catalog_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeee00000001").unwrap();
+    let other_tenant_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ews_mail_app_manifests: Arc::new(Mutex::new(vec![
+            FakeMailAppManifest {
+                tenant_id: account.tenant_id,
+                manifest: EwsMailAppManifest {
+                    catalog_id,
+                    app_id: "contoso-action".to_string(),
+                    display_name: "Contoso Action".to_string(),
+                    manifest_xml: "<OfficeApp><Id>contoso-action</Id></OfficeApp>".to_string(),
+                    provider_name: "Contoso".to_string(),
+                    version: "1.0.0".to_string(),
+                    installation_status: None,
+                },
+            },
+            FakeMailAppManifest {
+                tenant_id: other_tenant_id,
+                manifest: EwsMailAppManifest {
+                    catalog_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-000000000001").unwrap(),
+                    app_id: "other-tenant-app".to_string(),
+                    display_name: "Other Tenant App".to_string(),
+                    manifest_xml: "<OfficeApp><Id>other-tenant-app</Id></OfficeApp>".to_string(),
+                    provider_name: "Other".to_string(),
+                    version: "1.0.0".to_string(),
+                    installation_status: None,
+                },
+            },
+        ])),
+        ews_app_marketplace_policy: Arc::new(Mutex::new(EwsAppMarketplacePolicy {
+            enabled: false,
+            url: None,
+        })),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetAppManifests /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetAppManifestsResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:AppId>contoso-action</t:AppId>"));
+    assert!(body.contains("&lt;OfficeApp&gt;&lt;Id&gt;contoso-action&lt;/Id&gt;&lt;/OfficeApp&gt;"));
+    assert!(!body.contains("other-tenant-app"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetAppMarketplaceUrl /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetAppMarketplaceUrlResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("Exchange marketplace federation is not enabled"));
+
+    *store.ews_app_marketplace_policy.lock().unwrap() = EwsAppMarketplacePolicy {
+        enabled: true,
+        url: Some("https://apps.example.test/catalog".to_string()),
+    };
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetAppMarketplaceUrl /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body
+        .contains("<m:AppMarketplaceUrl>https://apps.example.test/catalog</m:AppMarketplaceUrl>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:InstallApp><m:AppId>contoso-action</m:AppId></m:InstallApp></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:InstallAppResponse>"));
+    assert!(body.contains("<m:Status>installed</m:Status>"));
+    assert_eq!(
+        store.ews_mail_app_installations.lock().unwrap()[0].status,
+        "installed"
+    );
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetClientAccessToken><m:AppId>contoso-action</m:AppId><m:TokenScope>ews</m:TokenScope></m:GetClientAccessToken></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetClientAccessTokenResponse>"));
+    assert!(body.contains("<t:TokenValue>ews-app-token:"));
+    assert!(body.contains("<t:Scope>ews</t:Scope>"));
+    assert_eq!(store.ews_mail_app_token_events.lock().unwrap().len(), 1);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DisableApp><m:AppId>contoso-action</m:AppId></m:DisableApp></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DisableAppResponse>"));
+    assert!(body.contains("<m:Status>disabled</m:Status>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:UninstallApp><m:AppId>contoso-action</m:AppId></m:UninstallApp></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:UninstallAppResponse>"));
+    assert!(body.contains("<m:Status>uninstalled</m:Status>"));
+    assert!(store.ews_mail_app_token_events.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn unified_messaging_operations_use_canonical_call_state() {
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"
+            <s:Envelope><s:Body>
+              <m:PlayOnPhone>
+                <m:DialString>+15551234567</m:DialString>
+                <m:ItemId><t:ItemId Id="message:11111111-2222-3333-4444-555555555555"/></m:ItemId>
+              </m:PlayOnPhone>
+            </s:Body></s:Envelope>
+            "#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:PlayOnPhoneResponse>"));
+    assert!(body.contains("<t:PhoneCallId>ews-call-1</t:PhoneCallId>"));
+    assert!(body.contains("<t:CallState>requested</t:CallState>"));
+    assert!(body.contains("<t:PhoneNumber>+15551234567</t:PhoneNumber>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetPhoneCallInformation><m:PhoneCallId>ews-call-1</m:PhoneCallId></m:GetPhoneCallInformation></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetPhoneCallInformationResponse>"));
+    assert!(body.contains("<t:CallState>requested</t:CallState>"));
+
+    let other_account = AuthenticatedAccount {
+        tenant_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap(),
+        account_id: Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-000000000001").unwrap(),
+        email: "mallory@other.test".to_string(),
+        display_name: "Mallory".to_string(),
+        expires_at: "2099-01-01T00:00:00Z".to_string(),
+    };
+    let mut other_store = store.clone();
+    other_store.session = Some(other_account);
+    let other_service = ExchangeService::new(other_store);
+    let response = other_service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetPhoneCallInformation><m:PhoneCallId>ews-call-1</m:PhoneCallId></m:GetPhoneCallInformation></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetPhoneCallInformationResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:DisconnectPhoneCall><m:PhoneCallId>ews-call-1</m:PhoneCallId></m:DisconnectPhoneCall></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let body = response_text(response).await;
+    assert!(body.contains("<m:DisconnectPhoneCallResponse>"));
+    assert!(body.contains("<t:CallState>cancelled</t:CallState>"));
+    assert_eq!(
+        store.ews_unified_messaging_calls.lock().unwrap()[0]
+            .call
+            .status,
+        "cancelled"
+    );
+}
+
+#[tokio::test]
 async fn find_conversation_groups_messages_by_canonical_thread_in_folder() {
     let inbox_id = "44444444-4444-4444-4444-444444444444";
     let archive_id = "55555555-5555-5555-5555-555555555555";
@@ -7864,13 +8078,13 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "DisableApp",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mail_app_operations_use_canonical_catalog_install_and_token_state",
     },
     EwsCatalogCoverage {
         operation: "DisconnectPhoneCall",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "unified_messaging_operations_use_canonical_call_state",
     },
     EwsCatalogCoverage {
         operation: "EmptyFolder",
@@ -7914,13 +8128,13 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetAppManifests",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mail_app_operations_use_canonical_catalog_install_and_token_state",
     },
     EwsCatalogCoverage {
         operation: "GetAppMarketplaceUrl",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mail_app_operations_use_canonical_catalog_install_and_token_state",
     },
     EwsCatalogCoverage {
         operation: "GetAttachment",
@@ -7929,8 +8143,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetClientAccessToken",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mail_app_operations_use_canonical_catalog_install_and_token_state",
     },
     EwsCatalogCoverage {
         operation: "GetConversationItems",
@@ -8015,8 +8229,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetPhoneCallInformation",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "unified_messaging_operations_use_canonical_call_state",
     },
     EwsCatalogCoverage {
         operation: "GetReminders",
@@ -8091,8 +8305,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "InstallApp",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mail_app_operations_use_canonical_catalog_install_and_token_state",
     },
     EwsCatalogCoverage {
         operation: "MarkAllItemsAsRead",
@@ -8121,8 +8335,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "PlayOnPhone",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "unified_messaging_operations_use_canonical_call_state",
     },
     EwsCatalogCoverage {
         operation: "RefreshSharingFolder",
@@ -8201,8 +8415,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "UninstallApp",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "mail_app_operations_use_canonical_catalog_install_and_token_state",
     },
     EwsCatalogCoverage {
         operation: "Unsubscribe",

@@ -149,12 +149,12 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `DisableApp` | Missing | New Outlook add-in installation/disable state | Add-in management API if Outlook add-ins become product scope | Unsupported | P3 |
-| `GetAppManifests` | Missing | New add-in manifest catalog and assignment state | Add-in catalog API | Unsupported | P3 |
-| `GetAppMarketplaceUrl` | Missing | Optional tenant/server add-in marketplace configuration | Add-in marketplace configuration API | Unsupported | P4 |
-| `GetClientAccessToken` | Missing | New OAuth/add-in token delegation state | Token issuance API with bounded scopes | Unsupported | P3 |
-| `InstallApp` | Missing | New add-in installation state | Add-in install API | Unsupported | P3 |
-| `UninstallApp` | Missing | New add-in installation state and audit rows | Add-in uninstall API | Unsupported | P3 |
+| `DisableApp` | Partial | `mail_app_installations` | Canonical account app-installation mutation API | Disables only the authenticated account's canonical install row; no Exchange org-wide add-in deployment surface | P3 |
+| `GetAppManifests` | Partial | `mail_app_catalog`, `mail_app_tenant_policies`, `mail_app_installations` | Canonical add-in catalog projection API | Returns stored same-tenant catalog manifests visible through install state or tenant default-install policy; no remote marketplace manifest discovery | P3 |
+| `GetAppMarketplaceUrl` | Partial | `mail_app_tenant_policies` | Canonical tenant marketplace policy lookup | Returns configured canonical tenant URL only; disabled or missing policy returns a parseable EWS gap and no Exchange marketplace federation | P4 |
+| `GetClientAccessToken` | Partial | `mail_app_catalog`, `mail_app_installations`, `mail_app_consents`, `mail_app_token_events` | Bounded token-event issuance API | Issues opaque EWS app tokens and stores only hashes/scope/expiry; no Exchange OAuth delegation or remote callback-token service | P3 |
+| `InstallApp` | Partial | `mail_app_catalog`, `mail_app_tenant_policies`, `mail_app_installations`, `mail_app_consents` | Canonical account add-in install API | Installs active same-tenant catalog apps allowed by tenant policy and grants bounded `ews` consent; arbitrary client manifests are unsupported | P3 |
+| `UninstallApp` | Partial | `mail_app_installations`, `mail_app_token_events` | Canonical account add-in uninstall API | Marks the authenticated account install uninstalled and revokes token events; no Exchange deployment package cleanup | P3 |
 
 ## Mail Tips Operation
 
@@ -223,9 +223,9 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 
 | Operation | LPE status | Required SQL data | Required canonical LPE API/storage integration | Client-visible differences from Exchange | Priority |
 | --- | --- | --- | --- | --- | --- |
-| `DisconnectPhoneCall` | Missing | New UM call/session state | Unified Messaging/telephony API if product scope changes | Unsupported | P4 |
-| `GetPhoneCallInformation` | Missing | New UM call/session state | Unified Messaging/telephony API | Unsupported | P4 |
-| `PlayOnPhone` | Missing | New UM mailbox/phone call state | Unified Messaging/telephony API | Unsupported | P4 |
+| `DisconnectPhoneCall` | Partial | `unified_messaging_calls` | Canonical Unified Messaging call-state mutation API | Cancels active same-account canonical calls only; no PBX, dial-plan, voicemail transport, or Exchange UM policy integration | P4 |
+| `GetPhoneCallInformation` | Partial | `unified_messaging_calls` | Canonical Unified Messaging call-state read API | Returns same-account canonical call state only; no Exchange UM diagnostics or telephony details | P4 |
+| `PlayOnPhone` | Partial | `unified_messaging_calls`, optional canonical message ids | Canonical Unified Messaging play request API | Records a `play_on_phone` request only; real outbound call control and voicemail playback are external to EWS | P4 |
 
 ## Unified Contact Store Operations
 
@@ -260,12 +260,12 @@ Microsoft's operation catalog page was last updated on 2023-03-29 and was review
 | P0 | `CreateItem`, `DeleteItem`, `FindItem`, `GetItem`, `SendItem`, `UpdateItem`, `CreateFolder`, `DeleteFolder`, `FindFolder`, `GetFolder`, `CreateAttachment`, `GetAttachment`, `DeleteAttachment`, `ResolveNames`, `GetUserAvailability`, `GetInboxRules`, `UpdateInboxRules`, `GetEvents`, `Subscribe`, `Unsubscribe`, `SyncFolderHierarchy`, `SyncFolderItems`, `GetServerTimeZones` |
 | P1 | `CopyItem`, `MarkAllItemsAsRead`, `MoveItem`, `EmptyFolder`, `UpdateFolder`, `GetReminders`, `PerformReminderAction`, `ConvertId`, `GetRoomLists`, `GetRooms`, `GetUserOofSettings`, `SetUserOofSettings`, `GetMailTips`, `GetStreamingEvents`, `CreateUserConfiguration`, `DeleteUserConfiguration`, `GetUserConfiguration`, `UpdateUserConfiguration` |
 | P2 | `ArchiveItem`, `CreateFolderPath`, `CopyFolder`, `MoveFolder`, `FindPeople`, `GetPersona` |
-| P3 | `DisableApp`, `GetAppManifests`, `GetClientAccessToken`, `InstallApp`, `UninstallApp`, `FindMessageTrackingReport`, `GetMessageTrackingReport` |
-| P4 | `CreateManagedFolder`, `GetAppMarketplaceUrl`, Unified Messaging operations, Unified Contact Store operations |
+| P3 | `FindMessageTrackingReport`, `GetMessageTrackingReport` |
+| P4 | `CreateManagedFolder`, Unified Contact Store operations |
 
 ## Main Parity Gaps For Outlook And Native Clients
 
 1. The highest-value remaining P0/P1 gaps are conversation listing/expansion and any real-client mail-tip fields beyond invalid-recipient and OOF that prove necessary in Outlook testing.
 2. `SendItem`, inbox rules, reminders, room/resource discovery, bounded streaming notifications, and user configuration are now wired, but remain partial because they expose canonical LPE behavior rather than full Exchange storage, rule, room-list, reminder, notification, or user-configuration semantics.
 3. EWS sync and notifications remain partial because current sync-state and subscription behavior is not a full Exchange-equivalent cursor, affinity, or push/streaming model.
-4. Most P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as mail apps, Unified Messaging, and Unified Contact Store IM groups.
+4. Most remaining P3/P4 operations require feature families that LPE intentionally does not model as Exchange-compatible runtime behavior today, such as message tracking reports and Unified Contact Store IM groups.

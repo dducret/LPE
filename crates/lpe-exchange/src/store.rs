@@ -317,6 +317,60 @@ pub(crate) struct EwsTransferJob {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsMailAppManifest {
+    pub(crate) catalog_id: Uuid,
+    pub(crate) app_id: String,
+    pub(crate) display_name: String,
+    pub(crate) manifest_xml: String,
+    pub(crate) provider_name: String,
+    pub(crate) version: String,
+    pub(crate) installation_status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsMailAppInstall {
+    pub(crate) catalog_id: Uuid,
+    pub(crate) app_id: String,
+    pub(crate) status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsMailAppTokenEvent {
+    pub(crate) id: Uuid,
+    pub(crate) catalog_id: Uuid,
+    pub(crate) app_id: String,
+    pub(crate) issued_at: String,
+    pub(crate) expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsAppMarketplacePolicy {
+    pub(crate) enabled: bool,
+    pub(crate) url: Option<String>,
+}
+
+impl Default for EwsAppMarketplacePolicy {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsUnifiedMessagingCall {
+    pub(crate) id: Uuid,
+    pub(crate) call_id: String,
+    pub(crate) call_kind: String,
+    pub(crate) status: String,
+    pub(crate) phone_number: Option<String>,
+    pub(crate) message_id: Option<Uuid>,
+    pub(crate) requested_at: String,
+    pub(crate) updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EwsDelegatePreferences {
     pub(crate) meeting_request_delivery: String,
     pub(crate) receives_meeting_request_copy: bool,
@@ -685,6 +739,67 @@ pub trait ExchangeStore: AccountAuthStore {
         request_json: serde_json::Value,
         audit: AuditEntryInput,
     ) -> StoreFuture<'a, EwsTransferJob>;
+
+    fn fetch_ews_mail_app_manifests<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsMailAppManifest>>;
+
+    fn fetch_ews_app_marketplace_policy<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, EwsAppMarketplacePolicy>;
+
+    fn install_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall>;
+
+    fn disable_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall>;
+
+    fn uninstall_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall>;
+
+    fn issue_ews_mail_app_token<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        token_hash: &'a str,
+        scopes: &'a [String],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppTokenEvent>;
+
+    fn create_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        phone_number: Option<&'a str>,
+        message_id: Option<Uuid>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsUnifiedMessagingCall>;
+
+    fn fetch_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        call_id: &'a str,
+    ) -> StoreFuture<'a, Option<EwsUnifiedMessagingCall>>;
+
+    fn disconnect_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        call_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<EwsUnifiedMessagingCall>>;
 
     fn upsert_ews_sharing_grant<'a>(
         &'a self,
@@ -1828,6 +1943,374 @@ impl ExchangeStore for Storage {
                 result_count: items.len(),
                 items,
             })
+        })
+    }
+
+    fn fetch_ews_mail_app_manifests<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, Vec<EwsMailAppManifest>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    c.id,
+                    c.app_id,
+                    c.display_name,
+                    c.manifest_xml,
+                    c.provider_name,
+                    c.version,
+                    i.status AS installation_status
+                FROM mail_app_catalog c
+                LEFT JOIN LATERAL (
+                    SELECT status
+                    FROM mail_app_installations i
+                    WHERE i.tenant_id = c.tenant_id
+                      AND i.app_catalog_id = c.id
+                      AND i.status <> 'uninstalled'
+                      AND (
+                        i.install_scope = 'tenant'
+                        OR (i.install_scope = 'account' AND i.account_id = $2)
+                      )
+                    ORDER BY CASE WHEN i.install_scope = 'account' THEN 0 ELSE 1 END, i.updated_at DESC
+                    LIMIT 1
+                ) i ON TRUE
+                LEFT JOIN mail_app_tenant_policies p
+                  ON p.tenant_id = c.tenant_id
+                WHERE c.tenant_id = $1
+                  AND c.lifecycle_state = 'active'
+                  AND (
+                    i.status IS NOT NULL
+                    OR COALESCE(p.default_install_allowed, FALSE)
+                  )
+                ORDER BY lower(c.display_name), c.id
+                LIMIT 100
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    Ok(EwsMailAppManifest {
+                        catalog_id: row.try_get("id")?,
+                        app_id: row.try_get("app_id")?,
+                        display_name: row.try_get("display_name")?,
+                        manifest_xml: row.try_get("manifest_xml")?,
+                        provider_name: row.try_get("provider_name")?,
+                        version: row.try_get("version")?,
+                        installation_status: row.try_get("installation_status")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn fetch_ews_app_marketplace_policy<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, EwsAppMarketplacePolicy> {
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                SELECT marketplace_enabled, marketplace_url
+                FROM mail_app_tenant_policies
+                WHERE tenant_id = $1
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .fetch_optional(self.pool())
+            .await?;
+
+            Ok(match row {
+                Some(row) => EwsAppMarketplacePolicy {
+                    enabled: row.try_get("marketplace_enabled")?,
+                    url: row.try_get("marketplace_url")?,
+                },
+                None => EwsAppMarketplacePolicy {
+                    enabled: false,
+                    url: None,
+                },
+            })
+        })
+    }
+
+    fn install_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall> {
+        Box::pin(async move {
+            let catalog_id = ews_mail_app_catalog_id(self, principal, app_id).await?;
+            let allowed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT COALESCE(default_install_allowed, FALSE)
+                FROM mail_app_tenant_policies
+                WHERE tenant_id = $1
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .fetch_optional(self.pool())
+            .await?
+            .unwrap_or(false);
+            if !allowed {
+                anyhow::bail!("mail app install access is not granted by tenant policy");
+            }
+
+            let row = sqlx::query(
+                r#"
+                INSERT INTO mail_app_installations (
+                    id, tenant_id, app_catalog_id, account_id, install_scope, status,
+                    installed_by_account_id
+                )
+                VALUES ($1, $2, $3, $4, 'account', 'installed', $4)
+                ON CONFLICT (tenant_id, account_id, app_catalog_id)
+                    WHERE install_scope = 'account' AND status <> 'uninstalled'
+                DO UPDATE SET status = 'installed', updated_at = NOW()
+                RETURNING app_catalog_id, status
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(principal.tenant_id)
+            .bind(catalog_id)
+            .bind(principal.account_id)
+            .fetch_one(self.pool())
+            .await?;
+            sqlx::query(
+                r#"
+                INSERT INTO mail_app_consents (
+                    id, tenant_id, app_catalog_id, account_id, consent_scope, granted_by_account_id
+                )
+                VALUES ($1, $2, $3, $4, 'ews', $4)
+                ON CONFLICT (tenant_id, app_catalog_id, account_id, consent_scope)
+                DO UPDATE SET revoked_at = NULL, granted_at = NOW(), granted_by_account_id = $4
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(principal.tenant_id)
+            .bind(catalog_id)
+            .bind(principal.account_id)
+            .execute(self.pool())
+            .await?;
+            self.append_audit_event(principal.tenant_id, audit).await?;
+            Ok(EwsMailAppInstall {
+                catalog_id: row.try_get("app_catalog_id")?,
+                app_id: app_id.trim().to_string(),
+                status: row.try_get("status")?,
+            })
+        })
+    }
+
+    fn disable_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall> {
+        Box::pin(async move {
+            ews_update_mail_app_install_status(self, principal, app_id, "disabled", audit).await
+        })
+    }
+
+    fn uninstall_ews_mail_app<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppInstall> {
+        Box::pin(async move {
+            let install =
+                ews_update_mail_app_install_status(self, principal, app_id, "uninstalled", audit)
+                    .await?;
+            sqlx::query(
+                r#"
+                UPDATE mail_app_token_events
+                SET revoked_at = COALESCE(revoked_at, NOW())
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND app_catalog_id = $3
+                  AND revoked_at IS NULL
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(install.catalog_id)
+            .execute(self.pool())
+            .await?;
+            Ok(install)
+        })
+    }
+
+    fn issue_ews_mail_app_token<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        app_id: &'a str,
+        token_hash: &'a str,
+        scopes: &'a [String],
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsMailAppTokenEvent> {
+        Box::pin(async move {
+            let catalog_id = ews_mail_app_catalog_id(self, principal, app_id).await?;
+            let installed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM mail_app_installations
+                    WHERE tenant_id = $1
+                      AND app_catalog_id = $2
+                      AND status = 'installed'
+                      AND (
+                        install_scope = 'tenant'
+                        OR (install_scope = 'account' AND account_id = $3)
+                      )
+                )
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(catalog_id)
+            .bind(principal.account_id)
+            .fetch_one(self.pool())
+            .await?;
+            if !installed {
+                anyhow::bail!("mail app token access is not granted for an installed app");
+            }
+
+            let active_scopes = sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT consent_scope
+                FROM mail_app_consents
+                WHERE tenant_id = $1
+                  AND app_catalog_id = $2
+                  AND account_id = $3
+                  AND revoked_at IS NULL
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(catalog_id)
+            .bind(principal.account_id)
+            .fetch_all(self.pool())
+            .await?;
+            if !scopes
+                .iter()
+                .all(|scope| active_scopes.iter().any(|active| active == scope))
+            {
+                anyhow::bail!("mail app token scope access is not granted");
+            }
+
+            let row = sqlx::query(
+                r#"
+                INSERT INTO mail_app_token_events (
+                    id, tenant_id, app_catalog_id, account_id, token_hash, scopes_json, expires_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '5 minutes')
+                RETURNING id, app_catalog_id,
+                          to_char(issued_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS issued_at,
+                          to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS expires_at
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(principal.tenant_id)
+            .bind(catalog_id)
+            .bind(principal.account_id)
+            .bind(token_hash)
+            .bind(serde_json::json!(scopes))
+            .fetch_one(self.pool())
+            .await?;
+            self.append_audit_event(principal.tenant_id, audit).await?;
+            Ok(EwsMailAppTokenEvent {
+                id: row.try_get("id")?,
+                catalog_id: row.try_get("app_catalog_id")?,
+                app_id: app_id.trim().to_string(),
+                issued_at: row.try_get("issued_at")?,
+                expires_at: row.try_get("expires_at")?,
+            })
+        })
+    }
+
+    fn create_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        phone_number: Option<&'a str>,
+        message_id: Option<Uuid>,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsUnifiedMessagingCall> {
+        Box::pin(async move {
+            let id = Uuid::new_v4();
+            let call_id = format!("ews-{}", Uuid::new_v4());
+            let row = sqlx::query(
+                r#"
+                INSERT INTO unified_messaging_calls (
+                    id, tenant_id, account_id, call_id, call_kind, status, phone_number, message_id
+                )
+                VALUES ($1, $2, $3, $4, 'play_on_phone', 'requested', $5, $6)
+                RETURNING id, call_id, call_kind, status, phone_number, message_id,
+                          to_char(requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS requested_at,
+                          to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                "#,
+            )
+            .bind(id)
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(&call_id)
+            .bind(phone_number)
+            .bind(message_id)
+            .fetch_one(self.pool())
+            .await?;
+            self.append_audit_event(principal.tenant_id, audit).await?;
+            Ok(ews_unified_messaging_call_from_row(row)?)
+        })
+    }
+
+    fn fetch_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        call_id: &'a str,
+    ) -> StoreFuture<'a, Option<EwsUnifiedMessagingCall>> {
+        Box::pin(async move {
+            let row = sqlx::query(ews_unified_messaging_call_select_sql())
+                .bind(principal.tenant_id)
+                .bind(principal.account_id)
+                .bind(call_id.trim())
+                .fetch_optional(self.pool())
+                .await?;
+            row.map(ews_unified_messaging_call_from_row).transpose()
+        })
+    }
+
+    fn disconnect_ews_unified_messaging_call<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        call_id: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, Option<EwsUnifiedMessagingCall>> {
+        Box::pin(async move {
+            let row = sqlx::query(
+                r#"
+                UPDATE unified_messaging_calls
+                SET status = 'cancelled',
+                    completed_at = COALESCE(completed_at, NOW()),
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND call_id = $3
+                  AND status IN ('requested', 'ringing', 'connected')
+                RETURNING id, call_id, call_kind, status, phone_number, message_id,
+                          to_char(requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS requested_at,
+                          to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(call_id.trim())
+            .fetch_optional(self.pool())
+            .await?;
+            if row.is_some() {
+                self.append_audit_event(principal.tenant_id, audit).await?;
+            }
+            row.map(ews_unified_messaging_call_from_row).transpose()
         })
     }
 
@@ -5823,4 +6306,96 @@ fn push_unique_uuid(values: &mut Vec<Uuid>, value: Uuid) {
     if !values.contains(&value) {
         values.push(value);
     }
+}
+
+async fn ews_mail_app_catalog_id(
+    storage: &Storage,
+    principal: &AccountPrincipal,
+    app_id: &str,
+) -> Result<Uuid> {
+    let app_id = app_id.trim();
+    if app_id.is_empty() {
+        anyhow::bail!("mail app id is required");
+    }
+    sqlx::query_scalar::<_, Uuid>(
+        r#"
+        SELECT id
+        FROM mail_app_catalog
+        WHERE tenant_id = $1
+          AND app_id = $2
+          AND lifecycle_state = 'active'
+        LIMIT 1
+        "#,
+    )
+    .bind(principal.tenant_id)
+    .bind(app_id)
+    .fetch_optional(storage.pool())
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("mail app not found"))
+}
+
+async fn ews_update_mail_app_install_status(
+    storage: &Storage,
+    principal: &AccountPrincipal,
+    app_id: &str,
+    status: &str,
+    audit: AuditEntryInput,
+) -> Result<EwsMailAppInstall> {
+    let catalog_id = ews_mail_app_catalog_id(storage, principal, app_id).await?;
+    let row = sqlx::query(
+        r#"
+        UPDATE mail_app_installations
+        SET status = $4,
+            updated_at = NOW()
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND app_catalog_id = $3
+          AND install_scope = 'account'
+          AND status <> 'uninstalled'
+        RETURNING app_catalog_id, status
+        "#,
+    )
+    .bind(principal.tenant_id)
+    .bind(principal.account_id)
+    .bind(catalog_id)
+    .bind(status)
+    .fetch_optional(storage.pool())
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("mail app installation not found"))?;
+    storage
+        .append_audit_event(principal.tenant_id, audit)
+        .await?;
+    Ok(EwsMailAppInstall {
+        catalog_id: row.try_get("app_catalog_id")?,
+        app_id: app_id.trim().to_string(),
+        status: row.try_get("status")?,
+    })
+}
+
+fn ews_unified_messaging_call_select_sql() -> &'static str {
+    r#"
+    SELECT id, call_id, call_kind, status, phone_number, message_id,
+           to_char(requested_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS requested_at,
+           to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
+    FROM unified_messaging_calls
+    WHERE tenant_id = $1
+      AND account_id = $2
+      AND call_id = $3
+    LIMIT 1
+    "#
+}
+
+fn ews_unified_messaging_call_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<EwsUnifiedMessagingCall> {
+    Ok(EwsUnifiedMessagingCall {
+        id: row.try_get("id")?,
+        call_id: row.try_get("call_id")?,
+        call_kind: row.try_get("call_kind")?,
+        status: row.try_get("status")?,
+        phone_number: row.try_get("phone_number")?,
+        message_id: row.try_get("message_id")?,
+        requested_at: row.try_get("requested_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
 }
