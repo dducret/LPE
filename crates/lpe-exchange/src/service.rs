@@ -50,11 +50,13 @@ use crate::{
     ntlm,
     store::{
         EwsDelegate, EwsDelegatePreferences, EwsDiscoverySearchConfig, EwsDiscoverySearchResult,
-        EwsHoldMailbox, EwsMailAppManifest, EwsMailAppTokenEvent, EwsNonIndexableReport,
-        EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferJob, EwsUnifiedMessagingCall,
-        EwsUserConfiguration, EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind,
-        ExchangeAddressBookEntry, ExchangeAddressBookEntryKind, ExchangeStore,
-        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
+        EwsHoldMailbox, EwsImGroup, EwsImGroupMember, EwsImList, EwsImMemberInput,
+        EwsMailAppManifest, EwsMailAppTokenEvent, EwsMessageTrackingReport,
+        EwsMessageTrackingReportDetail, EwsNonIndexableReport, EwsRetentionPolicyTag,
+        EwsSearchableMailbox, EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration,
+        EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
+        ExchangeAddressBookEntryKind, ExchangeStore, UpsertEwsDelegateInput,
+        UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -768,11 +770,13 @@ where
             "SendItem" => self.send_item(&principal, &body).await?,
             "UpdateItem" => self.update_item(&principal, &body).await?,
             "DeleteItem" => self.delete_item(&principal, &body).await?,
+            "ArchiveItem" => self.archive_item(&principal, &body).await?,
             "MoveItem" => self.move_item(&principal, &body).await?,
             "CopyItem" => self.copy_item(&principal, &body).await?,
             "MarkAllItemsAsRead" => self.mark_all_items_as_read(&principal, &body).await?,
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "CreateFolderPath" => self.create_folder_path(&principal, &body).await?,
+            "CreateManagedFolder" => create_managed_folder_unsupported_response(),
             "CopyFolder" => self.copy_folder(&principal, &body).await?,
             "EmptyFolder" => self.empty_folder(&principal, &body).await?,
             "MoveFolder" => self.move_folder(&principal, &body).await?,
@@ -802,6 +806,12 @@ where
             }
             "GetSearchableMailboxes" => self.get_searchable_mailboxes(&principal).await?,
             "SearchMailboxes" => self.search_mailboxes(&principal, &body).await?,
+            "FindMessageTrackingReport" => {
+                self.find_message_tracking_report(&principal, &body).await?
+            }
+            "GetMessageTrackingReport" => {
+                self.get_message_tracking_report(&principal, &body).await?
+            }
             "GetHoldOnMailboxes" => self.get_hold_on_mailboxes(&principal, &body).await?,
             "SetHoldOnMailboxes" => self.set_hold_on_mailboxes(&principal, &body).await?,
             "GetNonIndexableItemDetails" => self.get_non_indexable_item_details(&principal).await?,
@@ -819,7 +829,8 @@ where
             "PlayOnPhone" => self.play_on_phone(&principal, &body).await?,
             "GetPhoneCallInformation" => self.get_phone_call_information(&principal, &body).await?,
             "DisconnectPhoneCall" => self.disconnect_phone_call(&principal, &body).await?,
-            "FindPeople" => unsupported_operation_response("FindPeople"),
+            "FindPeople" => self.find_people(&principal, &body).await?,
+            "GetPersona" => self.get_persona(&principal, &body).await?,
             "ExpandDL" => self.expand_dl(&principal, &body).await?,
             "AddDelegate" => self.add_delegate(&principal, &body).await?,
             "GetDelegate" => self.get_delegate(&principal, &body).await?,
@@ -837,6 +848,126 @@ where
                 self.get_password_expiration_date(&principal, &body).await?
             }
             "MarkAsJunk" => self.mark_as_junk(&principal, &body).await?,
+            "GetImItemList" => self
+                .get_im_item_list(&principal)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "GetImItemList",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "GetImItems" => self
+                .get_im_items(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "GetImItems",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "AddImGroup" => self
+                .add_im_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "AddImGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "SetImGroup" => self
+                .set_im_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "SetImGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "RemoveImGroup" => self
+                .remove_im_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "RemoveImGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "AddImContactToGroup" => self
+                .add_im_contact_to_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "AddImContactToGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "AddNewImContactToGroup" => self
+                .add_new_im_contact_to_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "AddNewImContactToGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "AddNewTelUriContactToGroup" => self
+                .add_new_tel_uri_contact_to_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "AddNewTelUriContactToGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "RemoveContactFromImList" => self
+                .remove_contact_from_im_list(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "RemoveContactFromImList",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "RemoveImContactFromGroup" => self
+                .remove_im_contact_from_group(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "RemoveImContactFromGroup",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "AddDistributionGroupToImList" => self
+                .add_distribution_group_to_im_list(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "AddDistributionGroupToImList",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
+            "RemoveDistributionGroupFromImList" => self
+                .remove_distribution_group_from_im_list(&principal, &body)
+                .await
+                .unwrap_or_else(|error| {
+                    operation_error_response(
+                        "RemoveDistributionGroupFromImList",
+                        "ErrorInvalidOperation",
+                        &error.to_string(),
+                    )
+                }),
             _ => unsupported_operation_response(&operation),
         };
 
@@ -858,6 +989,16 @@ where
     async fn expand_dl(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let entries = self.store.fetch_address_book_entries(principal).await?;
         Ok(expand_dl_response(principal, request, &entries))
+    }
+
+    async fn find_people(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(find_people_response(principal, request, &entries))
+    }
+
+    async fn get_persona(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        Ok(get_persona_response(principal, request, &entries))
     }
 
     async fn get_user_photo(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
@@ -979,6 +1120,320 @@ where
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("MarkAsJunk", "ErrorInvalidOperation", &error.to_string())
         }))
+    }
+
+    async fn get_im_item_list(&self, principal: &AccountPrincipal) -> Result<String> {
+        let list = self.store.fetch_ews_im_list(principal).await?;
+        Ok(get_im_item_list_response(&list))
+    }
+
+    async fn get_im_items(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let list = self.store.fetch_ews_im_list(principal).await?;
+        Ok(get_im_items_response(request, &list))
+    }
+
+    async fn add_im_group(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let display_name = requested_im_group_name(request)
+            .ok_or_else(|| anyhow!("AddImGroup requires a group display name"))?;
+        let group = self
+            .store
+            .upsert_ews_im_group(
+                principal,
+                None,
+                &display_name,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-im-group".to_string(),
+                    subject: display_name.clone(),
+                },
+            )
+            .await?;
+        Ok(im_group_operation_response("AddImGroup", &group))
+    }
+
+    async fn set_im_group(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("SetImGroup requires a group id"))?;
+        let display_name = requested_im_group_name(request)
+            .ok_or_else(|| anyhow!("SetImGroup requires a group display name"))?;
+        let group = self
+            .store
+            .upsert_ews_im_group(
+                principal,
+                Some(group_id),
+                &display_name,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-set-im-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_group_operation_response("SetImGroup", &group))
+    }
+
+    async fn remove_im_group(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("RemoveImGroup requires a group id"))?;
+        let removed = self
+            .store
+            .remove_ews_im_group(
+                principal,
+                group_id,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-im-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result("RemoveImGroup", removed))
+    }
+
+    async fn add_im_contact_to_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddImContactToGroup requires a group id"))?;
+        let member = requested_im_contact_member(request, principal).ok_or_else(|| {
+            anyhow!("AddImContactToGroup requires a visible contact or account member")
+        })?;
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                member,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-im-contact-to-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response("AddImContactToGroup", &member))
+    }
+
+    async fn add_new_im_contact_to_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddNewImContactToGroup requires a group id"))?;
+        let name = element_text(request, "DisplayName")
+            .or_else(|| element_text(request, "Name"))
+            .unwrap_or_else(|| "IM Contact".to_string());
+        let email = requested_smtp_address(request)
+            .ok_or_else(|| anyhow!("AddNewImContactToGroup requires an SMTP address"))?;
+        let contact = self
+            .store
+            .create_accessible_contact(
+                principal.account_id,
+                Some("im_contact_list"),
+                UpsertClientContactInput {
+                    account_id: principal.account_id,
+                    id: None,
+                    name,
+                    role: String::new(),
+                    email,
+                    phone: String::new(),
+                    team: String::new(),
+                    notes: String::new(),
+                },
+            )
+            .await?;
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                EwsImMemberInput {
+                    member_kind: "contact".to_string(),
+                    contact_id: Some(contact.id),
+                    account_id: None,
+                    external_address: None,
+                    display_name: contact.name.clone(),
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-new-im-contact-to-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response(
+            "AddNewImContactToGroup",
+            &member,
+        ))
+    }
+
+    async fn add_new_tel_uri_contact_to_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddNewTelUriContactToGroup requires a group id"))?;
+        let tel_uri = element_text(request, "TelUri")
+            .or_else(|| element_text(request, "Address"))
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| anyhow!("AddNewTelUriContactToGroup requires a tel URI"))?;
+        let display_name = element_text(request, "DisplayName")
+            .or_else(|| element_text(request, "Name"))
+            .unwrap_or_else(|| tel_uri.clone());
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                EwsImMemberInput {
+                    member_kind: "tel_uri".to_string(),
+                    contact_id: None,
+                    account_id: None,
+                    external_address: Some(tel_uri),
+                    display_name,
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-new-tel-uri-contact-to-group".to_string(),
+                    subject: group_id.to_string(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response(
+            "AddNewTelUriContactToGroup",
+            &member,
+        ))
+    }
+
+    async fn remove_contact_from_im_list(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let value = requested_im_member_value(request)
+            .ok_or_else(|| anyhow!("RemoveContactFromImList requires a member id"))?;
+        let removed = self
+            .store
+            .remove_ews_im_group_member(
+                principal,
+                None,
+                requested_im_member_kind(request).unwrap_or("contact"),
+                &value,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-contact-from-im-list".to_string(),
+                    subject: value.clone(),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result(
+            "RemoveContactFromImList",
+            removed,
+        ))
+    }
+
+    async fn remove_im_contact_from_group(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("RemoveImContactFromGroup requires a group id"))?;
+        let value = requested_im_member_value(request)
+            .ok_or_else(|| anyhow!("RemoveImContactFromGroup requires a member id"))?;
+        let removed = self
+            .store
+            .remove_ews_im_group_member(
+                principal,
+                Some(group_id),
+                requested_im_member_kind(request).unwrap_or("contact"),
+                &value,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-im-contact-from-group".to_string(),
+                    subject: format!("{group_id}:{value}"),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result(
+            "RemoveImContactFromGroup",
+            removed,
+        ))
+    }
+
+    async fn add_distribution_group_to_im_list(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let group_id = requested_im_group_id(request)
+            .ok_or_else(|| anyhow!("AddDistributionGroupToImList requires a group id"))?;
+        let smtp = requested_smtp_address(request).ok_or_else(|| {
+            anyhow!("AddDistributionGroupToImList requires a distribution-list SMTP address")
+        })?;
+        let entries = self.store.fetch_address_book_entries(principal).await?;
+        let entry = entries
+            .iter()
+            .find(|entry| {
+                entry.entry_kind == ExchangeAddressBookEntryKind::DistributionList
+                    && entry.email.eq_ignore_ascii_case(&smtp)
+            })
+            .ok_or_else(|| anyhow!("distribution list not found"))?;
+        let member = self
+            .store
+            .add_ews_im_group_member(
+                principal,
+                group_id,
+                EwsImMemberInput {
+                    member_kind: "distribution_group".to_string(),
+                    contact_id: None,
+                    account_id: None,
+                    external_address: Some(entry.email.clone()),
+                    display_name: entry.display_name.clone(),
+                },
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-add-distribution-group-to-im-list".to_string(),
+                    subject: entry.email.clone(),
+                },
+            )
+            .await?;
+        Ok(im_member_operation_response(
+            "AddDistributionGroupToImList",
+            &member,
+        ))
+    }
+
+    async fn remove_distribution_group_from_im_list(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let smtp = requested_smtp_address(request).ok_or_else(|| {
+            anyhow!("RemoveDistributionGroupFromImList requires a distribution-list SMTP address")
+        })?;
+        let removed = self
+            .store
+            .remove_ews_im_group_member(
+                principal,
+                requested_im_group_id(request),
+                "distribution_group",
+                &smtp,
+                AuditEntryInput {
+                    actor: principal.email.clone(),
+                    action: "ews-remove-distribution-group-from-im-list".to_string(),
+                    subject: smtp.clone(),
+                },
+            )
+            .await?;
+        Ok(simple_ews_operation_result(
+            "RemoveDistributionGroupFromImList",
+            removed,
+        ))
     }
 
     async fn get_app_manifests(&self, principal: &AccountPrincipal) -> Result<String> {
@@ -3783,6 +4238,81 @@ where
         }))
     }
 
+    async fn archive_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
+        let result = async {
+            let ids = requested_item_ids(request);
+            let message_ids = ids
+                .iter()
+                .filter_map(|id| id.strip_prefix("message:"))
+                .map(Uuid::parse_str)
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            if ids.is_empty() || message_ids.len() != ids.len() {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorInvalidOperation",
+                    "ArchiveItem currently supports only canonical message item ids.",
+                ));
+            }
+
+            let mailboxes = self
+                .store
+                .ensure_jmap_system_mailboxes(principal.account_id)
+                .await?;
+            let Some(archive_mailbox_id) = mailboxes
+                .iter()
+                .find(|mailbox| mailbox.role == "archive")
+                .map(|mailbox| mailbox.id)
+            else {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorFolderNotFound",
+                    "The canonical Archive mailbox was not found.",
+                ));
+            };
+
+            let existing = self
+                .store
+                .fetch_jmap_emails(principal.account_id, &message_ids)
+                .await?;
+            if existing.len() != message_ids.len() {
+                return Ok(operation_error_response(
+                    "ArchiveItem",
+                    "ErrorItemNotFound",
+                    "message not found",
+                ));
+            }
+
+            let mut items = String::new();
+            for message_id in message_ids {
+                let moved = self
+                    .store
+                    .move_jmap_email(
+                        principal.account_id,
+                        message_id,
+                        archive_mailbox_id,
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-archive-message".to_string(),
+                            subject: format!("{message_id}->{archive_mailbox_id}"),
+                        },
+                    )
+                    .await?;
+                items.push_str(&message_item_xml(&moved));
+            }
+
+            Ok(archive_item_success_response(items))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "ArchiveItem",
+                ews_error_code_or(&error, "ErrorItemNotFound"),
+                &error.to_string(),
+            )
+        }))
+    }
+
     async fn copy_item(&self, principal: &AccountPrincipal, request: &str) -> Result<String> {
         let result = async {
             let ids = requested_item_ids(request);
@@ -5051,6 +5581,46 @@ where
             .search_ews_mailboxes(principal, &query_text, &mailbox_emails, 100)
             .await?;
         Ok(search_mailboxes_response(&result))
+    }
+
+    async fn find_message_tracking_report(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let query_text = message_tracking_query_text(request);
+        let reports = self
+            .store
+            .fetch_ews_message_tracking_reports(principal, &query_text, 100)
+            .await?;
+        Ok(find_message_tracking_report_response(&reports))
+    }
+
+    async fn get_message_tracking_report(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let report_id = requested_message_tracking_report_id(request);
+        let Some(report_id) = report_id else {
+            return Ok(operation_error_response(
+                "GetMessageTrackingReport",
+                "ErrorInvalidOperation",
+                "MessageTrackingReportId is required.",
+            ));
+        };
+        let detail = self
+            .store
+            .fetch_ews_message_tracking_report_detail(principal, &report_id)
+            .await?;
+        match detail {
+            Some(detail) => Ok(get_message_tracking_report_response(&detail)),
+            None => Ok(operation_error_response(
+                "GetMessageTrackingReport",
+                "ErrorItemNotFound",
+                "The requested message tracking report was not found.",
+            )),
+        }
     }
 
     async fn get_hold_on_mailboxes(
@@ -7603,6 +8173,136 @@ fn requested_mailbox_emails(request: &str) -> Vec<String> {
     emails
 }
 
+fn requested_smtp_address(request: &str) -> Option<String> {
+    element_text(request, "SmtpAddress")
+        .or_else(|| element_text(request, "EmailAddress"))
+        .or_else(|| {
+            element_content(request, "Mailbox")
+                .and_then(|mailbox| element_text(mailbox, "EmailAddress"))
+        })
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+}
+
+fn requested_im_group_id(request: &str) -> Option<Uuid> {
+    attribute_values_for_tag(request, "ImGroupId", "Id")
+        .into_iter()
+        .next()
+        .or_else(|| {
+            attribute_values_for_tag(request, "GroupId", "Id")
+                .into_iter()
+                .next()
+        })
+        .or_else(|| {
+            attribute_values_for_tag(request, "ItemId", "Id")
+                .into_iter()
+                .next()
+        })
+        .map(str::to_string)
+        .or_else(|| element_text(request, "ImGroupId"))
+        .or_else(|| element_text(request, "GroupId"))
+        .and_then(|value| parse_prefixed_uuid(&value, "im-group:"))
+}
+
+fn requested_im_group_name(request: &str) -> Option<String> {
+    element_text(request, "DisplayName")
+        .or_else(|| element_text(request, "GroupName"))
+        .or_else(|| element_text(request, "Name"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn requested_im_member_kind(request: &str) -> Option<&'static str> {
+    element_text(request, "MemberKind")
+        .or_else(|| element_text(request, "ImAddressType"))
+        .map(|value| value.to_ascii_lowercase())
+        .and_then(|value| match value.as_str() {
+            "contact" | "imcontact" => Some("contact"),
+            "account" | "mailbox" => Some("account"),
+            "distribution_group" | "distributiongroup" | "publicdl" => Some("distribution_group"),
+            "tel_uri" | "teluri" | "telephone" => Some("tel_uri"),
+            _ => None,
+        })
+        .or_else(|| {
+            if element_text(request, "AccountId").is_some() {
+                Some("account")
+            } else if element_text(request, "TelUri").is_some() {
+                Some("tel_uri")
+            } else {
+                None
+            }
+        })
+}
+
+fn requested_im_member_value(request: &str) -> Option<String> {
+    attribute_values_for_tag(request, "ImContactId", "Id")
+        .into_iter()
+        .next()
+        .or_else(|| {
+            attribute_values_for_tag(request, "ContactId", "Id")
+                .into_iter()
+                .next()
+        })
+        .or_else(|| {
+            attribute_values_for_tag(request, "MemberId", "Id")
+                .into_iter()
+                .next()
+        })
+        .map(str::to_string)
+        .or_else(|| element_text(request, "ContactId"))
+        .or_else(|| element_text(request, "AccountId"))
+        .or_else(|| element_text(request, "MemberId"))
+        .or_else(|| element_text(request, "TelUri"))
+        .or_else(|| requested_smtp_address(request))
+        .map(|value| {
+            value
+                .strip_prefix("im-member:")
+                .and_then(|rest| rest.split_once(':').map(|(_, value)| value.to_string()))
+                .or_else(|| value.strip_prefix("contact:").map(str::to_string))
+                .or_else(|| value.strip_prefix("account:").map(str::to_string))
+                .unwrap_or(value)
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn requested_im_contact_member(
+    request: &str,
+    principal: &AccountPrincipal,
+) -> Option<EwsImMemberInput> {
+    if let Some(account_id) =
+        element_text(request, "AccountId").and_then(|value| parse_prefixed_uuid(&value, "account:"))
+    {
+        return Some(EwsImMemberInput {
+            member_kind: "account".to_string(),
+            contact_id: None,
+            account_id: Some(account_id),
+            external_address: None,
+            display_name: element_text(request, "DisplayName")
+                .unwrap_or_else(|| account_id.to_string()),
+        });
+    }
+    let value = requested_im_member_value(request)?;
+    let id = parse_prefixed_uuid(&value, "contact:")?;
+    Some(EwsImMemberInput {
+        member_kind: "contact".to_string(),
+        contact_id: Some(id),
+        account_id: None,
+        external_address: None,
+        display_name: element_text(request, "DisplayName").unwrap_or_else(|| {
+            if id == principal.account_id {
+                principal.display_name.clone()
+            } else {
+                id.to_string()
+            }
+        }),
+    })
+}
+
+fn parse_prefixed_uuid(value: &str, prefix: &str) -> Option<Uuid> {
+    Uuid::parse_str(value.strip_prefix(prefix).unwrap_or(value)).ok()
+}
+
 fn discovery_query_text(request: &str) -> String {
     element_text(request, "Query")
         .or_else(|| element_text(request, "SearchQuery"))
@@ -7610,6 +8310,33 @@ fn discovery_query_text(request: &str) -> String {
         .unwrap_or_default()
         .trim()
         .to_string()
+}
+
+fn message_tracking_query_text(request: &str) -> String {
+    element_text(request, "MessageTrackingReportId")
+        .or_else(|| element_text(request, "TraceId"))
+        .or_else(|| element_text(request, "EmailAddress"))
+        .or_else(|| element_text(request, "SmtpAddress"))
+        .or_else(|| element_text(request, "Subject"))
+        .or_else(|| element_text(request, "Query"))
+        .or_else(|| element_text(request, "Sender"))
+        .or_else(|| element_text(request, "Recipient"))
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn requested_message_tracking_report_id(request: &str) -> Option<String> {
+    element_text(request, "MessageTrackingReportId")
+        .or_else(|| element_text(request, "ReportId"))
+        .or_else(|| element_text(request, "TraceId"))
+        .or_else(|| {
+            attribute_values_for_tag(request, "MessageTrackingReportId", "Id")
+                .first()
+                .map(|value| (*value).to_string())
+        })
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn requested_transfer_item_ids(request: &str) -> Vec<String> {
@@ -9016,6 +9743,22 @@ fn move_item_success_response(items: String) -> String {
     )
 }
 
+fn archive_item_success_response(items: String) -> String {
+    format!(
+        concat!(
+            "<m:ArchiveItemResponse>",
+            "<m:ResponseMessages>",
+            "<m:ArchiveItemResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:Items>{items}</m:Items>",
+            "</m:ArchiveItemResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:ArchiveItemResponse>"
+        ),
+        items = items,
+    )
+}
+
 fn copy_item_success_response(items: String) -> String {
     format!(
         concat!(
@@ -9380,6 +10123,145 @@ fn mark_as_junk_success_response(moved_item_ids: String) -> String {
         ),
         moved_item_ids = moved_item_ids,
     )
+}
+
+fn get_im_item_list_response(list: &EwsImList) -> String {
+    let groups_xml = list.groups.iter().map(im_group_xml).collect::<String>();
+    let members_xml = list.members.iter().map(im_member_xml).collect::<String>();
+    format!(
+        concat!(
+            "<m:GetImItemListResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetImItemListResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:ImGroups>{groups_xml}</m:ImGroups>",
+            "<m:ImItems>{members_xml}</m:ImItems>",
+            "</m:GetImItemListResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetImItemListResponse>"
+        ),
+        groups_xml = groups_xml,
+        members_xml = members_xml,
+    )
+}
+
+fn get_im_items_response(request: &str, list: &EwsImList) -> String {
+    let requested_ids = attribute_values_for_tag(request, "ImItemId", "Id")
+        .into_iter()
+        .chain(attribute_values_for_tag(request, "ItemId", "Id"))
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut members = list.members.clone();
+    if !requested_ids.is_empty() {
+        members.retain(|member| requested_ids.contains(&im_member_id(member)));
+    }
+    let members_xml = members.iter().map(im_member_xml).collect::<String>();
+    format!(
+        concat!(
+            "<m:GetImItemsResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetImItemsResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:ImItems>{members_xml}</m:ImItems>",
+            "</m:GetImItemsResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetImItemsResponse>"
+        ),
+        members_xml = members_xml,
+    )
+}
+
+fn im_group_operation_response(operation: &str, group: &EwsImGroup) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{group_xml}",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation,
+        group_xml = im_group_xml(group),
+    )
+}
+
+fn im_member_operation_response(operation: &str, member: &EwsImGroupMember) -> String {
+    format!(
+        concat!(
+            "<m:{operation}Response>",
+            "<m:ResponseMessages>",
+            "<m:{operation}ResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{member_xml}",
+            "</m:{operation}ResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:{operation}Response>"
+        ),
+        operation = operation,
+        member_xml = im_member_xml(member),
+    )
+}
+
+fn simple_ews_operation_result(operation: &str, ok: bool) -> String {
+    if ok {
+        simple_operation_success_response(operation)
+    } else {
+        operation_error_response(operation, "ErrorItemNotFound", "UCS item not found")
+    }
+}
+
+fn im_group_xml(group: &EwsImGroup) -> String {
+    format!(
+        concat!(
+            "<t:ImGroup>",
+            "<t:ImGroupId Id=\"im-group:{id}\" ChangeKey=\"{modseq}\"/>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "</t:ImGroup>"
+        ),
+        id = group.id,
+        modseq = group.modseq,
+        display_name = escape_xml(&group.display_name),
+    )
+}
+
+fn im_member_xml(member: &EwsImGroupMember) -> String {
+    let value = im_member_value(member);
+    format!(
+        concat!(
+            "<t:ImItem>",
+            "<t:ImItemId Id=\"{member_id}\"/>",
+            "<t:ParentGroupId Id=\"im-group:{group_id}\"/>",
+            "<t:MemberKind>{kind}</t:MemberKind>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "<t:SmtpAddress>{value}</t:SmtpAddress>",
+            "</t:ImItem>"
+        ),
+        member_id = escape_xml(&im_member_id(member)),
+        group_id = member.group_id,
+        kind = escape_xml(&member.member_kind),
+        display_name = escape_xml(&member.display_name),
+        value = escape_xml(&value),
+    )
+}
+
+fn im_member_id(member: &EwsImGroupMember) -> String {
+    format!(
+        "im-member:{}:{}",
+        member.member_kind,
+        im_member_value(member)
+    )
+}
+
+fn im_member_value(member: &EwsImGroupMember) -> String {
+    member
+        .contact_id
+        .or(member.account_id)
+        .map(|id| id.to_string())
+        .or_else(|| member.external_address.clone())
+        .unwrap_or_default()
 }
 
 fn convert_id_success_response(alternate_ids: String) -> String {
@@ -9793,6 +10675,99 @@ fn search_mailboxes_response(result: &EwsDiscoverySearchResult) -> String {
         query = escape_xml(&result.query_text),
         count = result.result_count,
         items_xml = items_xml,
+    )
+}
+
+fn find_message_tracking_report_response(reports: &[EwsMessageTrackingReport]) -> String {
+    let reports_xml = reports
+        .iter()
+        .map(message_tracking_report_xml)
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:FindMessageTrackingReportResponse>",
+            "<m:ResponseMessages>",
+            "<m:FindMessageTrackingReportResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:MessageTrackingSearchResults>{reports_xml}</m:MessageTrackingSearchResults>",
+            "</m:FindMessageTrackingReportResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:FindMessageTrackingReportResponse>"
+        ),
+        reports_xml = reports_xml,
+    )
+}
+
+fn get_message_tracking_report_response(detail: &EwsMessageTrackingReportDetail) -> String {
+    let events_xml = detail
+        .events
+        .iter()
+        .map(|event| {
+            format!(
+                concat!(
+                    "<t:RecipientTrackingEvent>",
+                    "<t:Date>{timestamp}</t:Date>",
+                    "<t:EventDescription>{event_kind}</t:EventDescription>",
+                    "<t:EventData>{event_source}</t:EventData>",
+                    "<t:RecipientAddress>{recipient}</t:RecipientAddress>",
+                    "<t:DeliveryStatus>{event_kind}</t:DeliveryStatus>",
+                    "<t:DiagnosticInformation>{diagnostics}</t:DiagnosticInformation>",
+                    "</t:RecipientTrackingEvent>"
+                ),
+                timestamp = escape_xml(&event.timestamp),
+                event_kind = escape_xml(&event.event_kind),
+                event_source = escape_xml(&event.event_source),
+                recipient = escape_xml(event.recipient_address.as_deref().unwrap_or_default()),
+                diagnostics = escape_xml(&event.dsn_json),
+            )
+        })
+        .collect::<String>();
+    format!(
+        concat!(
+            "<m:GetMessageTrackingReportResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetMessageTrackingReportResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:MessageTrackingReport>",
+            "{report_xml}",
+            "<t:RecipientTrackingEvents>{events_xml}</t:RecipientTrackingEvents>",
+            "</m:MessageTrackingReport>",
+            "</m:GetMessageTrackingReportResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetMessageTrackingReportResponse>"
+        ),
+        report_xml = message_tracking_report_xml(&detail.report),
+        events_xml = events_xml,
+    )
+}
+
+fn message_tracking_report_xml(report: &EwsMessageTrackingReport) -> String {
+    let recipients_xml = report
+        .recipients
+        .iter()
+        .map(|recipient| format!("<t:SmtpAddress>{}</t:SmtpAddress>", escape_xml(recipient)))
+        .collect::<String>();
+    format!(
+        concat!(
+            "<t:MessageTrackingSearchResult>",
+            "<t:MessageTrackingReportId>{report_id}</t:MessageTrackingReportId>",
+            "<t:Sender>{sender}</t:Sender>",
+            "<t:Recipients>{recipients_xml}</t:Recipients>",
+            "<t:Subject>{subject}</t:Subject>",
+            "<t:SubmittedTime>{submitted_at}</t:SubmittedTime>",
+            "<t:Status>{status}</t:Status>",
+            "<t:TraceId>{trace_id}</t:TraceId>",
+            "<t:RemoteMessageReference>{remote_ref}</t:RemoteMessageReference>",
+            "</t:MessageTrackingSearchResult>"
+        ),
+        report_id = escape_xml(&report.report_id),
+        sender = escape_xml(&report.sender),
+        recipients_xml = recipients_xml,
+        subject = escape_xml(&report.subject),
+        submitted_at = escape_xml(&report.submitted_at),
+        status = escape_xml(&report.status),
+        trace_id = escape_xml(report.trace_id.as_deref().unwrap_or_default()),
+        remote_ref = escape_xml(report.remote_message_ref.as_deref().unwrap_or_default()),
     )
 }
 
@@ -10524,6 +11499,85 @@ fn resolve_names_response(
     )
 }
 
+fn find_people_response(
+    principal: &AccountPrincipal,
+    request: &str,
+    entries: &[ExchangeAddressBookEntry],
+) -> String {
+    let query = find_people_query_text(request);
+    let mut visible_entries = visible_persona_entries(principal, entries);
+    if !query.is_empty() {
+        visible_entries.retain(|entry| address_book_entry_matches(entry, &query, true));
+    }
+    visible_entries.truncate(100);
+    let personas_xml = visible_entries
+        .iter()
+        .map(persona_xml)
+        .collect::<Vec<_>>()
+        .join("");
+    format!(
+        concat!(
+            "<m:FindPeopleResponse>",
+            "<m:ResponseMessages>",
+            "<m:FindPeopleResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "<m:People TotalNumberOfPeopleInView=\"{count}\" FirstMatchingRowIndex=\"0\" FirstLoadedRowIndex=\"0\">",
+            "{personas_xml}",
+            "</m:People>",
+            "</m:FindPeopleResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:FindPeopleResponse>"
+        ),
+        count = visible_entries.len(),
+        personas_xml = personas_xml,
+    )
+}
+
+fn get_persona_response(
+    principal: &AccountPrincipal,
+    request: &str,
+    entries: &[ExchangeAddressBookEntry],
+) -> String {
+    let Some(persona_id) = requested_persona_id(request) else {
+        return operation_error_response(
+            "GetPersona",
+            "ErrorInvalidOperation",
+            "PersonaId is required.",
+        );
+    };
+    let Some((kind, id)) = parse_persona_id(&persona_id) else {
+        return operation_error_response(
+            "GetPersona",
+            "ErrorItemNotFound",
+            "The requested persona was not found.",
+        );
+    };
+    let visible_entries = visible_persona_entries(principal, entries);
+    let Some(entry) = visible_entries
+        .iter()
+        .find(|entry| entry.entry_kind == kind && entry.id == id)
+    else {
+        return operation_error_response(
+            "GetPersona",
+            "ErrorItemNotFound",
+            "The requested persona was not found.",
+        );
+    };
+    format!(
+        concat!(
+            "<m:GetPersonaResponse>",
+            "<m:ResponseMessages>",
+            "<m:GetPersonaResponseMessage ResponseClass=\"Success\">",
+            "<m:ResponseCode>NoError</m:ResponseCode>",
+            "{persona_xml}",
+            "</m:GetPersonaResponseMessage>",
+            "</m:ResponseMessages>",
+            "</m:GetPersonaResponse>"
+        ),
+        persona_xml = persona_xml(entry),
+    )
+}
+
 fn expand_dl_response(
     principal: &AccountPrincipal,
     request: &str,
@@ -10618,6 +11672,121 @@ fn ews_mailbox_xml(entry: &ExchangeAddressBookEntry) -> String {
         escape_xml(&entry.display_name),
         escape_xml(&entry.email),
         ews_mailbox_type(entry),
+    )
+}
+
+fn visible_persona_entries(
+    principal: &AccountPrincipal,
+    entries: &[ExchangeAddressBookEntry],
+) -> Vec<ExchangeAddressBookEntry> {
+    let principal_entry = principal_address_book_entry(principal);
+    let mut visible = entries
+        .iter()
+        .filter(|entry| {
+            matches!(
+                entry.entry_kind,
+                ExchangeAddressBookEntryKind::Account | ExchangeAddressBookEntryKind::Contact
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if !visible.iter().any(|entry| {
+        entry.entry_kind == ExchangeAddressBookEntryKind::Account
+            && entry.id == principal.account_id
+    }) {
+        visible.push(principal_entry);
+    }
+    visible.sort_by(|left, right| {
+        left.display_name
+            .to_ascii_lowercase()
+            .cmp(&right.display_name.to_ascii_lowercase())
+            .then_with(|| {
+                left.email
+                    .to_ascii_lowercase()
+                    .cmp(&right.email.to_ascii_lowercase())
+            })
+            .then_with(|| persona_id(left).cmp(&persona_id(right)))
+    });
+    visible.dedup_by(|left, right| left.entry_kind == right.entry_kind && left.id == right.id);
+    visible
+}
+
+fn find_people_query_text(request: &str) -> String {
+    element_text(request, "QueryString")
+        .or_else(|| element_text(request, "SearchString"))
+        .or_else(|| element_text(request, "Query"))
+        .or_else(|| element_text(request, "EmailAddress"))
+        .or_else(|| element_text(request, "SmtpAddress"))
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+}
+
+fn requested_persona_id(request: &str) -> Option<String> {
+    attribute_values_for_tag(request, "PersonaId", "Id")
+        .first()
+        .map(|value| (*value).to_string())
+        .or_else(|| element_text(request, "PersonaId"))
+        .or_else(|| element_text(request, "PersonaID"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn persona_id(entry: &ExchangeAddressBookEntry) -> String {
+    match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => format!("persona:account:{}", entry.id),
+        ExchangeAddressBookEntryKind::Contact => format!("persona:contact:{}", entry.id),
+        ExchangeAddressBookEntryKind::DistributionList => format!("persona:group:{}", entry.id),
+    }
+}
+
+fn parse_persona_id(value: &str) -> Option<(ExchangeAddressBookEntryKind, Uuid)> {
+    let value = value.trim();
+    let Some(rest) = value.strip_prefix("persona:") else {
+        return None;
+    };
+    let (kind, id) = rest.split_once(':')?;
+    let id = Uuid::parse_str(id).ok()?;
+    let kind = match kind {
+        "account" => ExchangeAddressBookEntryKind::Account,
+        "contact" => ExchangeAddressBookEntryKind::Contact,
+        _ => return None,
+    };
+    Some((kind, id))
+}
+
+fn persona_xml(entry: &ExchangeAddressBookEntry) -> String {
+    let persona_id = persona_id(entry);
+    let persona_type = match entry.entry_kind {
+        ExchangeAddressBookEntryKind::Account => "Person",
+        ExchangeAddressBookEntryKind::Contact => "Contact",
+        ExchangeAddressBookEntryKind::DistributionList => "DistributionList",
+    };
+    format!(
+        concat!(
+            "<t:Persona>",
+            "<t:PersonaId Id=\"{persona_id}\"/>",
+            "<t:PersonaType>{persona_type}</t:PersonaType>",
+            "<t:DisplayName>{display_name}</t:DisplayName>",
+            "<t:DisplayNameFirstLast>{display_name}</t:DisplayNameFirstLast>",
+            "<t:DisplayNameLastFirst>{display_name}</t:DisplayNameLastFirst>",
+            "<t:FileAs>{display_name}</t:FileAs>",
+            "<t:EmailAddress>{email}</t:EmailAddress>",
+            "<t:EmailAddresses>",
+            "<t:EmailAddress>",
+            "<t:Name>{display_name}</t:Name>",
+            "<t:EmailAddress>{email}</t:EmailAddress>",
+            "<t:RoutingType>SMTP</t:RoutingType>",
+            "<t:MailboxType>{mailbox_type}</t:MailboxType>",
+            "</t:EmailAddress>",
+            "</t:EmailAddresses>",
+            "</t:Persona>"
+        ),
+        persona_id = escape_xml(&persona_id),
+        persona_type = persona_type,
+        display_name = escape_xml(&entry.display_name),
+        email = escape_xml(&entry.email),
+        mailbox_type = ews_mailbox_type(entry),
     )
 }
 
@@ -10840,6 +12009,14 @@ fn unsupported_operation_response(operation: &str) -> String {
         operation,
         "ErrorInvalidOperation",
         &format!("{operation} is not implemented by the EWS MVP."),
+    )
+}
+
+fn create_managed_folder_unsupported_response() -> String {
+    operation_error_response(
+        "CreateManagedFolder",
+        "ErrorInvalidOperation",
+        "CreateManagedFolder is not implemented by the EWS MVP. It is a deprecated Exchange managed-folder operation; LPE exposes canonical retention tags but has no documented managed-folder creation model.",
     )
 }
 

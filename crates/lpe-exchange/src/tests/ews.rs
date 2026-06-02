@@ -1161,6 +1161,116 @@ async fn resolve_names_returns_no_results_for_non_directory_names() {
 }
 
 #[tokio::test]
+async fn find_people_projects_canonical_accounts_and_contacts() {
+    let mut bob = FakeStore::account();
+    bob.account_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    bob.email = "bob@example.test".to_string();
+    bob.display_name = "Bob Tenant".to_string();
+    let mut mallory = FakeStore::account();
+    mallory.tenant_id = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
+    mallory.account_id = Uuid::parse_str("cccccccc-cccc-cccc-cccc-cccccccccccc").unwrap();
+    mallory.email = "mallory@other.test".to_string();
+    mallory.display_name = "Mallory Foreign".to_string();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        directory_accounts: Arc::new(Mutex::new(vec![bob, mallory])),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "dddddddd-dddd-dddd-dddd-dddddddddddd",
+            "Bob Contact",
+            "bob.contact@example.test",
+        )])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindPeople><m:QueryString>bob</m:QueryString></m:FindPeople></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:FindPeopleResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(
+        body.contains("<t:PersonaId Id=\"persona:account:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb\"/>")
+    );
+    assert!(body.contains("<t:PersonaType>Person</t:PersonaType>"));
+    assert!(body.contains("<t:DisplayName>Bob Tenant</t:DisplayName>"));
+    assert!(body.contains("<t:EmailAddress>bob@example.test</t:EmailAddress>"));
+    assert!(
+        body.contains("<t:PersonaId Id=\"persona:contact:dddddddd-dddd-dddd-dddd-dddddddddddd\"/>")
+    );
+    assert!(body.contains("<t:PersonaType>Contact</t:PersonaType>"));
+    assert!(body.contains("<t:DisplayName>Bob Contact</t:DisplayName>"));
+    assert!(body.contains("<t:EmailAddress>bob.contact@example.test</t:EmailAddress>"));
+    assert!(!body.contains("mallory@other.test"));
+    assert!(!body.contains("PublicDL"));
+}
+
+#[tokio::test]
+async fn get_persona_resolves_only_visible_stateless_persona_ids() {
+    let mut foreign = FakeStore::contact(
+        "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+        "Hidden Contact",
+        "hidden@example.test",
+    );
+    foreign.owner_account_id = Uuid::parse_str("ffffffff-ffff-ffff-ffff-ffffffffffff").unwrap();
+    foreign.collection_id = "foreign".to_string();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "default", "contacts", "Contacts",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![
+            FakeStore::contact(
+                "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                "Bob Contact",
+                "bob.contact@example.test",
+            ),
+            foreign,
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetPersona><m:PersonaId Id="persona:contact:dddddddd-dddd-dddd-dddd-dddddddddddd"/></m:GetPersona></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:GetPersonaResponseMessage ResponseClass=\"Success\">"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(
+        body.contains("<t:PersonaId Id=\"persona:contact:dddddddd-dddd-dddd-dddd-dddddddddddd\"/>")
+    );
+    assert!(body.contains("<t:DisplayName>Bob Contact</t:DisplayName>"));
+    assert!(body.contains("<t:EmailAddress>bob.contact@example.test</t:EmailAddress>"));
+
+    let foreign_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetPersona><m:PersonaId Id="persona:contact:eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"/></m:GetPersona></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let foreign_body = response_text(foreign_response).await;
+    assert!(foreign_body.contains("<m:GetPersonaResponseMessage ResponseClass=\"Error\">"));
+    assert!(foreign_body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(!foreign_body.contains("hidden@example.test"));
+}
+
+#[tokio::test]
 async fn get_user_availability_returns_canonical_busy_events() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -2107,30 +2217,6 @@ async fn get_item_returns_ews_error_for_unsupported_message_ids() {
     assert!(body.contains("ResponseClass=\"Error\""));
     assert!(body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
     assert!(body.contains("<t:ServerVersionInfo"));
-}
-
-#[tokio::test]
-async fn out_of_scope_bootstrap_operations_return_ews_unsupported_errors() {
-    let store = FakeStore {
-        session: Some(FakeStore::account()),
-        ..Default::default()
-    };
-    let service = ExchangeService::new(store);
-
-    for operation in ["FindPeople"] {
-        let request = format!("<s:Envelope><s:Body><m:{operation} /></s:Body></s:Envelope>");
-        let response = service
-            .handle(&bearer_headers(), request.as_bytes())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = response_text(response).await;
-        assert!(body.contains(&format!("<m:{operation}Response>")));
-        assert!(body.contains("ResponseClass=\"Error\""));
-        assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
-        assert!(body.contains("<t:ServerVersionInfo"));
-    }
 }
 
 #[tokio::test]
@@ -4831,7 +4917,7 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
     };
     let service = ExchangeService::new(store);
 
-    for operation in ["FindMessageTrackingReport", "GetMessageTrackingReport"] {
+    for operation in ["UnsupportedOperation"] {
         let request = format!(
             concat!(
                 "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" ",
@@ -4853,6 +4939,405 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
         assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
         assert!(body.contains("<t:ServerVersionInfo"));
     }
+}
+
+#[tokio::test]
+async fn create_managed_folder_returns_tracked_parseable_gap() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateManagedFolder><m:FolderNames><t:FolderName>Managed Archive</t:FolderName></m:FolderNames></m:CreateManagedFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_text(response).await;
+    assert!(body.contains("<m:CreateManagedFolderResponse>"));
+    assert!(body.contains("ResponseClass=\"Error\""));
+    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(body.contains("no documented managed-folder creation model"));
+}
+
+#[tokio::test]
+async fn ucs_im_group_operations_use_canonical_contact_group_state() {
+    let group_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+    let contact_id = Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        contact_collections: Arc::new(Mutex::new(vec![FakeStore::collection(
+            "im_contact_list",
+            "contacts",
+            "IM Contact List",
+        )])),
+        contacts: Arc::new(Mutex::new(vec![FakeStore::contact(
+            "22222222-2222-2222-2222-222222222222",
+            "Bob Contact",
+            "bob@example.test",
+        )])),
+        ..Default::default()
+    };
+    let groups = store.ews_im_groups.clone();
+    let members = store.ews_im_group_members.clone();
+    let contacts = store.contacts.clone();
+    let service = ExchangeService::new(store);
+
+    let add_group = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:AddImGroup><m:DisplayName>Engineering</m:DisplayName></m:AddImGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let add_group_body = response_text(add_group).await;
+    assert!(add_group_body.contains("<m:AddImGroupResponse>"));
+    assert!(add_group_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(add_group_body.contains("im-group:12121212-1212-1212-1212-121212121212"));
+    assert_eq!(groups.lock().unwrap()[0].display_name, "Engineering");
+
+    let set_group = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:SetImGroup><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:DisplayName>Platform</m:DisplayName></m:SetImGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let set_group_body = response_text(set_group).await;
+    assert!(set_group_body.contains("<m:SetImGroupResponse>"));
+    assert!(set_group_body.contains("<t:DisplayName>Platform</t:DisplayName>"));
+
+    let add_contact = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:AddImContactToGroup><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:ContactId Id="contact:22222222-2222-2222-2222-222222222222"/><m:DisplayName>Bob Contact</m:DisplayName></m:AddImContactToGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let add_contact_body = response_text(add_contact).await;
+    assert!(add_contact_body.contains("<m:AddImContactToGroupResponse>"));
+    assert!(add_contact_body.contains("<t:MemberKind>contact</t:MemberKind>"));
+    assert_eq!(members.lock().unwrap()[0].contact_id, Some(contact_id));
+
+    let add_new = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:AddNewImContactToGroup><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:DisplayName>Carol IM</m:DisplayName><m:SmtpAddress>carol@example.test</m:SmtpAddress></m:AddNewImContactToGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let add_new_body = response_text(add_new).await;
+    assert!(add_new_body.contains("<m:AddNewImContactToGroupResponse>"));
+    assert!(add_new_body.contains("<t:MemberKind>contact</t:MemberKind>"));
+    assert!(contacts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|contact| contact.collection_id == "im_contact_list"
+            && contact.email == "carol@example.test"));
+
+    let remove_from_list = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:RemoveContactFromImList><m:ContactId Id="contact:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"/></m:RemoveContactFromImList></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let remove_from_list_body = response_text(remove_from_list).await;
+    assert!(remove_from_list_body.contains("<m:RemoveContactFromImListResponse>"));
+    assert!(remove_from_list_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+
+    let add_tel = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:AddNewTelUriContactToGroup><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:DisplayName>Carol Mobile</m:DisplayName><m:TelUri>tel:+15550101</m:TelUri></m:AddNewTelUriContactToGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let add_tel_body = response_text(add_tel).await;
+    assert!(add_tel_body.contains("<m:AddNewTelUriContactToGroupResponse>"));
+    assert!(add_tel_body.contains("<t:MemberKind>tel_uri</t:MemberKind>"));
+
+    let list = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetImItemList /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let list_body = response_text(list).await;
+    assert!(list_body.contains("<m:GetImItemListResponse>"));
+    assert!(list_body.contains("<t:DisplayName>Platform</t:DisplayName>"));
+    assert!(list_body.contains("im-member:contact:22222222-2222-2222-2222-222222222222"));
+    assert!(list_body.contains("tel:+15550101"));
+
+    let items = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:GetImItems /></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let items_body = response_text(items).await;
+    assert!(items_body.contains("<m:GetImItemsResponse>"));
+    assert!(items_body.contains("<t:MemberKind>contact</t:MemberKind>"));
+
+    let remove_contact = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:RemoveImContactFromGroup><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:ContactId Id="contact:22222222-2222-2222-2222-222222222222"/></m:RemoveImContactFromGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let remove_contact_body = response_text(remove_contact).await;
+    assert!(remove_contact_body.contains("<m:RemoveImContactFromGroupResponse>"));
+    assert!(remove_contact_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(!members
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|member| member.contact_id == Some(contact_id)));
+
+    let remove_group = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:RemoveImGroup><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/></m:RemoveImGroup></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let remove_group_body = response_text(remove_group).await;
+    assert!(remove_group_body.contains("<m:RemoveImGroupResponse>"));
+    assert!(remove_group_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(!groups
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|group| group.id == group_id));
+}
+
+#[tokio::test]
+async fn ucs_distribution_list_membership_stays_tenant_scoped() {
+    let group_id = Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap();
+    let visible_dl_id = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+    let foreign_dl_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let foreign_tenant_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ews_im_groups: Arc::new(Mutex::new(vec![EwsImGroup {
+            id: group_id,
+            display_name: "Platform".to_string(),
+            modseq: 1,
+        }])),
+        extra_address_book_entries: Arc::new(Mutex::new(vec![
+            ExchangeAddressBookEntry {
+                id: visible_dl_id,
+                display_name: "Visible DL".to_string(),
+                email: "visible-dl@example.test".to_string(),
+                entry_kind: ExchangeAddressBookEntryKind::DistributionList,
+                directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                member_emails: vec!["bob@example.test".to_string()],
+            },
+            ExchangeAddressBookEntry {
+                id: foreign_dl_id,
+                display_name: "Foreign DL".to_string(),
+                email: "foreign-dl@other.test".to_string(),
+                entry_kind: ExchangeAddressBookEntryKind::DistributionList,
+                directory_kind: ExchangeAddressBookDirectoryKind::Person,
+                member_emails: vec!["mallory@other.test".to_string()],
+            },
+        ])),
+        extra_address_book_entry_tenants: Arc::new(Mutex::new(HashMap::from([(
+            foreign_dl_id,
+            foreign_tenant_id,
+        )]))),
+        ..Default::default()
+    };
+    let members = store.ews_im_group_members.clone();
+    let service = ExchangeService::new(store);
+
+    let add_visible = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:AddDistributionGroupToImList><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:SmtpAddress>visible-dl@example.test</m:SmtpAddress></m:AddDistributionGroupToImList></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let add_visible_body = response_text(add_visible).await;
+    assert!(add_visible_body.contains("<m:AddDistributionGroupToImListResponse>"));
+    assert!(add_visible_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert_eq!(members.lock().unwrap().len(), 1);
+
+    let add_foreign = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:AddDistributionGroupToImList><m:ImGroupId Id="im-group:12121212-1212-1212-1212-121212121212"/><m:SmtpAddress>foreign-dl@other.test</m:SmtpAddress></m:AddDistributionGroupToImList></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let add_foreign_body = response_text(add_foreign).await;
+    assert!(add_foreign_body.contains("<m:AddDistributionGroupToImListResponse>"));
+    assert!(add_foreign_body.contains("ResponseClass=\"Error\""));
+    assert!(add_foreign_body.contains("distribution list not found"));
+    assert_eq!(members.lock().unwrap().len(), 1);
+
+    let remove_visible = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:RemoveDistributionGroupFromImList><m:SmtpAddress>visible-dl@example.test</m:SmtpAddress></m:RemoveDistributionGroupFromImList></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let remove_visible_body = response_text(remove_visible).await;
+    assert!(remove_visible_body.contains("<m:RemoveDistributionGroupFromImListResponse>"));
+    assert!(remove_visible_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(members.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn message_tracking_reports_project_canonical_trace_state() {
+    let account = FakeStore::account();
+    let report_id = "aaaaaaaa-1111-2222-3333-444444444444";
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ews_message_tracking_reports: Arc::new(Mutex::new(vec![FakeMessageTrackingReport {
+            tenant_id: account.tenant_id,
+            report: EwsMessageTrackingReport {
+                report_id: report_id.to_string(),
+                account_id: account.account_id,
+                sender: "alice@example.test".to_string(),
+                recipients: vec!["bob@example.test".to_string()],
+                subject: "Quarterly trace".to_string(),
+                submitted_at: "2026-06-02T10:15:00Z".to_string(),
+                status: "relayed".to_string(),
+                trace_id: Some("lpe-ct-out-trace-1".to_string()),
+                remote_message_ref: Some("remote-123".to_string()),
+            },
+        }])),
+        ews_message_tracking_events: Arc::new(Mutex::new(HashMap::from([(
+            report_id.to_string(),
+            vec![
+                EwsMessageTrackingEvent {
+                    event_source: "lpe".to_string(),
+                    event_kind: "handed_off".to_string(),
+                    recipient_address: None,
+                    timestamp: "2026-06-02T10:16:00Z".to_string(),
+                    dsn_json: "{}".to_string(),
+                },
+                EwsMessageTrackingEvent {
+                    event_source: "lpe-ct".to_string(),
+                    event_kind: "relayed".to_string(),
+                    recipient_address: Some("bob@example.test".to_string()),
+                    timestamp: "2026-06-02T10:17:00Z".to_string(),
+                    dsn_json: "{\"status\":\"2.0.0\"}".to_string(),
+                },
+            ],
+        )]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let find_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindMessageTrackingReport><m:Subject>Quarterly</m:Subject></m:FindMessageTrackingReport></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(find_response.status(), StatusCode::OK);
+    let find_body = response_text(find_response).await;
+    assert!(find_body.contains("<m:FindMessageTrackingReportResponse>"));
+    assert!(find_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(find_body.contains("<t:MessageTrackingReportId>aaaaaaaa-1111-2222-3333-444444444444</t:MessageTrackingReportId>"));
+    assert!(find_body.contains("<t:Sender>alice@example.test</t:Sender>"));
+    assert!(find_body.contains("<t:SmtpAddress>bob@example.test</t:SmtpAddress>"));
+    assert!(find_body.contains("<t:Subject>Quarterly trace</t:Subject>"));
+    assert!(find_body.contains("<t:TraceId>lpe-ct-out-trace-1</t:TraceId>"));
+    assert!(find_body.contains("<t:RemoteMessageReference>remote-123</t:RemoteMessageReference>"));
+
+    let get_request = format!(
+        concat!(
+            "<s:Envelope><s:Body><m:GetMessageTrackingReport>",
+            "<m:MessageTrackingReportId>{report_id}</m:MessageTrackingReportId>",
+            "</m:GetMessageTrackingReport></s:Body></s:Envelope>"
+        ),
+        report_id = report_id
+    );
+    let get_response = service
+        .handle(&bearer_headers(), get_request.as_bytes())
+        .await
+        .unwrap();
+
+    assert_eq!(get_response.status(), StatusCode::OK);
+    let get_body = response_text(get_response).await;
+    assert!(get_body.contains("<m:GetMessageTrackingReportResponse>"));
+    assert!(get_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(get_body.contains("<t:RecipientTrackingEvents>"));
+    assert!(get_body.contains("<t:EventDescription>handed_off</t:EventDescription>"));
+    assert!(get_body.contains("<t:EventData>lpe</t:EventData>"));
+    assert!(get_body.contains("<t:EventDescription>relayed</t:EventDescription>"));
+    assert!(get_body.contains("<t:RecipientAddress>bob@example.test</t:RecipientAddress>"));
+    assert!(!get_body.contains("bcc@example.test"));
+}
+
+#[tokio::test]
+async fn message_tracking_reports_do_not_cross_tenant_boundaries() {
+    let account = FakeStore::account();
+    let foreign_tenant = Uuid::from_u128(0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb);
+    let report_id = "foreign-report";
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ews_message_tracking_reports: Arc::new(Mutex::new(vec![FakeMessageTrackingReport {
+            tenant_id: foreign_tenant,
+            report: EwsMessageTrackingReport {
+                report_id: report_id.to_string(),
+                account_id: account.account_id,
+                sender: "mallory@example.test".to_string(),
+                recipients: vec!["victim@example.test".to_string()],
+                subject: "Foreign trace".to_string(),
+                submitted_at: "2026-06-02T10:15:00Z".to_string(),
+                status: "relayed".to_string(),
+                trace_id: Some("foreign-trace".to_string()),
+                remote_message_ref: None,
+            },
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+
+    let find_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:FindMessageTrackingReport><m:TraceId>foreign-trace</m:TraceId></m:FindMessageTrackingReport></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let find_body = response_text(find_response).await;
+    assert!(find_body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(!find_body.contains("foreign-trace"));
+    assert!(!find_body.contains("mallory@example.test"));
+
+    let get_request = format!(
+        concat!(
+            "<s:Envelope><s:Body><m:GetMessageTrackingReport>",
+            "<m:MessageTrackingReportId>{report_id}</m:MessageTrackingReportId>",
+            "</m:GetMessageTrackingReport></s:Body></s:Envelope>"
+        ),
+        report_id = report_id
+    );
+    let get_response = service
+        .handle(&bearer_headers(), get_request.as_bytes())
+        .await
+        .unwrap();
+    let get_body = response_text(get_response).await;
+    assert!(get_body.contains("<m:GetMessageTrackingReportResponse>"));
+    assert!(get_body.contains("<m:ResponseCode>ErrorItemNotFound</m:ResponseCode>"));
+    assert!(!get_body.contains("mallory@example.test"));
 }
 
 #[tokio::test]
@@ -7486,6 +7971,51 @@ async fn move_item_moves_custom_mailbox_message_to_target_folder() {
 }
 
 #[tokio::test]
+async fn archive_item_moves_message_to_canonical_archive_mailbox() {
+    let message_id = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+    let archive_mailbox_id = Uuid::parse_str("55555555-5555-5555-5555-555555555555").unwrap();
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![
+            FakeStore::mailbox("44444444-4444-4444-4444-444444444444", "inbox", "Inbox"),
+            FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "archive", "Archive"),
+        ])),
+        emails: Arc::new(Mutex::new(vec![FakeStore::email(
+            "99999999-9999-9999-9999-999999999999",
+            "44444444-4444-4444-4444-444444444444",
+            "inbox",
+            "Archive target",
+        )])),
+        ..Default::default()
+    };
+    let moved_emails = store.moved_emails.clone();
+    let emails = store.emails.clone();
+    let service = ExchangeService::new(store);
+
+    let response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:ArchiveItem><m:ItemIds><t:ItemId Id="message:99999999-9999-9999-9999-999999999999"/></m:ItemIds></m:ArchiveItem></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+
+    let body = response_text(response).await;
+    assert!(body.contains("<m:ArchiveItemResponse>"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("message:99999999-9999-9999-9999-999999999999"));
+    assert!(body.contains("mailbox:55555555-5555-5555-5555-555555555555"));
+    assert_eq!(
+        moved_emails.lock().unwrap().as_slice(),
+        &[(message_id, archive_mailbox_id)]
+    );
+    let stored = emails.lock().unwrap();
+    let archived = stored.iter().find(|email| email.id == message_id).unwrap();
+    assert_eq!(archived.mailbox_id, archive_mailbox_id);
+    assert_eq!(archived.mailbox_role, "archive");
+}
+
+#[tokio::test]
 async fn move_item_moves_public_folder_item_to_target_public_folder() {
     let source_item_id = Uuid::parse_str("abababab-abab-abab-abab-abababababab").unwrap();
     let store = FakeStore {
@@ -8074,80 +8604,10 @@ const MICROSOFT_EWS_OPERATION_CATALOG: &[&str] = &[
     "UploadItems",
 ];
 
-const EWS_UNSUPPORTED_REASONS: &[(&str, &str)] = &[
-    (
-        "AddDistributionGroupToImList",
-        "Unified Contact Store distribution-list membership has no canonical LPE model.",
-    ),
-    (
-        "AddImContactToGroup",
-        "Unified Contact Store IM contact membership has no canonical LPE model.",
-    ),
-    (
-        "AddImGroup",
-        "Unified Contact Store IM groups have no canonical LPE model.",
-    ),
-    (
-        "AddNewImContactToGroup",
-        "Unified Contact Store IM contact creation has no canonical LPE model.",
-    ),
-    (
-        "AddNewTelUriContactToGroup",
-        "Unified Contact Store tel URI contacts have no canonical LPE model.",
-    ),
-    (
-        "ArchiveItem",
-        "Exchange archive-mailbox semantics are not represented by canonical mailbox state.",
-    ),
-    (
-        "CreateManagedFolder",
-        "Deprecated Exchange managed-folder behavior is superseded by canonical retention tags.",
-    ),
-    (
-        "FindMessageTrackingReport",
-        "Exchange tracking reports require a canonical LPE/LPE-CT trace API before EWS exposure.",
-    ),
-    (
-        "FindPeople",
-        "Persona aggregation is out of scope until canonical linked-person state exists.",
-    ),
-    (
-        "GetImItemList",
-        "Unified Contact Store IM list state has no canonical LPE model.",
-    ),
-    (
-        "GetImItems",
-        "Unified Contact Store IM items have no canonical LPE model.",
-    ),
-    (
-        "GetMessageTrackingReport",
-        "Exchange tracking report details require a canonical LPE/LPE-CT trace API before EWS exposure.",
-    ),
-    (
-        "GetPersona",
-        "Persona fetch is out of scope until canonical linked-person state exists.",
-    ),
-    (
-        "RemoveContactFromImList",
-        "Unified Contact Store IM list membership has no canonical LPE model.",
-    ),
-    (
-        "RemoveDistributionGroupFromImList",
-        "Unified Contact Store distribution-list membership has no canonical LPE model.",
-    ),
-    (
-        "RemoveImContactFromGroup",
-        "Unified Contact Store IM group membership has no canonical LPE model.",
-    ),
-    (
-        "RemoveImGroup",
-        "Unified Contact Store IM groups have no canonical LPE model.",
-    ),
-    (
-        "SetImGroup",
-        "Unified Contact Store IM groups have no canonical LPE model.",
-    ),
-];
+const EWS_UNSUPPORTED_REASONS: &[(&str, &str)] = &[(
+    "CreateManagedFolder",
+    "Deprecated Exchange managed-folder behavior is superseded by canonical retention tags.",
+)];
 
 const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     EwsCatalogCoverage {
@@ -8157,28 +8617,28 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "AddDistributionGroupToImList",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_distribution_list_membership_stays_tenant_scoped",
     },
     EwsCatalogCoverage {
         operation: "AddImContactToGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "AddImGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "AddNewImContactToGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "AddNewTelUriContactToGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "ApplyConversationAction",
@@ -8187,8 +8647,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "ArchiveItem",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "archive_item_moves_message_to_canonical_archive_mailbox",
     },
     EwsCatalogCoverage {
         operation: "ConvertId",
@@ -8228,7 +8688,7 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     EwsCatalogCoverage {
         operation: "CreateManagedFolder",
         kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        test_name: "create_managed_folder_returns_tracked_parseable_gap",
     },
     EwsCatalogCoverage {
         operation: "CreateUserConfiguration",
@@ -8297,13 +8757,13 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "FindMessageTrackingReport",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "message_tracking_reports_project_canonical_trace_state",
     },
     EwsCatalogCoverage {
         operation: "FindPeople",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "out_of_scope_bootstrap_operations_return_ews_unsupported_errors",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "find_people_projects_canonical_accounts_and_contacts",
     },
     EwsCatalogCoverage {
         operation: "GetAppManifests",
@@ -8358,13 +8818,13 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetImItemList",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "GetImItems",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "GetInboxRules",
@@ -8383,8 +8843,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetMessageTrackingReport",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "message_tracking_reports_project_canonical_trace_state",
     },
     EwsCatalogCoverage {
         operation: "GetNonIndexableItemDetails",
@@ -8403,8 +8863,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "GetPersona",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "get_persona_resolves_only_visible_stateless_persona_ids",
     },
     EwsCatalogCoverage {
         operation: "GetPhoneCallInformation",
@@ -8524,8 +8984,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "RemoveContactFromImList",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "RemoveDelegate",
@@ -8534,18 +8994,18 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "RemoveDistributionGroupFromImList",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_distribution_list_membership_stays_tenant_scoped",
     },
     EwsCatalogCoverage {
         operation: "RemoveImContactFromGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "RemoveImGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "ResolveNames",
@@ -8569,8 +9029,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "SetImGroup",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "ews_catalog_gate_covers_documented_operations_and_unsupported_gaps",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "ucs_im_group_operations_use_canonical_contact_group_state",
     },
     EwsCatalogCoverage {
         operation: "SetUserOofSettings",
@@ -8679,17 +9139,15 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
     );
 
     let ews_tests_source = include_str!("ews.rs");
-    let mut missing_behavior_tests = Vec::new();
+    let mut missing_soap_tests = Vec::new();
     for entry in EWS_CATALOG_COVERAGE {
-        if entry.kind == EwsCatalogCoverageKind::Behavioral
-            && !ews_tests_source.contains(&format!("async fn {}(", entry.test_name))
-        {
-            missing_behavior_tests.push((entry.operation, entry.test_name));
+        if !ews_tests_source.contains(&format!("async fn {}(", entry.test_name)) {
+            missing_soap_tests.push((entry.operation, entry.test_name));
         }
     }
     assert!(
-        missing_behavior_tests.is_empty(),
-        "implemented EWS operations must name an existing SOAP behavior test: {missing_behavior_tests:?}"
+        missing_soap_tests.is_empty(),
+        "every Microsoft EWS catalog operation must name an existing SOAP test: {missing_soap_tests:?}"
     );
 
     let unsupported: Vec<_> = EWS_CATALOG_COVERAGE
@@ -8761,12 +9219,13 @@ async fn ews_catalog_gate_covers_documented_operations_and_unsupported_gaps() {
         );
     }
 
+    let soap_evidence_count = EWS_CATALOG_COVERAGE.len();
     let behavioral_count = EWS_CATALOG_COVERAGE.len() - unsupported.len();
     println!(
-        "EWS catalog gate coverage: accounted coverage {}/{} ({:.1}%); behavioral coverage {}/{} ({:.1}%); explicit unsupported coverage {}/{} ({:.1}%)",
-        EWS_CATALOG_COVERAGE.len(),
+        "EWS catalog gate coverage: SOAP evidence {}/{} ({:.1}%); canonical behavioral coverage {}/{} ({:.1}%); explicit unsupported coverage {}/{} ({:.1}%)",
+        soap_evidence_count,
         documented.len(),
-        percentage(EWS_CATALOG_COVERAGE.len(), documented.len()),
+        percentage(soap_evidence_count, documented.len()),
         behavioral_count,
         documented.len(),
         percentage(behavioral_count, documented.len()),

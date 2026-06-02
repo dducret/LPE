@@ -55,16 +55,17 @@ use crate::{
     },
     store::{
         EwsAppMarketplacePolicy, EwsDelegate, EwsDiscoverySearchConfig, EwsDiscoverySearchItem,
-        EwsDiscoverySearchResult, EwsHoldMailbox, EwsMailAppInstall, EwsMailAppManifest,
-        EwsMailAppTokenEvent, EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox,
-        EwsTransferEntry, EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration,
-        EwsUserConfigurationKey, ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry,
-        ExchangeAddressBookEntryKind, ExchangeStore, MapiCheckpointKind, MapiContentTableQuery,
-        MapiContentTableQueryResult, MapiContentTableSortField, MapiCustomPropertyObjectKind,
-        MapiCustomPropertyValue, MapiIdentityLookupRecord, MapiIdentityObjectKind,
-        MapiIdentityRecord, MapiIdentityRequest, MapiNamedPropertyMapping, MapiNotificationPoll,
-        MapiSyncChangeSet, MapiSyncCheckpoint, UpsertEwsDelegateInput,
-        UpsertEwsUserConfigurationInput,
+        EwsDiscoverySearchResult, EwsHoldMailbox, EwsImGroup, EwsImGroupMember, EwsImList,
+        EwsImMemberInput, EwsMailAppInstall, EwsMailAppManifest, EwsMailAppTokenEvent,
+        EwsMessageTrackingEvent, EwsMessageTrackingReport, EwsMessageTrackingReportDetail,
+        EwsNonIndexableReport, EwsRetentionPolicyTag, EwsSearchableMailbox, EwsTransferEntry,
+        EwsTransferJob, EwsUnifiedMessagingCall, EwsUserConfiguration, EwsUserConfigurationKey,
+        ExchangeAddressBookDirectoryKind, ExchangeAddressBookEntry, ExchangeAddressBookEntryKind,
+        ExchangeStore, MapiCheckpointKind, MapiContentTableQuery, MapiContentTableQueryResult,
+        MapiContentTableSortField, MapiCustomPropertyObjectKind, MapiCustomPropertyValue,
+        MapiIdentityLookupRecord, MapiIdentityObjectKind, MapiIdentityRecord, MapiIdentityRequest,
+        MapiNamedPropertyMapping, MapiNotificationPoll, MapiSyncChangeSet, MapiSyncCheckpoint,
+        UpsertEwsDelegateInput, UpsertEwsUserConfigurationInput,
     },
 };
 
@@ -468,6 +469,8 @@ struct FakeStore {
     extra_address_book_entries: Arc<Mutex<Vec<ExchangeAddressBookEntry>>>,
     extra_address_book_entry_tenants: Arc<Mutex<HashMap<Uuid, Uuid>>>,
     hidden_address_book_entry_ids: Arc<Mutex<Vec<Uuid>>>,
+    ews_im_groups: Arc<Mutex<Vec<EwsImGroup>>>,
+    ews_im_group_members: Arc<Mutex<Vec<EwsImGroupMember>>>,
     mapi_identities: Arc<Mutex<HashMap<Uuid, u64>>>,
     mapi_identity_source_keys: Arc<Mutex<HashMap<Uuid, Vec<u8>>>>,
     mapi_named_properties: Arc<Mutex<FakeMapiNamedProperties>>,
@@ -493,6 +496,8 @@ struct FakeStore {
     ews_sharing_grants: Arc<Mutex<Vec<CollaborationGrant>>>,
     ews_discovery_search_configs: Arc<Mutex<Vec<EwsDiscoverySearchConfig>>>,
     ews_discovery_search_results: Arc<Mutex<Vec<EwsDiscoverySearchResult>>>,
+    ews_message_tracking_reports: Arc<Mutex<Vec<FakeMessageTrackingReport>>>,
+    ews_message_tracking_events: Arc<Mutex<HashMap<String, Vec<EwsMessageTrackingEvent>>>>,
     ews_holds: Arc<Mutex<Vec<EwsHoldMailbox>>>,
     ews_non_indexable_reports: Arc<Mutex<Vec<EwsNonIndexableReport>>>,
     ews_transfer_jobs: Arc<Mutex<Vec<EwsTransferJob>>>,
@@ -537,6 +542,12 @@ struct FakeUnifiedMessagingCall {
     tenant_id: Uuid,
     account_id: Uuid,
     call: EwsUnifiedMessagingCall,
+}
+
+#[derive(Clone)]
+struct FakeMessageTrackingReport {
+    tenant_id: Uuid,
+    report: EwsMessageTrackingReport,
 }
 
 #[derive(Default)]
@@ -1316,6 +1327,86 @@ impl ExchangeStore for FakeStore {
             };
             sink.lock().unwrap().push(result.clone());
             Ok(result)
+        })
+    }
+
+    fn fetch_ews_message_tracking_reports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        query_text: &'a str,
+        limit: usize,
+    ) -> StoreFuture<'a, Vec<EwsMessageTrackingReport>> {
+        let query = query_text.trim().to_ascii_lowercase();
+        let mut reports = self
+            .ews_message_tracking_reports
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.tenant_id == principal.tenant_id)
+            .filter(|entry| entry.report.account_id == principal.account_id)
+            .filter(|entry| {
+                query.is_empty()
+                    || entry.report.report_id.to_ascii_lowercase().contains(&query)
+                    || entry
+                        .report
+                        .trace_id
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_ascii_lowercase()
+                        .contains(&query)
+                    || entry.report.subject.to_ascii_lowercase().contains(&query)
+                    || entry.report.sender.to_ascii_lowercase().contains(&query)
+                    || entry
+                        .report
+                        .remote_message_ref
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_ascii_lowercase()
+                        .contains(&query)
+                    || entry
+                        .report
+                        .recipients
+                        .iter()
+                        .any(|recipient| recipient.to_ascii_lowercase().contains(&query))
+            })
+            .map(|entry| entry.report.clone())
+            .collect::<Vec<_>>();
+        reports.sort_by(|a, b| b.submitted_at.cmp(&a.submitted_at));
+        reports.truncate(limit.max(1).min(100));
+        Box::pin(async move { Ok(reports) })
+    }
+
+    fn fetch_ews_message_tracking_report_detail<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        report_id: &'a str,
+    ) -> StoreFuture<'a, Option<EwsMessageTrackingReportDetail>> {
+        let report_id = report_id.trim().to_string();
+        let report = self
+            .ews_message_tracking_reports
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| {
+                entry.tenant_id == principal.tenant_id
+                    && entry.report.account_id == principal.account_id
+                    && (entry.report.report_id == report_id
+                        || entry.report.trace_id.as_deref() == Some(report_id.as_str()))
+            })
+            .map(|entry| entry.report.clone());
+        let events = report.as_ref().map(|report| {
+            self.ews_message_tracking_events
+                .lock()
+                .unwrap()
+                .get(&report.report_id)
+                .cloned()
+                .unwrap_or_default()
+        });
+        Box::pin(async move {
+            Ok(report.map(|report| EwsMessageTrackingReportDetail {
+                report,
+                events: events.unwrap_or_default(),
+            }))
         })
     }
 
@@ -3099,6 +3190,145 @@ impl ExchangeStore for FakeStore {
                 .then_with(|| left.email.cmp(&right.email))
         });
         Box::pin(async move { Ok(entries) })
+    }
+
+    fn fetch_ews_im_list<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, EwsImList> {
+        let groups = self.ews_im_groups.lock().unwrap().clone();
+        let members = self.ews_im_group_members.lock().unwrap().clone();
+        Box::pin(async move { Ok(EwsImList { groups, members }) })
+    }
+
+    fn upsert_ews_im_group<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+        group_id: Option<Uuid>,
+        display_name: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsImGroup> {
+        let mut groups = self.ews_im_groups.lock().unwrap();
+        let id = group_id
+            .unwrap_or_else(|| Uuid::parse_str("12121212-1212-1212-1212-121212121212").unwrap());
+        let group = if let Some(existing) = groups.iter_mut().find(|group| group.id == id) {
+            existing.display_name = display_name.to_string();
+            existing.modseq += 1;
+            existing.clone()
+        } else {
+            let group = EwsImGroup {
+                id,
+                display_name: display_name.to_string(),
+                modseq: 1,
+            };
+            groups.push(group.clone());
+            group
+        };
+        Box::pin(async move { Ok(group) })
+    }
+
+    fn remove_ews_im_group<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+        group_id: Uuid,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        let mut groups = self.ews_im_groups.lock().unwrap();
+        let before = groups.len();
+        groups.retain(|group| group.id != group_id);
+        let removed = groups.len() != before;
+        if removed {
+            self.ews_im_group_members
+                .lock()
+                .unwrap()
+                .retain(|member| member.group_id != group_id);
+        }
+        Box::pin(async move { Ok(removed) })
+    }
+
+    fn add_ews_im_group_member<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+        group_id: Uuid,
+        member: EwsImMemberInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, EwsImGroupMember> {
+        if !self
+            .ews_im_groups
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|group| group.id == group_id)
+        {
+            return Box::pin(async move { Err(anyhow::anyhow!("IM group not found")) });
+        }
+        let mut members = self.ews_im_group_members.lock().unwrap();
+        let existing = members.iter_mut().find(|existing| {
+            existing.group_id == group_id
+                && existing.member_kind == member.member_kind
+                && existing.contact_id == member.contact_id
+                && existing.account_id == member.account_id
+                && existing
+                    .external_address
+                    .as_ref()
+                    .map(|value| value.to_ascii_lowercase())
+                    == member
+                        .external_address
+                        .as_ref()
+                        .map(|value| value.to_ascii_lowercase())
+        });
+        let stored = if let Some(existing) = existing {
+            existing.display_name = member.display_name;
+            existing.clone()
+        } else {
+            let stored = EwsImGroupMember {
+                id: Uuid::parse_str("34343434-3434-3434-3434-343434343434").unwrap(),
+                group_id,
+                member_kind: member.member_kind,
+                contact_id: member.contact_id,
+                account_id: member.account_id,
+                external_address: member.external_address,
+                display_name: member.display_name,
+            };
+            members.push(stored.clone());
+            stored
+        };
+        Box::pin(async move { Ok(stored) })
+    }
+
+    fn remove_ews_im_group_member<'a>(
+        &'a self,
+        _principal: &'a AccountPrincipal,
+        group_id: Option<Uuid>,
+        member_kind: &'a str,
+        member_value: &'a str,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        let value = member_value.to_ascii_lowercase();
+        let mut members = self.ews_im_group_members.lock().unwrap();
+        let before = members.len();
+        members.retain(|member| {
+            if group_id.map(|id| id != member.group_id).unwrap_or(false) {
+                return true;
+            }
+            if member.member_kind != member_kind {
+                return true;
+            }
+            let matches = match member_kind {
+                "contact" => member.contact_id.map(|id| id.to_string()) == Some(value.clone()),
+                "account" => member.account_id.map(|id| id.to_string()) == Some(value.clone()),
+                _ => {
+                    member
+                        .external_address
+                        .as_ref()
+                        .map(|address| address.to_ascii_lowercase())
+                        == Some(value.clone())
+                }
+            };
+            !matches
+        });
+        let removed = members.len() != before;
+        Box::pin(async move { Ok(removed) })
     }
 
     fn fetch_accessible_contact_collections<'a>(

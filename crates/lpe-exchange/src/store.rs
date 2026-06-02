@@ -276,6 +276,34 @@ pub(crate) struct EwsDiscoverySearchResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsMessageTrackingReport {
+    pub(crate) report_id: String,
+    pub(crate) account_id: Uuid,
+    pub(crate) sender: String,
+    pub(crate) recipients: Vec<String>,
+    pub(crate) subject: String,
+    pub(crate) submitted_at: String,
+    pub(crate) status: String,
+    pub(crate) trace_id: Option<String>,
+    pub(crate) remote_message_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsMessageTrackingEvent {
+    pub(crate) event_source: String,
+    pub(crate) event_kind: String,
+    pub(crate) recipient_address: Option<String>,
+    pub(crate) timestamp: String,
+    pub(crate) dsn_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsMessageTrackingReportDetail {
+    pub(crate) report: EwsMessageTrackingReport,
+    pub(crate) events: Vec<EwsMessageTrackingEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EwsHoldMailbox {
     pub(crate) account_id: Uuid,
     pub(crate) email: String,
@@ -469,6 +497,39 @@ pub(crate) struct ExchangeAddressBookEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsImGroup {
+    pub(crate) id: Uuid,
+    pub(crate) display_name: String,
+    pub(crate) modseq: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsImGroupMember {
+    pub(crate) id: Uuid,
+    pub(crate) group_id: Uuid,
+    pub(crate) member_kind: String,
+    pub(crate) contact_id: Option<Uuid>,
+    pub(crate) account_id: Option<Uuid>,
+    pub(crate) external_address: Option<String>,
+    pub(crate) display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsImList {
+    pub(crate) groups: Vec<EwsImGroup>,
+    pub(crate) members: Vec<EwsImGroupMember>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EwsImMemberInput {
+    pub(crate) member_kind: String,
+    pub(crate) contact_id: Option<Uuid>,
+    pub(crate) account_id: Option<Uuid>,
+    pub(crate) external_address: Option<String>,
+    pub(crate) display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiContentTableQuery {
     pub(crate) mailbox_id: Uuid,
     pub(crate) position: u64,
@@ -633,7 +694,7 @@ pub trait ExchangeStore: AccountAuthStore {
         may_write: bool,
         may_delete: bool,
         may_share: bool,
-        audit: AuditEntryInput,
+        _audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
     fn set_mapi_calendar_permission<'a>(
@@ -644,7 +705,7 @@ pub trait ExchangeStore: AccountAuthStore {
         may_write: bool,
         may_delete: bool,
         may_share: bool,
-        audit: AuditEntryInput,
+        _audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
     fn set_mapi_calendar_collection_permission<'a>(
@@ -656,7 +717,7 @@ pub trait ExchangeStore: AccountAuthStore {
         may_write: bool,
         may_delete: bool,
         may_share: bool,
-        audit: AuditEntryInput,
+        _audit: AuditEntryInput,
     ) -> StoreFuture<'a, ()>;
 
     fn fetch_mapi_notification_cursor<'a>(
@@ -711,6 +772,19 @@ pub trait ExchangeStore: AccountAuthStore {
         mailbox_emails: &'a [String],
         limit: usize,
     ) -> StoreFuture<'a, EwsDiscoverySearchResult>;
+
+    fn fetch_ews_message_tracking_reports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        query_text: &'a str,
+        limit: usize,
+    ) -> StoreFuture<'a, Vec<EwsMessageTrackingReport>>;
+
+    fn fetch_ews_message_tracking_report_detail<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        report_id: &'a str,
+    ) -> StoreFuture<'a, Option<EwsMessageTrackingReportDetail>>;
 
     fn fetch_ews_hold_mailboxes<'a>(
         &'a self,
@@ -834,6 +908,43 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<ExchangeAddressBookEntry>>;
+
+    fn fetch_ews_im_list<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, EwsImList>;
+
+    fn upsert_ews_im_group<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Option<Uuid>,
+        display_name: &'a str,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsImGroup>;
+
+    fn remove_ews_im_group<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, bool>;
+
+    fn add_ews_im_group_member<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Uuid,
+        member: EwsImMemberInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsImGroupMember>;
+
+    fn remove_ews_im_group_member<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Option<Uuid>,
+        member_kind: &'a str,
+        member_value: &'a str,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, bool>;
 
     fn fetch_accessible_contact_collections<'a>(
         &'a self,
@@ -1808,6 +1919,203 @@ impl ExchangeStore for Storage {
                     })
                 })
                 .collect()
+        })
+    }
+
+    fn fetch_ews_message_tracking_reports<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        query_text: &'a str,
+        limit: usize,
+    ) -> StoreFuture<'a, Vec<EwsMessageTrackingReport>> {
+        Box::pin(async move {
+            let query = query_text.trim().to_ascii_lowercase();
+            let like_query = format!("%{query}%");
+            let rows = sqlx::query(
+                r#"
+                SELECT
+                    q.id,
+                    q.account_id,
+                    COALESCE(q.sender_address, q.from_address) AS sender,
+                    COALESCE(m.normalized_subject, '') AS subject,
+                    q.status,
+                    q.last_trace_id,
+                    q.remote_message_ref,
+                    to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS submitted_at,
+                    COALESCE(string_agg(DISTINCT r.address, ',' ORDER BY r.address), '') AS recipients
+                FROM submission_queue q
+                JOIN mailbox_messages smm
+                  ON smm.tenant_id = q.tenant_id
+                 AND smm.account_id = q.account_id
+                 AND smm.id = q.sent_mailbox_message_id
+                JOIN messages m
+                  ON m.tenant_id = q.tenant_id
+                 AND m.id = smm.message_id
+                LEFT JOIN submission_recipients r
+                  ON r.tenant_id = q.tenant_id
+                 AND r.submission_queue_id = q.id
+                 AND r.protected_metadata = FALSE
+                WHERE q.tenant_id = $1
+                  AND q.account_id = $2
+                  AND (
+                    $3::text = ''
+                    OR lower(COALESCE(m.normalized_subject, '')) LIKE $4
+                    OR lower(COALESCE(q.sender_address, q.from_address)) LIKE $4
+                    OR lower(COALESCE(q.last_trace_id, '')) LIKE $4
+                    OR lower(COALESCE(q.remote_message_ref, '')) LIKE $4
+                    OR lower(COALESCE(r.address, '')) LIKE $4
+                  )
+                GROUP BY q.id, q.account_id, q.sender_address, q.from_address, m.normalized_subject,
+                         q.status, q.last_trace_id, q.remote_message_ref, q.created_at
+                ORDER BY q.created_at DESC, q.id
+                LIMIT $5
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(&query)
+            .bind(&like_query)
+            .bind(limit.max(1).min(100) as i64)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(|row| {
+                    let id: Uuid = row.try_get("id")?;
+                    let recipients: String = row.try_get("recipients")?;
+                    Ok(EwsMessageTrackingReport {
+                        report_id: id.to_string(),
+                        account_id: row.try_get("account_id")?,
+                        sender: row.try_get("sender")?,
+                        recipients: split_ews_recipient_list(&recipients),
+                        subject: row.try_get("subject")?,
+                        submitted_at: row.try_get("submitted_at")?,
+                        status: row.try_get("status")?,
+                        trace_id: row.try_get("last_trace_id")?,
+                        remote_message_ref: row.try_get("remote_message_ref")?,
+                    })
+                })
+                .collect()
+        })
+    }
+
+    fn fetch_ews_message_tracking_report_detail<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        report_id: &'a str,
+    ) -> StoreFuture<'a, Option<EwsMessageTrackingReportDetail>> {
+        Box::pin(async move {
+            let report_id = report_id.trim();
+            if report_id.is_empty() {
+                return Ok(None);
+            }
+            let row = sqlx::query(
+                r#"
+                SELECT
+                    q.id,
+                    q.account_id,
+                    COALESCE(q.sender_address, q.from_address) AS sender,
+                    COALESCE(m.normalized_subject, '') AS subject,
+                    q.status,
+                    q.last_trace_id,
+                    q.remote_message_ref,
+                    to_char(q.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS submitted_at,
+                    COALESCE(string_agg(DISTINCT r.address, ',' ORDER BY r.address), '') AS recipients
+                FROM submission_queue q
+                JOIN mailbox_messages smm
+                  ON smm.tenant_id = q.tenant_id
+                 AND smm.account_id = q.account_id
+                 AND smm.id = q.sent_mailbox_message_id
+                JOIN messages m
+                  ON m.tenant_id = q.tenant_id
+                 AND m.id = smm.message_id
+                LEFT JOIN submission_recipients r
+                  ON r.tenant_id = q.tenant_id
+                 AND r.submission_queue_id = q.id
+                 AND r.protected_metadata = FALSE
+                WHERE q.tenant_id = $1
+                  AND q.account_id = $2
+                  AND (q.id::text = $3 OR q.last_trace_id = $3)
+                GROUP BY q.id, q.account_id, q.sender_address, q.from_address, m.normalized_subject,
+                         q.status, q.last_trace_id, q.remote_message_ref, q.created_at
+                LIMIT 1
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(report_id)
+            .fetch_optional(self.pool())
+            .await?;
+
+            let Some(row) = row else {
+                return Ok(None);
+            };
+            let queue_id: Uuid = row.try_get("id")?;
+            let recipients: String = row.try_get("recipients")?;
+            let report = EwsMessageTrackingReport {
+                report_id: queue_id.to_string(),
+                account_id: row.try_get("account_id")?,
+                sender: row.try_get("sender")?,
+                recipients: split_ews_recipient_list(&recipients),
+                subject: row.try_get("subject")?,
+                submitted_at: row.try_get("submitted_at")?,
+                status: row.try_get("status")?,
+                trace_id: row.try_get("last_trace_id")?,
+                remote_message_ref: row.try_get("remote_message_ref")?,
+            };
+
+            let event_rows = sqlx::query(
+                r#"
+                SELECT event_source, event_kind, recipient_address,
+                       to_char(event_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS event_at,
+                       dsn_json::text AS dsn_json
+                FROM (
+                    SELECT
+                        'lpe'::text AS event_source,
+                        e.event_kind,
+                        NULL::text AS recipient_address,
+                        e.received_at AS event_at,
+                        e.dsn_json
+                    FROM submission_events e
+                    WHERE e.tenant_id = $1
+                      AND e.submission_queue_id = $2
+                    UNION ALL
+                    SELECT
+                        t.event_source,
+                        t.event_kind,
+                        t.recipient_address,
+                        t.occurred_at AS event_at,
+                        t.dsn_json
+                    FROM lpe_ct_transport_trace_events t
+                    WHERE t.tenant_id = $1
+                      AND (
+                        t.submission_queue_id = $2
+                        OR ($3::text IS NOT NULL AND t.trace_id = $3)
+                      )
+                ) events
+                ORDER BY event_at ASC, event_source ASC, event_kind ASC
+                LIMIT 200
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(queue_id)
+            .bind(report.trace_id.as_deref())
+            .fetch_all(self.pool())
+            .await?;
+            let events = event_rows
+                .into_iter()
+                .map(|row| {
+                    Ok(EwsMessageTrackingEvent {
+                        event_source: row.try_get("event_source")?,
+                        event_kind: row.try_get("event_kind")?,
+                        recipient_address: row.try_get("recipient_address")?,
+                        timestamp: row.try_get("event_at")?,
+                        dsn_json: row.try_get("dsn_json")?,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            Ok(Some(EwsMessageTrackingReportDetail { report, events }))
         })
     }
 
@@ -4466,6 +4774,253 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_ews_im_list<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+    ) -> StoreFuture<'a, EwsImList> {
+        Box::pin(async move {
+            let group_rows = sqlx::query(
+                r#"
+                SELECT id, display_name, modseq
+                FROM contact_groups
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND group_kind = 'im_group'
+                ORDER BY lower(display_name) ASC, id ASC
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .fetch_all(self.pool())
+            .await?;
+            let groups = group_rows
+                .into_iter()
+                .map(|row| EwsImGroup {
+                    id: row.get("id"),
+                    display_name: row.get("display_name"),
+                    modseq: row.get("modseq"),
+                })
+                .collect::<Vec<_>>();
+            let group_ids = groups.iter().map(|group| group.id).collect::<Vec<_>>();
+            if group_ids.is_empty() {
+                return Ok(EwsImList {
+                    groups,
+                    members: Vec::new(),
+                });
+            }
+            let member_rows = sqlx::query(
+                r#"
+                SELECT
+                    id, contact_group_id, member_kind, contact_id, account_id,
+                    external_address, display_name
+                FROM contact_group_members
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND contact_group_id = ANY($3)
+                ORDER BY contact_group_id ASC, sort_order ASC, lower(display_name) ASC, id ASC
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(&group_ids)
+            .fetch_all(self.pool())
+            .await?;
+            let members = member_rows
+                .into_iter()
+                .map(|row| EwsImGroupMember {
+                    id: row.get("id"),
+                    group_id: row.get("contact_group_id"),
+                    member_kind: row.get("member_kind"),
+                    contact_id: row.get("contact_id"),
+                    account_id: row.get("account_id"),
+                    external_address: row.get("external_address"),
+                    display_name: row.get("display_name"),
+                })
+                .collect();
+            Ok(EwsImList { groups, members })
+        })
+    }
+
+    fn upsert_ews_im_group<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Option<Uuid>,
+        display_name: &'a str,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsImGroup> {
+        Box::pin(async move {
+            let mut tx = self.pool().begin().await?;
+            let contact_book_id = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                INSERT INTO contact_books (id, tenant_id, owner_account_id, display_name, role)
+                VALUES ($1, $2, $3, 'IM Contact List', 'im_contact_list')
+                ON CONFLICT (tenant_id, owner_account_id, role)
+                    WHERE role <> 'custom'
+                    DO UPDATE SET display_name = contact_books.display_name
+                RETURNING id
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let id = group_id.unwrap_or_else(Uuid::new_v4);
+            let row = sqlx::query(
+                r#"
+                INSERT INTO contact_groups (
+                    id, tenant_id, owner_account_id, contact_book_id, display_name,
+                    group_kind, source_payload_json
+                )
+                VALUES ($1, $2, $3, $4, $5, 'im_group', '{"source":"ews"}'::jsonb)
+                ON CONFLICT (tenant_id, owner_account_id, id) DO UPDATE
+                SET display_name = EXCLUDED.display_name,
+                    modseq = contact_groups.modseq + 1,
+                    updated_at = NOW()
+                WHERE contact_groups.group_kind = 'im_group'
+                RETURNING id, display_name, modseq
+                "#,
+            )
+            .bind(id)
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(contact_book_id)
+            .bind(display_name.trim())
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("IM group not found"))?;
+            tx.commit().await?;
+            Ok(EwsImGroup {
+                id: row.get("id"),
+                display_name: row.get("display_name"),
+                modseq: row.get("modseq"),
+            })
+        })
+    }
+
+    fn remove_ews_im_group<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Uuid,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        Box::pin(async move {
+            let mut tx = self.pool().begin().await?;
+            let deleted = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                DELETE FROM contact_groups
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND id = $3
+                  AND group_kind = 'im_group'
+                RETURNING id
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(group_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some();
+            tx.commit().await?;
+            Ok(deleted)
+        })
+    }
+
+    fn add_ews_im_group_member<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Uuid,
+        member: EwsImMemberInput,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, EwsImGroupMember> {
+        Box::pin(async move {
+            let mut tx = self.pool().begin().await?;
+            let exists = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM contact_groups
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND id = $3
+                  AND group_kind = 'im_group'
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(group_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .is_some();
+            if !exists {
+                anyhow::bail!("IM group not found");
+            }
+            validate_ews_im_member_in_tx(&mut tx, principal, &member).await?;
+            let row = insert_ews_im_member_in_tx(&mut tx, principal, group_id, &member).await?;
+            tx.commit().await?;
+            Ok(EwsImGroupMember {
+                id: row.get("id"),
+                group_id: row.get("contact_group_id"),
+                member_kind: row.get("member_kind"),
+                contact_id: row.get("contact_id"),
+                account_id: row.get("account_id"),
+                external_address: row.get("external_address"),
+                display_name: row.get("display_name"),
+            })
+        })
+    }
+
+    fn remove_ews_im_group_member<'a>(
+        &'a self,
+        principal: &'a AccountPrincipal,
+        group_id: Option<Uuid>,
+        member_kind: &'a str,
+        member_value: &'a str,
+        _audit: AuditEntryInput,
+    ) -> StoreFuture<'a, bool> {
+        Box::pin(async move {
+            let mut tx = self.pool().begin().await?;
+            let mut query = String::from(
+                "DELETE FROM contact_group_members WHERE tenant_id = $1 AND owner_account_id = $2 AND member_kind = $3",
+            );
+            if group_id.is_some() {
+                query.push_str(" AND contact_group_id = $4");
+            }
+            match member_kind {
+                "contact" => query.push_str(if group_id.is_some() {
+                    " AND contact_id = $5"
+                } else {
+                    " AND contact_id = $4"
+                }),
+                "account" => query.push_str(if group_id.is_some() {
+                    " AND account_id = $5"
+                } else {
+                    " AND account_id = $4"
+                }),
+                _ => query.push_str(if group_id.is_some() {
+                    " AND lower(external_address) = lower($5)"
+                } else {
+                    " AND lower(external_address) = lower($4)"
+                }),
+            }
+            query.push_str(" RETURNING id");
+            let mut q = sqlx::query_scalar::<_, Uuid>(&query)
+                .bind(principal.tenant_id)
+                .bind(principal.account_id)
+                .bind(member_kind);
+            if let Some(group_id) = group_id {
+                q = q.bind(group_id);
+            }
+            q = match member_kind {
+                "contact" | "account" => q.bind(Uuid::parse_str(member_value)?),
+                _ => q.bind(member_value.trim().to_ascii_lowercase()),
+            };
+            let deleted = q.fetch_all(&mut *tx).await?;
+            tx.commit().await?;
+            Ok(!deleted.is_empty())
+        })
+    }
+
     fn fetch_accessible_contact_collections<'a>(
         &'a self,
         principal_account_id: Uuid,
@@ -5479,6 +6034,15 @@ impl ExchangeStore for Storage {
     }
 }
 
+fn split_ews_recipient_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
 fn mapi_special_object_kind_for_checkpoint_mailbox(
     checkpoint_kind: MapiCheckpointKind,
     mailbox_id: Option<Uuid>,
@@ -6372,6 +6936,215 @@ async fn ews_update_mail_app_install_status(
         app_id: app_id.trim().to_string(),
         status: row.try_get("status")?,
     })
+}
+
+async fn validate_ews_im_member_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    principal: &AccountPrincipal,
+    member: &EwsImMemberInput,
+) -> Result<()> {
+    match member.member_kind.as_str() {
+        "contact" => {
+            let contact_id = member
+                .contact_id
+                .ok_or_else(|| anyhow::anyhow!("contact member id is required"))?;
+            let exists = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT c.id
+                FROM contacts c
+                JOIN contact_books b
+                  ON b.tenant_id = c.tenant_id
+                 AND b.owner_account_id = c.owner_account_id
+                 AND b.id = c.contact_book_id
+                LEFT JOIN contact_book_grants g
+                  ON g.tenant_id = b.tenant_id
+                 AND g.contact_book_id = b.id
+                 AND g.grantee_account_id = $2
+                WHERE c.tenant_id = $1
+                  AND c.id = $3
+                  AND (c.owner_account_id = $2 OR g.may_read = TRUE)
+                LIMIT 1
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(contact_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .is_some();
+            if !exists {
+                anyhow::bail!("contact member not found");
+            }
+        }
+        "account" => {
+            let account_id = member
+                .account_id
+                .ok_or_else(|| anyhow::anyhow!("account member id is required"))?;
+            let exists = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM accounts
+                WHERE tenant_id = $1
+                  AND id = $2
+                  AND status = 'active'
+                  AND gal_visibility = 'tenant'
+                LIMIT 1
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(account_id)
+            .fetch_optional(&mut **tx)
+            .await?
+            .is_some();
+            if !exists {
+                anyhow::bail!("account member not found");
+            }
+        }
+        "distribution_group" | "tel_uri" => {
+            if member
+                .external_address
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            {
+                anyhow::bail!("external member address is required");
+            }
+        }
+        _ => anyhow::bail!("unsupported IM member kind"),
+    }
+    Ok(())
+}
+
+async fn insert_ews_im_member_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    principal: &AccountPrincipal,
+    group_id: Uuid,
+    member: &EwsImMemberInput,
+) -> Result<sqlx::postgres::PgRow> {
+    let display_name = member.display_name.trim();
+    match member.member_kind.as_str() {
+        "contact" => sqlx::query(
+            r#"
+            INSERT INTO contact_group_members (
+                id, tenant_id, owner_account_id, contact_group_id, member_kind,
+                contact_id, display_name
+            )
+            VALUES ($1, $2, $3, $4, 'contact', $5, $6)
+            ON CONFLICT (tenant_id, owner_account_id, contact_group_id, contact_id)
+                WHERE member_kind = 'contact'
+                DO UPDATE SET display_name = EXCLUDED.display_name
+            RETURNING
+                id, contact_group_id, member_kind, contact_id, account_id,
+                external_address, display_name
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(principal.tenant_id)
+        .bind(principal.account_id)
+        .bind(group_id)
+        .bind(member.contact_id)
+        .bind(display_name)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into),
+        "account" => sqlx::query(
+            r#"
+            INSERT INTO contact_group_members (
+                id, tenant_id, owner_account_id, contact_group_id, member_kind,
+                account_id, display_name
+            )
+            VALUES ($1, $2, $3, $4, 'account', $5, $6)
+            ON CONFLICT (tenant_id, owner_account_id, contact_group_id, account_id)
+                WHERE member_kind = 'account'
+                DO UPDATE SET display_name = EXCLUDED.display_name
+            RETURNING
+                id, contact_group_id, member_kind, contact_id, account_id,
+                external_address, display_name
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(principal.tenant_id)
+        .bind(principal.account_id)
+        .bind(group_id)
+        .bind(member.account_id)
+        .bind(display_name)
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(Into::into),
+        "distribution_group" | "tel_uri" => {
+            let external_address = member
+                .external_address
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase();
+            if let Some(existing_id) = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                SELECT id
+                FROM contact_group_members
+                WHERE tenant_id = $1
+                  AND owner_account_id = $2
+                  AND contact_group_id = $3
+                  AND member_kind = $4
+                  AND lower(external_address) = $5
+                LIMIT 1
+                "#,
+            )
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(group_id)
+            .bind(&member.member_kind)
+            .bind(&external_address)
+            .fetch_optional(&mut **tx)
+            .await?
+            {
+                return sqlx::query(
+                    r#"
+                    UPDATE contact_group_members
+                    SET display_name = $1
+                    WHERE id = $2
+                      AND tenant_id = $3
+                      AND owner_account_id = $4
+                    RETURNING
+                        id, contact_group_id, member_kind, contact_id, account_id,
+                        external_address, display_name
+                    "#,
+                )
+                .bind(display_name)
+                .bind(existing_id)
+                .bind(principal.tenant_id)
+                .bind(principal.account_id)
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(Into::into);
+            }
+
+            sqlx::query(
+                r#"
+                INSERT INTO contact_group_members (
+                    id, tenant_id, owner_account_id, contact_group_id, member_kind,
+                    external_address, display_name
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING
+                    id, contact_group_id, member_kind, contact_id, account_id,
+                    external_address, display_name
+                "#,
+            )
+            .bind(Uuid::new_v4())
+            .bind(principal.tenant_id)
+            .bind(principal.account_id)
+            .bind(group_id)
+            .bind(&member.member_kind)
+            .bind(&external_address)
+            .bind(display_name)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(Into::into)
+        }
+        _ => anyhow::bail!("unsupported IM member kind"),
+    }
 }
 
 fn ews_unified_messaging_call_select_sql() -> &'static str {
