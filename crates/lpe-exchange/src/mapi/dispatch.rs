@@ -12,7 +12,8 @@ use super::wire::{MapiPropertyType, MapiSyncType, RopId};
 use super::*;
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
-    MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiNavigationShortcutInput,
+    MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
+    UpsertMapiNavigationShortcutInput,
 };
 use lpe_storage::{
     AuditEntryInput, CancelSubmissionResult, JmapMailbox, JmapMailboxCreateInput,
@@ -20,6 +21,7 @@ use lpe_storage::{
     PublicFolderPermissionInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -1851,6 +1853,7 @@ fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
         Some(MapiObject::JournalEntry { .. }) => "journal_entry",
         Some(MapiObject::ConversationAction { .. }) => "conversation_action",
         Some(MapiObject::NavigationShortcut { .. }) => "navigation_shortcut",
+        Some(MapiObject::AssociatedConfig { .. }) => "associated_config",
         Some(MapiObject::DelegateFreeBusyMessage { .. }) => "delegate_freebusy_message",
         Some(MapiObject::RecoverableItem { .. }) => "recoverable_item",
         Some(MapiObject::PublicFolderItem { .. }) => "public_folder_item",
@@ -2655,6 +2658,27 @@ where
                         ordinal: shortcut.ordinal,
                         group_header_id: shortcut.group_header_id,
                         group_name: shortcut.group_name,
+                    })
+                    .await?;
+            }
+            MapiObject::AssociatedConfig {
+                folder_id,
+                config_id,
+            } => {
+                let Some(existing) = snapshot.associated_config_message_for_id(*config_id) else {
+                    return Err(anyhow!("MAPI associated config message was not found"));
+                };
+                let mut properties = mapi_properties_from_json(&existing.properties_json);
+                apply_mapi_property_values_to_map(&mut properties, canonical_values);
+                let (message_class, subject) = associated_config_class_and_subject(&properties);
+                store
+                    .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+                        id: Some(existing.canonical_id),
+                        account_id: principal.account_id,
+                        folder_id: *folder_id,
+                        message_class,
+                        subject,
+                        properties_json: mapi_properties_to_json(&properties),
                     })
                     .await?;
             }
@@ -5293,6 +5317,24 @@ where
                             0x8004_010F,
                         ));
                     }
+                } else if let Some(message) = snapshot
+                    .associated_config_message_for_id(message_id)
+                    .filter(|message| message.folder_id == folder_id)
+                {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::AssociatedConfig {
+                            folder_id,
+                            config_id: message_id,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        &message.subject,
+                        0,
+                    ));
+                    output_handles.push(handle);
                 } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     if let Some(message) = snapshot.conversation_action_message_for_id(message_id) {
                         let handle = session.allocate_output_handle(
@@ -5713,6 +5755,7 @@ where
                         | MapiObject::JournalEntry { .. }
                         | MapiObject::ConversationAction { .. }
                         | MapiObject::NavigationShortcut { .. }
+                        | MapiObject::AssociatedConfig { .. }
                         | MapiObject::DelegateFreeBusyMessage { .. }
                         | MapiObject::PublicFolderItem { .. }
                         | MapiObject::Attachment { .. }),
@@ -6449,6 +6492,10 @@ where
                         shortcut_id: contact_id,
                         ..
                     })
+                    | Some(MapiObject::AssociatedConfig {
+                        config_id: contact_id,
+                        ..
+                    })
                     | Some(MapiObject::DelegateFreeBusyMessage {
                         message_id: contact_id,
                         ..
@@ -6462,23 +6509,54 @@ where
                         folder_id,
                         properties,
                     }) => {
-                        let message_id = transient_associated_message_id(folder_id, &properties);
-                        set_handle_slot(
-                            &mut handle_slots,
-                            Some(request.response_handle_index()),
-                            handle,
-                        );
-                        record_sync_upload_content_change(
-                            session,
+                        match persist_associated_config_message(
+                            store,
+                            principal,
                             folder_id,
-                            message_id,
-                            mapi_mailstore::change_number_for_store_id(message_id),
-                            true,
-                            false,
-                        );
-                        responses.extend_from_slice(&rop_save_changes_message_response(
-                            &request, message_id,
-                        ));
+                            &properties,
+                        )
+                        .await
+                        {
+                            Ok((saved, message_id)) => {
+                                set_handle_slot(
+                                    &mut handle_slots,
+                                    Some(request.response_handle_index()),
+                                    handle,
+                                );
+                                record_sync_upload_content_change(
+                                    session,
+                                    folder_id,
+                                    message_id,
+                                    mapi_mailstore::change_number_for_store_id(message_id),
+                                    true,
+                                    false,
+                                );
+                                session.record_notification(MapiNotificationEvent::content(
+                                    folder_id,
+                                    Some(message_id),
+                                ));
+                                responses.extend_from_slice(&rop_save_changes_message_response(
+                                    &request, message_id,
+                                ));
+                                tracing::info!(
+                                    rca_debug = true,
+                                    adapter = "mapi",
+                                    endpoint = "emsmdb",
+                                    mailbox = %principal.email,
+                                    request_type = "Execute",
+                                    request_rop_id = "0x0c",
+                                    folder_id = %format!("{folder_id:#018x}"),
+                                    associated_config_id = %saved.id,
+                                    mapi_message_id = %format!("{message_id:#018x}"),
+                                    "rca debug persisted associated config message"
+                                );
+                            }
+                            Err(_) => responses.extend_from_slice(&rop_error_response(
+                                0x0C,
+                                request.response_handle_index(),
+                                0x8004_010F,
+                            )),
+                        }
                         continue;
                     }
                     Some(MapiObject::PublicFolderItem {
@@ -7763,6 +7841,24 @@ where
                             .is_err()
                         {
                             partial_completion = true;
+                        }
+                        continue;
+                    }
+                    if let Some(message) = snapshot
+                        .associated_config_message_for_id(message_id)
+                        .filter(|message| message.folder_id == folder_id)
+                    {
+                        if store
+                            .delete_mapi_associated_config(
+                                principal.account_id,
+                                message.canonical_id,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            partial_completion = true;
+                        } else {
+                            record_sync_upload_content_checkpoint(session, folder_id);
                         }
                         continue;
                     }
@@ -9653,7 +9749,7 @@ where
                             ),
                             changed_special_sync_objects(
                                 all_special_sync_objects.clone(),
-                                changed_special_ids,
+                                &changed_special_ids,
                             ),
                         )
                     } else {
@@ -13209,11 +13305,11 @@ where
         .collect())
 }
 
-fn changed_special_ids_for_folder<'a>(
+fn changed_special_ids_for_folder(
     folder_id: u64,
     snapshot: &MapiMailStoreSnapshot,
-    changes: &'a MapiSyncChangeSet,
-) -> &'a [Uuid] {
+    changes: &MapiSyncChangeSet,
+) -> Vec<Uuid> {
     if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Contacts)
@@ -13225,27 +13321,32 @@ fn changed_special_ids_for_folder<'a>(
                 | IM_CONTACT_LIST_FOLDER_ID
         )
     {
-        return &changes.changed_contact_ids;
+        return changes.changed_contact_ids.clone();
     }
     if folder_id == CALENDAR_FOLDER_ID
         || snapshot
             .collaboration_folder_for_id(folder_id)
             .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
     {
-        return &changes.changed_calendar_event_ids;
+        return changes.changed_calendar_event_ids.clone();
     }
     if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Task)
         || matches!(folder_id, TODO_SEARCH_FOLDER_ID | REMINDERS_FOLDER_ID)
     {
-        return &changes.changed_task_ids;
+        return changes.changed_task_ids.clone();
     }
     match folder_id {
-        NOTES_FOLDER_ID => &changes.changed_note_ids,
-        JOURNAL_FOLDER_ID => &changes.changed_journal_entry_ids,
-        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => &changes.changed_conversation_action_ids,
-        _ => &[],
+        NOTES_FOLDER_ID => changes.changed_note_ids.clone(),
+        JOURNAL_FOLDER_ID => changes.changed_journal_entry_ids.clone(),
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => changes.changed_conversation_action_ids.clone(),
+        _ => changes
+            .changed_associated_config_ids
+            .iter()
+            .filter(|change| change.folder_id == folder_id)
+            .map(|change| change.config_id)
+            .collect(),
     }
 }
 
@@ -13271,7 +13372,7 @@ where
         ) {
         Some((
             MapiIdentityObjectKind::Contact,
-            changes.deleted_contact_ids.as_slice(),
+            changes.deleted_contact_ids.clone(),
         ))
     } else if folder_id == CALENDAR_FOLDER_ID
         || snapshot
@@ -13280,7 +13381,7 @@ where
     {
         Some((
             MapiIdentityObjectKind::CalendarEvent,
-            changes.deleted_calendar_event_ids.as_slice(),
+            changes.deleted_calendar_event_ids.clone(),
         ))
     } else if snapshot
         .collaboration_folder_for_id(folder_id)
@@ -13289,15 +13390,28 @@ where
     {
         Some((
             MapiIdentityObjectKind::Task,
-            changes.deleted_task_ids.as_slice(),
+            changes.deleted_task_ids.clone(),
         ))
     } else {
-        None
+        let associated_config_ids = changes
+            .deleted_associated_config_ids
+            .iter()
+            .filter(|change| change.folder_id == folder_id)
+            .map(|change| change.config_id)
+            .collect::<Vec<_>>();
+        if associated_config_ids.is_empty() {
+            None
+        } else {
+            Some((
+                MapiIdentityObjectKind::AssociatedConfig,
+                associated_config_ids,
+            ))
+        }
     };
     let Some((object_kind, object_ids)) = kind_and_ids else {
         return Vec::new();
     };
-    mapi_object_ids_for_deleted_changes(store, principal, object_kind, object_ids)
+    mapi_object_ids_for_deleted_changes(store, principal, object_kind, &object_ids)
         .await
         .unwrap_or_default()
 }
@@ -13435,6 +13549,79 @@ fn pending_message_is_trash_sync_artifact(
             .is_some_and(|counter| {
                 import_source_key_identity_scope(counter) == "out_of_lpe_persisted_range"
             })
+}
+
+async fn persist_associated_config_message<S>(
+    store: &S,
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    properties: &HashMap<u32, MapiValue>,
+) -> Result<(crate::store::MapiAssociatedConfigRecord, u64)>
+where
+    S: ExchangeStore,
+{
+    let source_key = imported_message_source_key(properties);
+    let reserved_global_counter = source_key
+        .as_deref()
+        .and_then(persistable_import_source_key_global_counter);
+    let id = associated_config_uuid(properties);
+    let (message_class, subject) = associated_config_class_and_subject(properties);
+    let saved = store
+        .upsert_mapi_associated_config(UpsertMapiAssociatedConfigInput {
+            id: Some(id),
+            account_id: principal.account_id,
+            folder_id,
+            message_class,
+            subject,
+            properties_json: mapi_properties_to_json(properties),
+        })
+        .await?;
+    let message_id = remember_created_mapi_identity(
+        store,
+        principal,
+        MapiIdentityObjectKind::AssociatedConfig,
+        saved.id,
+        reserved_global_counter,
+        source_key.filter(|_| reserved_global_counter.is_some()),
+    )
+    .await?;
+    Ok((saved, message_id))
+}
+
+fn associated_config_uuid(properties: &HashMap<u32, MapiValue>) -> Uuid {
+    let mut hasher = Sha256::new();
+    if let Some(source_key) = imported_message_source_key(properties) {
+        hasher.update(source_key);
+    } else {
+        let mut tags = properties.keys().copied().collect::<Vec<_>>();
+        tags.sort_unstable();
+        for tag in tags {
+            hasher.update(tag.to_le_bytes());
+            if let Some(value) = properties.get(&tag) {
+                hasher.update(format!("{value:?}").as_bytes());
+            }
+        }
+    }
+    let digest = hasher.finalize();
+    Uuid::from_bytes(digest[..16].try_into().expect("sha256 digest prefix"))
+}
+
+fn associated_config_class_and_subject(properties: &HashMap<u32, MapiValue>) -> (String, String) {
+    let message_class = properties
+        .get(&PID_TAG_MESSAGE_CLASS_W)
+        .or_else(|| properties.get(&0x001A_001E))
+        .cloned()
+        .and_then(MapiValue::into_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "IPM.Configuration".to_string());
+    let subject = properties
+        .get(&PID_TAG_SUBJECT_W)
+        .or_else(|| properties.get(&PID_TAG_NORMALIZED_SUBJECT_W))
+        .cloned()
+        .and_then(MapiValue::into_text)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| message_class.clone());
+    (message_class, subject)
 }
 
 fn transient_associated_message_id(folder_id: u64, properties: &HashMap<u32, MapiValue>) -> u64 {

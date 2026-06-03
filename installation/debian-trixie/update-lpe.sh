@@ -170,6 +170,25 @@ ALTER TABLE public.mapi_custom_property_values
     ADD CONSTRAINT mapi_custom_property_values_object_kind_check
     CHECK (object_kind IN ('message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'attachment', 'public_folder_item'));
 
+DO $$
+DECLARE
+    constraint_name TEXT;
+BEGIN
+    FOR constraint_name IN
+        SELECT conname
+        FROM pg_constraint
+        WHERE conrelid = 'public.mapi_object_identities'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%object_kind%'
+    LOOP
+        EXECUTE format('ALTER TABLE public.mapi_object_identities DROP CONSTRAINT %I', constraint_name);
+    END LOOP;
+END $$;
+
+ALTER TABLE public.mapi_object_identities
+    ADD CONSTRAINT mapi_object_identities_object_kind_check
+    CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'));
+
 ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN target_folder_id DROP NOT NULL,
   ADD COLUMN IF NOT EXISTS group_header_id UUID,
@@ -182,6 +201,23 @@ WHERE group_name IS NULL;
 ALTER TABLE public.mapi_navigation_shortcuts
   ALTER COLUMN group_name SET DEFAULT '',
   ALTER COLUMN group_name SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages (
+    tenant_id UUID NOT NULL,
+    id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    folder_id BIGINT NOT NULL CHECK (folder_id > 0),
+    message_class TEXT NOT NULL CHECK (btrim(message_class) <> ''),
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+    properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx
+    ON public.mapi_associated_config_messages (tenant_id, account_id, folder_id, subject, id);
 
 ALTER TABLE public.accounts
   ADD COLUMN IF NOT EXISTS recoverable_items_retention_days INTEGER NOT NULL DEFAULT 14,
@@ -1100,7 +1136,10 @@ BEGIN
           AND contype = 'c'
           AND pg_get_constraintdef(oid) LIKE '%object_kind%'
           AND pg_get_constraintdef(oid) LIKE '%conversation_action%'
-          AND pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
+          AND (
+              pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
+              OR pg_get_constraintdef(oid) NOT LIKE '%associated_config%'
+          )
     LOOP
         EXECUTE format('ALTER TABLE public.mail_change_log DROP CONSTRAINT %I', existing_constraint);
     END LOOP;
@@ -1134,6 +1173,7 @@ BEGIN
                 'search_folder_definition',
                 'sieve_script',
                 'conversation_action',
+                'associated_config',
                 'recoverable_item',
                 'public_folder_tree',
                 'public_folder',
@@ -1398,6 +1438,11 @@ mapi_shortcut_group_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -t
 mapi_shortcut_target_nullable="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT is_nullable FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mapi_navigation_shortcuts' AND column_name = 'target_folder_id';")"
 if [[ "${mapi_shortcut_group_column_count}" != "2" || "${mapi_shortcut_target_nullable}" != "YES" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected mapi_navigation_shortcuts shape." >&2
+  exit 1
+fi
+mapi_associated_config_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');")"
+if [[ "${mapi_associated_config_table}" != "mapi_associated_config_messages" ]]; then
+  echo "LPE 0.4 schema compatibility update did not produce public.mapi_associated_config_messages." >&2
   exit 1
 fi
 recoverable_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');")"

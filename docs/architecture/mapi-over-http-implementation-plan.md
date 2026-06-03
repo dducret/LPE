@@ -253,6 +253,13 @@ non-canonical LPE state.
   presentation parity, shared-folder shortcut semantics, public-folder shortcut
   flags, and read-only group-type extensions remain deferred until real Outlook
   traces require them.
+- Outlook-created folder-associated configuration FAI messages outside Common
+  Views persist in `mapi_associated_config_messages`. This table is bounded
+  MAPI compatibility state for view/form/client configuration sync: it stores
+  the folder id, subject, message class, and typed MAPI property bag needed for
+  later associated-contents table and FAI content-sync replay. These rows are
+  not canonical mailbox messages and must not be exposed through normal message
+  lists, JMAP mail, IMAP, search, AI pipelines, or mailbox export as user mail.
 - Reminder projection is a computed search-folder surface over canonical
   calendar/task/message data, not a protocol-local reminder store. LPE-owned
   search-folder definitions are not exported as `IPM.Microsoft.WunderBar.SFInfo`
@@ -504,7 +511,7 @@ not by itself authorize broad client publication.
 | Rules | `sieve_scripts` | `/api/mail/rules` read projection; Sieve API mutates | private read-only `Rule/*` | `RopGetRulesTable` projection plus bounded generated-Sieve `RopModifyRules` mutations | Persistence/retrieval/profile visibility tests cover canonical wiring; Exchange rule blobs, client-only rules, provider-specific predicates, delegate templates, and deferred actions remain unsupported. |
 | Settings | `server_settings`, mailbox state, `mapi_profile_settings`, computed store/folder defaults | `/api/mail/outlook-profile` read summary and server setting APIs | private read-only `OutlookProfile/*` | Store/logon properties, default-folder properties, IPM subtree OST identity reload | Tests cover profile-state summary and OST identity reuse; full Exchange profile blobs and client registry state are unsupported. |
 | Identities | `account_identities`, authenticated account state, sender rights | workspace/session APIs and delegation APIs | `Identity/*` | mailbox owner/user GUID/store identity properties | Covered by identity/delegation tests. |
-| Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_sync_checkpoints`, `mapi_object_identities` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut FAI rows, ICS checkpoints, object IDs/source keys/change keys | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
+| Storage/profile state | `mapi_named_properties`, `mapi_custom_property_values`, `mapi_navigation_shortcuts`, `mapi_associated_config_messages`, `mapi_sync_checkpoints`, `mapi_object_identities` | `/api/mail/outlook-profile` read summary | private read-only `OutlookProfile/*` plus object-specific projections | named property mapping, shortcut and associated configuration FAI rows, ICS checkpoints, object IDs/source keys/change keys | Covered by schema/runtime/MAPI profile tests; client-local PST/OST files are intentionally out of scope. |
 
 ## Outlook Profile Settings Matrix
 
@@ -517,6 +524,7 @@ not by itself authorize broad client publication.
 | Named property IDs | `mapi_named_properties` | Durable per-account Outlook named-property ID mapping; session registry is only a cache. |
 | Opaque item custom properties | `mapi_custom_property_values` | Stored only for canonical item/attachment objects where the value is not a canonical built-in property. |
 | Navigation shortcuts | `mapi_navigation_shortcuts` | Common Views shortcut and group-header FAI rows are durable canonical profile-visible state for cached-mode profile creation and reopen. |
+| Associated configuration FAI | `mapi_associated_config_messages` | Outlook-created folder associated/config messages are durable MAPI-only compatibility state for view/form/client configuration sync replay. Direct associated-message deletes are supported and folder-scoped incremental content sync exports associated-config delete idsets. |
 | Sync checkpoints | `mapi_sync_checkpoints` | Durable EMSMDB/ICS cursors for hierarchy/content/read-state reuse; they do not store mailbox content. |
 | IPM subtree OST identity | `mapi_profile_settings.ipm_subtree_ost_id` | Outlook-written cached-mode profile identity is persisted account-wide and reloaded on IPM subtree open after reconnect. |
 | Default-folder EntryID writes | computed canonical folder projections | Valid writes are accepted for compatibility and stripped from session storage; invalid values are rejected. |
@@ -549,6 +557,11 @@ not by itself authorize broad client publication.
   because those identifiers cannot map to canonical LPE state. Deleted Items
   uploads that include user-visible message data are canonical message imports,
   not metadata-only reports.
+- Sync-upload saves with `import_associated=true` create or update bounded
+  MAPI associated configuration rows when they target a regular folder. LPE
+  persists and replays those rows through associated contents and FAI content
+  sync, including `MetaTagCnsetSeenFAI`, but keeps them out of canonical mail
+  storage and all non-MAPI user-visible surfaces.
 - Hierarchy sync emits changed descendant folders of the configured
   synchronization root; it does not emit the synchronization root itself.
   Hierarchy final state scopes `MetaTagIdsetGiven` and `MetaTagCnsetSeen` to

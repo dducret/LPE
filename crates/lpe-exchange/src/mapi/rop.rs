@@ -865,6 +865,7 @@ pub(in crate::mapi) fn rop_get_properties_list_response(
             default_conversation_action_property_tags()
         }
         Some(MapiObject::Message { .. })
+        | Some(MapiObject::AssociatedConfig { .. })
         | Some(MapiObject::PublicFolderItem { .. })
         | Some(MapiObject::PendingAssociatedMessage { .. })
         | Some(MapiObject::PendingMessage { .. }) => default_message_property_tags(),
@@ -1094,6 +1095,16 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
                 );
             };
             serialize_navigation_shortcut_row(&message, Some(principal), &columns)
+        }
+        Some(MapiObject::AssociatedConfig { config_id, .. }) => {
+            let Some(message) = snapshot.associated_config_message_for_id(*config_id) else {
+                return rop_error_response(
+                    0x07,
+                    request.input_handle_index().unwrap_or(0),
+                    0x8004_010F,
+                );
+            };
+            serialize_associated_config_row(&message, &columns)
         }
         Some(MapiObject::ConversationAction {
             conversation_action_id,
@@ -1968,6 +1979,14 @@ fn mapi_object_debug_fields(object: Option<&MapiObject>) -> (&'static str, Strin
             format!("{folder_id:#018x}"),
             format!("{shortcut_id:#018x}"),
         ),
+        Some(MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+        }) => (
+            "associated_config",
+            format!("{folder_id:#018x}"),
+            format!("{config_id:#018x}"),
+        ),
         Some(MapiObject::DelegateFreeBusyMessage {
             folder_id,
             message_id,
@@ -2487,6 +2506,14 @@ pub(in crate::mapi) fn serialize_object_property(
         Some(MapiObject::NavigationShortcut { shortcut_id, .. }) => snapshot
             .navigation_shortcut_message_for_id(*shortcut_id)
             .map(|message| serialize_navigation_shortcut_row(&message, Some(principal), &[tag]))
+            .unwrap_or_else(|| {
+                let mut value = Vec::new();
+                write_property_default(&mut value, tag);
+                value
+            }),
+        Some(MapiObject::AssociatedConfig { config_id, .. }) => snapshot
+            .associated_config_message_for_id(*config_id)
+            .map(|message| serialize_associated_config_row(&message, &[tag]))
             .unwrap_or_else(|| {
                 let mut value = Vec::new();
                 write_property_default(&mut value, tag);

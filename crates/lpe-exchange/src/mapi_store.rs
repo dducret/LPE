@@ -14,6 +14,7 @@ use crate::mapi::permissions::{
     MapiFolderPermission,
 };
 use crate::store::ExchangeStore;
+use crate::store::MapiAssociatedConfigRecord;
 use crate::store::{MapiIdentityObjectKind, MapiIdentityRequest, MapiNavigationShortcutRecord};
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     search_folder_definitions: Vec<SearchFolderDefinition>,
     rules: Vec<MapiRule>,
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
+    associated_configs: Vec<MapiAssociatedConfigMessage>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
     recoverable_items: Vec<MapiRecoverableItemMessage>,
@@ -166,6 +168,17 @@ pub(crate) struct MapiNavigationShortcutMessage {
     pub(crate) ordinal: u32,
     pub(crate) group_header_id: Option<Uuid>,
     pub(crate) group_name: String,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub(crate) struct MapiAssociatedConfigMessage {
+    pub(crate) id: u64,
+    pub(crate) folder_id: u64,
+    pub(crate) canonical_id: Uuid,
+    pub(crate) message_class: String,
+    pub(crate) subject: String,
+    pub(crate) properties_json: serde_json::Value,
 }
 
 pub(crate) enum MapiCommonViewsMessage {
@@ -403,6 +416,7 @@ impl MapiMailStoreSnapshot {
             search_folder_definitions: Vec::new(),
             rules: Vec::new(),
             navigation_shortcuts: Vec::new(),
+            associated_configs: Vec::new(),
             conversation_actions: Vec::new(),
             delegate_freebusy_messages: Vec::new(),
             recoverable_items: Vec::new(),
@@ -516,6 +530,24 @@ impl MapiMailStoreSnapshot {
                 ordinal: shortcut.ordinal,
                 group_header_id: shortcut.group_header_id,
                 group_name: shortcut.group_name,
+            })
+            .collect();
+        self
+    }
+
+    pub(crate) fn with_associated_configs(
+        mut self,
+        configs: Vec<MapiAssociatedConfigRecord>,
+    ) -> Self {
+        self.associated_configs = configs
+            .into_iter()
+            .map(|config| MapiAssociatedConfigMessage {
+                id: mapi_item_id(&config.id),
+                folder_id: config.folder_id,
+                canonical_id: config.id,
+                message_class: config.message_class,
+                subject: config.subject,
+                properties_json: config.properties_json,
             })
             .collect();
         self
@@ -1068,6 +1100,27 @@ impl MapiMailStoreSnapshot {
             .find(|message| message.id == item_id)
     }
 
+    pub(crate) fn associated_config_messages_for_folder(
+        &self,
+        folder_id: u64,
+    ) -> Vec<MapiAssociatedConfigMessage> {
+        self.associated_configs
+            .iter()
+            .filter(|message| message.folder_id == folder_id)
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn associated_config_message_for_id(
+        &self,
+        item_id: u64,
+    ) -> Option<MapiAssociatedConfigMessage> {
+        self.associated_configs
+            .iter()
+            .find(|message| message.id == item_id)
+            .cloned()
+    }
+
     pub(crate) fn conversation_action_messages(&self) -> &[MapiConversationActionMessage] {
         &self.conversation_actions
     }
@@ -1282,6 +1335,7 @@ impl<T: ExchangeStore> MapiStore for T {
             let search_folder_definitions = self.fetch_search_folders(account_id).await?;
             let rules = self.list_mailbox_rules(account_id).await?;
             let navigation_shortcuts = self.fetch_mapi_navigation_shortcuts(account_id).await?;
+            let associated_configs = self.fetch_mapi_associated_configs(account_id).await?;
             let conversation_actions = self.fetch_conversation_actions(account_id).await?;
             let delegate_freebusy_messages =
                 self.fetch_delegate_freebusy_messages(account_id).await?;
@@ -1347,6 +1401,7 @@ impl<T: ExchangeStore> MapiStore for T {
                 &search_folder_definitions,
                 &rules,
                 &navigation_shortcuts,
+                &associated_configs,
                 &conversation_actions,
                 &delegate_freebusy_messages,
                 &public_folders,
@@ -1385,6 +1440,7 @@ impl<T: ExchangeStore> MapiStore for T {
             .map(|snapshot| snapshot.with_search_folder_definitions(search_folder_definitions))
             .map(|snapshot| snapshot.with_rules(rules))
             .map(|snapshot| snapshot.with_navigation_shortcuts(navigation_shortcuts))
+            .map(|snapshot| snapshot.with_associated_configs(associated_configs))
             .map(|snapshot| snapshot.with_conversation_actions(conversation_actions))
             .map(|snapshot| snapshot.with_delegate_freebusy_messages(delegate_freebusy_messages))
             .map(|snapshot| snapshot.with_recoverable_items(recoverable_items))
@@ -1429,6 +1485,7 @@ fn mapi_identity_requests(
     search_folder_definitions: &[SearchFolderDefinition],
     rules: &[MailboxRule],
     navigation_shortcuts: &[MapiNavigationShortcutRecord],
+    associated_configs: &[MapiAssociatedConfigRecord],
     conversation_actions: &[ConversationAction],
     delegate_freebusy_messages: &[DelegateFreeBusyMessageObject],
     public_folders: &[PublicFolder],
@@ -1521,6 +1578,12 @@ fn mapi_identity_requests(
                 source_key: None,
             }),
     );
+    requests.extend(associated_configs.iter().map(|config| MapiIdentityRequest {
+        object_kind: MapiIdentityObjectKind::AssociatedConfig,
+        canonical_id: config.id,
+        reserved_global_counter: None,
+        source_key: None,
+    }));
     requests.extend(
         delegate_freebusy_messages
             .iter()

@@ -350,6 +350,11 @@ where
         .fetch_conversation_actions(account_id)
         .await
         .context("fetch MAPI conversation actions")?;
+    log_mapi_store_load_step(account_id, plan, "fetch associated config messages", 0);
+    let associated_configs = store
+        .fetch_mapi_associated_configs(account_id)
+        .await
+        .context("fetch MAPI associated config messages")?;
     log_mapi_store_load_step(account_id, plan, "fetch delegate freebusy messages", 0);
     let delegate_freebusy_messages = store
         .fetch_delegate_freebusy_messages(account_id)
@@ -630,6 +635,12 @@ where
                     source_key: None,
                 }),
         )
+        .chain(associated_configs.iter().map(|config| MapiIdentityRequest {
+            object_kind: MapiIdentityObjectKind::AssociatedConfig,
+            canonical_id: config.id,
+            reserved_global_counter: None,
+            source_key: None,
+        }))
         .collect::<Vec<_>>();
     log_mapi_store_load_step(
         account_id,
@@ -707,6 +718,7 @@ where
     .with_notes_and_journal(notes, journal_entries)
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
+    .with_associated_configs(associated_configs)
     .with_delegate_freebusy_messages(delegate_freebusy_messages)
     .with_recoverable_items(recoverable_items)
     .with_reminders(reminders)
@@ -942,6 +954,7 @@ fn mapi_identity_kind_name(object_kind: MapiIdentityObjectKind) -> &'static str 
         MapiIdentityObjectKind::SearchFolderDefinition => "search_folder_definition",
         MapiIdentityObjectKind::ConversationAction => "conversation_action",
         MapiIdentityObjectKind::NavigationShortcut => "navigation_shortcut",
+        MapiIdentityObjectKind::AssociatedConfig => "associated_config",
         MapiIdentityObjectKind::Note => "note",
         MapiIdentityObjectKind::JournalEntry => "journal_entry",
         MapiIdentityObjectKind::DelegateFreeBusyMessage => "delegate_freebusy_message",
@@ -1416,6 +1429,13 @@ fn add_object_ids_for_handle(plan: &mut MapiAccessPlan, object: &MapiObject) {
         } => {
             push_unique(&mut plan.object_ids, *folder_id);
             push_unique(&mut plan.object_ids, *shortcut_id);
+        }
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+        } => {
+            push_unique(&mut plan.object_ids, *folder_id);
+            push_unique(&mut plan.object_ids, *config_id);
         }
         MapiObject::DelegateFreeBusyMessage {
             folder_id,

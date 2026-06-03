@@ -81,6 +81,140 @@ pub(in crate::mapi) enum MapiValue {
     MultiGuid(Vec<[u8; 16]>),
 }
 
+pub(in crate::mapi) fn mapi_properties_to_json(
+    properties: &HashMap<u32, MapiValue>,
+) -> serde_json::Value {
+    let mut values = serde_json::Map::new();
+    for (tag, value) in properties {
+        values.insert(format!("0x{tag:08x}"), mapi_value_to_json(value));
+    }
+    serde_json::Value::Object(values)
+}
+
+pub(in crate::mapi) fn mapi_properties_from_json(
+    properties: &serde_json::Value,
+) -> HashMap<u32, MapiValue> {
+    properties
+        .as_object()
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|(tag, value)| {
+                    let tag = u32::from_str_radix(tag.trim_start_matches("0x"), 16).ok()?;
+                    Some((tag, mapi_value_from_json(value)?))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn mapi_value_to_json(value: &MapiValue) -> serde_json::Value {
+    match value {
+        MapiValue::Bool(value) => serde_json::json!({"type": "bool", "value": value}),
+        MapiValue::I16(value) => serde_json::json!({"type": "i16", "value": value}),
+        MapiValue::I32(value) => serde_json::json!({"type": "i32", "value": value}),
+        MapiValue::I64(value) => serde_json::json!({"type": "i64", "value": value}),
+        MapiValue::U32(value) => serde_json::json!({"type": "u32", "value": value}),
+        MapiValue::U64(value) => serde_json::json!({"type": "u64", "value": value}),
+        MapiValue::String(value) => serde_json::json!({"type": "string", "value": value}),
+        MapiValue::Binary(value) => {
+            serde_json::json!({"type": "binary", "value": bytes_to_hex(value)})
+        }
+        MapiValue::Guid(value) => serde_json::json!({"type": "guid", "value": bytes_to_hex(value)}),
+        MapiValue::Error(value) => serde_json::json!({"type": "error", "value": value}),
+        MapiValue::MultiI16(values) => serde_json::json!({"type": "multi_i16", "value": values}),
+        MapiValue::MultiI32(values) => serde_json::json!({"type": "multi_i32", "value": values}),
+        MapiValue::MultiI64(values) => serde_json::json!({"type": "multi_i64", "value": values}),
+        MapiValue::MultiString(values) => {
+            serde_json::json!({"type": "multi_string", "value": values})
+        }
+        MapiValue::MultiBinary(values) => serde_json::json!({
+            "type": "multi_binary",
+            "value": values.iter().map(|value| bytes_to_hex(value)).collect::<Vec<_>>()
+        }),
+        MapiValue::MultiGuid(values) => serde_json::json!({
+            "type": "multi_guid",
+            "value": values.iter().map(|value| bytes_to_hex(value)).collect::<Vec<_>>()
+        }),
+    }
+}
+
+fn mapi_value_from_json(value: &serde_json::Value) -> Option<MapiValue> {
+    let value_type = value.get("type")?.as_str()?;
+    let value = value.get("value")?;
+    match value_type {
+        "bool" => Some(MapiValue::Bool(value.as_bool()?)),
+        "i16" => Some(MapiValue::I16(value.as_i64()?.try_into().ok()?)),
+        "i32" => Some(MapiValue::I32(value.as_i64()?.try_into().ok()?)),
+        "i64" => Some(MapiValue::I64(value.as_i64()?)),
+        "u32" => Some(MapiValue::U32(value.as_u64()?.try_into().ok()?)),
+        "u64" => Some(MapiValue::U64(value.as_u64()?)),
+        "string" => Some(MapiValue::String(value.as_str()?.to_string())),
+        "binary" => Some(MapiValue::Binary(hex_to_bytes(value.as_str()?)?)),
+        "guid" => Some(MapiValue::Guid(
+            hex_to_bytes(value.as_str()?)?.try_into().ok()?,
+        )),
+        "error" => Some(MapiValue::Error(value.as_u64()?.try_into().ok()?)),
+        "multi_i16" => Some(MapiValue::MultiI16(json_i64_values(value)?)),
+        "multi_i32" => Some(MapiValue::MultiI32(json_i64_values(value)?)),
+        "multi_i64" => Some(MapiValue::MultiI64(
+            value
+                .as_array()?
+                .iter()
+                .map(serde_json::Value::as_i64)
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        "multi_string" => Some(MapiValue::MultiString(
+            value
+                .as_array()?
+                .iter()
+                .map(|value| value.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        "multi_binary" => Some(MapiValue::MultiBinary(json_hex_values(value)?)),
+        "multi_guid" => Some(MapiValue::MultiGuid(
+            json_hex_values(value)?
+                .into_iter()
+                .map(|value| value.try_into().ok())
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        _ => None,
+    }
+}
+
+fn json_i64_values<T>(value: &serde_json::Value) -> Option<Vec<T>>
+where
+    T: TryFrom<i64>,
+{
+    value
+        .as_array()?
+        .iter()
+        .map(|value| value.as_i64()?.try_into().ok())
+        .collect()
+}
+
+fn json_hex_values(value: &serde_json::Value) -> Option<Vec<Vec<u8>>> {
+    value
+        .as_array()?
+        .iter()
+        .map(|value| hex_to_bytes(value.as_str()?))
+        .collect()
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hex_to_bytes(value: &str) -> Option<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
+        .collect()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiPropertyTag {
     raw: u32,

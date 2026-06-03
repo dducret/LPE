@@ -10,9 +10,9 @@ use crate::mapi::identity::{
     RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
 };
 use crate::mapi_store::{
-    MapiCommonViewsMessage, MapiConversationActionMessage, MapiDelegateFreeBusyMessage, MapiEvent,
-    MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder, MapiPublicFolderItem, MapiRule,
-    MapiTask,
+    MapiAssociatedConfigMessage, MapiCommonViewsMessage, MapiConversationActionMessage,
+    MapiDelegateFreeBusyMessage, MapiEvent, MapiMessage, MapiNavigationShortcutMessage,
+    MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
 };
 
 pub(in crate::mapi) fn hierarchy_row_count(
@@ -81,6 +81,14 @@ pub(in crate::mapi) fn associated_folder_message_count(
     } else if folder_id == FREEBUSY_DATA_FOLDER_ID {
         snapshot
             .delegate_freebusy_messages()
+            .len()
+            .min(u32::MAX as usize) as u32
+    } else if !snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .is_empty()
+    {
+        snapshot
+            .associated_config_messages_for_folder(folder_id)
             .len()
             .min(u32::MAX as usize) as u32
     } else if snapshot
@@ -1114,6 +1122,15 @@ pub(in crate::mapi) fn rop_query_rows_response(
                         .delegate_freebusy_messages()
                         .iter()
                         .map(|message| serialize_delegate_freebusy_row(message, &columns))
+                        .collect::<Vec<_>>()
+                } else if !snapshot
+                    .associated_config_messages_for_folder(*folder_id)
+                    .is_empty()
+                {
+                    snapshot
+                        .associated_config_messages_for_folder(*folder_id)
+                        .iter()
+                        .map(|message| serialize_associated_config_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else if *folder_id == CALENDAR_FOLDER_ID
                     || snapshot
@@ -2667,6 +2684,25 @@ pub(in crate::mapi) fn rop_find_row_response(
                     write_standard_property_row(
                         &mut response,
                         &serialize_conversation_action_row(message, &columns),
+                    );
+                } else {
+                    response.push(0);
+                }
+            } else if *associated
+                && !snapshot
+                    .associated_config_messages_for_folder(*folder_id)
+                    .is_empty()
+            {
+                let rows = snapshot.associated_config_messages_for_folder(*folder_id);
+                let rows = rows.iter().collect::<Vec<_>>();
+                if let Some((index, message)) =
+                    find_row(rows.as_slice(), *position, request, |_message| true)
+                {
+                    *position = index;
+                    response.push(1);
+                    write_standard_property_row(
+                        &mut response,
+                        &serialize_associated_config_row(message, &columns),
                     );
                 } else {
                     response.push(0);
@@ -4564,6 +4600,70 @@ pub(in crate::mapi) fn serialize_delegate_freebusy_row(
         }
     }
     row
+}
+
+pub(in crate::mapi) fn serialize_associated_config_row(
+    message: &MapiAssociatedConfigMessage,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match associated_config_property_value(message, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
+}
+
+pub(in crate::mapi) fn associated_config_property_value(
+    message: &MapiAssociatedConfigMessage,
+    property_tag: u32,
+) -> Option<MapiValue> {
+    let lookup_tag = canonical_property_storage_tag(property_tag);
+    let properties = mapi_properties_from_json(&message.properties_json);
+    properties.get(&lookup_tag).cloned().or_else(|| {
+        let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+        match lookup_tag {
+            PID_TAG_MID => Some(MapiValue::U64(message.id)),
+            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+                crate::mapi::identity::instance_key_for_object_id(message.id),
+            )),
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                Some(MapiValue::String(message.subject.clone()))
+            }
+            PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(message.message_class.clone())),
+            PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+            PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
+            PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
+                message
+                    .subject
+                    .len()
+                    .saturating_add(message.message_class.len())
+                    .saturating_add(message.properties_json.to_string().len())
+                    .min(i64::MAX as usize) as i64,
+            )),
+            PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
+            PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id,
+            ))),
+            PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
+                mapi_mailstore::source_key_for_store_id(message.folder_id),
+            )),
+            PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
+                mapi_mailstore::change_key_for_change_number(change_number),
+            )),
+            PID_TAG_PREDECESSOR_CHANGE_LIST => Some(MapiValue::Binary(
+                mapi_mailstore::predecessor_change_list(change_number),
+            )),
+            PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
+            PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+                mapi_mailstore::filetime_from_change_number(change_number) as i64,
+            )),
+            PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+            _ => None,
+        }
+    })
 }
 
 pub(in crate::mapi) fn delegate_freebusy_property_value(

@@ -629,7 +629,7 @@ fn mapi_identity_mapping_is_store_backed() {
 
     let identities = table_definition("mapi_object_identities");
     for required in [
-        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'delegate_freebusy_message'))",
+        "object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message'))",
         "canonical_id UUID NOT NULL",
         "mapi_global_counter BIGINT NOT NULL",
         "mapi_object_id BIGINT NOT NULL",
@@ -666,6 +666,26 @@ fn mapi_navigation_shortcuts_persist_group_header_links() {
             "mapi_navigation_shortcuts must persist Common Views shortcut group/header state: {required}"
         );
     }
+}
+
+#[test]
+fn mapi_associated_config_messages_are_bounded_mapi_only_state() {
+    let configs = table_definition("mapi_associated_config_messages");
+    for required in [
+        "folder_id BIGINT NOT NULL CHECK (folder_id > 0)",
+        "message_class TEXT NOT NULL CHECK (btrim(message_class) <> '')",
+        "subject TEXT NOT NULL CHECK (btrim(subject) <> '')",
+        "properties_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "PRIMARY KEY (tenant_id, id)",
+    ] {
+        assert!(
+            configs.contains(required),
+            "mapi_associated_config_messages must persist bounded Outlook FAI config state: {required}"
+        );
+    }
+    assert_schema_contains_all(&[
+        "CREATE INDEX mapi_associated_config_messages_account_folder_idx",
+    ]);
 }
 
 #[test]
@@ -801,7 +821,7 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
         "CREATE TABLE IF NOT EXISTS public.mapi_delegate_freebusy_messages",
         "CREATE TABLE IF NOT EXISTS public.calendar_event_attachments",
         "ALTER TABLE public.mailbox_messages",
-        "ALTER TABLE public.mapi_object_identities",
+        "ALTER TABLE public.mapi_object_identities ADD COLUMN",
         "repair-notes-journal-reminders-schema.sh",
         "repair-mapi-identity-keys.sh",
     ] {
@@ -847,6 +867,17 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "mapi_custom_property_values_object_kind_check",
             "public_folder_item",
             "ALTER TABLE public.mapi_custom_property_values",
+        ],
+    );
+    assert_source_contains_all(
+        "update-lpe.sh MAPI associated configuration compatibility patch",
+        UPDATE_LPE_SCRIPT,
+        &[
+            "CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages",
+            "mapi_object_identities_object_kind_check",
+            "associated_config",
+            "CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx",
+            "public.mapi_associated_config_messages",
         ],
     );
     assert_source_contains_all(
@@ -943,6 +974,7 @@ fn runtime_schema_check_rejects_missing_required_mapi_tables() {
             "assert_required_schema_objects",
             "\"mapi_named_properties\"",
             "\"mapi_custom_property_values\"",
+            "\"mapi_associated_config_messages\"",
             "\"mapi_profile_settings\"",
             "SELECT to_regclass($1) IS NOT NULL",
             "required table public.{table} is missing",
@@ -1638,6 +1670,8 @@ fn cross_protocol_adapter_tests_cover_canonical_model_first_paths() {
             "mapi_over_http_set_get_search_criteria_round_trips_attachment_exists",
             "mapi_over_http_set_search_criteria_rejects_unsupported_restriction",
             "mapi_over_http_common_views_create_associated_navigation_shortcut_persists",
+            "mapi_over_http_sync_import_associated_message_persists_and_replays_fai",
+            "mapi_over_http_associated_config_content_sync_exports_deletes",
             "SearchFolderDefinition",
             "mapi_over_http_content_sync_incremental_does_not_leak_protected_bcc",
             "mapi_over_http_modify_rules_writes_bounded_canonical_sieve_rule",

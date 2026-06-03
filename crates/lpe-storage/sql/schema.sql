@@ -1631,6 +1631,7 @@ CREATE TABLE mail_change_log (
         'search_folder_definition',
         'sieve_script',
         'conversation_action',
+        'associated_config',
         'recoverable_item',
         'public_folder_tree',
         'public_folder',
@@ -1723,6 +1724,7 @@ CREATE TABLE mail_change_log (
                 'search_folder_definition',
                 'sieve_script',
                 'conversation_action',
+                'associated_config',
                 'public_folder_tree',
                 'public_folder',
                 'public_folder_item',
@@ -2148,7 +2150,7 @@ CREATE TABLE mapi_mailbox_replicas (
 CREATE TABLE mapi_object_identities (
     tenant_id UUID NOT NULL,
     account_id UUID NOT NULL,
-    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'delegate_freebusy_message')),
+    object_kind TEXT NOT NULL CHECK (object_kind IN ('account', 'mailbox', 'message', 'contact', 'calendar_event', 'task', 'note', 'journal_entry', 'search_folder_definition', 'conversation_action', 'navigation_shortcut', 'associated_config', 'delegate_freebusy_message')),
     canonical_id UUID NOT NULL,
     mapi_global_counter BIGINT NOT NULL CHECK (mapi_global_counter > 0 AND mapi_global_counter <= 140737488355327),
     mapi_object_id BIGINT NOT NULL CHECK ((mapi_object_id & 65535) = 1),
@@ -2231,6 +2233,23 @@ CREATE TABLE mapi_navigation_shortcuts (
 
 CREATE INDEX mapi_navigation_shortcuts_account_idx
     ON mapi_navigation_shortcuts (tenant_id, account_id, section, ordinal, subject, id);
+
+CREATE TABLE mapi_associated_config_messages (
+    tenant_id UUID NOT NULL,
+    id UUID NOT NULL,
+    account_id UUID NOT NULL,
+    folder_id BIGINT NOT NULL CHECK (folder_id > 0),
+    message_class TEXT NOT NULL CHECK (btrim(message_class) <> ''),
+    subject TEXT NOT NULL CHECK (btrim(subject) <> ''),
+    properties_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tenant_id, id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX mapi_associated_config_messages_account_folder_idx
+    ON mapi_associated_config_messages (tenant_id, account_id, folder_id, subject, id);
 
 CREATE TABLE submission_queue (
     id UUID PRIMARY KEY,

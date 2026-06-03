@@ -123,6 +123,10 @@ mapi_shortcut_target_nullable="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "S
   || fail "MAPI navigation shortcut target_folder_id is still NOT NULL. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "MAPI navigation shortcut target folder column supports group headers"
 
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_associated_config_messages');" | grep -qx 'mapi_associated_config_messages' \
+  || fail "Table public.mapi_associated_config_messages is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Found table public.mapi_associated_config_messages"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');" | grep -qx 'recoverable_items' \
   || fail "Table public.recoverable_items is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Found table public.recoverable_items"

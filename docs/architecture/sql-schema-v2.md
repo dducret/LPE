@@ -262,6 +262,15 @@ name. `target_folder_id` is populated only for non-header shortcuts; group
 headers carry their `WunderBar` group GUID/name without inventing a folder
 target.
 
+Outlook-created folder associated configuration messages are persisted as
+`mapi_associated_config_messages` rows with durable MAPI identity rows using
+`object_kind = 'associated_config'`. The table stores only MAPI compatibility
+state for view/form/client configuration sync: account, folder id, message
+class, subject, and a typed JSON property bag. These rows are replayed only
+through MAPI associated contents and FAI content synchronization; they are not
+canonical mailbox messages and are excluded from JMAP mail, IMAP, user search,
+AI-facing projections, and normal mailbox message lists.
+
 Recoverable item lifecycle events use `object_kind = 'recoverable_item'` change
 rows. These rows describe recovery state creation, restore, and purge for
 MAPI/EWS dumpster synchronization. Restore rows preserve the original
@@ -578,13 +587,15 @@ visibility rules as `/api/mail/delegation/free-busy`.
 Exchange and Outlook compatibility state is stored as canonical LPE state when
 LPE owns the product behavior. `account_client_configurations` stores bounded
 account, mailbox, and public-folder client configuration payloads for Outlook
-profile/user-configuration compatibility. `delegate_preferences` stores only
-delegate delivery/private-item preferences; mailbox, calendar, task, contact,
-and sender rights remain in the canonical grant tables. Retention tags use
-`retention_policy_tags` and `account_retention_policy_assignments`, not
-Exchange-only policy blobs. Contact groups and IM-group projections use
-`contact_groups` and `contact_group_members` over canonical contacts, accounts,
-and external member references.
+profile/user-configuration compatibility. `mapi_associated_config_messages`
+stores bounded Outlook-created MAPI FAI configuration rows only for MAPI replay.
+`delegate_preferences` stores only delegate delivery/private-item preferences;
+mailbox, calendar, task, contact, and sender rights remain in the canonical
+grant tables. Retention tags use `retention_policy_tags` and
+`account_retention_policy_assignments`, not Exchange-only policy blobs. Contact
+groups and IM-group projections use `contact_groups` and
+`contact_group_members` over canonical contacts, accounts, and external member
+references.
 
 Compliance search and hold state is first-class core state because it acts on
 canonical mailboxes and retention. Cases, holds, mailbox hold assignments,

@@ -460,6 +460,7 @@ pub(in crate::mapi) fn special_sync_objects_for(
     if sync_type == 0x02 {
         return Vec::new();
     }
+    let mut objects = Vec::new();
     if folder_id == CALENDAR_FOLDER_ID
         || snapshot
             .collaboration_folder_for_id(folder_id)
@@ -467,147 +468,156 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Calendar
             })
     {
-        return snapshot
-            .events_for_folder(folder_id)
-            .into_iter()
-            .map(|event| {
-                calendar_sync_object(
-                    event,
-                    snapshot.reminder_for_source("calendar", event.canonical_id),
-                )
-            })
-            .collect();
-    }
-    if snapshot
+        objects.extend(
+            snapshot
+                .events_for_folder(folder_id)
+                .into_iter()
+                .map(|event| {
+                    calendar_sync_object(
+                        event,
+                        snapshot.reminder_for_source("calendar", event.canonical_id),
+                    )
+                }),
+        );
+    } else if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| {
             folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Contacts
         })
     {
-        return snapshot
-            .contacts_for_folder(folder_id)
-            .into_iter()
-            .map(contact_sync_object)
-            .collect();
-    }
-    if snapshot
+        objects.extend(
+            snapshot
+                .contacts_for_folder(folder_id)
+                .into_iter()
+                .map(contact_sync_object),
+        );
+    } else if snapshot
         .collaboration_folder_for_id(folder_id)
         .is_some_and(|folder| folder.kind == crate::mapi_store::MapiCollaborationFolderKind::Task)
     {
-        return snapshot
-            .tasks_for_folder(folder_id)
-            .into_iter()
-            .map(|task| {
-                task_sync_object(
-                    task,
-                    snapshot.reminder_for_source("task", task.canonical_id),
-                )
-            })
-            .collect();
-    }
-    if snapshot.public_folder_for_id(folder_id).is_some() {
-        return snapshot
-            .public_folder_items_for_folder(folder_id)
-            .into_iter()
-            .map(public_folder_item_sync_object)
-            .collect();
-    }
-    match folder_id {
-        CONTACTS_SEARCH_FOLDER_ID => snapshot
-            .contacts_search_results()
-            .into_iter()
-            .map(contact_sync_object)
-            .collect(),
-        TODO_SEARCH_FOLDER_ID => snapshot
-            .todo_search_results()
-            .into_iter()
-            .map(|task| {
-                task_sync_object(
-                    task,
-                    snapshot.reminder_for_source("task", task.canonical_id),
-                )
-            })
-            .collect(),
-        REMINDERS_FOLDER_ID => snapshot
-            .reminder_tasks()
-            .into_iter()
-            .map(|task| {
-                task_sync_object(
-                    task,
-                    snapshot.reminder_for_source("task", task.canonical_id),
-                )
-            })
-            .collect(),
-        NOTES_FOLDER_ID => snapshot
-            .notes_for_folder(folder_id)
-            .into_iter()
-            .map(|note| mapi_mailstore::SpecialMessageSyncFact {
-                folder_id: note.folder_id,
-                item_id: note.id,
-                canonical_id: note.canonical_id,
-                associated: false,
-                subject: note.note.title.clone(),
-                body_text: note.note.body_text.clone(),
-                message_class: "IPM.StickyNote".to_string(),
-                last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
-                    &note.note.updated_at,
-                ),
-                message_size: note_size(&note.note),
-                read_state: None,
-                named_properties: vec![
-                    (
-                        PID_LID_NOTE_COLOR_TAG,
-                        mapi_mailstore::SpecialMessagePropertyValue::I32(
-                            note_property_value(
-                                &note.note,
-                                note.id,
-                                note.folder_id,
-                                PID_LID_NOTE_COLOR_TAG,
-                            )
-                            .and_then(|value| value.as_i64())
-                            .unwrap_or(3) as i32,
+        objects.extend(
+            snapshot
+                .tasks_for_folder(folder_id)
+                .into_iter()
+                .map(|task| {
+                    task_sync_object(
+                        task,
+                        snapshot.reminder_for_source("task", task.canonical_id),
+                    )
+                }),
+        );
+    } else if snapshot.public_folder_for_id(folder_id).is_some() {
+        objects.extend(
+            snapshot
+                .public_folder_items_for_folder(folder_id)
+                .into_iter()
+                .map(public_folder_item_sync_object),
+        );
+    } else {
+        objects.extend(match folder_id {
+            CONTACTS_SEARCH_FOLDER_ID => snapshot
+                .contacts_search_results()
+                .into_iter()
+                .map(contact_sync_object)
+                .collect(),
+            TODO_SEARCH_FOLDER_ID => snapshot
+                .todo_search_results()
+                .into_iter()
+                .map(|task| {
+                    task_sync_object(
+                        task,
+                        snapshot.reminder_for_source("task", task.canonical_id),
+                    )
+                })
+                .collect(),
+            REMINDERS_FOLDER_ID => snapshot
+                .reminder_tasks()
+                .into_iter()
+                .map(|task| {
+                    task_sync_object(
+                        task,
+                        snapshot.reminder_for_source("task", task.canonical_id),
+                    )
+                })
+                .collect(),
+            NOTES_FOLDER_ID => snapshot
+                .notes_for_folder(folder_id)
+                .into_iter()
+                .map(|note| mapi_mailstore::SpecialMessageSyncFact {
+                    folder_id: note.folder_id,
+                    item_id: note.id,
+                    canonical_id: note.canonical_id,
+                    associated: false,
+                    subject: note.note.title.clone(),
+                    body_text: note.note.body_text.clone(),
+                    message_class: "IPM.StickyNote".to_string(),
+                    last_modified_filetime: mapi_mailstore::filetime_from_rfc3339_utc(
+                        &note.note.updated_at,
+                    ),
+                    message_size: note_size(&note.note),
+                    read_state: None,
+                    named_properties: vec![
+                        (
+                            PID_LID_NOTE_COLOR_TAG,
+                            mapi_mailstore::SpecialMessagePropertyValue::I32(
+                                note_property_value(
+                                    &note.note,
+                                    note.id,
+                                    note.folder_id,
+                                    PID_LID_NOTE_COLOR_TAG,
+                                )
+                                .and_then(|value| value.as_i64())
+                                .unwrap_or(3) as i32,
+                            ),
                         ),
-                    ),
-                    (
-                        PID_LID_NOTE_HEIGHT_TAG,
-                        mapi_mailstore::SpecialMessagePropertyValue::I32(200),
-                    ),
-                    (
-                        PID_LID_NOTE_WIDTH_TAG,
-                        mapi_mailstore::SpecialMessagePropertyValue::I32(166),
-                    ),
-                    (
-                        PID_LID_NOTE_X_TAG,
-                        mapi_mailstore::SpecialMessagePropertyValue::I32(80),
-                    ),
-                    (
-                        PID_LID_NOTE_Y_TAG,
-                        mapi_mailstore::SpecialMessagePropertyValue::I32(80),
-                    ),
-                ],
-            })
-            .collect(),
-        JOURNAL_FOLDER_ID => snapshot
-            .journal_entries_for_folder(folder_id)
-            .into_iter()
-            .map(|entry| journal_sync_object(entry))
-            .collect(),
-        COMMON_VIEWS_FOLDER_ID => snapshot
-            .common_views_messages()
-            .map(|message| common_views_sync_object(message, account_id))
-            .collect(),
-        CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
-            .conversation_action_messages()
-            .iter()
-            .map(conversation_action_sync_object)
-            .collect(),
-        FREEBUSY_DATA_FOLDER_ID => snapshot
-            .delegate_freebusy_messages()
-            .iter()
-            .map(delegate_freebusy_sync_object)
-            .collect(),
-        _ => Vec::new(),
+                        (
+                            PID_LID_NOTE_HEIGHT_TAG,
+                            mapi_mailstore::SpecialMessagePropertyValue::I32(200),
+                        ),
+                        (
+                            PID_LID_NOTE_WIDTH_TAG,
+                            mapi_mailstore::SpecialMessagePropertyValue::I32(166),
+                        ),
+                        (
+                            PID_LID_NOTE_X_TAG,
+                            mapi_mailstore::SpecialMessagePropertyValue::I32(80),
+                        ),
+                        (
+                            PID_LID_NOTE_Y_TAG,
+                            mapi_mailstore::SpecialMessagePropertyValue::I32(80),
+                        ),
+                    ],
+                })
+                .collect(),
+            JOURNAL_FOLDER_ID => snapshot
+                .journal_entries_for_folder(folder_id)
+                .into_iter()
+                .map(|entry| journal_sync_object(entry))
+                .collect(),
+            COMMON_VIEWS_FOLDER_ID => snapshot
+                .common_views_messages()
+                .map(|message| common_views_sync_object(message, account_id))
+                .collect(),
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID => snapshot
+                .conversation_action_messages()
+                .iter()
+                .map(conversation_action_sync_object)
+                .collect(),
+            FREEBUSY_DATA_FOLDER_ID => snapshot
+                .delegate_freebusy_messages()
+                .iter()
+                .map(delegate_freebusy_sync_object)
+                .collect(),
+            _ => Vec::new(),
+        });
     }
+    objects.extend(
+        snapshot
+            .associated_config_messages_for_folder(folder_id)
+            .iter()
+            .map(associated_config_sync_object),
+    );
+    objects
 }
 
 fn public_folder_item_sync_object(
@@ -973,6 +983,75 @@ fn delegate_freebusy_sync_object(
         read_state: None,
         named_properties: Vec::new(),
     }
+}
+
+fn associated_config_sync_object(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    let mut named_properties = Vec::new();
+    for (tag, value) in mapi_properties_from_json(&message.properties_json) {
+        if associated_config_standard_sync_tag(tag) {
+            continue;
+        }
+        if let Some(value) = special_message_property_value(value) {
+            named_properties.push((tag, value));
+        }
+    }
+    let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+    let message_size = message
+        .subject
+        .len()
+        .saturating_add(message.message_class.len())
+        .saturating_add(message.properties_json.to_string().len())
+        .min(i64::MAX as usize) as i64;
+
+    mapi_mailstore::SpecialMessageSyncFact {
+        folder_id: message.folder_id,
+        item_id: message.id,
+        canonical_id: message.canonical_id,
+        associated: true,
+        subject: message.subject.clone(),
+        body_text: associated_config_text_property(message, PID_TAG_BODY_W),
+        message_class: message.message_class.clone(),
+        last_modified_filetime: mapi_mailstore::filetime_from_change_number(change_number),
+        message_size,
+        read_state: None,
+        named_properties,
+    }
+}
+
+fn associated_config_standard_sync_tag(tag: u32) -> bool {
+    matches!(
+        canonical_property_storage_tag(tag),
+        PID_TAG_SOURCE_KEY
+            | PID_TAG_PARENT_SOURCE_KEY
+            | PID_TAG_CHANGE_KEY
+            | PID_TAG_PREDECESSOR_CHANGE_LIST
+            | PID_TAG_CHANGE_NUMBER
+            | PID_TAG_MID
+            | PID_TAG_ENTRY_ID
+            | PID_TAG_INSTANCE_KEY
+            | PID_TAG_ASSOCIATED
+            | PID_TAG_MESSAGE_SIZE
+            | PID_TAG_MESSAGE_FLAGS
+            | PID_TAG_SUBJECT_W
+            | PID_TAG_NORMALIZED_SUBJECT_W
+            | PID_TAG_MESSAGE_CLASS_W
+            | PID_TAG_BODY_W
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_MESSAGE_DELIVERY_TIME
+            | PID_TAG_ACCESS
+    )
+}
+
+fn associated_config_text_property(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+    tag: u32,
+) -> String {
+    mapi_properties_from_json(&message.properties_json)
+        .remove(&tag)
+        .and_then(MapiValue::into_text)
+        .unwrap_or_default()
 }
 
 fn special_message_property_value(

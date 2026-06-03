@@ -485,6 +485,7 @@ struct FakeStore {
     fail_mapi_ipm_subtree_ost_id_store: bool,
     search_folders: Arc<Mutex<Vec<SearchFolderDefinition>>>,
     navigation_shortcuts: Arc<Mutex<Vec<crate::store::MapiNavigationShortcutRecord>>>,
+    associated_configs: Arc<Mutex<Vec<crate::store::MapiAssociatedConfigRecord>>>,
     conversation_actions: Arc<Mutex<Vec<ConversationAction>>>,
     delegate_freebusy_messages: Arc<Mutex<Vec<DelegateFreeBusyMessageObject>>>,
     reminders: Arc<Mutex<Vec<ClientReminder>>>,
@@ -1037,6 +1038,18 @@ impl FakeStore {
             .iter()
             .find(|folder| identities.get(&folder.id).copied() == Some(object_id))
             .map(|folder| (MapiIdentityObjectKind::PublicFolder, folder.id));
+        let associated_config_match = self
+            .associated_configs
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|config| identities.get(&config.id).copied() == Some(object_id))
+            .map(|config| (MapiIdentityObjectKind::AssociatedConfig, config.id));
+
+        let fallback_identity_match = identities
+            .iter()
+            .find(|(_, mapped_object_id)| **mapped_object_id == object_id)
+            .map(|(canonical_id, _)| (MapiIdentityObjectKind::AssociatedConfig, *canonical_id));
 
         let (object_kind, canonical_id) = mailbox_match
             .or(message_match)
@@ -1045,7 +1058,9 @@ impl FakeStore {
             .or(task_match)
             .or(rule_match)
             .or(account_match)
-            .or(public_folder_match)?;
+            .or(public_folder_match)
+            .or(associated_config_match)
+            .or(fallback_identity_match)?;
         Some(MapiIdentityLookupRecord {
             object_kind,
             canonical_id,
@@ -4201,6 +4216,83 @@ impl ExchangeStore for FakeStore {
         })
     }
 
+    fn fetch_mapi_associated_configs<'a>(
+        &'a self,
+        _account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<crate::store::MapiAssociatedConfigRecord>> {
+        let configs = self.associated_configs.lock().unwrap().clone();
+        Box::pin(async move { Ok(configs) })
+    }
+
+    fn upsert_mapi_associated_config<'a>(
+        &'a self,
+        input: crate::store::UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, crate::store::MapiAssociatedConfigRecord> {
+        let configs = self.associated_configs.clone();
+        let changes = self.mapi_sync_changes.clone();
+        Box::pin(async move {
+            let mut configs = configs.lock().unwrap();
+            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let is_update = configs.iter().any(|config| config.id == id);
+            let record = crate::store::MapiAssociatedConfigRecord {
+                id,
+                account_id: input.account_id,
+                folder_id: input.folder_id,
+                message_class: input.message_class,
+                subject: input.subject,
+                properties_json: input.properties_json,
+            };
+            if let Some(existing) = configs.iter_mut().find(|config| config.id == id) {
+                *existing = record.clone();
+            } else {
+                configs.push(record.clone());
+            }
+            let mut changes = changes.lock().unwrap();
+            changes.current_change_sequence = changes.current_change_sequence.saturating_add(1);
+            changes.current_modseq = changes.current_modseq.saturating_add(1);
+            if is_update {
+                changes
+                    .changed_associated_config_ids
+                    .retain(|change| change.config_id != id);
+            }
+            changes
+                .changed_associated_config_ids
+                .push(crate::store::MapiAssociatedConfigChange {
+                    folder_id: record.folder_id,
+                    config_id: record.id,
+                });
+            Ok(record)
+        })
+    }
+
+    fn delete_mapi_associated_config<'a>(
+        &'a self,
+        _account_id: Uuid,
+        config_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        let mut configs = self.associated_configs.lock().unwrap();
+        if let Some(folder_id) = configs
+            .iter()
+            .find(|config| config.id == config_id)
+            .map(|config| config.folder_id)
+        {
+            let mut changes = self.mapi_sync_changes.lock().unwrap();
+            changes.current_change_sequence = changes.current_change_sequence.saturating_add(1);
+            changes.current_modseq = changes.current_modseq.saturating_add(1);
+            changes
+                .changed_associated_config_ids
+                .retain(|change| change.config_id != config_id);
+            changes
+                .deleted_associated_config_ids
+                .push(crate::store::MapiAssociatedConfigChange {
+                    folder_id,
+                    config_id,
+                });
+        }
+        configs.retain(|config| config.id != config_id);
+        Box::pin(async move { Ok(()) })
+    }
+
     fn upsert_conversation_action<'a>(
         &'a self,
         input: UpsertConversationActionInput,
@@ -6464,6 +6556,14 @@ fn strict_decode_utf16z(bytes: &[u8]) -> Result<String, String> {
     String::from_utf16(&units).map_err(|_| "UTF-16 property contains invalid data".into())
 }
 
+fn strict_decode_string8z(bytes: &[u8]) -> Result<String, String> {
+    if bytes.last() != Some(&0) {
+        return Err("String8 property is not null-terminated".into());
+    }
+    String::from_utf8(bytes[..bytes.len().saturating_sub(1)].to_vec())
+        .map_err(|_| "String8 property contains invalid data".into())
+}
+
 fn read_rop_utf16z(bytes: &[u8], offset: &mut usize) -> Result<String, String> {
     let start = *offset;
     while *offset + 1 < bytes.len() {
@@ -7092,6 +7192,9 @@ fn strict_record_content_body_property(
     match property.tag {
         PID_TAG_PARENT_SOURCE_KEY => message.parent_source_key = Some(property.value),
         PID_TAG_SUBJECT_W => message.subject = Some(strict_decode_utf16z(&property.value)?),
+        PID_TAG_NORMALIZED_SUBJECT_A => {
+            message.subject = Some(strict_decode_string8z(&property.value)?)
+        }
         PID_TAG_MESSAGE_FLAGS | PID_TAG_FLAG_STATUS => {
             let _ = strict_decode_u32_property(&property)?;
         }

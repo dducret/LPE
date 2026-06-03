@@ -65,6 +65,7 @@ impl Storage {
             "accounts",
             "mapi_named_properties",
             "mapi_custom_property_values",
+            "mapi_associated_config_messages",
             "mapi_profile_settings",
         ] {
             let present = sqlx::query_scalar::<_, bool>(

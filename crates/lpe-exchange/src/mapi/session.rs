@@ -153,6 +153,10 @@ pub(in crate::mapi) enum MapiObject {
         folder_id: u64,
         shortcut_id: u64,
     },
+    AssociatedConfig {
+        folder_id: u64,
+        config_id: u64,
+    },
     DelegateFreeBusyMessage {
         folder_id: u64,
         message_id: u64,
@@ -966,6 +970,7 @@ impl MapiObject {
             | MapiObject::JournalEntry { folder_id, .. }
             | MapiObject::ConversationAction { folder_id, .. }
             | MapiObject::NavigationShortcut { folder_id, .. }
+            | MapiObject::AssociatedConfig { folder_id, .. }
             | MapiObject::DelegateFreeBusyMessage { folder_id, .. }
             | MapiObject::RecoverableItem { folder_id, .. }
             | MapiObject::PublicFolderItem { folder_id, .. }

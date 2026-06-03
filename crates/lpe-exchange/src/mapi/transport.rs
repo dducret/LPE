@@ -1176,6 +1176,7 @@ fn mapi_object_debug_kind(object: &MapiObject) -> &'static str {
         MapiObject::JournalEntry { .. } => "journal_entry",
         MapiObject::ConversationAction { .. } => "conversation_action",
         MapiObject::NavigationShortcut { .. } => "navigation_shortcut",
+        MapiObject::AssociatedConfig { .. } => "associated_config",
         MapiObject::DelegateFreeBusyMessage { .. } => "delegate_freebusy_message",
         MapiObject::RecoverableItem { .. } => "recoverable_item",
         MapiObject::PublicFolderItem { .. } => "public_folder_item",

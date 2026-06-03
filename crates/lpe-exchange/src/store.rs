@@ -40,6 +40,7 @@ pub(crate) enum MapiIdentityObjectKind {
     SearchFolderDefinition,
     ConversationAction,
     NavigationShortcut,
+    AssociatedConfig,
     DelegateFreeBusyMessage,
     PublicFolder,
     PublicFolderItem,
@@ -60,6 +61,7 @@ impl MapiIdentityObjectKind {
             Self::SearchFolderDefinition => "search_folder_definition",
             Self::ConversationAction => "conversation_action",
             Self::NavigationShortcut => "navigation_shortcut",
+            Self::AssociatedConfig => "associated_config",
             Self::DelegateFreeBusyMessage => "delegate_freebusy_message",
             Self::PublicFolder => "public_folder",
             Self::PublicFolderItem => "public_folder_item",
@@ -94,6 +96,26 @@ pub(crate) struct UpsertMapiNavigationShortcutInput {
     pub(crate) ordinal: u32,
     pub(crate) group_header_id: Option<Uuid>,
     pub(crate) group_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiAssociatedConfigRecord {
+    pub(crate) id: Uuid,
+    pub(crate) account_id: Uuid,
+    pub(crate) folder_id: u64,
+    pub(crate) message_class: String,
+    pub(crate) subject: String,
+    pub(crate) properties_json: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UpsertMapiAssociatedConfigInput {
+    pub(crate) id: Option<Uuid>,
+    pub(crate) account_id: Uuid,
+    pub(crate) folder_id: u64,
+    pub(crate) message_class: String,
+    pub(crate) subject: String,
+    pub(crate) properties_json: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -443,6 +465,12 @@ pub(crate) struct UpsertEwsDelegateInput {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MapiAssociatedConfigChange {
+    pub(crate) folder_id: u64,
+    pub(crate) config_id: Uuid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct MapiSyncChangeSet {
     pub(crate) current_change_sequence: u64,
     pub(crate) current_modseq: u64,
@@ -454,6 +482,7 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) changed_note_ids: Vec<Uuid>,
     pub(crate) changed_journal_entry_ids: Vec<Uuid>,
     pub(crate) changed_conversation_action_ids: Vec<Uuid>,
+    pub(crate) changed_associated_config_ids: Vec<MapiAssociatedConfigChange>,
     pub(crate) deleted_message_ids: Vec<Uuid>,
     pub(crate) deleted_contact_ids: Vec<Uuid>,
     pub(crate) deleted_calendar_event_ids: Vec<Uuid>,
@@ -461,6 +490,7 @@ pub(crate) struct MapiSyncChangeSet {
     pub(crate) deleted_note_ids: Vec<Uuid>,
     pub(crate) deleted_journal_entry_ids: Vec<Uuid>,
     pub(crate) deleted_conversation_action_ids: Vec<Uuid>,
+    pub(crate) deleted_associated_config_ids: Vec<MapiAssociatedConfigChange>,
 }
 
 impl Default for MapiSyncChangeSet {
@@ -476,6 +506,7 @@ impl Default for MapiSyncChangeSet {
             changed_note_ids: Vec::new(),
             changed_journal_entry_ids: Vec::new(),
             changed_conversation_action_ids: Vec::new(),
+            changed_associated_config_ids: Vec::new(),
             deleted_message_ids: Vec::new(),
             deleted_contact_ids: Vec::new(),
             deleted_calendar_event_ids: Vec::new(),
@@ -483,6 +514,7 @@ impl Default for MapiSyncChangeSet {
             deleted_note_ids: Vec::new(),
             deleted_journal_entry_ids: Vec::new(),
             deleted_conversation_action_ids: Vec::new(),
+            deleted_associated_config_ids: Vec::new(),
         }
     }
 }
@@ -1349,6 +1381,22 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         input: UpsertMapiNavigationShortcutInput,
     ) -> StoreFuture<'a, MapiNavigationShortcutRecord>;
+
+    fn fetch_mapi_associated_configs<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiAssociatedConfigRecord>>;
+
+    fn upsert_mapi_associated_config<'a>(
+        &'a self,
+        input: UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigRecord>;
+
+    fn delete_mapi_associated_config<'a>(
+        &'a self,
+        account_id: Uuid,
+        config_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
 
     fn upsert_conversation_action<'a>(
         &'a self,
@@ -3988,8 +4036,10 @@ impl ExchangeStore for Storage {
                                 'task',
                                 'note',
                                 'journal_entry',
-                                'conversation_action'
+                                'conversation_action',
+                                'associated_config'
                             ))
+                            OR object_kind = 'associated_config'
                             OR ($6::text IS NOT NULL AND object_kind = $6)
                         )
                     )
@@ -4083,6 +4133,29 @@ impl ExchangeStore for Storage {
                         } else {
                             push_unique_uuid(
                                 &mut changes.changed_conversation_action_ids,
+                                object_id,
+                            );
+                        }
+                    }
+                    "associated_config" => {
+                        let object_id = row.get::<Uuid, _>("object_id");
+                        let Some(folder_id) = summary_json
+                            .get("folderId")
+                            .and_then(serde_json::Value::as_str)
+                            .and_then(|value| value.parse::<u64>().ok())
+                        else {
+                            continue;
+                        };
+                        if change_kind == "destroyed" || change_kind == "expunged" {
+                            push_unique_associated_config_change(
+                                &mut changes.deleted_associated_config_ids,
+                                folder_id,
+                                object_id,
+                            );
+                        } else {
+                            push_unique_associated_config_change(
+                                &mut changes.changed_associated_config_ids,
+                                folder_id,
                                 object_id,
                             );
                         }
@@ -5565,6 +5638,130 @@ impl ExchangeStore for Storage {
         })
     }
 
+    fn fetch_mapi_associated_configs<'a>(
+        &'a self,
+        account_id: Uuid,
+    ) -> StoreFuture<'a, Vec<MapiAssociatedConfigRecord>> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let rows = sqlx::query(
+                r#"
+                SELECT id, account_id, folder_id, message_class, subject, properties_json
+                FROM mapi_associated_config_messages
+                WHERE tenant_id = $1 AND account_id = $2
+                ORDER BY folder_id, subject, id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .fetch_all(self.pool())
+            .await?;
+
+            rows.into_iter()
+                .map(mapi_associated_config_from_row)
+                .collect()
+        })
+    }
+
+    fn upsert_mapi_associated_config<'a>(
+        &'a self,
+        input: UpsertMapiAssociatedConfigInput,
+    ) -> StoreFuture<'a, MapiAssociatedConfigRecord> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, input.account_id).await?;
+            let id = input.id.unwrap_or_else(Uuid::new_v4);
+            let mut tx = self.pool().begin().await?;
+            let existed = sqlx::query_scalar::<_, bool>(
+                r#"
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM mapi_associated_config_messages
+                    WHERE tenant_id = $1 AND id = $2
+                )
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let row = sqlx::query(
+                r#"
+                INSERT INTO mapi_associated_config_messages (
+                    tenant_id, id, account_id, folder_id, message_class, subject, properties_json
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (tenant_id, id)
+                DO UPDATE SET
+                    folder_id = EXCLUDED.folder_id,
+                    message_class = EXCLUDED.message_class,
+                    subject = EXCLUDED.subject,
+                    properties_json = EXCLUDED.properties_json,
+                    updated_at = NOW()
+                RETURNING id, account_id, folder_id, message_class, subject, properties_json
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(id)
+            .bind(input.account_id)
+            .bind(input.folder_id as i64)
+            .bind(input.message_class)
+            .bind(input.subject)
+            .bind(input.properties_json)
+            .fetch_one(&mut *tx)
+            .await?;
+            let saved = mapi_associated_config_from_row(row)?;
+            insert_mapi_associated_config_change(
+                &mut tx,
+                tenant_id,
+                input.account_id,
+                saved.id,
+                if existed { "updated" } else { "created" },
+                saved.folder_id,
+            )
+            .await?;
+            tx.commit().await?;
+
+            Ok(saved)
+        })
+    }
+
+    fn delete_mapi_associated_config<'a>(
+        &'a self,
+        account_id: Uuid,
+        config_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let mut tx = self.pool().begin().await?;
+            let deleted = sqlx::query_scalar::<_, i64>(
+                r#"
+                DELETE FROM mapi_associated_config_messages
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                RETURNING folder_id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(config_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            let Some(folder_id) = deleted else {
+                anyhow::bail!("MAPI associated config message not found");
+            };
+            insert_mapi_associated_config_change(
+                &mut tx,
+                tenant_id,
+                account_id,
+                config_id,
+                "destroyed",
+                folder_id as u64,
+            )
+            .await?;
+            tx.commit().await?;
+            Ok(())
+        })
+    }
+
     fn upsert_conversation_action<'a>(
         &'a self,
         input: UpsertConversationActionInput,
@@ -6507,6 +6704,58 @@ fn mapi_navigation_shortcut_from_row(
     })
 }
 
+fn mapi_associated_config_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<MapiAssociatedConfigRecord> {
+    Ok(MapiAssociatedConfigRecord {
+        id: row.try_get("id")?,
+        account_id: row.try_get("account_id")?,
+        folder_id: row.try_get::<i64, _>("folder_id")? as u64,
+        message_class: row.try_get("message_class")?,
+        subject: row.try_get("subject")?,
+        properties_json: row.try_get("properties_json")?,
+    })
+}
+
+async fn insert_mapi_associated_config_change(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+    account_id: Uuid,
+    config_id: Uuid,
+    change_kind: &str,
+    folder_id: u64,
+) -> Result<()> {
+    let modseq = sqlx::query_scalar::<_, i64>(
+        r#"
+        SELECT COALESCE(MAX(modseq), 0) + 1
+        FROM mail_change_log
+        WHERE tenant_id = $1 AND account_id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO mail_change_log (
+            tenant_id, account_id, object_kind, object_id, change_kind, modseq,
+            affected_principal_ids, summary_json
+        )
+        VALUES ($1, $2, 'associated_config', $3, $4, $5, ARRAY[$2]::uuid[], $6)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(account_id)
+    .bind(config_id)
+    .bind(change_kind)
+    .bind(modseq)
+    .bind(serde_json::json!({ "folderId": folder_id.to_string() }))
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 async fn repair_invalid_mapi_identity_change_keys(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
@@ -6757,6 +7006,7 @@ fn mapi_identity_lookup_from_row(row: sqlx::postgres::PgRow) -> Result<MapiIdent
         "search_folder_definition" => MapiIdentityObjectKind::SearchFolderDefinition,
         "conversation_action" => MapiIdentityObjectKind::ConversationAction,
         "navigation_shortcut" => MapiIdentityObjectKind::NavigationShortcut,
+        "associated_config" => MapiIdentityObjectKind::AssociatedConfig,
         "delegate_freebusy_message" => MapiIdentityObjectKind::DelegateFreeBusyMessage,
         value => anyhow::bail!("unsupported MAPI object kind: {value}"),
     };
@@ -6886,6 +7136,22 @@ fn mapi_sync_checkpoint_from_row(row: sqlx::postgres::PgRow) -> Result<MapiSyncC
 fn push_unique_uuid(values: &mut Vec<Uuid>, value: Uuid) {
     if !values.contains(&value) {
         values.push(value);
+    }
+}
+
+fn push_unique_associated_config_change(
+    values: &mut Vec<MapiAssociatedConfigChange>,
+    folder_id: u64,
+    config_id: Uuid,
+) {
+    if !values
+        .iter()
+        .any(|value| value.folder_id == folder_id && value.config_id == config_id)
+    {
+        values.push(MapiAssociatedConfigChange {
+            folder_id,
+            config_id,
+        });
     }
 }
 
