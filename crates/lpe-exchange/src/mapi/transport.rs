@@ -2164,6 +2164,7 @@ mod tests {
             next_handle: 1,
             handles,
             message_statuses: HashMap::new(),
+            special_folder_aliases: HashMap::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: crate::mapi::properties::FIRST_NAMED_PROPERTY_ID,

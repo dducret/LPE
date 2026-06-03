@@ -2297,6 +2297,76 @@ fn merge_indexed_special_folder_entry_ids(
     Some(MapiValue::MultiBinary(canonical_values))
 }
 
+fn record_default_folder_entry_id_aliases(
+    session: &mut MapiSession,
+    object: Option<&MapiObject>,
+    values: &[(u32, MapiValue)],
+) {
+    if !strips_any_default_folder_identification_values(object) {
+        return;
+    }
+    for (tag, value) in values {
+        let storage_tag = canonical_property_storage_tag(*tag);
+        if storage_tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS {
+            record_indexed_special_folder_aliases(
+                session,
+                value,
+                &[
+                    CONFLICTS_FOLDER_ID,
+                    SYNC_ISSUES_FOLDER_ID,
+                    LOCAL_FAILURES_FOLDER_ID,
+                    SERVER_FAILURES_FOLDER_ID,
+                    JUNK_FOLDER_ID,
+                ],
+            );
+        } else if storage_tag == PID_TAG_FREE_BUSY_ENTRY_IDS {
+            record_indexed_special_folder_aliases(
+                session,
+                value,
+                &[0, 0, 0, FREEBUSY_DATA_FOLDER_ID],
+            );
+        } else if is_scalar_default_folder_entry_id_property_tag(storage_tag) {
+            let Some(expected_folder_id) = default_folder_entry_id_expected_folder_id(storage_tag)
+            else {
+                continue;
+            };
+            let MapiValue::Binary(bytes) = value else {
+                continue;
+            };
+            record_special_folder_alias(session, bytes, expected_folder_id);
+        }
+    }
+}
+
+fn record_indexed_special_folder_aliases(
+    session: &mut MapiSession,
+    value: &MapiValue,
+    expected_folder_ids: &[u64],
+) {
+    let MapiValue::MultiBinary(values) = value else {
+        return;
+    };
+    for (index, bytes) in values.iter().enumerate() {
+        let Some(expected_folder_id) = expected_folder_ids.get(index).copied() else {
+            continue;
+        };
+        if expected_folder_id == 0 {
+            continue;
+        }
+        record_special_folder_alias(session, bytes, expected_folder_id);
+    }
+}
+
+fn record_special_folder_alias(session: &mut MapiSession, bytes: &[u8], expected_folder_id: u64) {
+    let Some(alias_id) = crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes)
+    else {
+        return;
+    };
+    if alias_id != expected_folder_id {
+        session.record_special_folder_alias(alias_id, expected_folder_id);
+    }
+}
+
 fn default_folder_identification_values_stripped_by_safe_values(
     object: Option<&MapiObject>,
     property_tags: &[u32],
@@ -5101,7 +5171,8 @@ where
                 }
             }
             Some(RopId::OpenFolder) => {
-                let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
+                let requested_folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
+                let folder_id = session.resolve_special_folder_alias(requested_folder_id);
                 let mailbox_folder_found = folder_row_for_id(folder_id, mailboxes).is_some();
                 let collaboration_folder_found =
                     snapshot.collaboration_folder_for_id(folder_id).is_some();
@@ -5124,7 +5195,9 @@ where
                     request_rop_id = "0x02",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
                     response_handle_index = request.output_handle_index.unwrap_or(0),
+                    requested_folder_id = format!("0x{requested_folder_id:016x}"),
                     folder_id = format!("0x{folder_id:016x}"),
+                    folder_alias_resolved = requested_folder_id != folder_id,
                     folder_name = post_hierarchy_probe_folder_name(folder_id),
                     role = debug_role_for_folder_id(folder_id),
                     container_class = debug_container_class_for_folder_id(folder_id),
@@ -5778,6 +5851,7 @@ where
                             ));
                             continue;
                         }
+                        record_default_folder_entry_id_aliases(session, object.as_ref(), &values);
                         let values = default_folder_identification_safe_property_values(
                             principal,
                             object.as_ref(),

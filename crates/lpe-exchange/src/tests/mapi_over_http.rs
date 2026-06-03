@@ -27917,6 +27917,107 @@ async fn mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_
 }
 
 #[tokio::test]
+async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
+    let account = FakeStore::account();
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let stale_junk_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 42,
+    );
+    let conflicts = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::CONFLICTS_FOLDER_ID,
+    )
+    .unwrap();
+    let sync_issues = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+    )
+    .unwrap();
+    let local_failures = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+    )
+    .unwrap();
+    let server_failures = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+    )
+    .unwrap();
+    let stale_junk =
+        crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, stale_junk_id)
+            .unwrap();
+    let empty = Vec::new();
+    let mut property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut property_values,
+        0x36D8_1102,
+        &[
+            &conflicts,
+            &sync_issues,
+            &local_failures,
+            &server_failures,
+            &stale_junk,
+            &empty,
+        ],
+    );
+
+    let mut set_rops = Vec::new();
+    append_rop_open_folder(&mut set_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_set_properties(&mut set_rops, 1, 1, &property_values);
+    let set_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&set_rops, &[1])),
+        )
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&set_response);
+    let set_response_rops = response_rops_from_execute_response(set_response).await;
+    assert!(contains_bytes(
+        &set_response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+
+    let mut open_headers = mapi_headers("Execute");
+    open_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, stale_junk_id);
+    append_rop_get_properties_specific(&mut open_rops, 1, &[0x3001_001F, 0x3613_001F]);
+    let open_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &open_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let open_response_rops = response_rops_from_execute_response(open_response).await;
+    assert!(contains_bytes(
+        &open_response_rops,
+        &[0x02, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&open_response_rops, &utf16z("Junk E-mail")));
+    assert!(contains_bytes(&open_response_rops, &utf16z("IPF.Note")));
+}
+
+#[tokio::test]
 async fn mapi_over_http_folder_set_properties_do_not_survive_as_protocol_state() {
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let folder_id = test_mapi_folder_id(5);

@@ -26,6 +26,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) next_handle: u32,
     pub(in crate::mapi) handles: HashMap<u32, MapiObject>,
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
+    pub(in crate::mapi) special_folder_aliases: HashMap<u64, u64>,
     pub(in crate::mapi) named_properties: HashMap<MapiNamedProperty, u16>,
     pub(in crate::mapi) named_property_ids: HashMap<u16, MapiNamedProperty>,
     pub(in crate::mapi) next_named_property_id: u16,
@@ -429,6 +430,7 @@ pub(in crate::mapi) fn create_session(
         next_handle: 1,
         handles: HashMap::new(),
         message_statuses: HashMap::new(),
+        special_folder_aliases: HashMap::new(),
         named_properties: HashMap::new(),
         named_property_ids: HashMap::new(),
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
@@ -739,6 +741,20 @@ impl MapiSession {
         self.post_hierarchy_actions
             .opened_folder_ids
             .push(folder_id);
+    }
+
+    pub(in crate::mapi) fn record_special_folder_alias(&mut self, alias_id: u64, folder_id: u64) {
+        if alias_id == folder_id || self.special_folder_aliases.len() >= 32 {
+            return;
+        }
+        self.special_folder_aliases.insert(alias_id, folder_id);
+    }
+
+    pub(in crate::mapi) fn resolve_special_folder_alias(&self, folder_id: u64) -> u64 {
+        self.special_folder_aliases
+            .get(&folder_id)
+            .copied()
+            .unwrap_or(folder_id)
     }
 
     pub(in crate::mapi) fn allocate_output_handle(
