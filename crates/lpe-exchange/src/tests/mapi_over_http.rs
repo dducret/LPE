@@ -26826,6 +26826,96 @@ async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds() {
+    let associated_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 44,
+    );
+    let associated_source_key =
+        crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+            id: Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a7").unwrap(),
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "Outlook Inbox view state".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "Outlook Inbox view state"
+                },
+                "0x1000001f": {
+                    "type": "string",
+                    "value": "Client view payload"
+                },
+                "0x65e00102": {
+                    "type": "binary",
+                    "value": associated_source_key.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+                },
+                "0x7c080102": {
+                    "type": "binary",
+                    "value": "766965772d6578747261"
+                }
+            }),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let reconnect_cookie = mapi_cookie_header(&reconnect);
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        associated_object_id,
+    );
+    rops.extend_from_slice(&[0x4D, 0x00, 0x02, 0x03]);
+    rops.push(0);
+    rops.extend_from_slice(&0u32.to_le_bytes());
+    rops.push(0x01);
+    rops.extend_from_slice(&0u16.to_le_bytes());
+    rops.extend_from_slice(&[0x4E, 0x00, 0x03]);
+    rops.extend_from_slice(&4096u16.to_le_bytes());
+
+    let mut headers = mapi_headers("Execute");
+    headers.insert("cookie", HeaderValue::from_str(&reconnect_cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x4D, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, b"LPE-MAPI-FASTTRANSFER\0"));
+    assert!(contains_bytes(&response_rops, b"Outlook Inbox view state"));
+    assert!(contains_bytes(&response_rops, b"Client view payload"));
+    assert!(contains_bytes(&response_rops, b"view-extra"));
+}
+
+#[tokio::test]
 async fn mapi_over_http_reads_empty_associated_config_body_stream() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 43,

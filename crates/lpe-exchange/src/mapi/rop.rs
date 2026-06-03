@@ -2662,6 +2662,15 @@ fn serialize_session_folder_row(
             }
         }
 
+        if is_advertised_special_folder(folder_id) && storage_tag == PID_TAG_CONTENT_COUNT {
+            write_mapi_value(
+                &mut row,
+                *column,
+                &MapiValue::U32(folder_message_count(folder_id, mailboxes, &[], snapshot)),
+            );
+            continue;
+        }
+
         let value = folder_row_for_id(folder_id, mailboxes)
             .map(|mailbox| {
                 serialize_folder_row_with_context(
@@ -6435,6 +6444,102 @@ mod tests {
         assert_eq!(row_shape.property_row_bytes, 2450);
         assert_eq!(row_shape.icon_row_bytes, 2304);
         assert_eq!(row_shape.non_icon_row_bytes, 146);
+    }
+
+    #[test]
+    fn contacts_search_getprops_content_count_matches_projected_results() {
+        let account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "test@example.test".to_string(),
+            display_name: "Test".to_string(),
+        };
+        let rights = lpe_storage::CollaborationRights {
+            may_read: true,
+            may_write: true,
+            may_delete: true,
+            may_share: true,
+        };
+        let collection = lpe_storage::CollaborationCollection {
+            id: "default".to_string(),
+            kind: "contacts".to_string(),
+            owner_account_id: account_id,
+            owner_email: principal.email.clone(),
+            owner_display_name: principal.display_name.clone(),
+            display_name: "Contacts".to_string(),
+            is_owned: true,
+            rights: rights.clone(),
+        };
+        let contact_id = Uuid::parse_str("71717171-7171-7171-7171-717171717171").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            contact_id,
+            crate::mapi::identity::mapi_store_id(67),
+        );
+        let contact = lpe_storage::AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: account_id,
+            owner_email: principal.email.clone(),
+            owner_display_name: principal.display_name.clone(),
+            rights,
+            name: "Denis Ducret".to_string(),
+            role: String::new(),
+            email: "denis@example.test".to_string(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![collection],
+            Vec::new(),
+            Vec::new(),
+            vec![contact],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![lpe_storage::SearchFolderDefinition {
+            id: Uuid::parse_str("34343434-3434-4434-8434-343434343402").unwrap(),
+            account_id,
+            role: "contacts_search".to_string(),
+            display_name: "Contacts Search".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "contact".to_string(),
+            scope_json: serde_json::json!({"scope": "contacts"}),
+            restriction_json: serde_json::json!({"kind": "contacts_search"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        }]);
+        let object = MapiObject::Folder {
+            folder_id: CONTACTS_SEARCH_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4096u16.to_le_bytes());
+        payload.extend_from_slice(&1u16.to_le_bytes());
+        payload.extend_from_slice(&PID_TAG_CONTENT_COUNT.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::GetPropertiesSpecific as u8,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response = rop_get_properties_specific_response(
+            &request,
+            Some(&object),
+            &principal,
+            &[],
+            &[],
+            &snapshot,
+        );
+
+        assert_eq!(&response[..7], &[0x07, 0x01, 0, 0, 0, 0, 0]);
+        assert_eq!(u32::from_le_bytes(response[7..11].try_into().unwrap()), 1);
     }
 
     #[test]

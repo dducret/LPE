@@ -1253,6 +1253,57 @@ pub(in crate::mapi) fn fast_transfer_manifest_for_object(
                 ),
             ))
         }
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+        } => {
+            let message = snapshot.associated_config_message_for_id(*config_id)?;
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                    *folder_id,
+                    &[associated_config_sync_object(&message)],
+                ),
+            ))
+        }
+        MapiObject::ConversationAction {
+            folder_id,
+            conversation_action_id,
+        } => {
+            let message = snapshot.conversation_action_message_for_id(*conversation_action_id)?;
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                    *folder_id,
+                    &[conversation_action_sync_object(&message)],
+                ),
+            ))
+        }
+        MapiObject::DelegateFreeBusyMessage {
+            folder_id,
+            message_id,
+        } => {
+            let message = snapshot.delegate_freebusy_message_for_id(*message_id)?;
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                    *folder_id,
+                    &[delegate_freebusy_sync_object(&message)],
+                ),
+            ))
+        }
+        MapiObject::PublicFolderItem {
+            folder_id, item_id, ..
+        } => {
+            let item = snapshot.public_folder_item_for_id(*folder_id, *item_id)?;
+            Some((
+                *folder_id,
+                mapi_mailstore::fast_transfer_manifest_buffer_with_special_objects(
+                    *folder_id,
+                    &[public_folder_item_sync_object(&item)],
+                ),
+            ))
+        }
         _ => None,
     }
 }

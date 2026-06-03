@@ -44,6 +44,12 @@ pub(in crate::mapi) fn folder_message_count(
             .len()
             .min(u32::MAX as usize) as u32;
     }
+    if folder_id == CONTACTS_SEARCH_FOLDER_ID {
+        return snapshot
+            .contacts_search_results()
+            .len()
+            .min(u32::MAX as usize) as u32;
+    }
     if let Some(folder) = snapshot.public_folder_for_id(folder_id) {
         return folder.item_count;
     }
@@ -3607,7 +3613,10 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpe_storage::{MailboxRule, SearchFolderDefinition};
+    use lpe_storage::{
+        AccessibleContact, CollaborationCollection, CollaborationRights, MailboxRule,
+        SearchFolderDefinition,
+    };
 
     fn exchange_builtin_excluded_folder_roles() -> Vec<String> {
         [
@@ -3680,6 +3689,74 @@ mod tests {
         ] {
             assert!(columns.contains(&property_tag));
         }
+    }
+
+    #[test]
+    fn contacts_search_folder_message_count_matches_projected_results() {
+        let account_id = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
+        let collection = CollaborationCollection {
+            id: "default".to_string(),
+            kind: "contacts".to_string(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            display_name: "Contacts".to_string(),
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+        };
+        let contact_id = Uuid::parse_str("71717171-7171-7171-7171-717171717171").unwrap();
+        crate::mapi::identity::remember_mapi_identity(
+            contact_id,
+            crate::mapi::identity::mapi_store_id(67),
+        );
+        let contact = AccessibleContact {
+            id: contact_id,
+            collection_id: collection.id.clone(),
+            owner_account_id: account_id,
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            rights: collection.rights.clone(),
+            name: "Denis Ducret".to_string(),
+            role: String::new(),
+            email: "denis@example.test".to_string(),
+            phone: String::new(),
+            team: String::new(),
+            notes: String::new(),
+        };
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec![collection],
+            Vec::new(),
+            Vec::new(),
+            vec![contact],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+        .with_search_folder_definitions(vec![SearchFolderDefinition {
+            id: Uuid::parse_str("34343434-3434-4434-8434-343434343402").unwrap(),
+            account_id,
+            role: "contacts_search".to_string(),
+            display_name: "Contacts Search".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "contact".to_string(),
+            scope_json: serde_json::json!({"scope": "contacts"}),
+            restriction_json: serde_json::json!({"kind": "contacts_search"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        }]);
+
+        assert_eq!(
+            folder_message_count(CONTACTS_SEARCH_FOLDER_ID, &[], &[], &snapshot),
+            1
+        );
     }
 
     #[test]

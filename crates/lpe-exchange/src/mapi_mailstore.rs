@@ -3485,6 +3485,74 @@ pub(crate) fn fast_transfer_manifest_buffer_with_attachments(
     buffer
 }
 
+pub(crate) fn fast_transfer_manifest_buffer_with_special_objects(
+    folder_id: u64,
+    objects: &[SpecialMessageSyncFact],
+) -> Vec<u8> {
+    let mut buffer = b"LPE-MAPI-FASTTRANSFER\0".to_vec();
+    buffer.extend_from_slice(&folder_id.to_le_bytes());
+    buffer.extend_from_slice(&0u32.to_le_bytes());
+    buffer.extend_from_slice(&(objects.len().min(u32::MAX as usize) as u32).to_le_bytes());
+
+    let mut objects = objects.iter().collect::<Vec<_>>();
+    objects.sort_by(|left, right| {
+        left.last_modified_filetime
+            .cmp(&right.last_modified_filetime)
+            .then(left.subject.cmp(&right.subject))
+            .then(left.canonical_id.cmp(&right.canonical_id))
+    });
+    for object in objects {
+        let change_number = change_number_for_store_id(object.item_id);
+        write_prefixed_bytes(&mut buffer, &source_key_for_store_id(object.item_id));
+        buffer.extend_from_slice(&change_number.to_le_bytes());
+        let mut flags = 0;
+        if object.read_state.unwrap_or(false) {
+            flags |= MSGFLAG_READ;
+        }
+        buffer.extend_from_slice(&flags.to_le_bytes());
+        buffer.extend_from_slice(&0u32.to_le_bytes());
+        write_prefixed_bytes(&mut buffer, object.subject.as_bytes());
+        write_prefixed_bytes(&mut buffer, object.body_text.as_bytes());
+        write_prefixed_bytes(&mut buffer, object.message_class.as_bytes());
+        write_prefixed_bytes(&mut buffer, &[]);
+        buffer.extend_from_slice(&0u16.to_le_bytes());
+        buffer.extend_from_slice(
+            &(object.named_properties.len().min(u16::MAX as usize) as u16).to_le_bytes(),
+        );
+        for (tag, value) in object.named_properties.iter().take(u16::MAX as usize) {
+            buffer.extend_from_slice(&tag.to_le_bytes());
+            write_special_fast_transfer_property_value(&mut buffer, value);
+        }
+    }
+
+    buffer
+}
+
+fn write_special_fast_transfer_property_value(
+    buffer: &mut Vec<u8>,
+    value: &SpecialMessagePropertyValue,
+) {
+    match value {
+        SpecialMessagePropertyValue::Binary(value) => write_prefixed_bytes(buffer, value),
+        SpecialMessagePropertyValue::Bool(value) => buffer.push(u8::from(*value)),
+        SpecialMessagePropertyValue::Guid(value) => buffer.extend_from_slice(value),
+        SpecialMessagePropertyValue::I32(value) => buffer.extend_from_slice(&value.to_le_bytes()),
+        SpecialMessagePropertyValue::I64(value) => buffer.extend_from_slice(&value.to_le_bytes()),
+        SpecialMessagePropertyValue::U32(value) => buffer.extend_from_slice(&value.to_le_bytes()),
+        SpecialMessagePropertyValue::U64(value) => buffer.extend_from_slice(&value.to_le_bytes()),
+        SpecialMessagePropertyValue::String(value) => {
+            write_prefixed_bytes(buffer, value.as_bytes())
+        }
+        SpecialMessagePropertyValue::MultiString(values) => {
+            buffer.extend_from_slice(&(values.len().min(u16::MAX as usize) as u16).to_le_bytes());
+            for value in values.iter().take(u16::MAX as usize) {
+                write_prefixed_bytes(buffer, value.as_bytes());
+            }
+        }
+        SpecialMessagePropertyValue::Time(value) => write_prefixed_bytes(buffer, value.as_bytes()),
+    }
+}
+
 pub(crate) fn canonical_message_flags(email: &JmapEmail) -> u32 {
     let mut flags = 0u32;
     if !email.unread {
