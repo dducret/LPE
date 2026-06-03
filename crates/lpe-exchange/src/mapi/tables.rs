@@ -3254,6 +3254,46 @@ pub(in crate::mapi) fn role_for_folder_id(folder_id: u64) -> Option<&'static str
     }
 }
 
+pub(in crate::mapi) fn advertised_special_folder_id_for_create(
+    parent_folder_id: u64,
+    display_name: &str,
+) -> Option<u64> {
+    [
+        INBOX_FOLDER_ID,
+        OUTBOX_FOLDER_ID,
+        SENT_FOLDER_ID,
+        TRASH_FOLDER_ID,
+        DRAFTS_FOLDER_ID,
+        CONTACTS_FOLDER_ID,
+        CALENDAR_FOLDER_ID,
+        JOURNAL_FOLDER_ID,
+        NOTES_FOLDER_ID,
+        TASKS_FOLDER_ID,
+        SUGGESTED_CONTACTS_FOLDER_ID,
+        QUICK_CONTACTS_FOLDER_ID,
+        IM_CONTACT_LIST_FOLDER_ID,
+        CONTACTS_SEARCH_FOLDER_ID,
+        DOCUMENT_LIBRARIES_FOLDER_ID,
+        SYNC_ISSUES_FOLDER_ID,
+        CONFLICTS_FOLDER_ID,
+        LOCAL_FAILURES_FOLDER_ID,
+        SERVER_FAILURES_FOLDER_ID,
+        JUNK_FOLDER_ID,
+        RSS_FEEDS_FOLDER_ID,
+        TRACKED_MAIL_PROCESSING_FOLDER_ID,
+        TODO_SEARCH_FOLDER_ID,
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        ARCHIVE_FOLDER_ID,
+        FREEBUSY_DATA_FOLDER_ID,
+        CONVERSATION_HISTORY_FOLDER_ID,
+    ]
+    .into_iter()
+    .find(|folder_id| {
+        let (name, parent_id, _, _) = special_folder_metadata(*folder_id);
+        parent_id == parent_folder_id && name.eq_ignore_ascii_case(display_name)
+    })
+}
+
 pub(in crate::mapi) fn serialize_special_folder_row(
     folder_id: u64,
     mailboxes: &[JmapMailbox],

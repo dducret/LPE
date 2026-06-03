@@ -7494,6 +7494,26 @@ where
                     continue;
                 }
 
+                if let Some(folder_id) =
+                    advertised_special_folder_id_for_create(parent_folder_id, display_name)
+                {
+                    let properties =
+                        folder_properties_for_open(store, principal, session, folder_id).await;
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::Folder {
+                            folder_id,
+                            properties,
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_create_folder_response(
+                        &request, folder_id, true,
+                    ));
+                    output_handles.push(handle);
+                    continue;
+                }
+
                 if request.create_folder_open_existing() {
                     if let Some(existing) = mailboxes
                         .iter()
