@@ -2366,7 +2366,9 @@ pub(in crate::mapi) fn rop_get_status_response(
     request: &RopRequest,
     object: Option<&MapiObject>,
 ) -> Vec<u8> {
-    if !object.is_some_and(is_table_object) {
+    if !object.is_some_and(|object| {
+        is_table_object(object) || matches!(object, MapiObject::Folder { .. })
+    }) {
         return rop_error_response(0x16, request.response_handle_index(), 0x8004_0102);
     }
 
@@ -3613,6 +3615,7 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapi::wire::RopId;
     use lpe_storage::{
         AccessibleContact, CollaborationCollection, CollaborationRights, MailboxRule,
         SearchFolderDefinition,
@@ -3756,6 +3759,25 @@ mod tests {
         assert_eq!(
             folder_message_count(CONTACTS_SEARCH_FOLDER_ID, &[], &[], &snapshot),
             1
+        );
+    }
+
+    #[test]
+    fn get_status_accepts_folder_handles_after_sync_import() {
+        let request = RopRequest {
+            rop_id: RopId::GetStatus.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let folder = MapiObject::Folder {
+            folder_id: CONTACTS_SEARCH_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        assert_eq!(
+            rop_get_status_response(&request, Some(&folder)),
+            vec![RopId::GetStatus.as_u8(), 1, 0, 0, 0, 0, 0]
         );
     }
 

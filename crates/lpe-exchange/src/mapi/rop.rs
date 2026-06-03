@@ -294,7 +294,7 @@ pub(in crate::mapi) fn rop_message_status_response(
     request: &RopRequest,
     old_status: u32,
 ) -> Vec<u8> {
-    let mut response = vec![0x20, request.response_handle_index()];
+    let mut response = vec![request.rop_id, request.response_handle_index()];
     write_u32(&mut response, 0);
     write_u32(&mut response, old_status);
     response
@@ -3073,6 +3073,11 @@ impl<'a> Cursor<'a> {
 
     pub(in crate::mapi) fn remaining(&self) -> usize {
         self.bytes.len().saturating_sub(self.position)
+    }
+
+    pub(in crate::mapi) fn remaining_is_zero_padding(&self) -> bool {
+        let remaining = self.remaining();
+        remaining <= 2 && self.bytes[self.position..].iter().all(|byte| *byte == 0)
     }
 
     pub(in crate::mapi) fn position(&self) -> usize {
@@ -6387,6 +6392,23 @@ mod tests {
             Some(&folder),
             PID_TAG_DELETED_COUNT_TOTAL
         ));
+    }
+
+    #[test]
+    pub(in crate::mapi) fn get_message_status_response_keeps_get_opcode() {
+        let request = RopRequest {
+            rop_id: RopId::GetMessageStatus.as_u8(),
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+
+        let response = rop_message_status_response(&request, 0);
+
+        assert_eq!(
+            response,
+            vec![RopId::GetMessageStatus.as_u8(), 1, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
     }
 
     #[test]

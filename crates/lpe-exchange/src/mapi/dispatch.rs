@@ -5119,6 +5119,9 @@ where
     let mut created_emails: Vec<JmapEmail> = Vec::new();
     let mut echo_input_handle_table = false;
     while cursor.remaining() > 0 {
+        if cursor.remaining_is_zero_padding() {
+            break;
+        }
         let request = match read_rop_request(&mut cursor) {
             Ok(request) => request,
             Err(_) => {
@@ -8041,7 +8044,7 @@ where
                     Some(folder_id) => folder_id,
                     None => {
                         responses.extend_from_slice(&rop_error_response(
-                            0x20,
+                            request.rop_id,
                             request.response_handle_index(),
                             0x0000_04B9,
                         ));
@@ -8049,19 +8052,22 @@ where
                     }
                 };
                 let message_id = request.status_message_id().unwrap_or(0);
-                if message_for_id(folder_id, message_id, mailboxes, emails)
+                let item_exists = message_for_id(folder_id, message_id, mailboxes, emails)
                     .or_else(|| {
                         emails
                             .iter()
                             .find(|email| mapi_item_id_matches(&email.id, message_id))
                     })
-                    .is_none()
-                    && snapshot
+                    .is_some()
+                    || snapshot
                         .public_folder_item_for_id(folder_id, message_id)
-                        .is_none()
-                {
+                        .is_some()
+                    || snapshot.contact_for_id(folder_id, message_id).is_some()
+                    || snapshot.event_for_id(folder_id, message_id).is_some()
+                    || snapshot.task_for_id(folder_id, message_id).is_some();
+                if !item_exists {
                     responses.extend_from_slice(&rop_error_response(
-                        0x20,
+                        request.rop_id,
                         request.response_handle_index(),
                         0x8004_010F,
                     ));
