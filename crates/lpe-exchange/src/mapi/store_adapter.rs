@@ -739,13 +739,14 @@ fn log_mapi_store_load_step(
     step: &'static str,
     item_count: usize,
 ) {
-    tracing::debug!(
+    tracing::info!(
         rca_debug = true,
         adapter = "mapi",
         request_type = "Execute",
         account_id = %account_id,
         full_snapshot = plan.requires_full_snapshot,
         object_id_count = plan.object_ids.len(),
+        object_ids = %format_mapi_object_ids(&plan.object_ids),
         content_query_count = plan.content_queries.len(),
         step = step,
         item_count = item_count,

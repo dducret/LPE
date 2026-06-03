@@ -1563,9 +1563,18 @@ fn log_execute_store_access_debug(
         mapi_request_id = request_id,
         full_snapshot = access_plan.requires_full_snapshot,
         object_id_count = access_plan.object_ids.len(),
+        object_ids = %format_debug_object_ids(&access_plan.object_ids),
         content_query_count = access_plan.content_queries.len(),
         message = message,
     );
+}
+
+fn format_debug_object_ids(object_ids: &[u64]) -> String {
+    object_ids
+        .iter()
+        .map(|object_id| format!("{object_id:#018x}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn log_execute_dispatch_start_debug(
