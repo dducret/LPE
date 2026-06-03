@@ -27195,7 +27195,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_creates_canonical_mailbox()
 }
 
 #[tokio::test]
-async fn mapi_over_http_sync_import_hierarchy_change_rejects_system_folder_mutation() {
+async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_reconciliation() {
     let store = FakeStore {
         session: Some(FakeStore::account()),
         mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
@@ -27251,10 +27251,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_rejects_system_folder_mutat
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x73, 0x02, 0x02, 0x01, 0x04, 0x80]
-    ));
+    assert!(contains_bytes(&response_rops, &[0x73, 0x02, 0, 0, 0, 0]));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
 

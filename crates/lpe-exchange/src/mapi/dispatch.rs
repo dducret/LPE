@@ -11281,11 +11281,20 @@ where
                     continue;
                 };
                 if system_folder_display_name(&display_name) {
-                    responses.extend_from_slice(&rop_error_response(
-                        0x73,
-                        request.response_handle_index(),
-                        0x8004_0102,
-                    ));
+                    if let Some(existing) = imported_hierarchy_existing_mailbox(
+                        &hierarchy_values,
+                        &display_name,
+                        mailboxes,
+                    ) {
+                        record_sync_upload_hierarchy_change(
+                            session,
+                            _folder_id,
+                            mapi_folder_id(existing),
+                        );
+                    }
+                    responses.extend_from_slice(
+                        &rop_synchronization_import_hierarchy_change_response(&request),
+                    );
                     continue;
                 }
                 if let Some(existing) =
