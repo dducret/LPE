@@ -16604,6 +16604,16 @@ async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent()
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1);
     assert_eq!(stream.message_changes[0].subject, "Contact Search One");
+    assert!(!stream.message_changes[0].associated);
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_DISPLAY_NAME_W));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&PID_TAG_SUBJECT_W));
+    assert!(stream.message_changes[0]
+        .body_tags
+        .contains(&0x001A_001Fu32));
     assert_eq!(
         stream.message_changes[0].parent_source_key,
         mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID)

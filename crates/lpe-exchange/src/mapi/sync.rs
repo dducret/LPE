@@ -687,6 +687,7 @@ fn contact_sync_object(
 ) -> mapi_mailstore::SpecialMessageSyncFact {
     let mut properties = Vec::new();
     for property_tag in [
+        PID_TAG_DISPLAY_NAME_W,
         PID_TAG_EMAIL_ADDRESS_W,
         PID_TAG_SMTP_ADDRESS_W,
         PID_TAG_MOBILE_TELEPHONE_NUMBER_W,
