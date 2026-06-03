@@ -26727,6 +26727,95 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
 }
 
 #[tokio::test]
+async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
+    let associated_object_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 42,
+    );
+    let associated_source_key =
+        crate::mapi::identity::source_key_for_object_id(associated_object_id);
+    let account = FakeStore::account();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        associated_configs: Arc::new(Mutex::new(vec![crate::store::MapiAssociatedConfigRecord {
+            id: Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a5").unwrap(),
+            account_id: account.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "Outlook Inbox view state".to_string(),
+            properties_json: serde_json::json!({
+                "0x001a001f": {
+                    "type": "string",
+                    "value": "IPM.Configuration.MessageListSettings"
+                },
+                "0x0037001f": {
+                    "type": "string",
+                    "value": "Outlook Inbox view state"
+                },
+                "0x1000001f": {
+                    "type": "string",
+                    "value": "Client view payload"
+                },
+                "0x65e00102": {
+                    "type": "binary",
+                    "value": associated_source_key.iter().map(|byte| format!("{byte:02x}")).collect::<String>()
+                }
+            }),
+        }])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let reconnect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let reconnect_cookie = mapi_cookie_header(&reconnect);
+
+    let mut open_rops = Vec::new();
+    append_rop_open_folder(&mut open_rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut open_rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        associated_object_id,
+    );
+    append_rop_get_properties_specific(&mut open_rops, 2, &[PID_TAG_SUBJECT_W, PID_TAG_BODY_W]);
+
+    let mut open_headers = mapi_headers("Execute");
+    open_headers.insert("cookie", HeaderValue::from_str(&reconnect_cookie).unwrap());
+    let open_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &open_headers,
+            &execute_body(&rop_buffer(&open_rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let open_response_rops = response_rops_from_execute_response(open_response).await;
+    assert!(
+        contains_bytes(&open_response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
+        "{open_response_rops:02x?}"
+    );
+    assert!(contains_bytes(
+        &open_response_rops,
+        &[0x07, 0x02, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &open_response_rops,
+        &utf16z("Outlook Inbox view state")
+    ));
+    assert!(contains_bytes(
+        &open_response_rops,
+        &utf16z("Client view payload")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_save_message_acknowledges_foreign_trash_sync_upload_without_persisting() {
     let trash_id = Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
     let imported_source_key =

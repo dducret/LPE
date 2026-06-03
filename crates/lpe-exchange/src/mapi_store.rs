@@ -1121,6 +1121,23 @@ impl MapiMailStoreSnapshot {
             .cloned()
     }
 
+    pub(crate) fn associated_config_message_for_folder_and_source_key_id(
+        &self,
+        folder_id: u64,
+        item_id: u64,
+    ) -> Option<MapiAssociatedConfigMessage> {
+        crate::mapi::identity::global_counter_from_store_id(item_id)?;
+        let source_key = crate::mapi::identity::source_key_for_object_id(item_id);
+        self.associated_configs
+            .iter()
+            .find(|message| {
+                message.folder_id == folder_id
+                    && associated_config_source_key(&message.properties_json)
+                        .is_some_and(|message_source_key| message_source_key == source_key)
+            })
+            .cloned()
+    }
+
     pub(crate) fn conversation_action_messages(&self) -> &[MapiConversationActionMessage] {
         &self.conversation_actions
     }
@@ -1233,6 +1250,37 @@ impl MapiMailStoreSnapshot {
     #[cfg(test)]
     pub(crate) fn messages(&self) -> &[MapiMessage] {
         &self.messages
+    }
+}
+
+fn associated_config_source_key(properties_json: &serde_json::Value) -> Option<Vec<u8>> {
+    let value = properties_json
+        .get("0x65e00102")
+        .filter(|value| value.get("type").and_then(serde_json::Value::as_str) == Some("binary"))?
+        .get("value")?
+        .as_str()?;
+    hex_to_bytes(value)
+}
+
+fn hex_to_bytes(value: &str) -> Option<Vec<u8>> {
+    if value.len() % 2 != 0 {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(value.len() / 2);
+    for chunk in value.as_bytes().chunks(2) {
+        let high = hex_digit(chunk[0])?;
+        let low = hex_digit(chunk[1])?;
+        bytes.push((high << 4) | low);
+    }
+    Some(bytes)
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 

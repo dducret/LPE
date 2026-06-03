@@ -5320,12 +5320,17 @@ where
                 } else if let Some(message) = snapshot
                     .associated_config_message_for_id(message_id)
                     .filter(|message| message.folder_id == folder_id)
+                    .or_else(|| {
+                        snapshot.associated_config_message_for_folder_and_source_key_id(
+                            folder_id, message_id,
+                        )
+                    })
                 {
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
                         MapiObject::AssociatedConfig {
                             folder_id,
-                            config_id: message_id,
+                            config_id: message.id,
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
@@ -7847,6 +7852,11 @@ where
                     if let Some(message) = snapshot
                         .associated_config_message_for_id(message_id)
                         .filter(|message| message.folder_id == folder_id)
+                        .or_else(|| {
+                            snapshot.associated_config_message_for_folder_and_source_key_id(
+                                folder_id, message_id,
+                            )
+                        })
                     {
                         if store
                             .delete_mapi_associated_config(
