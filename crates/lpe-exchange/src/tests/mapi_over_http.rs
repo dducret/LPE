@@ -22382,6 +22382,13 @@ async fn mapi_over_http_get_rules_table_projects_canonical_sieve_rules() {
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.push(0);
     rops.extend_from_slice(&[0x3F, 0x00, 0x01, 0x02, 0x00]);
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x6674_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x6682_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x6684_0102u32.to_le_bytes());
+    rops.extend_from_slice(&[0x14, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&0u16.to_le_bytes());
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
     rops.extend_from_slice(&1u16.to_le_bytes());
     rops.extend_from_slice(&[0x41, 0x00, 0x01, 0x00]);
@@ -22405,6 +22412,8 @@ async fn mapi_over_http_get_rules_table_projects_canonical_sieve_rules() {
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x3F, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x12, 0x02, 0, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x14, 0x02, 0, 0, 0, 0, 0]));
     let rule_name = "Reports"
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
@@ -22762,6 +22771,55 @@ async fn mapi_over_http_permissions_table_maps_delegate_folder_access() {
     assert!(contains_bytes(
         &response_rops,
         &crate::mapi::permissions::rights_from_grant(true, true, false, false).to_le_bytes()
+    ));
+}
+
+#[tokio::test]
+async fn mapi_over_http_ipm_subtree_permissions_table_is_empty_not_not_found() {
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = vec![0x02, 0x00, 0x00, 0x01];
+    append_mapi_wire_id(&mut rops, crate::mapi::identity::IPM_SUBTREE_FOLDER_ID);
+    rops.push(0);
+    rops.extend_from_slice(&[0x3E, 0x00, 0x01, 0x02, 0x00]);
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]);
+    rops.extend_from_slice(&3u16.to_le_bytes());
+    rops.extend_from_slice(&0x6671_0014u32.to_le_bytes());
+    rops.extend_from_slice(&0x6672_001Fu32.to_le_bytes());
+    rops.extend_from_slice(&0x6673_0003u32.to_le_bytes());
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01]);
+    rops.extend_from_slice(&8u16.to_le_bytes());
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(&response_rops, &[0x3E, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x12, 0x02, 0, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0]));
+    assert!(!contains_bytes(
+        &response_rops,
+        &[0x3E, 0x02, 0x0F, 0x01, 0x04, 0x80]
     ));
 }
 

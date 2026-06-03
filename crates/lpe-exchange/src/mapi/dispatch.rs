@@ -7069,8 +7069,7 @@ where
             Some(RopId::SetColumns) => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::HierarchyTable { columns, .. })
                 | Some(MapiObject::ContentsTable { columns, .. })
-                | Some(MapiObject::AttachmentTable { columns, .. })
-                | Some(MapiObject::PermissionTable { columns, .. }) => {
+                | Some(MapiObject::AttachmentTable { columns, .. }) => {
                     if !property_tags_are_supported(&request.property_tags()) {
                         responses.extend_from_slice(&rop_error_response(
                             0x12,
@@ -7079,6 +7078,11 @@ where
                         ));
                         break;
                     }
+                    *columns = request.property_tags();
+                    responses.extend_from_slice(&rop_set_columns_response(&request));
+                }
+                Some(MapiObject::PermissionTable { columns, .. })
+                | Some(MapiObject::RuleTable { columns, .. }) => {
                     *columns = request.property_tags();
                     responses.extend_from_slice(&rop_set_columns_response(&request));
                 }
@@ -7166,6 +7170,11 @@ where
                         break;
                     }
                 },
+                Some(MapiObject::PermissionTable { position, .. })
+                | Some(MapiObject::RuleTable { position, .. }) => {
+                    *position = 0;
+                    responses.extend_from_slice(&rop_restrict_response(&request));
+                }
                 _ => responses.extend_from_slice(&rop_error_response(
                     0x14,
                     request.response_handle_index(),
@@ -12381,6 +12390,7 @@ where
                 };
                 if folder_row_for_id(folder_id, mailboxes).is_none()
                     && role_for_folder_id(folder_id).is_none()
+                    && !is_advertised_special_folder(folder_id)
                     && snapshot.public_folder_for_id(folder_id).is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
