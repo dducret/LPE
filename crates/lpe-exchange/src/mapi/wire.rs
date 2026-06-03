@@ -798,6 +798,7 @@ impl FastTransferMarker {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u16)]
+#[allow(dead_code)]
 pub(in crate::mapi) enum MapiNotificationEventMask {
     CriticalError = 0x0001,
     NewMail = 0x0002,
@@ -830,6 +831,7 @@ pub(in crate::mapi) const MAPI_HIERARCHY_NOTIFICATION_MASK: u16 =
         | MapiNotificationEventMask::ObjectMoved.as_u16()
         | MapiNotificationEventMask::TableModified.as_u16();
 
+#[allow(dead_code)]
 pub(in crate::mapi) const MAPI_SUPPORTED_NOTIFICATION_MASK: u16 =
     MapiNotificationEventMask::CriticalError.as_u16()
         | MapiNotificationEventMask::NewMail.as_u16()

@@ -2,7 +2,6 @@ use super::identity::wire_id_bytes_from_object_id;
 use super::rop::*;
 use super::wire::{
     MapiNotificationEventMask, MAPI_CONTENT_NOTIFICATION_MASK, MAPI_HIERARCHY_NOTIFICATION_MASK,
-    MAPI_SUPPORTED_NOTIFICATION_MASK,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -266,8 +265,4 @@ pub(in crate::mapi) fn notification_registration_from_request(
         notification_types,
         folder_id,
     }
-}
-
-pub(in crate::mapi) fn supported_notification_types(notification_types: u16) -> bool {
-    notification_types & !MAPI_SUPPORTED_NOTIFICATION_MASK == 0
 }

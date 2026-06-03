@@ -23670,12 +23670,19 @@ async fn mapi_over_http_register_notification_returns_protocol_success_handles()
     rops.push(0);
     append_mapi_wire_id(&mut rops, test_mapi_folder_id(5));
     rops.extend_from_slice(&0u64.to_le_bytes());
+    rops.extend_from_slice(&[0x29, 0x00, 0x01, 0x04]);
+    rops.extend_from_slice(&0xffffu16.to_le_bytes());
+    rops.push(0);
+    rops.push(1);
 
     let response = service
         .handle_mapi(
             MapiEndpoint::Emsmdb,
             &execute_headers,
-            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+            &execute_body(&rop_buffer(
+                &rops,
+                &[1, u32::MAX, u32::MAX, u32::MAX, u32::MAX],
+            )),
         )
         .await
         .unwrap();
@@ -23684,6 +23691,7 @@ async fn mapi_over_http_register_notification_returns_protocol_success_handles()
     let response_rops = response_rops_from_execute_response(response).await;
     assert!(contains_bytes(&response_rops, &[0x29, 0x02, 0, 0, 0, 0]));
     assert!(contains_bytes(&response_rops, &[0x29, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x29, 0x04, 0, 0, 0, 0]));
     assert!(!contains_bytes(
         &response_rops,
         &[0x00, 0x00, 0x02, 0x01, 0x04, 0x80]

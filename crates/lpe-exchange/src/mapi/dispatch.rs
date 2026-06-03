@@ -12552,14 +12552,6 @@ where
                 responses.extend_from_slice(&rop_query_named_properties_response(&request, session))
             }
             Some(RopId::RegisterNotification) => {
-                let notification_types = request.notification_types().unwrap_or(0);
-                if !supported_notification_types(notification_types) {
-                    responses.extend_from_slice(&unsupported_rop_response(
-                        0x29,
-                        request.response_handle_index(),
-                    ));
-                    continue;
-                }
                 let registration = notification_registration_from_request(&request);
                 if session.notification_cursor.is_none() {
                     session.notification_cursor = store
