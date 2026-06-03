@@ -5062,6 +5062,15 @@ pub(in crate::mapi) fn system_folder_display_name(display_name: &str) -> bool {
             | "deleted items"
             | "trash"
             | "outbox"
+            | "sync issues"
+            | "conflicts"
+            | "local failures"
+            | "server failures"
+            | "junk e-mail"
+            | "junk email"
+            | "rss feeds"
+            | "archive"
+            | "conversation history"
     )
 }
 

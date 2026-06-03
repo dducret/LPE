@@ -27225,7 +27225,7 @@ async fn mapi_over_http_sync_import_hierarchy_change_acknowledges_system_folder_
     let mut hierarchy_values = Vec::new();
     append_mapi_binary_property(&mut hierarchy_values, 0x65E1_0102, &[]);
     append_mapi_binary_property(&mut hierarchy_values, 0x65E0_0102, b"system-source-key");
-    append_mapi_utf16_property(&mut hierarchy_values, 0x3001_001F, "Inbox");
+    append_mapi_utf16_property(&mut hierarchy_values, 0x3001_001F, "Sync Issues");
 
     let mut rops = vec![
         0x02, 0x00, 0x00, 0x01, // RopOpenFolder
