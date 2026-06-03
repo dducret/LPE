@@ -545,6 +545,7 @@ fn hierarchy_rows<'a>(
     }
     let mut rows = mailboxes
         .iter()
+        .filter(|mailbox| !mailbox_shadows_non_mail_outlook_special_folder(mailbox))
         .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
         .filter(|mailbox| {
             restriction_matches_mailbox_with_context_for_account(
@@ -676,6 +677,21 @@ fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
         HierarchyRow::Collaboration(folder) => &folder.collection.display_name,
         HierarchyRow::Special(folder_id) => special_folder_metadata(*folder_id).0,
     }
+}
+
+pub(in crate::mapi) fn mailbox_shadows_non_mail_outlook_special_folder(
+    mailbox: &JmapMailbox,
+) -> bool {
+    if mapi_parent_folder_id(mailbox) != IPM_SUBTREE_FOLDER_ID
+        || folder_message_class(mailbox) != "IPF.Note"
+    {
+        return false;
+    }
+
+    matches!(
+        mailbox.name.trim().to_ascii_lowercase().as_str(),
+        "calendar" | "contacts" | "journal" | "notes" | "tasks"
+    )
 }
 
 fn hierarchy_row_content_count(row: &HierarchyRow<'_>) -> u32 {
@@ -4017,6 +4033,73 @@ mod tests {
         };
         assert_eq!(mapi_parent_folder_id(mailbox), IPM_SUBTREE_FOLDER_ID);
         let class = "IPF.Note"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert!(serialized
+            .windows(class.len())
+            .any(|window| window == class));
+    }
+
+    #[test]
+    fn ipm_subtree_hierarchy_suppresses_mail_folder_shadowing_calendar_special_folder() {
+        let shadow_id = Uuid::parse_str("aaaaaaaa-5555-4111-8111-aaaaaaaaaaaa").unwrap();
+        let shadow_folder_id = crate::mapi::identity::mapi_store_id(0x4f);
+        crate::mapi::identity::remember_mapi_identity(shadow_id, shadow_folder_id);
+        let mailboxes = vec![JmapMailbox {
+            id: shadow_id,
+            parent_id: None,
+            role: String::new(),
+            name: "Calendar".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        }];
+        let snapshot = MapiMailStoreSnapshot::new(
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+
+        let rows = hierarchy_rows(
+            IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
+        assert!(row_ids.contains(&CALENDAR_FOLDER_ID));
+        assert!(!row_ids.contains(&shadow_folder_id));
+
+        let sync_ids = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
+            .iter()
+            .map(mapi_folder_id)
+            .collect::<Vec<_>>();
+        assert!(sync_ids.contains(&CALENDAR_FOLDER_ID));
+        assert!(!sync_ids.contains(&shadow_folder_id));
+
+        let calendar_row = rows
+            .iter()
+            .find(|row| hierarchy_row_id(row) == CALENDAR_FOLDER_ID)
+            .expect("calendar special folder row");
+        let serialized = serialize_hierarchy_row(
+            *calendar_row,
+            &mailboxes,
+            &[PID_TAG_CONTAINER_CLASS_W],
+            Uuid::nil(),
+        );
+        let class = "IPF.Appointment"
             .encode_utf16()
             .flat_map(u16::to_le_bytes)
             .collect::<Vec<_>>();
