@@ -2840,6 +2840,27 @@ pub(in crate::mapi) fn message_body_stream_data(
             2 => (String::new(), Some(String::new())),
             _ => return None,
         },
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+        } if open_mode == 0 => {
+            let message = snapshot
+                .associated_config_message_for_id(*config_id)
+                .filter(|message| message.folder_id == *folder_id)?;
+            let body_text = match associated_config_property_value(&message, PID_TAG_BODY_W) {
+                Some(MapiValue::String(value)) => value,
+                _ => String::new(),
+            };
+            let body_html = match associated_config_property_value(&message, PID_TAG_BODY_HTML_W) {
+                Some(MapiValue::String(value)) => Some(value),
+                _ => match associated_config_property_value(&message, PID_TAG_HTML_BINARY) {
+                    Some(MapiValue::Binary(value)) => String::from_utf8(value).ok(),
+                    Some(MapiValue::String(value)) => Some(value),
+                    _ => None,
+                },
+            };
+            (body_text, body_html)
+        }
         _ => return None,
     };
 
