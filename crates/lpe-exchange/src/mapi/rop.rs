@@ -3989,6 +3989,12 @@ impl RopRequest {
     }
 
     pub(in crate::mapi) fn status_message_id(&self) -> Option<u64> {
+        if !matches!(
+            RopId::from_u8(self.rop_id),
+            Some(RopId::GetMessageStatus | RopId::SetMessageStatus)
+        ) {
+            return None;
+        }
         let bytes = self.payload.get(..8)?;
         crate::mapi::identity::object_id_from_wire_id(bytes)
     }

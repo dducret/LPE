@@ -68,13 +68,19 @@ pub(in crate::mapi) fn plan_mapi_store_access(
             return MapiAccessPlan::full();
         }
         if let Some(folder_id) = request.folder_id() {
-            push_unique(&mut plan.object_ids, folder_id);
+            push_unique(
+                &mut plan.object_ids,
+                session.resolve_special_folder_alias(folder_id),
+            );
         }
         if let Some(message_id) = request.message_id() {
             push_unique(&mut plan.object_ids, message_id);
         }
         if let Some(message_id) = request.status_message_id() {
-            push_unique(&mut plan.object_ids, message_id);
+            push_unique(
+                &mut plan.object_ids,
+                session.resolve_special_folder_alias(message_id),
+            );
         }
         if let Some(object_id) = request.long_term_source_object_id() {
             push_unique(&mut plan.object_ids, object_id);
@@ -116,6 +122,7 @@ pub(in crate::mapi) fn plan_mapi_store_access(
         }
         simulate_table_access(
             &mut plan,
+            session,
             &mut simulated_handles,
             &mut simulated_next_handle,
             &mut handle_slots,
@@ -1044,6 +1051,7 @@ fn rop_requires_full_snapshot(rop_id: u8) -> bool {
 
 fn simulate_table_access(
     plan: &mut MapiAccessPlan,
+    session: &MapiSession,
     handles: &mut HashMap<u32, MapiObject>,
     next_handle: &mut u32,
     handle_slots: &mut Vec<u32>,
@@ -1051,7 +1059,8 @@ fn simulate_table_access(
 ) {
     match request.rop_id {
         0x02 => {
-            let folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
+            let folder_id =
+                session.resolve_special_folder_alias(request.folder_id().unwrap_or(ROOT_FOLDER_ID));
             let handle = simulate_allocate_handle(
                 handles,
                 next_handle,
@@ -1116,12 +1125,13 @@ fn simulate_table_access(
             set_handle_slot(handle_slots, request.output_handle_index, handle);
         }
         0x06 => {
-            let folder_id = request.folder_id().unwrap_or_else(|| {
-                input_handle(handle_slots, request)
-                    .and_then(|handle| handles.get(&handle))
-                    .and_then(MapiObject::folder_id)
-                    .unwrap_or(INBOX_FOLDER_ID)
-            });
+            let folder_id =
+                session.resolve_special_folder_alias(request.folder_id().unwrap_or_else(|| {
+                    input_handle(handle_slots, request)
+                        .and_then(|handle| handles.get(&handle))
+                        .and_then(MapiObject::folder_id)
+                        .unwrap_or(INBOX_FOLDER_ID)
+                }));
             let object =
                 if folder_id == crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     MapiObject::PendingConversationAction {
@@ -1599,6 +1609,30 @@ mod tests {
         assert!(
             plan.object_ids.contains(&object_id),
             "object_id={object_id:#018x} plan={:?}",
+            plan.object_ids
+        );
+    }
+
+    #[test]
+    fn access_plan_resolves_learned_special_folder_aliases() {
+        let alias_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 9,
+        );
+        let mut session = empty_session();
+        session.record_special_folder_alias(alias_id, crate::mapi::identity::JUNK_FOLDER_ID);
+        let mut rop = vec![0x02, 0x00, 0x00, 0x01];
+        rop.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(alias_id)
+                .expect("alias id is encodable"),
+        );
+        rop.push(0);
+
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&rop));
+
+        assert_eq!(
+            plan.object_ids,
+            vec![crate::mapi::identity::JUNK_FOLDER_ID],
+            "plan={:?}",
             plan.object_ids
         );
     }

@@ -382,7 +382,11 @@ not by itself authorize broad client publication.
   accepted as session-local Inbox metadata during cached-mode bootstrap. LPE
   keeps canonical values for the documented indexes and preserves client data at
   other indexes, matching the special-folder property contract without creating
-  durable MAPI-only folder truth.
+  durable MAPI-only folder truth. Documented index aliases learned from this
+  property, including index 4 for Junk E-mail, resolve to the canonical special
+  folder for later `RopOpenFolder` calls in the same MAPI session. Unlearned
+  client-local folder identifiers remain unmapped and fail through the normal
+  `ecNotFound` folder-open path.
 - Outlook scalar default-folder EntryID writebacks on Root or Inbox are validated
   against the canonical special-folder map and acknowledged for interoperability,
   but they do not override the canonical projection or create session-local

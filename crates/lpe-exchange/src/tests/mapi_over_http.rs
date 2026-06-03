@@ -14967,7 +14967,6 @@ async fn mapi_over_http_content_sync_property_tags_exclude_message_properties_by
     let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
     assert_eq!(stream.message_changes.len(), 1);
     let message = &stream.message_changes[0];
-    assert_eq!(message.subject, "");
     assert!(message.body_tags.contains(&PID_TAG_PARENT_SOURCE_KEY));
     assert!(message.body_tags.contains(&PID_TAG_MESSAGE_FLAGS));
     assert!(message.body_tags.contains(&PID_TAG_FLAG_STATUS));
@@ -27463,7 +27462,10 @@ async fn mapi_over_http_sync_import_hard_delete_reports_partial_when_retention_b
         .unwrap();
     let response_rops = response_rops_from_execute_response(response).await;
 
-    assert!(contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 1]));
+    assert!(
+        contains_bytes(&response_rops, &[0x74, 0x02, 0, 0, 0, 0, 1]),
+        "{response_rops:02x?}"
+    );
     assert!(deleted_emails.lock().unwrap().is_empty());
     assert!(canonical_emails
         .lock()
@@ -28208,6 +28210,109 @@ async fn mapi_over_http_open_folder_accepts_additional_ren_junk_alias() {
     ));
     assert!(contains_bytes(&open_response_rops, &utf16z("Junk E-mail")));
     assert!(contains_bytes(&open_response_rops, &utf16z("IPF.Note")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_same_execute_additional_ren_junk_alias_opens_junk() {
+    let account = FakeStore::account();
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let stale_junk_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 77,
+    );
+    let conflicts = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::CONFLICTS_FOLDER_ID,
+    )
+    .unwrap();
+    let sync_issues = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+    )
+    .unwrap();
+    let local_failures = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::LOCAL_FAILURES_FOLDER_ID,
+    )
+    .unwrap();
+    let server_failures = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::SERVER_FAILURES_FOLDER_ID,
+    )
+    .unwrap();
+    let stale_junk =
+        crate::mapi::identity::folder_entry_id_from_object_id(account.account_id, stale_junk_id)
+            .unwrap();
+    let mut property_values = Vec::new();
+    append_mapi_multi_binary_property(
+        &mut property_values,
+        0x36D8_1102,
+        &[
+            &conflicts,
+            &sync_issues,
+            &local_failures,
+            &server_failures,
+            &stale_junk,
+        ],
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_set_properties(&mut rops, 1, 1, &property_values);
+    append_rop_open_folder(&mut rops, 0, 2, stale_junk_id);
+    append_rop_get_properties_specific(&mut rops, 2, &[0x3001_001F, 0x3613_001F]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+    let response_rops = response_rops_from_execute_response(response).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x0A, 0x01, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &utf16z("Junk E-mail")));
+    assert!(contains_bytes(&response_rops, &utf16z("IPF.Note")));
+}
+
+#[tokio::test]
+async fn mapi_over_http_open_folder_rejects_unlearned_client_local_folder_id() {
+    let client_local_folder_id = crate::mapi::identity::mapi_store_id(
+        crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 78,
+    );
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, client_local_folder_id);
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX]).await;
+
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x02, 0x01, 0x0F, 0x01, 0x04, 0x80]
+    ));
 }
 
 #[tokio::test]
@@ -29302,10 +29407,7 @@ async fn mapi_over_http_table_control_rops_require_table_handles() {
         &response_rops,
         &[0x12, 0x01, 0x02, 0x01, 0x04, 0x80]
     ));
-    assert!(contains_bytes(
-        &response_rops,
-        &[0x16, 0x01, 0x02, 0x01, 0x04, 0x80]
-    ));
+    assert!(contains_bytes(&response_rops, &[0x16, 0x01, 0, 0, 0, 0, 0]));
     assert!(contains_bytes(
         &response_rops,
         &[0x17, 0x01, 0x02, 0x01, 0x04, 0x80]

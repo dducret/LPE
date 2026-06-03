@@ -11586,7 +11586,8 @@ where
                 let mut partial_completion = false;
                 let hard_delete = request.import_delete_hard_delete();
                 for message_id in request.import_delete_message_ids() {
-                    if transient_client_local_message_id(message_id) {
+                    let email = message_for_id(folder_id, message_id, mailboxes, emails);
+                    if transient_client_local_message_id(message_id) && email.is_none() {
                         continue;
                     }
                     if let Some(note) = snapshot.note_for_id(folder_id, message_id) {
@@ -11609,8 +11610,7 @@ where
                         }
                         continue;
                     }
-                    let Some(email) = message_for_id(folder_id, message_id, mailboxes, emails)
-                    else {
+                    let Some(email) = email else {
                         partial_completion = true;
                         continue;
                     };
@@ -13633,6 +13633,14 @@ fn pending_message_is_trash_sync_artifact(
     folder_id == TRASH_FOLDER_ID
         && !properties.is_empty()
         && recipients.is_empty()
+        && properties.keys().any(|tag| {
+            matches!(
+                *tag,
+                PID_TAG_LAST_MODIFICATION_TIME
+                    | PID_TAG_CHANGE_KEY
+                    | PID_TAG_PREDECESSOR_CHANGE_LIST
+            )
+        })
         && imported_message_source_key(properties)
             .as_deref()
             .and_then(source_key_global_counter)
