@@ -28,10 +28,10 @@ use lpe_storage::{
     ClientReminder, ClientTask, CollaborationCollection, CollaborationGrant,
     CollaborationResourceKind, CollaborationRights, CreatePublicFolderInput, JmapEmail,
     JmapEmailAddress, JmapEmailFollowupUpdate, JmapImportedEmailInput, JmapMailbox,
-    JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxRule, PublicFolder, PublicFolderItem,
-    ReminderQuery, Storage, SubmitMessageInput, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientTaskInput,
-    UpsertPublicFolderItemInput,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, MailboxRule, ManagedRetentionFolderCreateInput,
+    PublicFolder, PublicFolderItem, ReminderQuery, Storage, SubmitMessageInput,
+    SubmittedRecipientInput, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientTaskInput, UpsertPublicFolderItemInput,
 };
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -776,7 +776,7 @@ where
             "MarkAllItemsAsRead" => self.mark_all_items_as_read(&principal, &body).await?,
             "CreateFolder" => self.create_folder(&principal, &body).await?,
             "CreateFolderPath" => self.create_folder_path(&principal, &body).await?,
-            "CreateManagedFolder" => create_managed_folder_unsupported_response(),
+            "CreateManagedFolder" => self.create_managed_folder(&principal, &body).await?,
             "CopyFolder" => self.copy_folder(&principal, &body).await?,
             "EmptyFolder" => self.empty_folder(&principal, &body).await?,
             "MoveFolder" => self.move_folder(&principal, &body).await?,
@@ -4568,6 +4568,57 @@ where
 
         Ok(result.unwrap_or_else(|error: anyhow::Error| {
             operation_error_response("CreateFolder", "ErrorInvalidOperation", &error.to_string())
+        }))
+    }
+
+    async fn create_managed_folder(
+        &self,
+        principal: &AccountPrincipal,
+        request: &str,
+    ) -> Result<String> {
+        let result = async {
+            let folder_names = element_contents(request, "FolderName")
+                .into_iter()
+                .map(xml_text)
+                .filter(|name| !name.is_empty())
+                .collect::<Vec<_>>();
+            if folder_names.is_empty() {
+                bail!("CreateManagedFolder requires at least one FolderName.");
+            }
+
+            let mut folders = String::new();
+            for folder_name in folder_names {
+                let mailbox = self
+                    .store
+                    .create_managed_retention_folder(
+                        ManagedRetentionFolderCreateInput {
+                            account_id: principal.account_id,
+                            folder_name: folder_name.clone(),
+                            is_subscribed: true,
+                        },
+                        AuditEntryInput {
+                            actor: principal.email.clone(),
+                            action: "ews-create-managed-folder".to_string(),
+                            subject: folder_name,
+                        },
+                    )
+                    .await?;
+                folders.push_str(&mailbox_folder_xml(&mailbox));
+            }
+
+            Ok(folders_operation_success_response(
+                "CreateManagedFolder",
+                folders,
+            ))
+        }
+        .await;
+
+        Ok(result.unwrap_or_else(|error: anyhow::Error| {
+            operation_error_response(
+                "CreateManagedFolder",
+                ews_error_code_or(&error, "ErrorInvalidOperation"),
+                &error.to_string(),
+            )
         }))
     }
 
@@ -12009,14 +12060,6 @@ fn unsupported_operation_response(operation: &str) -> String {
         operation,
         "ErrorInvalidOperation",
         &format!("{operation} is not implemented by the EWS MVP."),
-    )
-}
-
-fn create_managed_folder_unsupported_response() -> String {
-    operation_error_response(
-        "CreateManagedFolder",
-        "ErrorInvalidOperation",
-        "CreateManagedFolder is not implemented by the EWS MVP. It is a deprecated Exchange managed-folder operation; LPE exposes canonical retention tags but has no documented managed-folder creation model.",
     )
 }
 

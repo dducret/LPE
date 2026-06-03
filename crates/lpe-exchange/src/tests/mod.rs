@@ -12,15 +12,15 @@ use lpe_storage::{
     CollaborationResourceKind, CollaborationRights, ConversationAction, CreatePublicFolderInput,
     DelegateFreeBusyMessageObject, JmapEmail, JmapEmailAddress, JmapEmailMailboxState,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
-    JmapMailboxUpdateInput, JournalEntry, MailboxRule, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights, PublicFolderTree,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
-    SenderDelegationRight, SieveScriptDocument, Storage, StoredAccountAppPassword,
-    SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpdatePublicFolderInput,
-    UpsertClientContactInput, UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
-    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
-    UpsertSearchFolderInput,
+    JmapMailboxUpdateInput, JournalEntry, MailboxRule, ManagedRetentionFolderCreateInput,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderRights,
+    PublicFolderTree, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
+    StoredAccountAppPassword, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput,
+    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
+    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::PgPool;
@@ -1219,6 +1219,65 @@ impl ExchangeStore for FakeStore {
             })
             .collect();
         Box::pin(async move { Ok(tags) })
+    }
+
+    fn create_managed_retention_folder<'a>(
+        &'a self,
+        input: ManagedRetentionFolderCreateInput,
+        _audit: lpe_storage::AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        let tenant_id = self
+            .session
+            .as_ref()
+            .map(|account| account.tenant_id)
+            .unwrap_or_else(|| Self::account().tenant_id);
+        let tag = self
+            .ews_retention_policy_tags
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| {
+                entry.tenant_id == tenant_id
+                    && entry
+                        .tag
+                        .display_name
+                        .eq_ignore_ascii_case(&input.folder_name)
+                    && (entry.tag.tag_type == "custom_folder" || entry.tag.tag_type == "personal")
+                    && (entry.tag.is_visible || entry.assigned_account_id == Some(input.account_id))
+            })
+            .map(|entry| entry.tag.clone());
+        let result = tag
+            .map(|tag| {
+                let mailbox_id = Uuid::from_u128(
+                    0x44444444_4444_4444_4444_444444445000
+                        + self.mailboxes.lock().unwrap().len() as u128,
+                );
+                let mailbox = JmapMailbox {
+                    id: mailbox_id,
+                    parent_id: None,
+                    role: "custom".to_string(),
+                    name: tag.display_name,
+                    sort_order: 40,
+                    modseq: 40,
+                    total_emails: 0,
+                    unread_emails: 0,
+                    is_subscribed: input.is_subscribed,
+                };
+                self.mailboxes.lock().unwrap().push(mailbox.clone());
+                self.created_mailboxes
+                    .lock()
+                    .unwrap()
+                    .push(JmapMailboxCreateInput {
+                        account_id: input.account_id,
+                        name: input.folder_name,
+                        parent_id: None,
+                        sort_order: None,
+                        is_subscribed: input.is_subscribed,
+                    });
+                Ok(mailbox)
+            })
+            .unwrap_or_else(|| Err(anyhow::anyhow!("managed retention folder tag not found")));
+        Box::pin(async move { result })
     }
 
     fn fetch_ews_searchable_mailboxes<'a>(

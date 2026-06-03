@@ -3,11 +3,12 @@ use std::{env, str::FromStr};
 use anyhow::{Context, Result};
 use lpe_storage::{
     AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CreatePublicFolderTreeInput,
-    JmapImportedEmailInput, JmapMailboxCreateInput, JmapMailboxUpdateInput, NewAccount, NewDomain,
-    NewMailbox, NewPstTransferJob, PublicFolderPerUserStatePatch, PublicFolderPermissionInput,
-    PublicFolderReplicaInput, ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight,
-    Storage, SubmitMessageInput, SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    JmapImportedEmailInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
+    ManagedRetentionFolderCreateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob,
+    PublicFolderPerUserStatePatch, PublicFolderPermissionInput, PublicFolderReplicaInput,
+    ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput, UpsertJournalEntryInput,
+    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -123,6 +124,11 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "mailbox canonical name storage guards",
             exercise_mailbox_name_policy_storage_guards(&storage, pool, &fixture).await,
+        );
+        collect(
+            &mut failures,
+            "managed retention folder SQL path",
+            exercise_managed_retention_folder_path(&storage, pool, &fixture).await,
         );
 
         let submitted = collect(
@@ -1419,6 +1425,126 @@ async fn exercise_mailbox_name_policy_storage_guards(
         stored_decomposed_count == 0,
         "direct storage APIs must store NFC display_name values"
     );
+
+    Ok(())
+}
+
+async fn exercise_managed_retention_folder_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let tag_id = Uuid::new_v4();
+    let hidden_tag_id = Uuid::new_v4();
+    let foreign_tenant_id = Uuid::new_v4();
+
+    sqlx::query(
+        r#"
+        INSERT INTO tenants (id, slug, display_name)
+        VALUES ($1, $2, 'Foreign Retention Tenant')
+        "#,
+    )
+    .bind(foreign_tenant_id)
+    .bind(format!("foreign-retention-{}", Uuid::new_v4().simple()))
+    .execute(pool)
+    .await
+    .context("seed foreign tenant for managed retention isolation")?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO retention_policy_tags (
+            id, tenant_id, display_name, tag_type, action, retention_days,
+            is_visible, description
+        )
+        VALUES
+            ($1, $2, 'Managed Archive', 'custom_folder', 'delete_and_allow_recovery', 180, TRUE, 'Managed archive'),
+            ($3, $2, 'Hidden Managed Folder', 'custom_folder', 'delete_and_allow_recovery', 90, FALSE, 'Hidden managed folder'),
+            ($4, $5, 'Foreign Managed Folder', 'custom_folder', 'delete_and_allow_recovery', 30, TRUE, 'Foreign managed folder')
+        "#,
+    )
+    .bind(tag_id)
+    .bind(fixture.tenant_id)
+    .bind(hidden_tag_id)
+    .bind(Uuid::new_v4())
+    .bind(foreign_tenant_id)
+    .execute(pool)
+    .await
+    .context("seed retention policy tags for managed folder path")?;
+
+    let folder = storage
+        .create_managed_retention_folder(
+            ManagedRetentionFolderCreateInput {
+                account_id: fixture.account_id,
+                folder_name: "Managed Archive".to_string(),
+                is_subscribed: true,
+            },
+            audit(
+                "test-admin",
+                "mailbox.create-managed-retention-folder",
+                "managed archive",
+            ),
+        )
+        .await
+        .context("create managed retention folder through canonical storage API")?;
+
+    let row = sqlx::query(
+        r#"
+        SELECT retention_policy_tag_id, retention_days
+        FROM mailboxes
+        WHERE tenant_id = $1
+          AND account_id = $2
+          AND id = $3
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(fixture.account_id)
+    .bind(folder.id)
+    .fetch_one(pool)
+    .await
+    .context("load managed retention folder mailbox row")?;
+    anyhow::ensure!(
+        row.try_get::<Option<Uuid>, _>("retention_policy_tag_id")? == Some(tag_id),
+        "managed retention folder must store canonical retention tag identity"
+    );
+    anyhow::ensure!(
+        row.try_get::<i32, _>("retention_days")? == 180,
+        "managed retention folder must project tag retention days onto mailbox retention guard"
+    );
+
+    expect_anyhow_failure(
+        "managed retention folder rejects hidden unassigned same-tenant tag",
+        storage
+            .create_managed_retention_folder(
+                ManagedRetentionFolderCreateInput {
+                    account_id: fixture.account_id,
+                    folder_name: "Hidden Managed Folder".to_string(),
+                    is_subscribed: true,
+                },
+                audit(
+                    "test-admin",
+                    "mailbox.create-managed-retention-folder",
+                    "hidden managed folder",
+                ),
+            )
+            .await,
+    )?;
+    expect_anyhow_failure(
+        "managed retention folder rejects cross-tenant tag",
+        storage
+            .create_managed_retention_folder(
+                ManagedRetentionFolderCreateInput {
+                    account_id: fixture.account_id,
+                    folder_name: "Foreign Managed Folder".to_string(),
+                    is_subscribed: true,
+                },
+                audit(
+                    "test-admin",
+                    "mailbox.create-managed-retention-folder",
+                    "foreign managed folder",
+                ),
+            )
+            .await,
+    )?;
 
     Ok(())
 }

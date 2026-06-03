@@ -8,14 +8,15 @@ use lpe_storage::{
     CreatePublicFolderInput, DelegateFreeBusyMessageObject, JmapEmail, JmapEmailFollowupUpdate,
     JmapEmailQuery, JmapImportedEmailInput, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JournalEntry, MailboxDelegationGrantInput,
-    MailboxFolderDelegationGrantInput, MailboxRule, PublicFolder, PublicFolderItem,
-    PublicFolderPerUserState, PublicFolderPerUserStatePatch, PublicFolderPermission,
-    PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree, RecoverableItem,
-    ReminderQuery, SavedDraftMessage, SearchFolderDefinition, SenderDelegationGrantInput,
-    SenderDelegationRight, SieveScriptDocument, Storage, SubmitMessageInput, SubmittedMessage,
-    UpdatePublicFolderInput, UpsertClientContactInput, UpsertClientEventInput,
-    UpsertClientNoteInput, UpsertClientTaskInput, UpsertConversationActionInput,
-    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    MailboxFolderDelegationGrantInput, MailboxRule, ManagedRetentionFolderCreateInput,
+    PublicFolder, PublicFolderItem, PublicFolderPerUserState, PublicFolderPerUserStatePatch,
+    PublicFolderPermission, PublicFolderPermissionInput, PublicFolderReplica, PublicFolderTree,
+    RecoverableItem, ReminderQuery, SavedDraftMessage, SearchFolderDefinition,
+    SenderDelegationGrantInput, SenderDelegationRight, SieveScriptDocument, Storage,
+    SubmitMessageInput, SubmittedMessage, UpdatePublicFolderInput, UpsertClientContactInput,
+    UpsertClientEventInput, UpsertClientNoteInput, UpsertClientTaskInput,
+    UpsertConversationActionInput, UpsertJournalEntryInput, UpsertPublicFolderItemInput,
+    UpsertSearchFolderInput,
 };
 use sqlx::Row;
 use uuid::Uuid;
@@ -754,6 +755,12 @@ pub trait ExchangeStore: AccountAuthStore {
         &'a self,
         principal: &'a AccountPrincipal,
     ) -> StoreFuture<'a, Vec<EwsRetentionPolicyTag>>;
+
+    fn create_managed_retention_folder<'a>(
+        &'a self,
+        input: ManagedRetentionFolderCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox>;
 
     fn fetch_ews_searchable_mailboxes<'a>(
         &'a self,
@@ -1858,6 +1865,14 @@ impl ExchangeStore for Storage {
                 })
                 .collect()
         })
+    }
+
+    fn create_managed_retention_folder<'a>(
+        &'a self,
+        input: ManagedRetentionFolderCreateInput,
+        audit: AuditEntryInput,
+    ) -> StoreFuture<'a, JmapMailbox> {
+        Box::pin(async move { self.create_managed_retention_folder(input, audit).await })
     }
 
     fn fetch_ews_searchable_mailboxes<'a>(

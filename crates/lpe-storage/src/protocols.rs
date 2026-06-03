@@ -447,6 +447,13 @@ pub struct JmapMailboxUpdateInput {
 }
 
 #[derive(Debug, Clone)]
+pub struct ManagedRetentionFolderCreateInput {
+    pub account_id: Uuid,
+    pub folder_name: String,
+    pub is_subscribed: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct JmapImportedEmailInput {
     pub account_id: Uuid,
     pub submitted_by_account_id: Uuid,
@@ -1922,6 +1929,170 @@ impl Storage {
             .into_iter()
             .find(|mailbox| mailbox.id == mailbox_id)
             .ok_or_else(|| anyhow!("mailbox creation failed"))
+    }
+
+    pub async fn create_managed_retention_folder(
+        &self,
+        input: ManagedRetentionFolderCreateInput,
+        audit: AuditEntryInput,
+    ) -> Result<JmapMailbox> {
+        let tenant_id = self.tenant_id_for_account_id(input.account_id).await?;
+        let name = MailboxDisplayName::new(&input.folder_name)?.into_string();
+        let mut tx = self.pool.begin().await?;
+        self.ensure_account_exists(&mut tx, &tenant_id, input.account_id)
+            .await?;
+
+        let tag = sqlx::query(
+            r#"
+            WITH assignment AS (
+                SELECT default_tag_id
+                FROM account_retention_policy_assignments
+                WHERE tenant_id = $1
+                  AND account_id = $2
+            )
+            SELECT tag.id, tag.display_name, tag.retention_days
+            FROM retention_policy_tags tag
+            LEFT JOIN assignment ON TRUE
+            WHERE tag.tenant_id = $1
+              AND tag.lifecycle_state = 'active'
+              AND tag.tag_type IN ('custom_folder', 'personal')
+              AND lower(tag.display_name) = lower($3)
+              AND (tag.is_visible OR tag.id = assignment.default_tag_id)
+            ORDER BY
+                CASE WHEN tag.id = assignment.default_tag_id THEN 0 ELSE 1 END,
+                tag.id
+            LIMIT 1
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(&name)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("managed retention folder tag not found"))?;
+
+        let tag_id = tag.try_get::<Uuid, _>("id")?;
+        let tag_display_name = tag.try_get::<String, _>("display_name")?;
+        let retention_days = tag
+            .try_get::<Option<i32>, _>("retention_days")?
+            .unwrap_or(365);
+        let display_name = MailboxDisplayName::new(&tag_display_name)?.into_string();
+        let modseq = self
+            .allocate_mail_modseq_in_tx(&mut tx, &tenant_id, input.account_id)
+            .await?;
+
+        let existing = sqlx::query(
+            r#"
+            SELECT id
+            FROM mailboxes
+            WHERE tenant_id = $1
+              AND account_id = $2
+              AND parent_mailbox_id IS NULL
+              AND role = 'custom'
+              AND normalized_display_name = lower($3)
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(input.account_id)
+        .bind(&display_name)
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let (mailbox_id, change_kind) = if let Some(row) = existing {
+            let mailbox_id = row.try_get::<Uuid, _>("id")?;
+            sqlx::query(
+                r#"
+                UPDATE mailboxes
+                SET retention_policy_tag_id = $4,
+                    retention_days = $5,
+                    modseq = $6,
+                    updated_at = NOW()
+                WHERE tenant_id = $1
+                  AND account_id = $2
+                  AND id = $3
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(mailbox_id)
+            .bind(tag_id)
+            .bind(retention_days)
+            .bind(modseq as i64)
+            .execute(&mut *tx)
+            .await?;
+            (mailbox_id, "updated")
+        } else {
+            let next_sort_order = sqlx::query_scalar::<_, i32>(
+                r#"
+                SELECT COALESCE(MAX(sort_order), 0) + 1
+                FROM mailboxes
+                WHERE tenant_id = $1 AND account_id = $2
+                "#,
+            )
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            let mailbox_id = Uuid::new_v4();
+            sqlx::query(
+                r#"
+                INSERT INTO mailboxes (
+                    id, tenant_id, account_id, role, display_name, sort_order,
+                    retention_days, retention_policy_tag_id, uid_validity, modseq
+                )
+                VALUES ($1, $2, $3, 'custom', $4, $5, $6, $7, $8, $9)
+                "#,
+            )
+            .bind(mailbox_id)
+            .bind(&tenant_id)
+            .bind(input.account_id)
+            .bind(&display_name)
+            .bind(next_sort_order)
+            .bind(retention_days)
+            .bind(tag_id)
+            .bind(allocate_uid_validity())
+            .bind(modseq as i64)
+            .execute(&mut *tx)
+            .await?;
+            (mailbox_id, "created")
+        };
+
+        Self::set_mailbox_subscription_in_tx(
+            &mut tx,
+            &tenant_id,
+            input.account_id,
+            mailbox_id,
+            input.account_id,
+            input.is_subscribed,
+        )
+        .await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        let principals =
+            Self::affected_mail_principals_in_tx(&mut tx, &tenant_id, input.account_id).await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(input.account_id),
+            Some(mailbox_id),
+            "mailbox",
+            mailbox_id,
+            change_kind,
+            modseq,
+            &principals,
+            serde_json::json!({
+                "name": display_name,
+                "retentionPolicyTagId": tag_id,
+            }),
+        )
+        .await?;
+        Self::emit_mail_change(&mut tx, &tenant_id, input.account_id).await?;
+        tx.commit().await?;
+
+        self.fetch_jmap_mailboxes(input.account_id)
+            .await?
+            .into_iter()
+            .find(|mailbox| mailbox.id == mailbox_id)
+            .ok_or_else(|| anyhow!("managed retention folder creation failed"))
     }
 
     pub async fn create_imap_mailbox(

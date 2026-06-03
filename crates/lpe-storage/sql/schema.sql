@@ -504,6 +504,7 @@ CREATE TABLE mailboxes (
     normalized_display_name TEXT GENERATED ALWAYS AS (lower(display_name)) STORED,
     sort_order INTEGER NOT NULL DEFAULT 0,
     retention_days INTEGER NOT NULL DEFAULT 365 CHECK (retention_days >= 0),
+    retention_policy_tag_id UUID,
     recoverable_items_retention_days INTEGER CHECK (recoverable_items_retention_days IS NULL OR recoverable_items_retention_days >= 0),
     hierarchy_path TEXT NOT NULL DEFAULT '/' CHECK (left(hierarchy_path, 1) = '/'),
     hierarchy_depth INTEGER NOT NULL DEFAULT 0 CHECK (hierarchy_depth >= 0),
@@ -538,6 +539,10 @@ CREATE INDEX mailboxes_parent_idx
 
 CREATE INDEX mailboxes_hierarchy_idx
     ON mailboxes (tenant_id, account_id, hierarchy_path);
+
+CREATE INDEX mailboxes_retention_policy_tag_idx
+    ON mailboxes (tenant_id, account_id, retention_policy_tag_id)
+    WHERE retention_policy_tag_id IS NOT NULL;
 
 CREATE TABLE search_folders (
     id UUID PRIMARY KEY,
@@ -1223,6 +1228,12 @@ CREATE TABLE account_retention_policy_assignments (
     FOREIGN KEY (tenant_id, default_tag_id) REFERENCES retention_policy_tags (tenant_id, id) ON DELETE RESTRICT,
     FOREIGN KEY (tenant_id, assigned_by_account_id) REFERENCES accounts (tenant_id, id) ON DELETE RESTRICT
 );
+
+ALTER TABLE mailboxes
+    ADD CONSTRAINT mailboxes_retention_policy_tag_fk
+    FOREIGN KEY (tenant_id, retention_policy_tag_id)
+    REFERENCES retention_policy_tags (tenant_id, id)
+    ON DELETE RESTRICT;
 
 CREATE TABLE mailbox_pst_jobs (
     id UUID PRIMARY KEY,

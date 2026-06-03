@@ -67,7 +67,8 @@ pub use crate::protocols::{
     JmapEmailFollowupUpdate, JmapEmailMailboxState, JmapEmailQuery, JmapEmailSubmission,
     JmapImportedEmailInput, JmapMailObjectChange, JmapMailbox, JmapMailboxCreateInput,
     JmapMailboxUpdateInput, JmapQuota, JmapStoredQueryState, JmapStringObjectChange,
-    JmapThreadQuery, JmapUploadBlob, SearchFolderDefinition, UpsertSearchFolderInput,
+    JmapThreadQuery, JmapUploadBlob, ManagedRetentionFolderCreateInput, SearchFolderDefinition,
+    UpsertSearchFolderInput,
 };
 pub use crate::pst::{NewPstTransferJob, PstJobExecutionSummary, PstTransferJobRecord};
 pub use crate::public_folders::{

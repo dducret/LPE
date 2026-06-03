@@ -468,6 +468,33 @@ CREATE TABLE IF NOT EXISTS public.account_retention_policy_assignments (
     FOREIGN KEY (tenant_id, assigned_by_account_id) REFERENCES public.accounts (tenant_id, id) ON DELETE RESTRICT
 );
 
+ALTER TABLE public.mailboxes
+  ADD COLUMN IF NOT EXISTS retention_policy_tag_id UUID;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.mailboxes'::regclass
+      AND conname = 'mailboxes_retention_policy_tag_fk'
+  ) THEN
+    ALTER TABLE public.mailboxes
+      ADD CONSTRAINT mailboxes_retention_policy_tag_fk
+      FOREIGN KEY (tenant_id, retention_policy_tag_id)
+      REFERENCES public.retention_policy_tags (tenant_id, id)
+      ON DELETE RESTRICT
+      NOT VALID;
+  END IF;
+END $$;
+
+ALTER TABLE public.mailboxes
+  VALIDATE CONSTRAINT mailboxes_retention_policy_tag_fk;
+
+CREATE INDEX IF NOT EXISTS mailboxes_retention_policy_tag_idx
+    ON public.mailboxes (tenant_id, account_id, retention_policy_tag_id)
+    WHERE retention_policy_tag_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS public.mailbox_item_transfer_jobs (
     id UUID PRIMARY KEY,
     tenant_id UUID NOT NULL,
@@ -1376,9 +1403,11 @@ fi
 recoverable_table="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');")"
 recoverable_account_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name IN ('recoverable_items_retention_days', 'litigation_hold_enabled', 'litigation_hold_started_at');")"
 recoverable_mailbox_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'recoverable_items_retention_days';")"
+managed_retention_mailbox_column_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'retention_policy_tag_id';")"
+managed_retention_mailbox_fk_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mailboxes'::regclass AND conname = 'mailboxes_retention_policy_tag_fk';")"
 recoverable_change_constraint_count="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%recoverable_item%';")"
 recoverable_shape_constraint_ok="$(psql "${DATABASE_URL}" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%' AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%' AND pg_get_constraintdef(oid) NOT LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%';")"
-if [[ "${recoverable_table}" != "recoverable_items" || "${recoverable_account_column_count}" != "3" || "${recoverable_mailbox_column_count}" != "1" || "${recoverable_change_constraint_count}" -lt "4" || "${recoverable_shape_constraint_ok}" -lt "1" ]]; then
+if [[ "${recoverable_table}" != "recoverable_items" || "${recoverable_account_column_count}" != "3" || "${recoverable_mailbox_column_count}" != "1" || "${managed_retention_mailbox_column_count}" != "1" || "${managed_retention_mailbox_fk_count}" != "1" || "${recoverable_change_constraint_count}" -lt "4" || "${recoverable_shape_constraint_ok}" -lt "1" ]]; then
   echo "LPE 0.4 schema compatibility update did not produce the expected recoverable-items shape." >&2
   exit 1
 fi

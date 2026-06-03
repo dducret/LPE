@@ -139,6 +139,18 @@ recoverable_mailbox_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc
   || fail "Recoverable-item mailbox retention override column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Recoverable-item mailbox retention override column is present"
 
+managed_retention_mailbox_column_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'mailboxes' AND column_name = 'retention_policy_tag_id';")" \
+  || fail "Unable to inspect managed retention folder mailbox columns"
+[[ "$managed_retention_mailbox_column_count" == "1" ]] \
+  || fail "Managed retention folder mailbox tag column is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Managed retention folder mailbox tag column is present"
+
+managed_retention_mailbox_fk_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mailboxes'::regclass AND conname = 'mailboxes_retention_policy_tag_fk';")" \
+  || fail "Unable to inspect managed retention folder mailbox constraint"
+[[ "$managed_retention_mailbox_fk_count" == "1" ]] \
+  || fail "Managed retention folder mailbox tag constraint is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "Managed retention folder mailbox tag constraint is present"
+
 recoverable_change_constraint_count="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid IN ('public.mail_change_log'::regclass, 'public.tombstones'::regclass) AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%recoverable_item%';")" \
   || fail "Unable to inspect recoverable-item change-log constraints"
 [[ "$recoverable_change_constraint_count" -ge "4" ]] \

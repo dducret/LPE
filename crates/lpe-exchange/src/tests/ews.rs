@@ -4942,12 +4942,27 @@ async fn unknown_ews_operations_return_parseable_invalid_operation_errors() {
 }
 
 #[tokio::test]
-async fn create_managed_folder_returns_tracked_parseable_gap() {
+async fn create_managed_folder_uses_canonical_retention_folder_api() {
+    let account = FakeStore::account();
+    let tag_id = Uuid::parse_str("66666666-6666-6666-6666-666666666666").unwrap();
     let store = FakeStore {
-        session: Some(FakeStore::account()),
+        session: Some(account.clone()),
+        ews_retention_policy_tags: Arc::new(Mutex::new(vec![FakeRetentionPolicyTag {
+            tenant_id: account.tenant_id,
+            assigned_account_id: None,
+            tag: retention_policy_tag(
+                tag_id,
+                "Managed Archive",
+                "custom_folder",
+                "delete_and_allow_recovery",
+                Some(180),
+                true,
+                "Managed archive folder",
+            ),
+        }])),
         ..Default::default()
     };
-    let service = ExchangeService::new(store);
+    let service = ExchangeService::new(store.clone());
 
     let response = service
         .handle(
@@ -4960,9 +4975,75 @@ async fn create_managed_folder_returns_tracked_parseable_gap() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = response_text(response).await;
     assert!(body.contains("<m:CreateManagedFolderResponse>"));
-    assert!(body.contains("ResponseClass=\"Error\""));
-    assert!(body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
-    assert!(body.contains("no documented managed-folder creation model"));
+    assert!(body.contains("<m:ResponseCode>NoError</m:ResponseCode>"));
+    assert!(body.contains("<t:DisplayName>Managed Archive</t:DisplayName>"));
+    assert_eq!(store.created_mailboxes.lock().unwrap().len(), 1);
+    assert_eq!(
+        store.created_mailboxes.lock().unwrap()[0].name,
+        "Managed Archive"
+    );
+}
+
+#[tokio::test]
+async fn create_managed_folder_rejects_unavailable_retention_tags() {
+    let account = FakeStore::account();
+    let foreign_tenant_id = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+    let store = FakeStore {
+        session: Some(account.clone()),
+        ews_retention_policy_tags: Arc::new(Mutex::new(vec![
+            FakeRetentionPolicyTag {
+                tenant_id: account.tenant_id,
+                assigned_account_id: None,
+                tag: retention_policy_tag(
+                    Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap(),
+                    "Hidden Folder",
+                    "custom_folder",
+                    "delete_and_allow_recovery",
+                    Some(90),
+                    false,
+                    "Hidden tag",
+                ),
+            },
+            FakeRetentionPolicyTag {
+                tenant_id: foreign_tenant_id,
+                assigned_account_id: Some(account.account_id),
+                tag: retention_policy_tag(
+                    Uuid::parse_str("88888888-8888-8888-8888-888888888888").unwrap(),
+                    "Foreign Folder",
+                    "custom_folder",
+                    "delete_and_allow_recovery",
+                    Some(90),
+                    true,
+                    "Foreign tag",
+                ),
+            },
+        ])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store.clone());
+
+    let hidden_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateManagedFolder><m:FolderNames><t:FolderName>Hidden Folder</t:FolderName></m:FolderNames></m:CreateManagedFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let hidden_body = response_text(hidden_response).await;
+    assert!(hidden_body.contains("<m:CreateManagedFolderResponse>"));
+    assert!(hidden_body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(hidden_body.contains("managed retention folder tag not found"));
+
+    let foreign_response = service
+        .handle(
+            &bearer_headers(),
+            br#"<s:Envelope><s:Body><m:CreateManagedFolder><m:FolderNames><t:FolderName>Foreign Folder</t:FolderName></m:FolderNames></m:CreateManagedFolder></s:Body></s:Envelope>"#,
+        )
+        .await
+        .unwrap();
+    let foreign_body = response_text(foreign_response).await;
+    assert!(foreign_body.contains("<m:ResponseCode>ErrorInvalidOperation</m:ResponseCode>"));
+    assert!(store.created_mailboxes.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -8604,10 +8685,7 @@ const MICROSOFT_EWS_OPERATION_CATALOG: &[&str] = &[
     "UploadItems",
 ];
 
-const EWS_UNSUPPORTED_REASONS: &[(&str, &str)] = &[(
-    "CreateManagedFolder",
-    "Deprecated Exchange managed-folder behavior is superseded by canonical retention tags.",
-)];
+const EWS_UNSUPPORTED_REASONS: &[(&str, &str)] = &[];
 
 const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     EwsCatalogCoverage {
@@ -8687,8 +8765,8 @@ const EWS_CATALOG_COVERAGE: &[EwsCatalogCoverage] = &[
     },
     EwsCatalogCoverage {
         operation: "CreateManagedFolder",
-        kind: EwsCatalogCoverageKind::Unsupported,
-        test_name: "create_managed_folder_returns_tracked_parseable_gap",
+        kind: EwsCatalogCoverageKind::Behavioral,
+        test_name: "create_managed_folder_uses_canonical_retention_folder_api",
     },
     EwsCatalogCoverage {
         operation: "CreateUserConfiguration",
