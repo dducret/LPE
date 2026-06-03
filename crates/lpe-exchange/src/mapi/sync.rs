@@ -518,15 +518,23 @@ pub(in crate::mapi) fn special_sync_objects_for(
             CONTACTS_SEARCH_FOLDER_ID => snapshot
                 .contacts_search_results()
                 .into_iter()
-                .map(contact_sync_object)
+                .map(|contact| {
+                    sync_object_projected_to_folder(
+                        contact_sync_object(contact),
+                        CONTACTS_SEARCH_FOLDER_ID,
+                    )
+                })
                 .collect(),
             TODO_SEARCH_FOLDER_ID => snapshot
                 .todo_search_results()
                 .into_iter()
                 .map(|task| {
-                    task_sync_object(
-                        task,
-                        snapshot.reminder_for_source("task", task.canonical_id),
+                    sync_object_projected_to_folder(
+                        task_sync_object(
+                            task,
+                            snapshot.reminder_for_source("task", task.canonical_id),
+                        ),
+                        TODO_SEARCH_FOLDER_ID,
                     )
                 })
                 .collect(),
@@ -534,9 +542,12 @@ pub(in crate::mapi) fn special_sync_objects_for(
                 .reminder_tasks()
                 .into_iter()
                 .map(|task| {
-                    task_sync_object(
-                        task,
-                        snapshot.reminder_for_source("task", task.canonical_id),
+                    sync_object_projected_to_folder(
+                        task_sync_object(
+                            task,
+                            snapshot.reminder_for_source("task", task.canonical_id),
+                        ),
+                        REMINDERS_FOLDER_ID,
                     )
                 })
                 .collect(),
@@ -618,6 +629,14 @@ pub(in crate::mapi) fn special_sync_objects_for(
             .map(associated_config_sync_object),
     );
     objects
+}
+
+fn sync_object_projected_to_folder(
+    mut object: mapi_mailstore::SpecialMessageSyncFact,
+    folder_id: u64,
+) -> mapi_mailstore::SpecialMessageSyncFact {
+    object.folder_id = folder_id;
+    object
 }
 
 fn public_folder_item_sync_object(

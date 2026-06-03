@@ -16562,6 +16562,80 @@ async fn mapi_over_http_virtual_contacts_content_sync_stores_virtual_checkpoint(
 }
 
 #[tokio::test]
+async fn mapi_over_http_contacts_search_content_sync_uses_search_folder_parent() {
+    let account = FakeStore::account();
+    let contacts = FakeStore::collection("default", "contacts", "Contacts");
+    let contact = FakeStore::contact(
+        "71717171-7171-7171-7171-717171717171",
+        "Contact Search One",
+        "one@example.test",
+    );
+    let store = FakeStore {
+        session: Some(account.clone()),
+        contact_collections: Arc::new(Mutex::new(vec![contacts])),
+        contacts: Arc::new(Mutex::new(vec![contact])),
+        search_folders: Arc::new(Mutex::new(vec![SearchFolderDefinition {
+            id: Uuid::parse_str("34343434-3434-4434-8434-343434343402").unwrap(),
+            account_id: account.account_id,
+            role: "contacts_search".to_string(),
+            display_name: "Contacts Search".to_string(),
+            definition_kind: "exchange_builtin".to_string(),
+            result_object_kind: "contact".to_string(),
+            scope_json: serde_json::json!({"scope": "contacts"}),
+            restriction_json: serde_json::json!({"kind": "contacts_search"}),
+            excluded_folder_roles: Vec::new(),
+            is_builtin: true,
+        }])),
+        ..Default::default()
+    };
+    *store.mapi_sync_changes.lock().unwrap() = MapiSyncChangeSet {
+        current_change_sequence: 57,
+        current_modseq: 43,
+        ..Default::default()
+    };
+
+    let response_rops = content_sync_response_rops_for_store(
+        store.clone(),
+        crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+        &[],
+    )
+    .await;
+
+    let stream = strict_content_sync_transfer_from_response(&response_rops).unwrap();
+    assert_eq!(stream.message_changes.len(), 1);
+    assert_eq!(stream.message_changes[0].subject, "Contact Search One");
+    assert_eq!(
+        stream.message_changes[0].parent_source_key,
+        mapi_mailstore::source_key_for_store_id(crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID)
+    );
+
+    let checkpoint = store
+        .fetch_mapi_sync_checkpoint(
+            account.account_id,
+            Some(
+                mapi_mailstore::virtual_special_mailbox(
+                    crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
+                )
+                .unwrap()
+                .id,
+            ),
+            MapiCheckpointKind::Content,
+        )
+        .await
+        .unwrap()
+        .expect("Contacts Search content checkpoint");
+    assert_eq!(checkpoint.last_change_sequence, 57);
+    assert_eq!(checkpoint.last_modseq, 43);
+    assert_eq!(
+        checkpoint
+            .cursor_json
+            .get("syncRootFolderId")
+            .and_then(|id| id.as_u64()),
+        Some(crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID)
+    );
+}
+
+#[tokio::test]
 async fn mapi_over_http_calendar_sync_projects_postgresql_canonical_event_properties(
 ) -> anyhow::Result<()> {
     let Some(fixture) = postgres_mapi_calendar_fixture().await? else {
