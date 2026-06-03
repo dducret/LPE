@@ -7471,8 +7471,9 @@ where
                         continue;
                     }
                 };
+                let parent_mailbox = folder_row_for_id(parent_folder_id, mailboxes);
                 if !is_root_hierarchy_folder(parent_folder_id)
-                    && folder_row_for_id(parent_folder_id, mailboxes).is_none()
+                    && parent_mailbox.is_none()
                     && role_for_folder_id(parent_folder_id).is_none()
                 {
                     responses.extend_from_slice(&rop_error_response(
@@ -7483,13 +7484,45 @@ where
                     continue;
                 }
 
+                let create_parent_id = parent_mailbox.map(|mailbox| mailbox.id);
                 let display_name = request.create_folder_display_name();
                 let display_name = display_name.trim();
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    tenant_id = %principal.tenant_id,
+                    account_id = %principal.account_id,
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x1c",
+                    parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                    folder_type = request.create_folder_type(),
+                    open_existing = request.create_folder_open_existing(),
+                    display_name = display_name,
+                    message = "rca debug mapi create folder request",
+                );
                 if display_name.is_empty() || request.create_folder_type() == 0 {
+                    tracing::warn!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        tenant_id = %principal.tenant_id,
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x1c",
+                        parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                        folder_type = request.create_folder_type(),
+                        open_existing = request.create_folder_open_existing(),
+                        display_name = display_name,
+                        response_error = "0x80070057",
+                        message = "rca debug mapi create folder invalid request",
+                    );
                     responses.extend_from_slice(&rop_error_response(
                         0x1C,
                         request.output_handle_index.unwrap_or(0),
-                        0x8004_0102,
+                        0x8007_0057,
                     ));
                     continue;
                 }
@@ -7507,18 +7540,17 @@ where
                         },
                     );
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_create_folder_response(
-                        &request, folder_id, true,
-                    ));
+                    responses
+                        .extend_from_slice(&rop_create_folder_response(&request, folder_id, true));
                     output_handles.push(handle);
                     continue;
                 }
 
                 if request.create_folder_open_existing() {
-                    if let Some(existing) = mailboxes
-                        .iter()
-                        .find(|mailbox| mailbox.name.eq_ignore_ascii_case(display_name))
-                    {
+                    if let Some(existing) = mailboxes.iter().find(|mailbox| {
+                        mailbox.parent_id == create_parent_id
+                            && mailbox.name.eq_ignore_ascii_case(display_name)
+                    }) {
                         let folder_id = mapi_folder_id(existing);
                         let properties =
                             folder_properties_for_open(store, principal, session, folder_id).await;
@@ -7536,6 +7568,32 @@ where
                         output_handles.push(handle);
                         continue;
                     }
+                } else if mailboxes.iter().any(|mailbox| {
+                    mailbox.parent_id == create_parent_id
+                        && mailbox.name.eq_ignore_ascii_case(display_name)
+                }) {
+                    tracing::warn!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        tenant_id = %principal.tenant_id,
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x1c",
+                        parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                        folder_type = request.create_folder_type(),
+                        open_existing = request.create_folder_open_existing(),
+                        display_name = display_name,
+                        response_error = "0x80040604",
+                        message = "rca debug mapi create folder duplicate name",
+                    );
+                    responses.extend_from_slice(&rop_error_response(
+                        0x1C,
+                        request.output_handle_index.unwrap_or(0),
+                        0x8004_0604,
+                    ));
+                    continue;
                 }
 
                 match store
@@ -7543,7 +7601,7 @@ where
                         JmapMailboxCreateInput {
                             account_id: principal.account_id,
                             name: display_name.to_string(),
-                            parent_id: None,
+                            parent_id: create_parent_id,
                             sort_order: None,
                             is_subscribed: true,
                         },
