@@ -127,6 +127,12 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.mapi_as
   || fail "Table public.mapi_associated_config_messages is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Found table public.mapi_associated_config_messages"
 
+mapi_associated_config_shape_constraint_ok="$(psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT COUNT(*) FROM pg_constraint WHERE conrelid = 'public.mail_change_log'::regclass AND conname = 'mail_change_log_object_shape_check' AND pg_get_constraintdef(oid) LIKE '%associated_config%';")" \
+  || fail "Unable to inspect MAPI associated configuration replay shape constraint"
+[[ "$mapi_associated_config_shape_constraint_ok" -ge "1" ]] \
+  || fail "MAPI associated configuration replay shape constraint is stale. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
+pass "MAPI associated configuration replay shape constraint is current"
+
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT to_regclass('public.recoverable_items');" | grep -qx 'recoverable_items' \
   || fail "Table public.recoverable_items is missing. Run /opt/lpe/src/installation/debian-trixie/update-lpe.sh."
 pass "Found table public.recoverable_items"

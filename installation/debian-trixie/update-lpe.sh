@@ -1193,6 +1193,7 @@ BEGIN
           AND pg_get_constraintdef(oid) LIKE '%mailbox_message%'
           AND (
               pg_get_constraintdef(oid) NOT LIKE '%public_folder_replica%'
+              OR pg_get_constraintdef(oid) NOT LIKE '%associated_config%'
               OR (
                   pg_get_constraintdef(oid) LIKE '%sourceMailboxMessageId%'
                   AND pg_get_constraintdef(oid) LIKE '%[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}%'
@@ -1280,6 +1281,7 @@ BEGIN
                         'search_folder_definition',
                         'sieve_script',
                         'conversation_action',
+                        'associated_config',
                         'public_folder_tree',
                         'public_folder',
                         'public_folder_item',

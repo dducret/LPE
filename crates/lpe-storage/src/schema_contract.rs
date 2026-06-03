@@ -876,8 +876,19 @@ fn update_script_only_applies_documented_schema_compatibility_updates() {
             "CREATE TABLE IF NOT EXISTS public.mapi_associated_config_messages",
             "mapi_object_identities_object_kind_check",
             "associated_config",
+            "mail_change_log_object_shape_check",
             "CREATE INDEX IF NOT EXISTS mapi_associated_config_messages_account_folder_idx",
             "public.mapi_associated_config_messages",
+        ],
+    );
+    assert_source_contains_all(
+        "check-lpe.sh MAPI associated configuration compatibility check",
+        CHECK_LPE_SCRIPT,
+        &[
+            "to_regclass('public.mapi_associated_config_messages')",
+            "mapi_associated_config_shape_constraint_ok",
+            "mail_change_log_object_shape_check",
+            "associated_config",
         ],
     );
     assert_source_contains_all(
