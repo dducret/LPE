@@ -545,7 +545,7 @@ fn hierarchy_rows<'a>(
     }
     let mut rows = mailboxes
         .iter()
-        .filter(|mailbox| !mailbox_shadows_non_mail_outlook_special_folder(mailbox))
+        .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
         .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
         .filter(|mailbox| {
             restriction_matches_mailbox_with_context_for_account(
@@ -679,9 +679,7 @@ fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
     }
 }
 
-pub(in crate::mapi) fn mailbox_shadows_non_mail_outlook_special_folder(
-    mailbox: &JmapMailbox,
-) -> bool {
+pub(in crate::mapi) fn mailbox_shadows_outlook_special_folder(mailbox: &JmapMailbox) -> bool {
     if mapi_parent_folder_id(mailbox) != IPM_SUBTREE_FOLDER_ID
         || folder_message_class(mailbox) != "IPF.Note"
     {
@@ -690,7 +688,25 @@ pub(in crate::mapi) fn mailbox_shadows_non_mail_outlook_special_folder(
 
     matches!(
         mailbox.name.trim().to_ascii_lowercase().as_str(),
-        "calendar" | "contacts" | "journal" | "notes" | "tasks"
+        "archive"
+            | "calendar"
+            | "conflicts"
+            | "contacts"
+            | "contacts search"
+            | "conversation action settings"
+            | "conversation history"
+            | "drafts"
+            | "im contact list"
+            | "journal"
+            | "junk e-mail"
+            | "local failures"
+            | "notes"
+            | "quick contacts"
+            | "rss feeds"
+            | "server failures"
+            | "suggested contacts"
+            | "sync issues"
+            | "tasks"
     )
 }
 
@@ -4042,21 +4058,40 @@ mod tests {
     }
 
     #[test]
-    fn ipm_subtree_hierarchy_suppresses_mail_folder_shadowing_calendar_special_folder() {
+    fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders() {
         let shadow_id = Uuid::parse_str("aaaaaaaa-5555-4111-8111-aaaaaaaaaaaa").unwrap();
+        let suggested_shadow_id = Uuid::parse_str("aaaaaaaa-6666-4111-8111-aaaaaaaaaaaa").unwrap();
         let shadow_folder_id = crate::mapi::identity::mapi_store_id(0x4f);
+        let suggested_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x54);
         crate::mapi::identity::remember_mapi_identity(shadow_id, shadow_folder_id);
-        let mailboxes = vec![JmapMailbox {
-            id: shadow_id,
-            parent_id: None,
-            role: String::new(),
-            name: "Calendar".to_string(),
-            sort_order: 0,
-            modseq: 1,
-            total_emails: 0,
-            unread_emails: 0,
-            is_subscribed: true,
-        }];
+        crate::mapi::identity::remember_mapi_identity(
+            suggested_shadow_id,
+            suggested_shadow_folder_id,
+        );
+        let mailboxes = vec![
+            JmapMailbox {
+                id: shadow_id,
+                parent_id: None,
+                role: String::new(),
+                name: "Calendar".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: suggested_shadow_id,
+                parent_id: None,
+                role: String::new(),
+                name: "Suggested Contacts".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+        ];
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
             Vec::new(),
@@ -4080,14 +4115,18 @@ mod tests {
         );
         let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
         assert!(row_ids.contains(&CALENDAR_FOLDER_ID));
+        assert!(row_ids.contains(&SUGGESTED_CONTACTS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
+        assert!(!row_ids.contains(&suggested_shadow_folder_id));
 
         let sync_ids = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
             .iter()
             .map(mapi_folder_id)
             .collect::<Vec<_>>();
         assert!(sync_ids.contains(&CALENDAR_FOLDER_ID));
+        assert!(sync_ids.contains(&SUGGESTED_CONTACTS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
+        assert!(!sync_ids.contains(&suggested_shadow_folder_id));
 
         let calendar_row = rows
             .iter()

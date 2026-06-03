@@ -228,7 +228,7 @@ pub(in crate::mapi) fn sync_mailboxes_for(
                 mapi_folder_id(mailbox) == folder_id
                     || mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes)
             })
-            .filter(|mailbox| !mailbox_shadows_non_mail_outlook_special_folder(mailbox))
+            .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
             .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
             .filter(|mailbox| folder_ids.insert(mapi_folder_id(mailbox)))
             .cloned()
