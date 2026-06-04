@@ -29372,7 +29372,9 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
         0x07, 0x00, 0x01, // RopGetPropertiesSpecific
     ]);
     rops.extend_from_slice(&4096u16.to_le_bytes());
-    rops.extend_from_slice(&14u16.to_le_bytes());
+    rops.extend_from_slice(&16u16.to_le_bytes());
+    rops.extend_from_slice(&0x3601_0003u32.to_le_bytes());
+    rops.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     rops.extend_from_slice(&0x35E0_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x35E2_0102u32.to_le_bytes());
     rops.extend_from_slice(&0x35E3_0102u32.to_le_bytes());
@@ -29401,7 +29403,15 @@ async fn mapi_over_http_root_default_folder_get_properties_returns_canonical_ent
     let response_rops = response_rops_from_execute_response(response).await;
     let get_props_offset = 8;
     assert_eq!(response_rops[get_props_offset], 0x07);
-    assert_eq!(response_rops[get_props_offset + 6], 0);
+    assert_eq!(
+        u32::from_le_bytes(
+            response_rops[get_props_offset + 2..get_props_offset + 6]
+                .try_into()
+                .unwrap()
+        ),
+        0
+    );
+    assert!(contains_bytes(&response_rops, b"R\0o\0o\0t\0\0\0"));
     for folder_id in [
         crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
         crate::mapi::identity::OUTBOX_FOLDER_ID,
@@ -37060,6 +37070,8 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
 
     let mut props_request = Vec::new();
     props_request.extend_from_slice(&visible_mid.to_le_bytes());
+    props_request.extend_from_slice(&0x0FFF_0102u32.to_le_bytes());
+    props_request.extend_from_slice(&0x300B_0102u32.to_le_bytes());
     props_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
     props_request.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
     let props_headers = nspi_bound_headers(&service, "GetProps").await;
@@ -37069,6 +37081,18 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
         .unwrap();
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
+    assert!(contains_bytes(&body, b"EX:"));
+    let mut search_key = format!(
+        "EX:{}",
+        test_contact_legacy_dn(
+            "bob.contact@example.test",
+            "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+        )
+        .to_ascii_uppercase()
+    )
+    .into_bytes();
+    search_key.push(0);
+    assert!(contains_bytes(&body, &search_key));
     assert!(contains_bytes(
         &body,
         &utf16z(&test_contact_legacy_dn(

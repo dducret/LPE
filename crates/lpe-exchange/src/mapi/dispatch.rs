@@ -1963,6 +1963,44 @@ where
     S: ExchangeStore,
 {
     let mut properties = HashMap::new();
+    if is_advertised_special_folder(folder_id) {
+        for property_tag in [
+            PID_TAG_DISPLAY_NAME_W,
+            PID_TAG_ENTRY_ID,
+            PID_TAG_INSTANCE_KEY,
+            PID_TAG_FOLDER_ID,
+            PID_TAG_PARENT_FOLDER_ID,
+            PID_TAG_FOLDER_TYPE,
+            PID_TAG_CONTENT_COUNT,
+            PID_TAG_CONTENT_UNREAD_COUNT,
+            PID_TAG_DELETED_COUNT_TOTAL,
+            PID_TAG_SUBFOLDERS,
+            PID_TAG_ACCESS,
+            PID_TAG_CONTAINER_CLASS_W,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_LAST_MODIFICATION_TIME,
+            PID_TAG_LOCAL_COMMIT_TIME,
+            PID_TAG_LOCAL_COMMIT_TIME_MAX,
+            PID_TAG_HIER_REV,
+            PID_TAG_HIERARCHY_CHANGE_NUMBER,
+            PID_TAG_SOURCE_KEY,
+            PID_TAG_PARENT_SOURCE_KEY,
+            PID_TAG_CHANGE_KEY,
+            PID_TAG_PREDECESSOR_CHANGE_LIST,
+            PID_TAG_CHANGE_NUMBER,
+        ] {
+            if property_tag == PID_TAG_PARENT_SOURCE_KEY
+                && matches!(folder_id, ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID)
+            {
+                continue;
+            }
+            if let Some(value) =
+                special_folder_property_value(folder_id, property_tag, principal.account_id)
+            {
+                properties.insert(property_tag, value);
+            }
+        }
+    }
     if folder_id == IPM_SUBTREE_FOLDER_ID {
         if let Ok(Some(ost_id)) = store
             .fetch_mapi_ipm_subtree_ost_id(principal.account_id)

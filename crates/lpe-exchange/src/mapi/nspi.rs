@@ -177,6 +177,8 @@ const AB_UNMODIFIABLE: u32 = 0x0000_0008;
 const DT_CONTAINER: u32 = 0x0000_0100;
 
 const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
+    0x0FFF_0102, // PidTagEntryId
+    0x300B_0102, // PidTagSearchKey
     0x0FF8_0102, // PidTagMappingSignature
     0x3902_0102, // PidTagTemplateid
     0x39FF_001E, // PidTag7BitDisplayName string8

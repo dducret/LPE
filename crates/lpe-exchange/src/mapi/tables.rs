@@ -774,7 +774,7 @@ fn special_hierarchy_row_matches(
     })
 }
 
-fn special_folder_property_value(
+pub(in crate::mapi) fn special_folder_property_value(
     folder_id: u64,
     property_tag: u32,
     mailbox_guid: Uuid,
