@@ -4414,6 +4414,145 @@ fn log_calendar_hierarchy_query_rows_contract(
     );
 }
 
+fn log_outlook_contents_table_open(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    folder_id: u64,
+    table_flags: u8,
+    associated: bool,
+    row_count: u32,
+    output_handle: u32,
+) {
+    if !is_outlook_folder_table_debug_target(folder_id) {
+        return;
+    }
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x05",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        request_output_handle_index = request.output_handle_index.unwrap_or(0),
+        output_handle,
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(folder_id),
+        table_flags = %format!("0x{table_flags:02x}"),
+        associated,
+        row_count,
+        selected_column_source = "none_before_setcolumns",
+        selected_property_tag_count = 0,
+        selected_property_tags = "",
+        "rca debug outlook contents table opened"
+    );
+}
+
+fn log_outlook_contents_table_set_columns(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    folder_id: u64,
+    associated: bool,
+    columns: &[u32],
+) {
+    if !is_outlook_folder_table_debug_target(folder_id) {
+        return;
+    }
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x12",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(folder_id),
+        associated,
+        set_columns_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
+        requested_property_tag_count = columns.len(),
+        requested_property_tags = %format_debug_property_tags(columns),
+        "rca debug outlook contents table columns selected"
+    );
+}
+
+fn log_outlook_contents_table_query_rows(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        restriction,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !is_outlook_folder_table_debug_target(*folder_id) {
+        return;
+    }
+
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let total_row_count = if *associated {
+        associated_folder_message_count(*folder_id, snapshot)
+    } else {
+        folder_message_count(*folder_id, mailboxes, emails, snapshot)
+    };
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x15",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        associated,
+        requested_forward_read = request.query_forward_read(),
+        requested_row_count = request.query_row_count().unwrap_or(0),
+        current_position = *position,
+        table_total_row_count = total_row_count,
+        table_has_restriction = restriction.is_some(),
+        table_sort_order_count = sort_orders.len(),
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        "rca debug outlook contents table query rows"
+    );
+}
+
+fn effective_contents_table_columns(folder_id: u64, associated: bool, columns: &[u32]) -> Vec<u32> {
+    if !columns.is_empty() {
+        return columns.to_vec();
+    }
+    if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
+        default_navigation_shortcut_property_tags()
+    } else if associated && folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+        default_conversation_action_property_tags()
+    } else {
+        default_contents_columns()
+    }
+}
+
+fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
+    matches!(folder_id, INBOX_FOLDER_ID | COMMON_VIEWS_FOLDER_ID)
+}
+
 fn log_calendar_identity_chain(
     principal: &AccountPrincipal,
     stage: &str,
@@ -5758,6 +5897,8 @@ where
                 let folder_id = input_object(session, &handle_slots, &request)
                     .and_then(|object| object.folder_id())
                     .unwrap_or(INBOX_FOLDER_ID);
+                let table_flags = request.payload.first().copied().unwrap_or(0);
+                let associated = table_flags & 0x02 != 0;
                 if !snapshot
                     .folder_access_for_principal(folder_id, principal.account_id)
                     .map(|access| access.may_read)
@@ -5774,10 +5915,7 @@ where
                     request.output_handle_index,
                     MapiObject::ContentsTable {
                         folder_id,
-                        associated: request
-                            .payload
-                            .first()
-                            .is_some_and(|flags| flags & 0x02 != 0),
+                        associated,
                         columns: Vec::new(),
                         sort_orders: Vec::new(),
                         category_count: 0,
@@ -5790,17 +5928,17 @@ where
                     },
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                let row_count = if associated {
+                    associated_folder_message_count(folder_id, snapshot)
+                } else {
+                    folder_message_count(folder_id, mailboxes, emails, snapshot)
+                };
+                log_outlook_contents_table_open(
+                    principal, &request, folder_id, table_flags, associated, row_count, handle,
+                );
                 responses.extend_from_slice(&rop_get_contents_table_response(
                     &request,
-                    if request
-                        .payload
-                        .first()
-                        .is_some_and(|flags| flags & 0x02 != 0)
-                    {
-                        associated_folder_message_count(folder_id, snapshot)
-                    } else {
-                        folder_message_count(folder_id, mailboxes, emails, snapshot)
-                    },
+                    row_count,
                 ));
                 output_handles.push(handle);
             }
@@ -7404,7 +7542,6 @@ where
             }
             Some(RopId::SetColumns) => match input_object_mut(session, &handle_slots, &request) {
                 Some(MapiObject::HierarchyTable { columns, .. })
-                | Some(MapiObject::ContentsTable { columns, .. })
                 | Some(MapiObject::AttachmentTable { columns, .. }) => {
                     if !property_tags_have_known_wire_types(&request.property_tags()) {
                         responses.extend_from_slice(&rop_error_response(
@@ -7415,6 +7552,30 @@ where
                         break;
                     }
                     *columns = request.property_tags();
+                    responses.extend_from_slice(&rop_set_columns_response(&request));
+                }
+                Some(MapiObject::ContentsTable {
+                    folder_id,
+                    associated,
+                    columns,
+                    ..
+                }) => {
+                    if !property_tags_have_known_wire_types(&request.property_tags()) {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x12,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        break;
+                    }
+                    *columns = request.property_tags();
+                    log_outlook_contents_table_set_columns(
+                        principal,
+                        &request,
+                        *folder_id,
+                        *associated,
+                        columns,
+                    );
                     responses.extend_from_slice(&rop_set_columns_response(&request));
                 }
                 Some(MapiObject::PermissionTable { columns, .. })
@@ -7521,6 +7682,14 @@ where
                 log_calendar_hierarchy_query_rows_contract(
                     principal,
                     input_object(session, &handle_slots, &request),
+                    snapshot,
+                );
+                log_outlook_contents_table_query_rows(
+                    principal,
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
                     snapshot,
                 );
                 responses.extend_from_slice(&rop_query_rows_response(
