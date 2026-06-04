@@ -984,6 +984,7 @@ where
 
     if rop_buffer_has_no_requests(&execute.rop_buffer)
         || rop_buffer_is_store_independent_logon(&execute.rop_buffer)
+        || rop_buffer_is_store_independent_release_only(&execute.rop_buffer)
     {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mailboxes = snapshot.mailboxes();
@@ -1200,6 +1201,24 @@ fn rop_buffer_is_store_independent_logon(rop_buffer: &[u8]) -> bool {
             return false;
         };
         if !matches!(RopId::from_u8(request.rop_id), Some(RopId::Logon)) {
+            return false;
+        }
+        saw_request = true;
+    }
+    saw_request
+}
+
+fn rop_buffer_is_store_independent_release_only(rop_buffer: &[u8]) -> bool {
+    let Some((requests, _handle_table)) = split_rop_buffer(rop_buffer) else {
+        return false;
+    };
+    let mut cursor = Cursor::new(requests);
+    let mut saw_request = false;
+    while cursor.remaining() > 0 {
+        let Ok(request) = read_rop_request(&mut cursor) else {
+            return false;
+        };
+        if !matches!(RopId::from_u8(request.rop_id), Some(RopId::Release)) {
             return false;
         }
         saw_request = true;
@@ -14133,6 +14152,20 @@ mod tests {
         drop(acquired);
         release.await.unwrap();
         assert!(!session_request_is_active(&session_id));
+    }
+
+    #[test]
+    fn release_only_execute_batch_is_store_independent() {
+        let release_only = rop_buffer_with_response(vec![0x01, 0x00, 0x00], &[0x34]);
+        assert!(rop_buffer_is_store_independent_release_only(&release_only));
+
+        let mut release_then_getprops = vec![0x01, 0x00, 0x00];
+        release_then_getprops.extend_from_slice(&[0x07, 0x00, 0x01]);
+        release_then_getprops.extend_from_slice(&4096u16.to_le_bytes());
+        release_then_getprops.extend_from_slice(&1u16.to_le_bytes());
+        release_then_getprops.extend_from_slice(&0x3601_0003u32.to_le_bytes());
+        let mixed = rop_buffer_with_response(release_then_getprops, &[0x34, 0xff]);
+        assert!(!rop_buffer_is_store_independent_release_only(&mixed));
     }
 
     #[test]
