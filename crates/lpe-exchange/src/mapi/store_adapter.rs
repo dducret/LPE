@@ -1,7 +1,7 @@
 use super::properties::*;
 use super::rop::*;
 use super::session::*;
-use super::sync::{CALENDAR_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
+use super::sync::{CALENDAR_FOLDER_ID, COMMON_VIEWS_FOLDER_ID, INBOX_FOLDER_ID, ROOT_FOLDER_ID};
 use super::tables::*;
 use super::*;
 use crate::mapi_store;
@@ -15,6 +15,7 @@ use lpe_storage::ReminderQuery;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::mapi) struct MapiAccessPlan {
     pub(in crate::mapi) requires_full_snapshot: bool,
+    pub(in crate::mapi) requires_associated_contents: bool,
     pub(in crate::mapi) object_ids: Vec<u64>,
     pub(in crate::mapi) content_queries: Vec<MapiContentAccessQuery>,
 }
@@ -23,6 +24,7 @@ impl MapiAccessPlan {
     fn full() -> Self {
         Self {
             requires_full_snapshot: true,
+            requires_associated_contents: false,
             object_ids: Vec::new(),
             content_queries: Vec::new(),
         }
@@ -50,6 +52,7 @@ pub(in crate::mapi) fn plan_mapi_store_access(
     };
     let mut plan = MapiAccessPlan {
         requires_full_snapshot: false,
+        requires_associated_contents: false,
         object_ids: Vec::new(),
         content_queries: Vec::new(),
     };
@@ -153,6 +156,7 @@ pub(in crate::mapi) fn hierarchy_sync_selective_fallback_plan(
 
     saw_hierarchy_configure.then_some(MapiAccessPlan {
         requires_full_snapshot: false,
+        requires_associated_contents: false,
         object_ids: Vec::new(),
         content_queries: Vec::new(),
     })
@@ -362,10 +366,11 @@ where
         .fetch_mapi_associated_configs(account_id)
         .await
         .context("fetch MAPI associated config messages")?;
-    let snapshot_backed_contents = plan
-        .content_queries
-        .iter()
-        .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none())
+    let snapshot_backed_contents = plan.requires_associated_contents
+        || plan
+            .content_queries
+            .iter()
+            .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none())
         || plan.object_ids.contains(&CALENDAR_FOLDER_ID);
     let navigation_shortcut_ids = identities
         .iter()
@@ -1142,16 +1147,20 @@ fn simulate_table_access(
                 .and_then(|handle| handles.get(&handle))
                 .and_then(MapiObject::folder_id)
                 .unwrap_or(INBOX_FOLDER_ID);
+            let associated = request
+                .payload
+                .first()
+                .is_some_and(|flags| flags & 0x02 != 0);
+            if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
+                plan.requires_associated_contents = true;
+            }
             let handle = simulate_allocate_handle(
                 handles,
                 next_handle,
                 request.output_handle_index,
                 MapiObject::ContentsTable {
                     folder_id,
-                    associated: request
-                        .payload
-                        .first()
-                        .is_some_and(|flags| flags & 0x02 != 0),
+                    associated,
                     columns: Vec::new(),
                     sort_orders: Vec::new(),
                     category_count: 0,
@@ -1688,6 +1697,36 @@ mod tests {
         let plan = plan_mapi_store_access(&empty_session(), &single_rop_buffer(&rop));
 
         assert!(plan.object_ids.is_empty(), "plan={:?}", plan.object_ids);
+    }
+
+    #[test]
+    fn access_plan_loads_common_views_associated_contents_on_table_open() {
+        let mut session = empty_session();
+        session.handles.insert(
+            1,
+            MapiObject::Folder {
+                folder_id: COMMON_VIEWS_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        session.next_handle = 2;
+
+        let associated_get_contents_table = [0x05, 0x00, 0x00, 0x01, 0x02];
+        let plan =
+            plan_mapi_store_access(&session, &single_rop_buffer(&associated_get_contents_table));
+
+        assert!(
+            plan.requires_associated_contents,
+            "plan should preload Common Views associated rows: {plan:?}"
+        );
+
+        let normal_get_contents_table = [0x05, 0x00, 0x00, 0x01, 0x00];
+        let plan = plan_mapi_store_access(&session, &single_rop_buffer(&normal_get_contents_table));
+
+        assert!(
+            !plan.requires_associated_contents,
+            "normal Common Views contents should not preload associated rows: {plan:?}"
+        );
     }
 
     #[test]

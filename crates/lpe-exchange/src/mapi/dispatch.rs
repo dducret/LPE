@@ -5934,12 +5934,15 @@ where
                     folder_message_count(folder_id, mailboxes, emails, snapshot)
                 };
                 log_outlook_contents_table_open(
-                    principal, &request, folder_id, table_flags, associated, row_count, handle,
-                );
-                responses.extend_from_slice(&rop_get_contents_table_response(
+                    principal,
                     &request,
+                    folder_id,
+                    table_flags,
+                    associated,
                     row_count,
-                ));
+                    handle,
+                );
+                responses.extend_from_slice(&rop_get_contents_table_response(&request, row_count));
                 output_handles.push(handle);
             }
             Some(RopId::CreateMessage) => {
