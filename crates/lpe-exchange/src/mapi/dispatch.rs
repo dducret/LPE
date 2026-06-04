@@ -985,6 +985,10 @@ where
     if rop_buffer_has_no_requests(&execute.rop_buffer)
         || rop_buffer_is_store_independent_logon(&execute.rop_buffer)
         || rop_buffer_is_store_independent_release_only(&execute.rop_buffer)
+        || rop_buffer_is_store_independent_special_folder_getprops_probe(
+            &execute.rop_buffer,
+            &session,
+        )
     {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mailboxes = snapshot.mailboxes();
@@ -1224,6 +1228,66 @@ fn rop_buffer_is_store_independent_release_only(rop_buffer: &[u8]) -> bool {
         saw_request = true;
     }
     saw_request
+}
+
+fn rop_buffer_is_store_independent_special_folder_getprops_probe(
+    rop_buffer: &[u8],
+    session: &MapiSession,
+) -> bool {
+    let Some((requests, handle_table)) = split_rop_buffer(rop_buffer) else {
+        return false;
+    };
+    let Ok(handle_slots) = read_handle_table(handle_table) else {
+        return false;
+    };
+    let mut opened_special_folder_indexes = HashSet::new();
+    let mut saw_open_folder = false;
+    let mut saw_get_properties = false;
+    let mut cursor = Cursor::new(requests);
+    while cursor.remaining() > 0 {
+        let Ok(request) = read_rop_request(&mut cursor) else {
+            return false;
+        };
+        match RopId::from_u8(request.rop_id) {
+            Some(RopId::Release) => {}
+            Some(RopId::OpenFolder) => {
+                let folder_id = session
+                    .resolve_special_folder_alias(request.folder_id().unwrap_or(ROOT_FOLDER_ID));
+                if !is_store_independent_special_folder(folder_id) {
+                    return false;
+                }
+                opened_special_folder_indexes.insert(request.output_handle_index.unwrap_or(0));
+                saw_open_folder = true;
+            }
+            Some(RopId::GetPropertiesSpecific) => {
+                if request
+                    .property_tags()
+                    .iter()
+                    .copied()
+                    .any(is_custom_property_tag)
+                {
+                    return false;
+                }
+                let input_handle_index = request.input_handle_index().unwrap_or(0);
+                let opened_in_same_batch =
+                    opened_special_folder_indexes.contains(&input_handle_index);
+                let existing_special_folder = input_handle(&handle_slots, &request)
+                    .and_then(|handle| session.handles.get(&handle))
+                    .and_then(MapiObject::folder_id)
+                    .is_some_and(is_store_independent_special_folder);
+                if !opened_in_same_batch && !existing_special_folder {
+                    return false;
+                }
+                saw_get_properties = true;
+            }
+            _ => return false,
+        }
+    }
+    saw_open_folder && saw_get_properties
+}
+
+fn is_store_independent_special_folder(folder_id: u64) -> bool {
+    is_advertised_special_folder(folder_id) && folder_id != IPM_SUBTREE_FOLDER_ID
 }
 
 fn rop_buffer_has_no_requests(rop_buffer: &[u8]) -> bool {
@@ -14177,6 +14241,40 @@ mod tests {
     }
 
     #[test]
+    fn special_folder_getprops_probe_is_store_independent() {
+        let session = test_mapi_session();
+        let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
+        probe.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+        );
+        probe.push(0);
+        probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+        probe.extend_from_slice(&4096u16.to_le_bytes());
+        probe.extend_from_slice(&1u16.to_le_bytes());
+        probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
+        let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+        assert!(rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
+    fn special_folder_getprops_probe_rejects_custom_properties() {
+        let session = test_mapi_session();
+        let mut probe = vec![0x02, 0x00, 0x00, 0x01];
+        probe.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+        );
+        probe.push(0);
+        probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+        probe.extend_from_slice(&4096u16.to_le_bytes());
+        probe.extend_from_slice(&1u16.to_le_bytes());
+        probe.extend_from_slice(&0x9000_0003u32.to_le_bytes());
+        let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+        assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
     fn uploaded_state_delta_anchor_requires_idset_and_cnset_seen() {
         let idset_only = upload_state_marker_bit(0x4017_0003);
         assert!(!uploaded_state_has_delta_anchor(idset_only));
@@ -14843,6 +14941,38 @@ mod tests {
             account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
             email: "alice@example.test".to_string(),
             display_name: "Alice".to_string(),
+        }
+    }
+
+    fn test_mapi_session() -> MapiSession {
+        let principal = test_principal();
+        MapiSession {
+            endpoint: MapiEndpoint::Emsmdb,
+            tenant_id: principal.tenant_id,
+            account_id: principal.account_id,
+            email: principal.email,
+            created_at: SystemTime::UNIX_EPOCH,
+            last_seen_at: SystemTime::UNIX_EPOCH,
+            first_request_type: String::new(),
+            first_request_id: String::new(),
+            last_request_type: String::new(),
+            last_request_id: String::new(),
+            request_count: 0,
+            execute_request_count: 0,
+            next_handle: 1,
+            handles: HashMap::new(),
+            message_statuses: HashMap::new(),
+            special_folder_aliases: HashMap::new(),
+            named_properties: HashMap::new(),
+            named_property_ids: HashMap::new(),
+            next_named_property_id: FIRST_NAMED_PROPERTY_ID,
+            next_local_replica_sequence: 1,
+            notification_cursor: None,
+            pending_notifications: VecDeque::new(),
+            completed_execute_requests: HashMap::new(),
+            completed_execute_request_order: VecDeque::new(),
+            post_hierarchy_actions: PostHierarchyActionState::default(),
+            logon_identity: None,
         }
     }
 
