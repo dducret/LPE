@@ -763,10 +763,31 @@ impl MapiSession {
         output_handle_index: Option<u8>,
         object: MapiObject,
     ) -> u32 {
+        self.allocate_output_handle_avoiding(output_handle_index, object, &HashSet::new())
+    }
+
+    pub(in crate::mapi) fn allocate_output_handle_avoiding(
+        &mut self,
+        output_handle_index: Option<u8>,
+        object: MapiObject,
+        reserved_handles: &HashSet<u32>,
+    ) -> u32 {
         let preferred = output_handle_index.map(|index| index as u32 + 1);
         let handle = preferred
-            .filter(|handle| !self.handles.contains_key(handle))
+            .filter(|handle| {
+                !self.handles.contains_key(handle) && !reserved_handles.contains(handle)
+            })
             .unwrap_or(self.next_handle);
+        while self.handles.contains_key(&self.next_handle)
+            || reserved_handles.contains(&self.next_handle)
+        {
+            self.next_handle = self.next_handle.saturating_add(1).max(1);
+        }
+        let handle = if self.handles.contains_key(&handle) || reserved_handles.contains(&handle) {
+            self.next_handle
+        } else {
+            handle
+        };
         self.next_handle = self.next_handle.saturating_add(1).max(1);
         if handle >= self.next_handle {
             self.next_handle = handle.saturating_add(1).max(1);
@@ -1353,6 +1374,41 @@ mod tests {
 
         assert_eq!(logon_handle, 1);
         assert_eq!(source_handle, 2);
+    }
+
+    #[test]
+    fn allocate_output_handle_skips_reserved_same_execute_handle() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+        session.allocate_output_handle(Some(0), MapiObject::Logon);
+        session.allocate_output_handle(
+            Some(1),
+            MapiObject::Folder {
+                folder_id: ROOT_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        let released_handle = session.allocate_output_handle(
+            Some(2),
+            MapiObject::Folder {
+                folder_id: INBOX_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+        );
+        session.handles.remove(&released_handle);
+
+        let handle = session.allocate_output_handle_avoiding(
+            Some(2),
+            MapiObject::Folder {
+                folder_id: INBOX_FOLDER_ID,
+                properties: HashMap::new(),
+            },
+            &HashSet::from([released_handle]),
+        );
+
+        assert_eq!(released_handle, 3);
+        assert_ne!(handle, released_handle);
     }
 
     #[test]

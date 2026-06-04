@@ -5142,6 +5142,7 @@ where
     let mut responses = Vec::new();
     let mut output_handles = Vec::new();
     let mut post_hierarchy_release_events = Vec::new();
+    let mut same_execute_released_handles = HashSet::new();
     let mut created_emails: Vec<JmapEmail> = Vec::new();
     let mut echo_input_handle_table = false;
     while cursor.remaining() > 0 {
@@ -5170,12 +5171,13 @@ where
         }
         match RopId::from_u8(typed_request.rop_id()) {
             Some(RopId::Release) => {
+                let released_handle = input_handle(&handle_slots, &request);
                 let released_object = input_object(session, &handle_slots, &request);
                 if session.hierarchy_sync_completed() {
                     let remaining_before = session.handles.len();
                     post_hierarchy_release_events.push(PostHierarchyReleaseDebugEvent {
                         input_handle_index: request.input_handle_index().unwrap_or(0),
-                        handle: format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                        handle: format_optional_debug_handle(released_handle),
                         object_kind: mapi_object_debug_kind(released_object).to_string(),
                         folder_id: mapi_object_debug_folder_id(released_object),
                         remaining_before,
@@ -5195,6 +5197,9 @@ where
                     session.record_logoff_after_hierarchy_completion();
                 }
                 release_handle_slot(session, &mut handle_slots, &request);
+                if let Some(handle) = released_handle {
+                    same_execute_released_handles.insert(handle);
+                }
                 if let Some(event) = post_hierarchy_release_events.last_mut() {
                     event.remaining_after = session.handles.len();
                 }
@@ -5272,12 +5277,13 @@ where
                 session.record_opened_folder(folder_id);
                 let properties =
                     folder_properties_for_open(store, principal, session, folder_id).await;
-                let handle = session.allocate_output_handle(
+                let handle = session.allocate_output_handle_avoiding(
                     request.output_handle_index,
                     MapiObject::Folder {
                         folder_id,
                         properties,
                     },
+                    &same_execute_released_handles,
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_open_folder_response(
