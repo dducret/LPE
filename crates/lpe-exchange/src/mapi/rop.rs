@@ -921,20 +921,12 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
             log_get_properties_specific_debug(
                 request, object, principal, &columns, mailboxes, emails, snapshot,
             );
-            if unsupported_tags.is_empty() {
-                write_logon_property_row(&mut response, principal, &columns);
-            } else {
-                write_flagged_property_row(
-                    &mut response,
-                    object,
-                    principal,
-                    mailboxes,
-                    emails,
-                    snapshot,
-                    &columns,
-                    &unsupported_tags,
-                );
-            }
+            let supported_columns = columns
+                .iter()
+                .copied()
+                .filter(|tag| !unsupported_tags.contains(tag))
+                .collect::<Vec<_>>();
+            write_logon_property_row(&mut response, principal, &supported_columns);
             return response;
         }
         Some(MapiObject::Message {

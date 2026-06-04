@@ -21139,7 +21139,7 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     bootstrap_cookie = mapi_cookie_header(&trace_store_props_response);
     let trace_store_props_rops =
         response_rops_from_execute_response(trace_store_props_response).await;
-    assert!(contains_bytes(
+    assert!(!contains_bytes(
         &trace_store_props_rops,
         &[0x02, 0x01, 0x04, 0x80]
     ));
