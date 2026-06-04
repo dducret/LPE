@@ -27145,11 +27145,13 @@ async fn mapi_over_http_sync_import_associated_message_persists_and_replays_fai(
     let sync_response_rops = response_rops_from_execute_response(sync_response).await;
     let stream = strict_content_sync_transfer_from_response(&sync_response_rops)
         .unwrap_or_else(|error| panic!("{error}: {sync_response_rops:02x?}"));
-    assert_eq!(stream.message_changes.len(), 1);
-    let message = &stream.message_changes[0];
+    let message = stream
+        .message_changes
+        .iter()
+        .find(|message| message.source_key == associated_source_key)
+        .expect("imported associated config should replay in FAI sync");
     assert!(message.associated);
     assert_eq!(message.subject, "Outlook Inbox view state");
-    assert_eq!(message.source_key, associated_source_key);
     assert!(message.mid.is_some());
     assert!(message.body_tags.contains(&0x7C08_0102));
     assert!(contains_bytes(&sync_response_rops, b"view-extra"));

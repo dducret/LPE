@@ -4423,6 +4423,50 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_find_row_returns_outlook_eas_config() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Configuration.EAS");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 1);
+        let mut message_class = Vec::new();
+        write_utf16z(&mut message_class, "IPM.Configuration.EAS");
+        assert!(response
+            .windows(message_class.len())
+            .any(|window| window == message_class.as_slice()));
+    }
+
+    #[test]
     fn access_rows_follow_microsoft_flags() {
         let mailbox = JmapMailbox {
             id: Uuid::nil(),
