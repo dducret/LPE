@@ -2855,7 +2855,8 @@ pub(in crate::mapi) fn message_body_stream_data(
             let email = message_for_id(*folder_id, *message_id, mailboxes, emails)?;
             (email.body_text.clone(), email.body_html_sanitized.clone())
         }
-        MapiObject::PendingMessage { properties, .. } => match open_mode {
+        MapiObject::PendingMessage { properties, .. }
+        | MapiObject::PendingAssociatedMessage { properties, .. } => match open_mode {
             0 | 1 => (
                 pending_text_property(properties, &[PID_TAG_BODY_W]),
                 optional_pending_text_property(properties, &[PID_TAG_BODY_HTML_W])
@@ -2917,6 +2918,12 @@ pub(in crate::mapi) fn message_body_stream_data(
     let target = match (session.handles.get(&input_handle), open_mode) {
         (Some(MapiObject::PendingMessage { .. }), 1 | 2) => {
             Some(StreamWriteTarget::PendingMessageProperty {
+                handle: input_handle,
+                property_tag,
+            })
+        }
+        (Some(MapiObject::PendingAssociatedMessage { .. }), 1 | 2) => {
+            Some(StreamWriteTarget::PendingAssociatedMessageProperty {
                 handle: input_handle,
                 property_tag,
             })
@@ -3065,6 +3072,20 @@ pub(in crate::mapi) fn sync_stream_target(
         } => {
             let value = stream_property_value(property_tag, data)?;
             if let Some(MapiObject::PendingMessage { properties, .. }) =
+                session.handles.get_mut(&handle)
+            {
+                properties.insert(canonical_property_storage_tag(property_tag), value);
+                Some(())
+            } else {
+                None
+            }
+        }
+        StreamWriteTarget::PendingAssociatedMessageProperty {
+            handle,
+            property_tag,
+        } => {
+            let value = stream_property_value(property_tag, data)?;
+            if let Some(MapiObject::PendingAssociatedMessage { properties, .. }) =
                 session.handles.get_mut(&handle)
             {
                 properties.insert(canonical_property_storage_tag(property_tag), value);

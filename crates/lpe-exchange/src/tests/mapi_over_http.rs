@@ -27270,6 +27270,101 @@ async fn mapi_over_http_open_associated_message_by_imported_source_key_id() {
 }
 
 #[tokio::test]
+async fn mapi_over_http_missing_associated_config_identity_opens_writable_placeholder() {
+    let account = FakeStore::account();
+    let config_id = Uuid::parse_str("e0fdf7ca-15f8-bc62-ff51-d543d69a14a8").unwrap();
+    let config_object_id = crate::mapi::identity::mapi_store_id(302);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mailboxes: Arc::new(Mutex::new(vec![FakeStore::mailbox(
+            "55555555-5555-4555-9555-555555555501",
+            "inbox",
+            "Inbox",
+        )])),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(config_id, config_object_id)]))),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = mapi_cookie_header(&connect);
+
+    let mut property_values = Vec::new();
+    append_mapi_utf16_property(
+        &mut property_values,
+        0x001A_001F,
+        "IPM.Configuration.MessageListSettings",
+    );
+    append_mapi_utf16_property(
+        &mut property_values,
+        PID_TAG_SUBJECT_W,
+        "Recovered view state",
+    );
+    let stream_body = utf16z("Recovered body stream");
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, crate::mapi::identity::INBOX_FOLDER_ID);
+    append_rop_open_message(
+        &mut rops,
+        1,
+        2,
+        crate::mapi::identity::INBOX_FOLDER_ID,
+        config_object_id,
+    );
+    append_rop_set_properties(&mut rops, 2, 2, &property_values);
+    rops.extend_from_slice(&[0x2B, 0x00, 0x02, 0x03]);
+    rops.extend_from_slice(&PID_TAG_BODY_W.to_le_bytes());
+    rops.push(2);
+    rops.extend_from_slice(&[0x2F, 0x00, 0x03]);
+    rops.extend_from_slice(&(stream_body.len() as u64).to_le_bytes());
+    rops.extend_from_slice(&[0x2D, 0x00, 0x03]);
+    rops.extend_from_slice(&(stream_body.len() as u16).to_le_bytes());
+    rops.extend_from_slice(&stream_body);
+    rops.extend_from_slice(&[0x5D, 0x00, 0x03]);
+    append_rop_get_properties_specific(&mut rops, 2, &[PID_TAG_SUBJECT_W, PID_TAG_BODY_W]);
+
+    let mut headers = mapi_headers("Execute");
+    headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x03, 0x02, 0, 0, 0, 0]),
+        "{response_rops:02x?}"
+    );
+    assert!(contains_bytes(&response_rops, &[0x0A, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2B, 0x03, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &[0x2F, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2D, 0x03, 0, 0, 0, 0, stream_body.len() as u8, 0]
+    ));
+    assert!(contains_bytes(&response_rops, &[0x5D, 0x03, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x07, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Recovered view state")
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &utf16z("Recovered body stream")
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_fast_transfer_copy_to_associated_config_message_succeeds() {
     let associated_object_id = crate::mapi::identity::mapi_store_id(
         crate::mapi::identity::MAX_PERSISTED_GLOBAL_COUNTER + 44,

@@ -34,6 +34,7 @@ pub(crate) struct MapiMailStoreSnapshot {
     rules: Vec<MapiRule>,
     navigation_shortcuts: Vec<MapiNavigationShortcutMessage>,
     associated_configs: Vec<MapiAssociatedConfigMessage>,
+    associated_config_identity_ids: Vec<u64>,
     conversation_actions: Vec<MapiConversationActionMessage>,
     delegate_freebusy_messages: Vec<MapiDelegateFreeBusyMessage>,
     recoverable_items: Vec<MapiRecoverableItemMessage>,
@@ -417,6 +418,7 @@ impl MapiMailStoreSnapshot {
             rules: Vec::new(),
             navigation_shortcuts: Vec::new(),
             associated_configs: Vec::new(),
+            associated_config_identity_ids: Vec::new(),
             conversation_actions: Vec::new(),
             delegate_freebusy_messages: Vec::new(),
             recoverable_items: Vec::new(),
@@ -550,6 +552,11 @@ impl MapiMailStoreSnapshot {
                 properties_json: config.properties_json,
             })
             .collect();
+        self
+    }
+
+    pub(crate) fn with_associated_config_identity_ids(mut self, ids: Vec<u64>) -> Self {
+        self.associated_config_identity_ids = ids;
         self
     }
 
@@ -1136,6 +1143,13 @@ impl MapiMailStoreSnapshot {
                         .is_some_and(|message_source_key| message_source_key == source_key)
             })
             .cloned()
+    }
+
+    pub(crate) fn has_associated_config_identity_id(&self, item_id: u64) -> bool {
+        self.associated_configs
+            .iter()
+            .any(|message| message.id == item_id)
+            || self.associated_config_identity_ids.contains(&item_id)
     }
 
     pub(crate) fn conversation_action_messages(&self) -> &[MapiConversationActionMessage] {

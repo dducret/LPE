@@ -5425,6 +5425,21 @@ where
                         0,
                     ));
                     output_handles.push(handle);
+                } else if snapshot.has_associated_config_identity_id(message_id) {
+                    let handle = session.allocate_output_handle(
+                        request.output_handle_index,
+                        MapiObject::PendingAssociatedMessage {
+                            folder_id,
+                            properties: HashMap::new(),
+                        },
+                    );
+                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                    responses.extend_from_slice(&rop_open_message_response(
+                        &request,
+                        "IPM.Configuration",
+                        0,
+                    ));
+                    output_handles.push(handle);
                 } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     if let Some(message) = snapshot.conversation_action_message_for_id(message_id) {
                         let handle = session.allocate_output_handle(

@@ -966,6 +966,9 @@ pub(in crate::mapi) fn rop_get_properties_specific_response_with_custom(
         Some(MapiObject::PendingMessage { properties, .. }) => {
             serialize_pending_message_row(principal, properties, &columns)
         }
+        Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
+            serialize_pending_message_row(principal, properties, &columns)
+        }
         Some(MapiObject::Contact {
             folder_id,
             contact_id,
@@ -2435,6 +2438,9 @@ pub(in crate::mapi) fn serialize_object_property(
                 value
             }),
         Some(MapiObject::PendingMessage { properties, .. }) => {
+            serialize_pending_message_row(principal, properties, &[tag])
+        }
+        Some(MapiObject::PendingAssociatedMessage { properties, .. }) => {
             serialize_pending_message_row(principal, properties, &[tag])
         }
         Some(MapiObject::Contact {

@@ -372,6 +372,11 @@ where
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::NavigationShortcut)
         .map(|identity| identity.canonical_id)
         .collect::<Vec<_>>();
+    let associated_config_identity_ids = identities
+        .iter()
+        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::AssociatedConfig)
+        .map(|identity| identity.object_id)
+        .collect::<Vec<_>>();
     let navigation_shortcuts = if snapshot_backed_contents || !navigation_shortcut_ids.is_empty() {
         log_mapi_store_load_step(
             account_id,
@@ -760,6 +765,7 @@ where
     .with_conversation_actions(conversation_actions)
     .with_navigation_shortcuts(navigation_shortcuts)
     .with_associated_configs(associated_configs)
+    .with_associated_config_identity_ids(associated_config_identity_ids)
     .with_delegate_freebusy_messages(delegate_freebusy_messages)
     .with_recoverable_items(recoverable_items)
     .with_reminders(reminders)
