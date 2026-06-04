@@ -295,6 +295,7 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
+pub(in crate::mapi) const PID_TAG_ASSOCIATED_SHARING_PROVIDER: u32 = 0x0EA0_0048;
 pub(in crate::mapi) const PID_TAG_READ: u32 = 0x0E69_000B;
 pub(in crate::mapi) const PID_TAG_CONVERSATION_INDEX: u32 = 0x0071_0102;
 pub(in crate::mapi) const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
@@ -707,6 +708,7 @@ pub(in crate::mapi) fn logon_property_value(
             Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
+        PID_TAG_ASSOCIATED_SHARING_PROVIDER => Some(MapiValue::Guid([0; 16])),
         PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(special_folder_entry_id_value(
             principal.account_id,
             PUBLIC_FOLDERS_ROOT_FOLDER_ID,
@@ -8448,6 +8450,10 @@ mod tests {
         assert_eq!(
             logon_property_value(&principal, PID_TAG_MAILBOX_OWNER_NAME_W),
             Some(MapiValue::String("Test User".to_string()))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_ASSOCIATED_SHARING_PROVIDER),
+            Some(MapiValue::Guid([0; 16]))
         );
         assert_eq!(
             logon_property_value(&principal, PID_TAG_USER_GUID),

@@ -21117,6 +21117,7 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
             0x6619_0102, // PidTagUserEntryId
             0x661B_0102, // PidTagMailboxOwnerEntryId
             0x661C_001F, // PidTagMailboxOwnerName
+            0x0EA0_0048, // PidTagAssociatedSharingProvider
             0x6631_0102, // PidTagIpmPublicFoldersEntryId
         ],
     );
