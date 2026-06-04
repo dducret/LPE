@@ -1604,6 +1604,11 @@ fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u
         PID_TAG_USER_GUID,
         PID_TAG_MAX_SUBMIT_MESSAGE_SIZE,
     ];
+    const OUTLOOK_BOOTSTRAP_LOGON_EXTENSION_PROPS: [u32; 3] = [
+        PID_TAG_RESOURCE_FLAGS,
+        PID_TAG_USER_ENTRY_ID,
+        PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID,
+    ];
     const REQUIRED_OUTLOOK_BOOTSTRAP_LOGON_PROPS: [u32; 8] = [
         PID_TAG_MAILBOX_OWNER_NAME_W,
         PID_TAG_MAILBOX_OWNER_ENTRY_ID,
@@ -1617,13 +1622,15 @@ fn is_outlook_logon_bootstrap_getprops(object: Option<&MapiObject>, columns: &[u
 
     matches!(object, Some(MapiObject::Logon))
         && columns.len() >= REQUIRED_OUTLOOK_BOOTSTRAP_LOGON_PROPS.len()
-        && columns.len() <= OUTLOOK_BOOTSTRAP_LOGON_PROPS.len()
+        && columns.len()
+            <= OUTLOOK_BOOTSTRAP_LOGON_PROPS.len() + OUTLOOK_BOOTSTRAP_LOGON_EXTENSION_PROPS.len()
         && REQUIRED_OUTLOOK_BOOTSTRAP_LOGON_PROPS
             .iter()
             .all(|expected| columns.contains(expected))
-        && columns
-            .iter()
-            .all(|tag| OUTLOOK_BOOTSTRAP_LOGON_PROPS.contains(tag))
+        && columns.iter().all(|tag| {
+            OUTLOOK_BOOTSTRAP_LOGON_PROPS.contains(tag)
+                || OUTLOOK_BOOTSTRAP_LOGON_EXTENSION_PROPS.contains(tag)
+        })
 }
 
 fn format_outlook_logon_bootstrap_property_details(
@@ -1759,7 +1766,10 @@ fn property_is_unsupported_for_object(
 fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bool {
     let storage_tag = canonical_property_storage_tag(tag);
     match object {
-        Some(MapiObject::Logon) => matches!(tag, PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE),
+        Some(MapiObject::Logon) => matches!(
+            tag,
+            PID_TAG_PRIVATE | PID_TAG_OUTLOOK_STORE_STATE | PID_TAG_RESOURCE_FLAGS
+        ),
         Some(MapiObject::PublicFolderLogon) => matches!(tag, PID_TAG_PRIVATE),
         Some(MapiObject::Folder { .. }) | None => matches!(
             storage_tag,
@@ -2188,8 +2198,11 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
+        PID_TAG_RESOURCE_FLAGS => "PidTagResourceFlags",
+        PID_TAG_USER_ENTRY_ID => "PidTagUserEntryId",
         PID_TAG_MAILBOX_OWNER_ENTRY_ID => "PidTagMailboxOwnerEntryId",
         PID_TAG_MAILBOX_OWNER_NAME_W => "PidTagMailboxOwnerName",
+        PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => "PidTagIpmPublicFoldersEntryId",
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => "PidTagServerTypeDisplayName",
         PID_TAG_SERVER_CONNECTED_ICON => "PidTagServerConnectedIcon",
         PID_TAG_SERVER_ACCOUNT_ICON => "PidTagServerAccountIcon",

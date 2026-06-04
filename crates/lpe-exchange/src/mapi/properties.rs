@@ -344,8 +344,11 @@ pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME: u32 = 0x6709_0040;
 pub(in crate::mapi) const PID_TAG_LOCAL_COMMIT_TIME_MAX: u32 = 0x670A_0040;
 pub(in crate::mapi) const PID_TAG_DELETED_COUNT_TOTAL: u32 = 0x670B_0003;
 pub(in crate::mapi) const PID_TAG_SERIALIZED_REPLID_GUID_MAP: u32 = 0x6638_0102;
+pub(in crate::mapi) const PID_TAG_RESOURCE_FLAGS: u32 = 0x3009_0003;
+pub(in crate::mapi) const PID_TAG_USER_ENTRY_ID: u32 = 0x6619_0102;
 pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_ENTRY_ID: u32 = 0x661B_0102;
 pub(in crate::mapi) const PID_TAG_MAILBOX_OWNER_NAME_W: u32 = 0x661C_001F;
+pub(in crate::mapi) const PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID: u32 = 0x6631_0102;
 pub(in crate::mapi) const PID_TAG_SERVER_TYPE_DISPLAY_NAME_W: u32 = 0x341D_001F;
 pub(in crate::mapi) const PID_TAG_SERVER_CONNECTED_ICON: u32 = 0x341E_0102;
 pub(in crate::mapi) const PID_TAG_SERVER_ACCOUNT_ICON: u32 = 0x341F_0102;
@@ -698,10 +701,16 @@ pub(in crate::mapi) fn logon_property_value(
     match property_tag {
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => Some(MapiValue::Binary(serialized_replid_guid_map())),
         PID_TAG_VALID_FOLDER_MASK => Some(MapiValue::U32(valid_folder_mask())),
+        PID_TAG_RESOURCE_FLAGS => Some(MapiValue::U32(0)),
+        PID_TAG_USER_ENTRY_ID => Some(MapiValue::Binary(mailbox_owner_entry_id(principal))),
         PID_TAG_MAILBOX_OWNER_ENTRY_ID => {
             Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
+        PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(special_folder_entry_id_value(
+            principal.account_id,
+            PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+        )),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
@@ -8412,6 +8421,10 @@ mod tests {
             Some(MapiValue::U32(0))
         );
         assert_eq!(
+            logon_property_value(&principal, PID_TAG_RESOURCE_FLAGS),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
             logon_property_value(&principal, PID_TAG_MAILBOX_OWNER_NAME_W),
             Some(MapiValue::String("Test User".to_string()))
         );
@@ -8430,6 +8443,17 @@ mod tests {
             &NSPI_PERMANENT_ENTRY_ID_PROVIDER_UID
         );
         assert!(owner_entry_id.ends_with(&[0]));
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_USER_ENTRY_ID),
+            Some(MapiValue::Binary(owner_entry_id))
+        );
+        assert_eq!(
+            logon_property_value(&principal, PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID),
+            Some(special_folder_entry_id_value(
+                principal.account_id,
+                PUBLIC_FOLDERS_ROOT_FOLDER_ID
+            ))
+        );
     }
 
     #[test]

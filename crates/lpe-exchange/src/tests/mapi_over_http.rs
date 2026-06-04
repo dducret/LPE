@@ -21065,6 +21065,9 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         &[
             0x661C_001F, // PidTagMailboxOwnerName
             0x661B_0102, // PidTagMailboxOwnerEntryId
+            0x3009_0003, // PidTagResourceFlags
+            0x6619_0102, // PidTagUserEntryId
+            0x6631_0102, // PidTagIpmPublicFoldersEntryId
             0x341D_001F, // PidTagServerTypeDisplayName
             0x341E_0102, // PidTagServerConnectedIcon
             0x341F_0102, // PidTagServerAccountIcon
@@ -21101,6 +21104,45 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
         &utf16z("Alice")
     ));
     assert!(contains_bytes(&bootstrap_store_props_rops, &utf16z("LPE")));
+
+    let mut trace_store_props_headers = mapi_headers("Execute");
+    trace_store_props_headers.insert("cookie", HeaderValue::from_str(&bootstrap_cookie).unwrap());
+    let mut trace_store_props = Vec::new();
+    append_rop_get_properties_specific(
+        &mut trace_store_props,
+        0,
+        &[
+            0x0E5C_000B, // PidTagPrivate
+            0x3009_0003, // PidTagResourceFlags
+            0x6619_0102, // PidTagUserEntryId
+            0x661B_0102, // PidTagMailboxOwnerEntryId
+            0x661C_001F, // PidTagMailboxOwnerName
+            0x6631_0102, // PidTagIpmPublicFoldersEntryId
+        ],
+    );
+    let trace_store_props_response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &trace_store_props_headers,
+            &execute_body(&rop_buffer(&trace_store_props, &[1])),
+        )
+        .await
+        .unwrap();
+    assert_eq!(trace_store_props_response.status(), StatusCode::OK);
+    assert_eq!(
+        trace_store_props_response
+            .headers()
+            .get("x-responsecode")
+            .unwrap(),
+        "0"
+    );
+    bootstrap_cookie = mapi_cookie_header(&trace_store_props_response);
+    let trace_store_props_rops =
+        response_rops_from_execute_response(trace_store_props_response).await;
+    assert!(!contains_bytes(
+        &trace_store_props_rops,
+        &[0x02, 0x01, 0x04, 0x80]
+    ));
 
     let mut cookie = bootstrap_cookie;
 

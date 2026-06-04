@@ -1305,12 +1305,7 @@ where
         );
     }
     let Some(_active_request) = begin_active_session_request(&session_id) else {
-        return mapi_diagnostic_response(
-            "NotificationWait",
-            request_id,
-            15,
-            "MAPI session already has an active request",
-        );
+        return notification_wait_empty_response(endpoint, request_id, &session_id);
     };
     let Some(session) = remove_session(&session_id) else {
         return mapi_diagnostic_response(
@@ -1352,6 +1347,20 @@ where
         0,
         body,
         session_context_cookies(endpoint, &session_id, false),
+    )
+}
+
+fn notification_wait_empty_response(
+    endpoint: MapiEndpoint,
+    request_id: &str,
+    session_id: &str,
+) -> Response {
+    mapi_response_with_cookies(
+        "NotificationWait",
+        request_id,
+        0,
+        notification_wait_body_with_events(false, &[]),
+        session_context_cookies(endpoint, session_id, false),
     )
 }
 
@@ -2243,6 +2252,37 @@ mod tests {
         assert!(body.contains("\r\nX-StartTime: "));
         assert!(body.contains(" GMT\r\n\r\n"));
         assert!(!body.contains("Mon, 01 Jan 2001 00:00:00 GMT"));
+    }
+
+    #[tokio::test]
+    async fn notification_wait_empty_response_reports_success_with_empty_body() {
+        let response = notification_wait_empty_response(MapiEndpoint::Emsmdb, "request:43", "abc");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response_header(&response, "x-requesttype").unwrap(),
+            "NotificationWait"
+        );
+        assert_eq!(response_header(&response, "x-responsecode").unwrap(), "0");
+        let set_cookies = response
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .map(|value| value.to_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(set_cookies.len(), 2);
+        assert!(set_cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("MapiContext=abc")));
+        assert!(set_cookies
+            .iter()
+            .any(|cookie| cookie.starts_with("MapiSequence=abc")));
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
+        assert!(body.ends_with(&[0; 16]));
     }
 
     #[test]
