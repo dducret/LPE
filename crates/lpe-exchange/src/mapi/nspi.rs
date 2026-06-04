@@ -200,6 +200,9 @@ const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x800F_101E, // PidTagAddressBookProxyAddresses string8
     0x800F_101F, // PidTagAddressBookProxyAddresses
     0x8009_000D, // PidTagAddressBookMember
+    0x3E04_0003, // Outlook address book compatibility flags
+    0x8888_0003, // Outlook address book compatibility flags
+    0x8CA8_001E, // Outlook address book string8 compatibility column
     0x8CE2_0003, // PidTagAddressBookDistributionListMemberCount
     0x8CE3_0003, // PidTagAddressBookDistributionListExternalMemberCount
     0x8C6D_0102, // PidTagAddressBookObjectGuid

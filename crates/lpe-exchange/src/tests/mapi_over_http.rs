@@ -37074,6 +37074,9 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     props_request.extend_from_slice(&0x300B_0102u32.to_le_bytes());
     props_request.extend_from_slice(&0x3003_001Fu32.to_le_bytes());
     props_request.extend_from_slice(&0x3001_001Fu32.to_le_bytes());
+    props_request.extend_from_slice(&0x3E04_0003u32.to_le_bytes());
+    props_request.extend_from_slice(&0x8888_0003u32.to_le_bytes());
+    props_request.extend_from_slice(&0x8CA8_001Eu32.to_le_bytes());
     let props_headers = nspi_bound_headers(&service, "GetProps").await;
     let response = service
         .handle_mapi(MapiEndpoint::Nspi, &props_headers, &props_request)
@@ -37082,6 +37085,9 @@ async fn mapi_over_http_nspi_bootstrap_sequence_sees_only_visible_contacts() {
     let body = response_bytes(response).await;
     assert_eq!(body[12], 1);
     assert!(contains_bytes(&body, b"EX:"));
+    assert!(contains_bytes(&body, &0x3E04_0003u32.to_le_bytes()));
+    assert!(contains_bytes(&body, &0x8888_0003u32.to_le_bytes()));
+    assert!(contains_bytes(&body, &0x8CA8_001Eu32.to_le_bytes()));
     let mut search_key = format!(
         "EX:{}",
         test_contact_legacy_dn(
