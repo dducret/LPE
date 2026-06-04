@@ -1045,6 +1045,13 @@ impl FakeStore {
             .iter()
             .find(|config| identities.get(&config.id).copied() == Some(object_id))
             .map(|config| (MapiIdentityObjectKind::AssociatedConfig, config.id));
+        let navigation_shortcut_match = self
+            .navigation_shortcuts
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|shortcut| identities.get(&shortcut.id).copied() == Some(object_id))
+            .map(|shortcut| (MapiIdentityObjectKind::NavigationShortcut, shortcut.id));
 
         let fallback_identity_match = identities
             .iter()
@@ -1060,6 +1067,7 @@ impl FakeStore {
             .or(account_match)
             .or(public_folder_match)
             .or(associated_config_match)
+            .or(navigation_shortcut_match)
             .or(fallback_identity_match)?;
         Some(MapiIdentityLookupRecord {
             object_kind,
@@ -4214,6 +4222,18 @@ impl ExchangeStore for FakeStore {
             }
             Ok(record)
         })
+    }
+
+    fn delete_mapi_navigation_shortcut<'a>(
+        &'a self,
+        _account_id: Uuid,
+        shortcut_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        self.navigation_shortcuts
+            .lock()
+            .unwrap()
+            .retain(|shortcut| shortcut.id != shortcut_id);
+        Box::pin(async move { Ok(()) })
     }
 
     fn fetch_mapi_associated_configs<'a>(

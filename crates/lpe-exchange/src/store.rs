@@ -1382,6 +1382,12 @@ pub trait ExchangeStore: AccountAuthStore {
         input: UpsertMapiNavigationShortcutInput,
     ) -> StoreFuture<'a, MapiNavigationShortcutRecord>;
 
+    fn delete_mapi_navigation_shortcut<'a>(
+        &'a self,
+        account_id: Uuid,
+        shortcut_id: Uuid,
+    ) -> StoreFuture<'a, ()>;
+
     fn fetch_mapi_associated_configs<'a>(
         &'a self,
         account_id: Uuid,
@@ -5635,6 +5641,32 @@ impl ExchangeStore for Storage {
             .await?;
 
             mapi_navigation_shortcut_from_row(row)
+        })
+    }
+
+    fn delete_mapi_navigation_shortcut<'a>(
+        &'a self,
+        account_id: Uuid,
+        shortcut_id: Uuid,
+    ) -> StoreFuture<'a, ()> {
+        Box::pin(async move {
+            let tenant_id = mapi_tenant_id_for_account(self, account_id).await?;
+            let deleted = sqlx::query_scalar::<_, Uuid>(
+                r#"
+                DELETE FROM mapi_navigation_shortcuts
+                WHERE tenant_id = $1 AND account_id = $2 AND id = $3
+                RETURNING id
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(account_id)
+            .bind(shortcut_id)
+            .fetch_optional(self.pool())
+            .await?;
+            if deleted.is_none() {
+                anyhow::bail!("MAPI navigation shortcut not found");
+            }
+            Ok(())
         })
     }
 

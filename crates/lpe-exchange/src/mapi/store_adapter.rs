@@ -362,6 +362,34 @@ where
         .fetch_mapi_associated_configs(account_id)
         .await
         .context("fetch MAPI associated config messages")?;
+    let snapshot_backed_contents = plan
+        .content_queries
+        .iter()
+        .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none())
+        || plan.object_ids.contains(&CALENDAR_FOLDER_ID);
+    let navigation_shortcut_ids = identities
+        .iter()
+        .filter(|identity| identity.object_kind == MapiIdentityObjectKind::NavigationShortcut)
+        .map(|identity| identity.canonical_id)
+        .collect::<Vec<_>>();
+    let navigation_shortcuts = if snapshot_backed_contents || !navigation_shortcut_ids.is_empty() {
+        log_mapi_store_load_step(
+            account_id,
+            plan,
+            "fetch navigation shortcuts",
+            navigation_shortcut_ids.len(),
+        );
+        let mut shortcuts = store
+            .fetch_mapi_navigation_shortcuts(account_id)
+            .await
+            .context("fetch MAPI navigation shortcuts")?;
+        if !snapshot_backed_contents {
+            shortcuts.retain(|shortcut| navigation_shortcut_ids.contains(&shortcut.id));
+        }
+        shortcuts
+    } else {
+        Vec::new()
+    };
     log_mapi_store_load_step(account_id, plan, "fetch delegate freebusy messages", 0);
     let delegate_freebusy_messages = store
         .fetch_delegate_freebusy_messages(account_id)
@@ -387,11 +415,6 @@ where
         )
         .await
         .context("fetch MAPI reminders")?;
-    let snapshot_backed_contents = plan
-        .content_queries
-        .iter()
-        .any(|query| mailbox_id_for_mapi_folder_id(&mailboxes, query.folder_id).is_none())
-        || plan.object_ids.contains(&CALENDAR_FOLDER_ID);
     let contact_ids = identities
         .iter()
         .filter(|identity| identity.object_kind == MapiIdentityObjectKind::Contact)
@@ -633,6 +656,16 @@ where
                 }),
         )
         .chain(
+            navigation_shortcuts
+                .iter()
+                .map(|shortcut| MapiIdentityRequest {
+                    object_kind: MapiIdentityObjectKind::NavigationShortcut,
+                    canonical_id: shortcut.id,
+                    reserved_global_counter: None,
+                    source_key: None,
+                }),
+        )
+        .chain(
             delegate_freebusy_messages
                 .iter()
                 .map(|message| MapiIdentityRequest {
@@ -725,6 +758,7 @@ where
     .with_notes_and_journal(notes, journal_entries)
     .with_search_folder_definitions(search_folder_definitions)
     .with_conversation_actions(conversation_actions)
+    .with_navigation_shortcuts(navigation_shortcuts)
     .with_associated_configs(associated_configs)
     .with_delegate_freebusy_messages(delegate_freebusy_messages)
     .with_recoverable_items(recoverable_items)

@@ -15569,6 +15569,69 @@ async fn mapi_over_http_common_views_create_associated_navigation_shortcut_persi
 }
 
 #[tokio::test]
+async fn mapi_over_http_common_views_delete_messages_deletes_navigation_shortcut() {
+    let account = FakeStore::account();
+    let shortcut_id = Uuid::parse_str("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").unwrap();
+    let shortcut_mapi_id = test_mapi_uuid_id(&shortcut_id);
+    let store = FakeStore {
+        session: Some(account.clone()),
+        mapi_identities: Arc::new(Mutex::new(HashMap::from([(shortcut_id, shortcut_mapi_id)]))),
+        navigation_shortcuts: Arc::new(Mutex::new(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id: account.account_id,
+                subject: "Shortcut".to_string(),
+                target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 0,
+                ordinal: 1,
+                group_header_id: None,
+                group_name: "Mail".to_string(),
+            },
+        ])),
+        ..Default::default()
+    };
+    let shortcuts = store.navigation_shortcuts.clone();
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert(
+        "cookie",
+        HeaderValue::from_str(&mapi_cookie_header(&connect)).unwrap(),
+    );
+
+    let mut rops = Vec::new();
+    append_rop_open_folder(
+        &mut rops,
+        0,
+        1,
+        crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+    );
+    append_rop_delete_messages(&mut rops, 1, &[shortcut_mapi_id]);
+
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x1E, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00]
+    ));
+    assert!(shortcuts.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn mapi_over_http_common_views_create_group_header_and_link_persists_and_reloads() {
     let account = FakeStore::account();
     let store = FakeStore {

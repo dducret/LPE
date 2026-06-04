@@ -8013,6 +8013,23 @@ where
                         }
                         continue;
                     }
+                    if folder_id == crate::mapi::identity::COMMON_VIEWS_FOLDER_ID {
+                        if let Some(message) =
+                            snapshot.navigation_shortcut_message_for_id(message_id)
+                        {
+                            if store
+                                .delete_mapi_navigation_shortcut(
+                                    principal.account_id,
+                                    message.canonical_id,
+                                )
+                                .await
+                                .is_err()
+                            {
+                                partial_completion = true;
+                            }
+                            continue;
+                        }
+                    }
                     if let Some(message) = snapshot
                         .associated_config_message_for_id(message_id)
                         .filter(|message| message.folder_id == folder_id)
