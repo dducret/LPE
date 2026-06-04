@@ -34,6 +34,8 @@ const SEARCH_RECURSIVE_FLAG: u32 = 0x0000_0004;
 const EC_RULE_UNSUPPORTED: u32 = 0x8004_0102;
 const EC_RULE_NOT_FOUND: u32 = 0x8004_010F;
 const EC_RULE_INVALID_PARAMETER: u32 = 0x8007_0057;
+const EXECUTE_ACTIVE_SESSION_RETRY_ATTEMPTS: usize = 50;
+const EXECUTE_ACTIVE_SESSION_RETRY_DELAY_MS: u64 = 10;
 const DEFAULT_CALENDAR_COLLECTION_ID: &str = "default";
 const ROW_ADD: u8 = 0x01;
 const ROW_MODIFY: u8 = 0x02;
@@ -845,6 +847,21 @@ async fn hard_delete_recoverable_folder_contents<S: ExchangeStore>(
     Ok((changed_folder_ids, partial_completion))
 }
 
+async fn acquire_execute_active_session_request(session_id: &str) -> Option<ActiveSessionRequest> {
+    for attempt in 0..EXECUTE_ACTIVE_SESSION_RETRY_ATTEMPTS {
+        if let Some(active_request) = begin_active_session_request(session_id) {
+            return Some(active_request);
+        }
+        if attempt + 1 < EXECUTE_ACTIVE_SESSION_RETRY_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                EXECUTE_ACTIVE_SESSION_RETRY_DELAY_MS,
+            ))
+            .await;
+        }
+    }
+    None
+}
+
 pub(in crate::mapi) async fn execute_response<S, V>(
     store: &S,
     validator: &Validator<V>,
@@ -870,7 +887,7 @@ where
             None,
         );
     }
-    let Some(_active_request) = begin_active_session_request(&session_id) else {
+    let Some(_active_request) = acquire_execute_active_session_request(&session_id).await else {
         return execute_failure_response(
             request_id,
             15,
@@ -14056,6 +14073,23 @@ fn summarize_fast_transfer_get_buffer_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn execute_active_session_acquire_waits_for_short_outlook_overlap() {
+        let session_id = format!("test-overlap-{}", Uuid::new_v4());
+        let active = begin_active_session_request(&session_id).unwrap();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            drop(active);
+        });
+
+        let acquired = acquire_execute_active_session_request(&session_id).await;
+
+        assert!(acquired.is_some());
+        drop(acquired);
+        release.await.unwrap();
+        assert!(!session_request_is_active(&session_id));
+    }
 
     #[test]
     fn uploaded_state_delta_anchor_requires_idset_and_cnset_seen() {
