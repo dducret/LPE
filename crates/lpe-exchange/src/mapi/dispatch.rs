@@ -4567,7 +4567,8 @@ fn log_outlook_contents_table_restrict(
         associated,
         restrict_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
         restriction_bytes = request_restriction_bytes(request).len(),
-        restriction_preview = %hex_preview(request_restriction_bytes(request), 48),
+        restriction_preview = %hex_preview(request_restriction_bytes(request), 96),
+        restriction_decoded = %format_debug_restriction(request_restriction_bytes(request)),
         parsed_restriction_present = restriction.is_some(),
         current_position = *position,
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
@@ -4678,7 +4679,8 @@ fn log_outlook_contents_table_find_row(
         find_origin = request.find_origin().unwrap_or(0),
         find_backward = request.find_backward(),
         restriction_bytes = request_restriction_bytes(request).len(),
-        restriction_preview = %hex_preview(request_restriction_bytes(request), 48),
+        restriction_preview = %hex_preview(request_restriction_bytes(request), 96),
+        restriction_decoded = %format_debug_restriction(request_restriction_bytes(request)),
         response_found = response.get(7).copied().unwrap_or(0),
         current_position = *position,
         table_has_restriction = restriction.is_some(),
@@ -4716,6 +4718,97 @@ fn request_restriction_bytes(request: &RopRequest) -> &[u8] {
     };
     let size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
     request.payload.get(3..3 + size).unwrap_or_default()
+}
+
+fn format_debug_restriction(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    match parse_mapi_restriction(bytes) {
+        Ok(restriction) => format_debug_parsed_restriction(&restriction),
+        Err(error) => format!("parse_error={error}"),
+    }
+}
+
+fn format_debug_parsed_restriction(restriction: &MapiRestriction) -> String {
+    match restriction {
+        MapiRestriction::And(children) => format!(
+            "and({})",
+            children
+                .iter()
+                .map(format_debug_parsed_restriction)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        MapiRestriction::Or(children) => format!(
+            "or({})",
+            children
+                .iter()
+                .map(format_debug_parsed_restriction)
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        MapiRestriction::Not(child) => {
+            format!("not({})", format_debug_parsed_restriction(child))
+        }
+        MapiRestriction::Content {
+            property_tag,
+            value,
+        } => format!(
+            "content;property_tag=0x{property_tag:08x};value={}",
+            format_debug_text_value(value)
+        ),
+        MapiRestriction::Property {
+            relop,
+            property_tag,
+            value,
+        } => format!(
+            "property;relop=0x{relop:02x};property_tag=0x{property_tag:08x};value={}",
+            format_debug_mapi_value(value)
+        ),
+        MapiRestriction::Bitmask {
+            property_tag,
+            mask,
+            must_be_nonzero,
+        } => format!(
+            "bitmask;property_tag=0x{property_tag:08x};mask=0x{mask:08x};must_be_nonzero={must_be_nonzero}"
+        ),
+        MapiRestriction::Size {
+            relop,
+            property_tag,
+            size,
+        } => {
+            format!("size;relop=0x{relop:02x};property_tag=0x{property_tag:08x};size={size}")
+        }
+        MapiRestriction::Exist { property_tag } => {
+            format!("exist;property_tag=0x{property_tag:08x}")
+        }
+    }
+}
+
+fn format_debug_mapi_value(value: &MapiValue) -> String {
+    match value {
+        MapiValue::String(value) => format_debug_text_value(value),
+        MapiValue::Binary(value) => format!("binary:{}", hex_preview(value, 96)),
+        MapiValue::Bool(value) => value.to_string(),
+        MapiValue::I16(value) => value.to_string(),
+        MapiValue::I32(value) => value.to_string(),
+        MapiValue::I64(value) => value.to_string(),
+        MapiValue::U32(value) => value.to_string(),
+        MapiValue::U64(value) => value.to_string(),
+        MapiValue::Guid(value) => format!("guid:{}", hex_preview(value, 16)),
+        MapiValue::Error(value) => format!("error:0x{value:08x}"),
+        MapiValue::MultiI16(values) => format!("{values:?}"),
+        MapiValue::MultiI32(values) => format!("{values:?}"),
+        MapiValue::MultiI64(values) => format!("{values:?}"),
+        MapiValue::MultiString(values) => format!("{values:?}"),
+        MapiValue::MultiBinary(values) => format!("multi_binary:count={}", values.len()),
+        MapiValue::MultiGuid(values) => format!("multi_guid:count={}", values.len()),
+    }
+}
+
+fn format_debug_text_value(value: &str) -> String {
+    value.escape_debug().to_string()
 }
 
 fn format_debug_sort_orders(sort_orders: &[MapiSortOrder]) -> String {
