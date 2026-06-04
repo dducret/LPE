@@ -6,8 +6,9 @@ use super::sync::*;
 use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi::identity::{
-    RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID, RECOVERABLE_ITEMS_PURGES_FOLDER_ID,
-    RECOVERABLE_ITEMS_ROOT_FOLDER_ID, RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
+    QUICK_STEP_SETTINGS_FOLDER_ID, RECOVERABLE_ITEMS_DELETIONS_FOLDER_ID,
+    RECOVERABLE_ITEMS_PURGES_FOLDER_ID, RECOVERABLE_ITEMS_ROOT_FOLDER_ID,
+    RECOVERABLE_ITEMS_VERSIONS_FOLDER_ID,
 };
 use crate::mapi_store::{
     MapiAssociatedConfigMessage, MapiCommonViewsMessage, MapiConversationActionMessage,
@@ -637,6 +638,7 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
     CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+    QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
@@ -3248,6 +3250,7 @@ pub(in crate::mapi) fn role_for_folder_id(folder_id: u64) -> Option<&'static str
         TRACKED_MAIL_PROCESSING_FOLDER_ID => Some("tracked_mail_processing"),
         TODO_SEARCH_FOLDER_ID => Some("todo_search"),
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => Some("conversation_action_settings"),
+        QUICK_STEP_SETTINGS_FOLDER_ID => Some("quick_step_settings"),
         ARCHIVE_FOLDER_ID => Some("archive"),
         CONVERSATION_HISTORY_FOLDER_ID => Some("conversation_history"),
         _ => None,
@@ -3283,6 +3286,7 @@ pub(in crate::mapi) fn advertised_special_folder_id_for_create(
         TRACKED_MAIL_PROCESSING_FOLDER_ID,
         TODO_SEARCH_FOLDER_ID,
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        QUICK_STEP_SETTINGS_FOLDER_ID,
         ARCHIVE_FOLDER_ID,
         FREEBUSY_DATA_FOLDER_ID,
         CONVERSATION_HISTORY_FOLDER_ID,
@@ -3496,6 +3500,12 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             IPM_SUBTREE_FOLDER_ID,
             "IPF.Configuration",
             false,
+        ),
+        QUICK_STEP_SETTINGS_FOLDER_ID => (
+            "Quick Step Settings",
+            IPM_SUBTREE_FOLDER_ID,
+            "IPF.Configuration",
+            true,
         ),
         ARCHIVE_FOLDER_ID => ("Archive", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "", false),
@@ -5818,6 +5828,7 @@ pub(in crate::mapi) fn try_mapi_folder_id(mailbox: &JmapMailbox) -> Option<u64> 
         "tracked_mail_processing" => Some(TRACKED_MAIL_PROCESSING_FOLDER_ID),
         "todo_search" => Some(TODO_SEARCH_FOLDER_ID),
         "conversation_action_settings" => Some(CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
+        "quick_step_settings" => Some(QUICK_STEP_SETTINGS_FOLDER_ID),
         "archive" => Some(ARCHIVE_FOLDER_ID),
         "conversation_history" => Some(CONVERSATION_HISTORY_FOLDER_ID),
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id),
