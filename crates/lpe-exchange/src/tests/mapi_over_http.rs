@@ -30599,7 +30599,7 @@ async fn mapi_over_http_unknown_property_type_terminates_current_buffer() {
     rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
     rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
     rops.extend_from_slice(&1u16.to_le_bytes());
-    rops.extend_from_slice(&0x0037_000Du32.to_le_bytes()); // Unknown property type.
+    rops.extend_from_slice(&0x0037_2222u32.to_le_bytes()); // Unknown property type.
     rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01, 0x01, 0x00]); // Must not execute.
 
     let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX]).await;
@@ -30611,6 +30611,24 @@ async fn mapi_over_http_unknown_property_type_terminates_current_buffer() {
         &[0x12, 0x02, 0x02, 0x01, 0x04, 0x80]
     ));
     assert!(!contains_bytes(&response_rops, &[0x15, 0x02]));
+}
+
+#[tokio::test]
+async fn mapi_over_http_known_unmodeled_table_column_type_does_not_abort_buffer() {
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, test_mapi_folder_id(5));
+    rops.extend_from_slice(&[0x05, 0x00, 0x01, 0x02, 0x00]); // RopGetContentsTable
+    rops.extend_from_slice(&[0x12, 0x00, 0x02, 0x00]); // RopSetColumns
+    rops.extend_from_slice(&1u16.to_le_bytes());
+    rops.extend_from_slice(&0x0037_000Du32.to_le_bytes()); // PtypObject is known but unmodeled.
+    rops.extend_from_slice(&[0x15, 0x00, 0x02, 0x00, 0x01, 0x01, 0x00]); // RopQueryRows
+
+    let response_rops = execute_rops_response_rops(&rops, &[1, u32::MAX, u32::MAX]).await;
+
+    assert!(contains_bytes(&response_rops, &[0x02, 0x01, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x05, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x12, 0x02, 0, 0, 0, 0]));
+    assert!(contains_bytes(&response_rops, &[0x15, 0x02, 0, 0, 0, 0]));
 }
 
 #[tokio::test]

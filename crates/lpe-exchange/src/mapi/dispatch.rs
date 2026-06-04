@@ -7254,7 +7254,7 @@ where
                 Some(MapiObject::HierarchyTable { columns, .. })
                 | Some(MapiObject::ContentsTable { columns, .. })
                 | Some(MapiObject::AttachmentTable { columns, .. }) => {
-                    if !property_tags_are_supported(&request.property_tags()) {
+                    if !property_tags_have_known_wire_types(&request.property_tags()) {
                         responses.extend_from_slice(&rop_error_response(
                             0x12,
                             request.response_handle_index(),
@@ -13268,6 +13268,15 @@ fn property_tags_are_supported(property_tags: &[u32]) -> bool {
     property_tags.iter().all(|tag| {
         let property_type = (*tag & 0xFFFF) as u16;
         property_type == 0 || MapiPropertyType::from_code(property_type).is_some()
+    })
+}
+
+fn property_tags_have_known_wire_types(property_tags: &[u32]) -> bool {
+    property_tags.iter().all(|tag| {
+        let property_type = (*tag & 0xFFFF) as u16;
+        property_type == 0
+            || MapiPropertyType::from_code(property_type).is_some()
+            || MapiPropertyType::known_unsupported_name(property_type).is_some()
     })
 }
 
