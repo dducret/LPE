@@ -6,7 +6,8 @@ use super::wire::MapiPropertyType;
 use super::*;
 use crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID;
 use crate::mapi_store::{
-    MapiConversationActionMessage, MapiMessage, MapiNavigationShortcutMessage, MapiPublicFolder,
+    MapiAssociatedConfigMessage, MapiConversationActionMessage, MapiMessage,
+    MapiNavigationShortcutMessage, MapiPublicFolder,
 };
 use anyhow::bail;
 use lpe_storage::{
@@ -1124,6 +1125,15 @@ pub(in crate::mapi) fn restriction_matches_navigation_shortcut(
 ) -> bool {
     restriction_matches(restriction, |property_tag| {
         navigation_shortcut_property_value(message, account_id, property_tag)
+    })
+}
+
+pub(in crate::mapi) fn restriction_matches_associated_config(
+    restriction: Option<&MapiRestriction>,
+    message: &MapiAssociatedConfigMessage,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        associated_config_property_value(message, property_tag)
     })
 }
 

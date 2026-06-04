@@ -4679,7 +4679,7 @@ fn log_outlook_contents_table_find_row(
         find_backward = request.find_backward(),
         restriction_bytes = request_restriction_bytes(request).len(),
         restriction_preview = %hex_preview(request_restriction_bytes(request), 48),
-        response_found = response.get(6).copied().unwrap_or(0),
+        response_found = response.get(7).copied().unwrap_or(0),
         current_position = *position,
         table_has_restriction = restriction.is_some(),
         table_sort_order_count = sort_orders.len(),

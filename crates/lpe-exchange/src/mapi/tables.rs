@@ -2750,7 +2750,9 @@ pub(in crate::mapi) fn rop_find_row_response(
                 let rows = snapshot.associated_config_messages_for_folder(*folder_id);
                 let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) =
-                    find_row(rows.as_slice(), *position, request, |_message| true)
+                    find_row(rows.as_slice(), *position, request, |message| {
+                        restriction_matches_associated_config(Some(&restriction), message)
+                    })
                 {
                     *position = index;
                     response.push(1);
