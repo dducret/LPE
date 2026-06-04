@@ -707,6 +707,10 @@ pub(in crate::mapi) fn logon_property_value(
             Some(MapiValue::Binary(mailbox_owner_entry_id(principal)))
         }
         PID_TAG_MAILBOX_OWNER_NAME_W => Some(MapiValue::String(principal.display_name.clone())),
+        PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => Some(special_folder_entry_id_value(
+            principal.account_id,
+            PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+        )),
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => Some(MapiValue::String("LPE".to_string())),
         PID_TAG_OUTLOOK_STORE_STATE => Some(MapiValue::U32(0)),
         PID_TAG_PRIVATE => Some(MapiValue::Bool(true)),
@@ -8464,9 +8468,14 @@ mod tests {
             logon_property_value(&principal, PID_TAG_USER_ENTRY_ID),
             Some(MapiValue::Binary(owner_entry_id))
         );
+        let Some(MapiValue::Binary(public_folder_entry_id)) =
+            logon_property_value(&principal, PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID)
+        else {
+            panic!("expected public folders EntryID");
+        };
         assert_eq!(
-            logon_property_value(&principal, PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID),
-            None
+            crate::mapi::identity::object_id_from_folder_entry_id(&public_folder_entry_id),
+            Some(PUBLIC_FOLDERS_ROOT_FOLDER_ID)
         );
     }
 

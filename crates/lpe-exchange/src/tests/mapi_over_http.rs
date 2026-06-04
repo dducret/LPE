@@ -21139,6 +21139,15 @@ async fn mapi_over_http_outlook_startup_replay_keeps_calendar_search_and_partial
     bootstrap_cookie = mapi_cookie_header(&trace_store_props_response);
     let trace_store_props_rops =
         response_rops_from_execute_response(trace_store_props_response).await;
+    let public_folders_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+        account.account_id,
+        crate::mapi::identity::PUBLIC_FOLDERS_ROOT_FOLDER_ID,
+    )
+    .unwrap();
+    assert!(contains_bytes(
+        &trace_store_props_rops,
+        &public_folders_entry_id
+    ));
     assert!(!contains_bytes(
         &trace_store_props_rops,
         &[0x02, 0x01, 0x04, 0x80]
