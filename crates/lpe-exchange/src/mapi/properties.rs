@@ -2745,8 +2745,88 @@ pub(in crate::mapi) async fn open_stream_data<S: ExchangeStore>(
                 snapshot,
             )
         }
+        _ => property_stream_data(
+            session,
+            input_handle,
+            property_tag,
+            open_mode,
+            mailboxes,
+            principal.account_id,
+            snapshot,
+        ),
+    }
+}
+
+fn property_stream_data(
+    session: &MapiSession,
+    input_handle: u32,
+    property_tag: u32,
+    open_mode: u8,
+    mailboxes: &[JmapMailbox],
+    mailbox_guid: Uuid,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<(Vec<u8>, Option<StreamWriteTarget>)> {
+    if open_mode != 0 {
+        return None;
+    }
+    let value = match session.handles.get(&input_handle)? {
+        MapiObject::Folder {
+            folder_id,
+            properties,
+        } => properties
+            .get(&canonical_property_storage_tag(property_tag))
+            .cloned()
+            .or_else(|| {
+                mailboxes
+                    .iter()
+                    .find(|mailbox| mapi_folder_id(mailbox) == *folder_id)
+                    .and_then(|mailbox| {
+                        mailbox_property_value_with_context_for_account(
+                            mailbox,
+                            mailboxes,
+                            property_tag,
+                            mailbox_guid,
+                        )
+                    })
+            }),
+        MapiObject::AssociatedConfig {
+            folder_id,
+            config_id,
+        } => snapshot
+            .associated_config_message_for_id(*config_id)
+            .filter(|message| message.folder_id == *folder_id)
+            .and_then(|message| associated_config_property_value(&message, property_tag)),
+        _ => return None,
+    };
+    let stream = match value {
+        Some(value) => mapi_value_stream_bytes(property_tag, value)?,
+        None => empty_stream_bytes_for_property_tag(property_tag)?,
+    };
+    Some((stream, None))
+}
+
+fn mapi_value_stream_bytes(property_tag: u32, value: MapiValue) -> Option<Vec<u8>> {
+    match value {
+        MapiValue::Binary(value) => Some(value),
+        MapiValue::String(value) if property_tag_type(property_tag) == 0x001E => {
+            Some(string8z_bytes(&value))
+        }
+        MapiValue::String(value) => Some(utf16z_bytes(&value)),
         _ => None,
     }
+}
+
+fn empty_stream_bytes_for_property_tag(property_tag: u32) -> Option<Vec<u8>> {
+    match property_tag_type(property_tag) {
+        0x0102 => Some(Vec::new()),
+        0x001E => Some(string8z_bytes("")),
+        0x001F => Some(utf16z_bytes("")),
+        _ => None,
+    }
+}
+
+fn property_tag_type(property_tag: u32) -> u32 {
+    property_tag & 0x0000_FFFF
 }
 
 pub(in crate::mapi) fn message_body_stream_data(

@@ -28379,6 +28379,122 @@ async fn mapi_over_http_folder_set_properties_accepts_additional_ren_entry_ids()
 }
 
 #[tokio::test]
+async fn mapi_over_http_folder_open_stream_reads_computed_binary_property() {
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let folder_id = test_mapi_folder_id(5);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let property_tag: u32 = 0x36D9_0102;
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, folder_id);
+    rops.extend_from_slice(&[0x2B, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&property_tag.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x2C, 0x00, 0x02]);
+    rops.extend_from_slice(&32u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(
+        contains_bytes(&response_rops, &[0x2B, 0x02, 0, 0, 0, 0]),
+        "{response_rops:02x?}"
+    );
+    assert!(
+        contains_bytes(&response_rops, &[0x2C, 0x02, 0, 0, 0, 0, 32, 0]),
+        "{response_rops:02x?}"
+    );
+}
+
+#[tokio::test]
+async fn mapi_over_http_folder_open_stream_returns_empty_missing_binary_property() {
+    let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
+    let folder_id = test_mapi_folder_id(5);
+    let store = FakeStore {
+        session: Some(FakeStore::account()),
+        mailboxes: Arc::new(Mutex::new(vec![inbox])),
+        ..Default::default()
+    };
+    let service = ExchangeService::new(store);
+    let connect = service
+        .handle_mapi(MapiEndpoint::Emsmdb, &mapi_headers("Connect"), b"")
+        .await
+        .unwrap();
+    let cookie = connect
+        .headers()
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let property_tag: u32 = 0x66AB_0102;
+    let mut rops = Vec::new();
+    append_rop_open_folder(&mut rops, 0, 1, folder_id);
+    rops.extend_from_slice(&[0x2B, 0x00, 0x01, 0x02]);
+    rops.extend_from_slice(&property_tag.to_le_bytes());
+    rops.push(0);
+    rops.extend_from_slice(&[0x2C, 0x00, 0x02]);
+    rops.extend_from_slice(&32u16.to_le_bytes());
+
+    let mut execute_headers = mapi_headers("Execute");
+    execute_headers.insert("cookie", HeaderValue::from_str(&cookie).unwrap());
+    let response = service
+        .handle_mapi(
+            MapiEndpoint::Emsmdb,
+            &execute_headers,
+            &execute_body(&rop_buffer(&rops, &[1, u32::MAX, u32::MAX])),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers().get("x-responsecode").unwrap(), "0");
+    let response_rops = response_rops_from_execute_response(response).await;
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2B, 0x02, 0, 0, 0, 0, 0, 0, 0, 0]
+    ));
+    assert!(contains_bytes(
+        &response_rops,
+        &[0x2C, 0x02, 0, 0, 0, 0, 0, 0]
+    ));
+}
+
+#[tokio::test]
 async fn mapi_over_http_root_set_properties_accepts_additional_ren_entry_ids_as_cache_write() {
     let inbox = FakeStore::mailbox("55555555-5555-5555-5555-555555555555", "inbox", "Inbox");
     let root_folder_id = test_mapi_folder_id(1);
