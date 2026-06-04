@@ -3987,6 +3987,14 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     {
         return Some("getprops_or_release_getprops");
     }
+    if request_rop_ids
+        .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x02 | 0x07))
+        && request_rop_ids.contains(&0x02)
+        && request_rop_ids.contains(&0x07)
+    {
+        return Some("openfolder_getprops_probe");
+    }
     if request_rop_ids.iter().all(|rop_id| matches!(*rop_id, 0x01))
         && request_rop_ids.contains(&0x01)
     {
@@ -14370,9 +14378,16 @@ mod tests {
             execute_response_framing_context(&[0x02, 0x70, 0x4E]),
             Some("hierarchy_sync")
         );
+        assert_eq!(
+            execute_response_framing_context(&[0x01, 0x02, 0x07]),
+            Some("openfolder_getprops_probe")
+        );
         assert_eq!(execute_response_framing_context(&[0x0A]), Some("setprops"));
         assert_eq!(execute_response_framing_context(&[0x79]), Some("setprops"));
-        assert_eq!(execute_response_framing_context(&[0x02, 0x07]), None);
+        assert_eq!(
+            execute_response_framing_context(&[0x02, 0x07]),
+            Some("openfolder_getprops_probe")
+        );
     }
 
     #[test]
