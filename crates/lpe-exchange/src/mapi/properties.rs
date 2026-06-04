@@ -1117,6 +1117,16 @@ pub(in crate::mapi) fn restriction_matches_attachment(
     })
 }
 
+pub(in crate::mapi) fn restriction_matches_navigation_shortcut(
+    restriction: Option<&MapiRestriction>,
+    message: &MapiNavigationShortcutMessage,
+    account_id: Uuid,
+) -> bool {
+    restriction_matches(restriction, |property_tag| {
+        navigation_shortcut_property_value(message, account_id, property_tag)
+    })
+}
+
 pub(in crate::mapi) fn restriction_matches(
     restriction: Option<&MapiRestriction>,
     value_for: impl Copy + Fn(u32) -> Option<MapiValue>,

@@ -1149,7 +1149,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
                     snapshot
                         .common_views_messages()
-                        .map(|message| serialize_common_views_row(message, None, &columns))
+                        .map(|message| serialize_common_views_row(&message, None, &columns))
                         .collect::<Vec<_>>()
                 } else if *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     snapshot
@@ -2701,9 +2701,21 @@ pub(in crate::mapi) fn rop_find_row_response(
             };
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
                 let rows = snapshot.common_views_messages().collect::<Vec<_>>();
-                if *position < rows.len() {
-                    let index = *position;
-                    let message = rows.into_iter().nth(index).expect("row exists");
+                let rows = rows.iter().collect::<Vec<_>>();
+                if let Some((index, message)) = find_row(
+                    rows.as_slice(),
+                    *position,
+                    request,
+                    |message| match message {
+                        MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+                            restriction_matches_navigation_shortcut(
+                                Some(&restriction),
+                                shortcut,
+                                mailbox_guid,
+                            )
+                        }
+                    },
+                ) {
                     *position = index;
                     response.push(1);
                     write_standard_property_row(
@@ -3697,6 +3709,7 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mapi::wire::MapiRestrictionType;
     use crate::mapi::wire::RopId;
     use lpe_storage::{
         AccessibleContact, CollaborationCollection, CollaborationRights, MailboxRule,
@@ -4347,6 +4360,67 @@ mod tests {
     }
 
     #[test]
+    fn common_views_find_row_honors_restriction() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000002);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 102,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 0,
+                ordinal: 0x81,
+                group_header_id: Some(default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            },
+        ]);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_SUBJECT_W.to_le_bytes());
+        write_utf16z(&mut restriction, "Archive");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 0);
+        assert_eq!(table_position(&table), Some(0));
+    }
+
+    #[test]
     fn access_rows_follow_microsoft_flags() {
         let mailbox = JmapMailbox {
             id: Uuid::nil(),
@@ -4834,13 +4908,13 @@ pub(in crate::mapi) fn serialize_navigation_shortcut_row(
 }
 
 fn serialize_common_views_row(
-    message: MapiCommonViewsMessage,
+    message: &MapiCommonViewsMessage,
     principal: Option<&AccountPrincipal>,
     columns: &[u32],
 ) -> Vec<u8> {
     match message {
         MapiCommonViewsMessage::NavigationShortcut(message) => {
-            serialize_navigation_shortcut_row(&message, principal, columns)
+            serialize_navigation_shortcut_row(message, principal, columns)
         }
     }
 }

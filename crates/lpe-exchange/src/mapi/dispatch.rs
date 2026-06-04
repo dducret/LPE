@@ -4480,6 +4480,105 @@ fn log_outlook_contents_table_set_columns(
     );
 }
 
+fn log_outlook_contents_table_sort(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !is_outlook_folder_table_debug_target(*folder_id) {
+        return;
+    }
+
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x13",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        associated,
+        sort_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
+        requested_sort_order_count = request.sort_orders().len(),
+        requested_sort_orders = %format_debug_sort_orders(&request.sort_orders()),
+        sort_category_count = request.sort_category_count(),
+        sort_expanded_count = request.sort_expanded_count(),
+        stored_sort_order_count = sort_orders.len(),
+        stored_sort_orders = %format_debug_sort_orders(sort_orders),
+        current_position = *position,
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        inbox_associated_config_summary =
+            %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        "rca debug outlook contents table sorted"
+    );
+}
+
+fn log_outlook_contents_table_restrict(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        restriction,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !is_outlook_folder_table_debug_target(*folder_id) {
+        return;
+    }
+
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x14",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        associated,
+        restrict_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
+        restriction_bytes = request_restriction_bytes(request).len(),
+        restriction_preview = %hex_preview(request_restriction_bytes(request), 48),
+        parsed_restriction_present = restriction.is_some(),
+        current_position = *position,
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        inbox_associated_config_summary =
+            %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        "rca debug outlook contents table restricted"
+    );
+}
+
 fn log_outlook_contents_table_query_rows(
     principal: &AccountPrincipal,
     request: &RopRequest,
@@ -4529,10 +4628,68 @@ fn log_outlook_contents_table_query_rows(
         table_total_row_count = total_row_count,
         table_has_restriction = restriction.is_some(),
         table_sort_order_count = sort_orders.len(),
+        table_sort_orders = %format_debug_sort_orders(sort_orders),
         selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
         selected_property_tag_count = selected_columns.len(),
         selected_property_tags = %format_debug_property_tags(&selected_columns),
+        inbox_associated_config_summary =
+            %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         "rca debug outlook contents table query rows"
+    );
+}
+
+fn log_outlook_contents_table_find_row(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+    response: &[u8],
+) {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        restriction,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !is_outlook_folder_table_debug_target(*folder_id) {
+        return;
+    }
+
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x4f",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        associated,
+        find_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
+        find_origin = request.find_origin().unwrap_or(0),
+        find_backward = request.find_backward(),
+        restriction_bytes = request_restriction_bytes(request).len(),
+        restriction_preview = %hex_preview(request_restriction_bytes(request), 48),
+        response_found = response.get(6).copied().unwrap_or(0),
+        current_position = *position,
+        table_has_restriction = restriction.is_some(),
+        table_sort_order_count = sort_orders.len(),
+        table_sort_orders = %format_debug_sort_orders(sort_orders),
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        inbox_associated_config_summary =
+            %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        "rca debug outlook contents table find row"
     );
 }
 
@@ -4551,6 +4708,49 @@ fn effective_contents_table_columns(folder_id: u64, associated: bool, columns: &
 
 fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
     matches!(folder_id, INBOX_FOLDER_ID | COMMON_VIEWS_FOLDER_ID)
+}
+
+fn request_restriction_bytes(request: &RopRequest) -> &[u8] {
+    let Some(size_bytes) = request.payload.get(1..3) else {
+        return &[];
+    };
+    let size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
+    request.payload.get(3..3 + size).unwrap_or_default()
+}
+
+fn format_debug_sort_orders(sort_orders: &[MapiSortOrder]) -> String {
+    sort_orders
+        .iter()
+        .map(|order| format!("{:#010x}:{}", order.property_tag, order.order))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_inbox_associated_config_summary(
+    folder_id: u64,
+    associated: bool,
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !associated || folder_id != INBOX_FOLDER_ID {
+        return String::new();
+    }
+    let messages = snapshot.associated_config_messages_for_folder(folder_id);
+    let mut parts = Vec::new();
+    for message in messages.iter().take(16) {
+        let source_key = mapi_mailstore::source_key_for_store_id(message.id);
+        let decoded_source_key = crate::mapi::identity::object_id_from_source_key(&source_key);
+        parts.push(format!(
+            "id=0x{:016x};source_key_id={};class={};subject={}",
+            message.id,
+            format_optional_folder_id(decoded_source_key),
+            message.message_class,
+            message.subject
+        ));
+    }
+    if messages.len() > 16 {
+        parts.push(format!("truncated={}", messages.len() - 16));
+    }
+    format!("count={};{}", messages.len(), parts.join("|"))
 }
 
 fn log_calendar_identity_chain(
@@ -7617,6 +7817,12 @@ where
                     collapsed_categories.clear();
                     *position = 0;
                     bookmarks.clear();
+                    log_outlook_contents_table_sort(
+                        principal,
+                        &request,
+                        input_object(session, &handle_slots, &request),
+                        snapshot,
+                    );
                     responses.extend_from_slice(&rop_sort_table_response(&request));
                 }
                 Some(MapiObject::AttachmentTable {
@@ -7659,6 +7865,12 @@ where
                         *restriction = parsed;
                         *position = 0;
                         bookmarks.clear();
+                        log_outlook_contents_table_restrict(
+                            principal,
+                            &request,
+                            input_object(session, &handle_slots, &request),
+                            snapshot,
+                        );
                         responses.extend_from_slice(&rop_restrict_response(&request));
                     }
                     Err(_) => {
@@ -8529,14 +8741,24 @@ where
                 }
                 responses.extend_from_slice(&rop_message_status_response(&request, old_status));
             }
-            Some(RopId::FindRow) => responses.extend_from_slice(&rop_find_row_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
-                mailboxes,
-                emails,
-                snapshot,
-                principal.account_id,
-            )),
+            Some(RopId::FindRow) => {
+                let response = rop_find_row_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    principal.account_id,
+                );
+                log_outlook_contents_table_find_row(
+                    principal,
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    snapshot,
+                    &response,
+                );
+                responses.extend_from_slice(&response);
+            }
             Some(RopId::GetValidAttachments) => {
                 responses.extend_from_slice(&rop_get_valid_attachments_response(
                     &request,
