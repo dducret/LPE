@@ -182,6 +182,9 @@ pub(crate) struct MapiAssociatedConfigMessage {
     pub(crate) properties_json: serde_json::Value,
 }
 
+const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS: &str = "IPM.Configuration.AccountPrefs";
+const OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFB);
 const OUTLOOK_INBOX_EAS_CONFIG_CLASS: &str = "IPM.Configuration.EAS";
 const OUTLOOK_INBOX_EAS_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFD);
 const OUTLOOK_INBOX_ELC_CONFIG_CLASS: &str = "IPM.Configuration.ELC";
@@ -190,12 +193,22 @@ const OUTLOOK_INBOX_ELC_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x
 pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
     matches!(
         item_id,
-        OUTLOOK_INBOX_EAS_CONFIG_ID | OUTLOOK_INBOX_ELC_CONFIG_ID
+        OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID
+            | OUTLOOK_INBOX_EAS_CONFIG_ID
+            | OUTLOOK_INBOX_ELC_CONFIG_ID
     )
 }
 
 fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
     vec![
+        MapiAssociatedConfigMessage {
+            id: OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
+            folder_id,
+            canonical_id: Uuid::from_u128(0x6d617069_6163_6350_8000_000000000001),
+            message_class: OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        },
         MapiAssociatedConfigMessage {
             id: OUTLOOK_INBOX_EAS_CONFIG_ID,
             folder_id,
@@ -2023,6 +2036,10 @@ mod tests {
             snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
 
         for (message_class, message_id) in [
+            (
+                OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_CLASS,
+                OUTLOOK_INBOX_ACCOUNT_PREFS_CONFIG_ID,
+            ),
             (OUTLOOK_INBOX_EAS_CONFIG_CLASS, OUTLOOK_INBOX_EAS_CONFIG_ID),
             (OUTLOOK_INBOX_ELC_CONFIG_CLASS, OUTLOOK_INBOX_ELC_CONFIG_ID),
         ] {
