@@ -28,6 +28,8 @@ pub(in crate::mapi) const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 pub(in crate::mapi) const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 pub(in crate::mapi) const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
 pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS: u64 = 1_500;
+pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_ATTEMPTS: usize = 200;
+pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_DELAY_MS: u64 = 10;
 pub(in crate::mapi) const NSPI_UNICODE_CODEPAGE: u32 = 1200;
 pub(in crate::mapi) const MAPI_MAILUSER_OBJECT_TYPE: u32 = 6;
 pub(in crate::mapi) const NSPI_MID_RESOLVED: u32 = 0x0000_0002;
@@ -1309,7 +1311,8 @@ where
             "invalid MAPI request sequence cookie",
         );
     }
-    let Some(_active_request) = begin_active_session_request(&session_id) else {
+    let Some(_active_request) = acquire_notification_wait_active_session_request(&session_id).await
+    else {
         info!(
             rca_debug = true,
             adapter = "mapi",
@@ -1387,7 +1390,9 @@ where
         empty_wait_elapsed_millis = empty_wait_started_at.elapsed().as_millis();
         active_during_empty_wait = session_request_is_active(&session_id);
         waited_for_empty_events = true;
-        let Some(_active_request) = begin_active_session_request(&session_id) else {
+        let Some(_active_request) =
+            acquire_notification_wait_active_session_request(&session_id).await
+        else {
             reacquire_after_wait_failed = true;
             info!(
                 rca_debug = true,
@@ -1507,6 +1512,23 @@ fn notification_wait_empty_response(
         notification_wait_body_with_events(false, &[]),
         session_context_cookies(endpoint, session_id, false),
     )
+}
+
+async fn acquire_notification_wait_active_session_request(
+    session_id: &str,
+) -> Option<ActiveSessionRequest> {
+    for attempt in 0..MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_ATTEMPTS {
+        if let Some(active_request) = begin_active_session_request(session_id) {
+            return Some(active_request);
+        }
+        if attempt + 1 < MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_ATTEMPTS {
+            tokio::time::sleep(std::time::Duration::from_millis(
+                MAPI_NOTIFICATION_WAIT_REACQUIRE_RETRY_DELAY_MS,
+            ))
+            .await;
+        }
+    }
+    None
 }
 
 fn session_id_prefix(session_id: &str) -> &str {
@@ -2436,6 +2458,23 @@ mod tests {
             .unwrap();
         assert!(body.starts_with(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n"));
         assert!(body.ends_with(&[0; 16]));
+    }
+
+    #[tokio::test]
+    async fn notification_wait_active_session_acquire_waits_for_short_outlook_overlap() {
+        let session_id = "notification-overlap-session".to_string();
+        let active = begin_active_session_request(&session_id).unwrap();
+        let release = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            drop(active);
+        });
+
+        let acquired = acquire_notification_wait_active_session_request(&session_id).await;
+
+        assert!(acquired.is_some());
+        drop(acquired);
+        release.await.unwrap();
+        assert!(!session_request_is_active(&session_id));
     }
 
     #[test]
