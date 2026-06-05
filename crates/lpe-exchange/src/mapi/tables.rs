@@ -1167,9 +1167,9 @@ pub(in crate::mapi) fn rop_query_rows_response(
                     .associated_config_messages_for_folder(*folder_id)
                     .is_empty()
                 {
-                    snapshot
-                        .associated_config_messages_for_folder(*folder_id)
-                        .iter()
+                    let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
+                    sort_associated_config_messages(&mut rows, sort_orders);
+                    rows.iter()
                         .map(|message| serialize_associated_config_row(message, &columns))
                         .collect::<Vec<_>>()
                 } else if *folder_id == CALENDAR_FOLDER_ID
@@ -1871,6 +1871,34 @@ pub(in crate::mapi) fn sort_mapi_messages(
             }
         }
         Ordering::Equal
+    });
+}
+
+fn sort_associated_config_messages(
+    rows: &mut [MapiAssociatedConfigMessage],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_MESSAGE_CLASS_W => {
+                    compare_case_insensitive(&left.message_class, &right.message_class)
+                }
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.subject, &right.subject)
+                }
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        left.id.cmp(&right.id)
     });
 }
 
@@ -2747,7 +2775,8 @@ pub(in crate::mapi) fn rop_find_row_response(
                     .associated_config_messages_for_folder(*folder_id)
                     .is_empty()
             {
-                let rows = snapshot.associated_config_messages_for_folder(*folder_id);
+                let mut rows = snapshot.associated_config_messages_for_folder(*folder_id);
+                sort_associated_config_messages(&mut rows, sort_orders);
                 let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) =
                     find_row(rows.as_slice(), *position, request, |message| {
@@ -4432,6 +4461,86 @@ mod tests {
         assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
     }
 
+    #[test]
+    fn inbox_associated_find_row_uses_sort_order() {
+        let snapshot = inbox_associated_sort_snapshot();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let mut restriction = vec![MapiRestrictionType::Property as u8, 0x02];
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
+        write_utf16z(&mut restriction, "IPM.Configuration.");
+        let mut payload = vec![0];
+        payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
+        payload.extend_from_slice(&restriction);
+        payload.push(1);
+        payload.extend_from_slice(&0u16.to_le_bytes());
+        let request = RopRequest {
+            rop_id: RopId::FindRow.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload,
+        };
+
+        let response =
+            rop_find_row_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::FindRow.as_u8());
+        assert_eq!(response[7], 1);
+        assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
+    }
+
+    #[test]
+    fn inbox_associated_query_rows_uses_sort_order() {
+        let snapshot = inbox_associated_sort_snapshot();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_MESSAGE_CLASS_W],
+            sort_orders: vec![MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            }],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 50, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
+        let eas = utf16_position(&response, "IPM.Configuration.EAS").unwrap();
+        let elc = utf16_position(&response, "IPM.Configuration.ELC").unwrap();
+        assert!(account_prefs < eas);
+        assert!(eas < elc);
+    }
+
     fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -4473,6 +4582,42 @@ mod tests {
         assert!(response
             .windows(encoded_message_class.len())
             .any(|window| window == encoded_message_class.as_slice()));
+    }
+
+    fn inbox_associated_sort_snapshot() -> MapiMailStoreSnapshot {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let persisted_id = Uuid::from_u128(0x6d617069_6163_6350_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            persisted_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 81,
+            ),
+        );
+        MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: persisted_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.AccountPrefs".to_string(),
+                subject: "Account prefs".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ])
+    }
+
+    fn assert_response_contains_utf16(response: &[u8], value: &str) {
+        assert!(
+            utf16_position(response, value).is_some(),
+            "response did not contain {value}"
+        );
+    }
+
+    fn utf16_position(response: &[u8], value: &str) -> Option<usize> {
+        let mut encoded = Vec::new();
+        write_utf16z(&mut encoded, value);
+        response
+            .windows(encoded.len())
+            .position(|window| window == encoded.as_slice())
     }
 
     #[test]
