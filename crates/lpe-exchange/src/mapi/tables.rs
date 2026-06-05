@@ -4707,6 +4707,53 @@ mod tests {
         assert!(eas < elc);
     }
 
+    #[test]
+    fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
+        let message = MapiAssociatedConfigMessage {
+            id: crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 91,
+            ),
+            folder_id: INBOX_FOLDER_ID,
+            canonical_id: Uuid::nil(),
+            message_class: "IPM.Configuration.MessageListSettings".to_string(),
+            subject: "Message list settings".to_string(),
+            properties_json: serde_json::json!({}),
+        };
+        let change_number = mapi_mailstore::change_number_for_store_id(message.id);
+
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_FOLDER_ID),
+            Some(MapiValue::U64(INBOX_FOLDER_ID))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_INST_ID),
+            Some(MapiValue::U64(message.id))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_INSTANCE_NUM),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_LAST_MODIFICATION_TIME),
+            Some(MapiValue::I64(
+                mapi_mailstore::filetime_from_change_number(change_number) as i64
+            ))
+        );
+
+        let row = serialize_associated_config_row(
+            &message,
+            &[
+                PID_TAG_FOLDER_ID,
+                PID_TAG_MID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_LAST_MODIFICATION_TIME,
+            ],
+        );
+
+        assert_eq!(row.len(), 36);
+    }
+
     fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
@@ -5396,6 +5443,8 @@ pub(in crate::mapi) fn associated_config_property_value(
         let change_number = mapi_mailstore::change_number_for_store_id(message.id);
         match lookup_tag {
             PID_TAG_MID => Some(MapiValue::U64(message.id)),
+            PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
+            PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
                 crate::mapi::identity::instance_key_for_object_id(message.id),
             )),
@@ -5413,6 +5462,7 @@ pub(in crate::mapi) fn associated_config_property_value(
                     .saturating_add(message.properties_json.to_string().len())
                     .min(i64::MAX as usize) as i64,
             )),
+            PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
             PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
             PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 message.id,
@@ -5427,7 +5477,9 @@ pub(in crate::mapi) fn associated_config_property_value(
                 mapi_mailstore::predecessor_change_list(change_number),
             )),
             PID_TAG_CHANGE_NUMBER => Some(MapiValue::U64(change_number)),
-            PID_TAG_LOCAL_COMMIT_TIME | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
+            PID_TAG_LAST_MODIFICATION_TIME
+            | PID_TAG_LOCAL_COMMIT_TIME
+            | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
                 mapi_mailstore::filetime_from_change_number(change_number) as i64,
             )),
             PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),

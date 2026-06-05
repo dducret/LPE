@@ -4690,6 +4690,16 @@ fn log_outlook_contents_table_query_rows(
         sort_orders,
         snapshot,
     );
+    let query_row_value_summary = format_outlook_query_row_values(
+        *folder_id,
+        *associated,
+        *position,
+        request.query_forward_read(),
+        requested_row_count,
+        sort_orders,
+        &selected_columns,
+        snapshot,
+    );
 
     tracing::info!(
         rca_debug = true,
@@ -4716,6 +4726,7 @@ fn log_outlook_contents_table_query_rows(
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
         query_row_window_summary = %query_row_window_summary,
+        query_row_value_summary = %query_row_value_summary,
         "rca debug outlook contents table query rows"
     );
 }
@@ -4931,6 +4942,41 @@ fn format_outlook_query_row_window(
         );
     }
     String::new()
+}
+
+fn format_outlook_query_row_values(
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !associated || folder_id != INBOX_FOLDER_ID || row_count == 0 || columns.is_empty() {
+        return String::new();
+    }
+    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    select_query_window(rows.len(), position, forward_read, row_count)
+        .iter()
+        .map(|index| {
+            let message = &rows[*index];
+            let values = columns
+                .iter()
+                .map(|tag| {
+                    let value = associated_config_property_value(message, *tag)
+                        .map(|value| format_debug_mapi_value(&value))
+                        .unwrap_or_else(|| "default".to_string());
+                    format!("0x{tag:08x}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("index={};id=0x{:016x};{}", index, message.id, values)
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn format_inbox_associated_query_row_window(

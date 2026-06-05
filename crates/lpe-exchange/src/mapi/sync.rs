@@ -1049,7 +1049,10 @@ fn associated_config_standard_sync_tag(tag: u32) -> bool {
             | PID_TAG_CHANGE_KEY
             | PID_TAG_PREDECESSOR_CHANGE_LIST
             | PID_TAG_CHANGE_NUMBER
+            | PID_TAG_FOLDER_ID
             | PID_TAG_MID
+            | PID_TAG_INST_ID
+            | PID_TAG_INSTANCE_NUM
             | PID_TAG_ENTRY_ID
             | PID_TAG_INSTANCE_KEY
             | PID_TAG_ASSOCIATED
@@ -1059,6 +1062,7 @@ fn associated_config_standard_sync_tag(tag: u32) -> bool {
             | PID_TAG_NORMALIZED_SUBJECT_W
             | PID_TAG_MESSAGE_CLASS_W
             | PID_TAG_BODY_W
+            | PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME
             | PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_ACCESS
