@@ -2576,6 +2576,7 @@ fn mapi_folder_id_for_mailbox(mailbox: &JmapMailbox, fallback: u64) -> u64 {
         "conversation_action_settings" => {
             crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID
         }
+        "quick_step_settings" => crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID,
         "archive" => crate::mapi::identity::ARCHIVE_FOLDER_ID,
         "conversation_history" => crate::mapi::identity::CONVERSATION_HISTORY_FOLDER_ID,
         _ => crate::mapi::identity::mapped_mapi_object_id(&mailbox.id).unwrap_or(fallback),
@@ -2614,6 +2615,7 @@ fn mapi_folder_parent_id_for_mailbox(mailbox: &JmapMailbox, mailboxes: &[JmapMai
         | "tracked_mail_processing"
         | "todo_search"
         | "conversation_action_settings"
+        | "quick_step_settings"
         | "archive"
         | "conversation_history" => crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
         "conflicts" | "local_failures" | "server_failures" => {
@@ -3061,6 +3063,13 @@ fn virtual_special_folder_metadata(
             "conversation_action_settings",
             "Conversation Action Settings",
             170,
+            crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
+            "IPF.Configuration",
+        )),
+        crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID => Some((
+            "quick_step_settings",
+            "Quick Step Settings",
+            175,
             crate::mapi::identity::IPM_SUBTREE_FOLDER_ID,
             "IPF.Configuration",
         )),

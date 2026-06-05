@@ -682,9 +682,7 @@ fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
 }
 
 pub(in crate::mapi) fn mailbox_shadows_outlook_special_folder(mailbox: &JmapMailbox) -> bool {
-    if mapi_parent_folder_id(mailbox) != IPM_SUBTREE_FOLDER_ID
-        || folder_message_class(mailbox) != "IPF.Note"
-    {
+    if mapi_parent_folder_id(mailbox) != IPM_SUBTREE_FOLDER_ID {
         return false;
     }
 
@@ -704,6 +702,7 @@ pub(in crate::mapi) fn mailbox_shadows_outlook_special_folder(mailbox: &JmapMail
             | "local failures"
             | "notes"
             | "quick contacts"
+            | "quick step settings"
             | "rss feeds"
             | "server failures"
             | "suggested contacts"
@@ -4746,12 +4745,35 @@ mod tests {
     fn ipm_subtree_hierarchy_suppresses_mail_folders_shadowing_outlook_special_folders() {
         let shadow_id = Uuid::parse_str("aaaaaaaa-5555-4111-8111-aaaaaaaaaaaa").unwrap();
         let suggested_shadow_id = Uuid::parse_str("aaaaaaaa-6666-4111-8111-aaaaaaaaaaaa").unwrap();
+        let quick_contacts_shadow_id =
+            Uuid::parse_str("aaaaaaaa-7777-4111-8111-aaaaaaaaaaaa").unwrap();
+        let im_contacts_shadow_id =
+            Uuid::parse_str("aaaaaaaa-8888-4111-8111-aaaaaaaaaaaa").unwrap();
+        let tasks_shadow_id = Uuid::parse_str("aaaaaaaa-9999-4111-8111-aaaaaaaaaaaa").unwrap();
+        let quick_step_shadow_id = Uuid::parse_str("aaaaaaaa-aaaa-4111-8111-aaaaaaaaaaaa").unwrap();
         let shadow_folder_id = crate::mapi::identity::mapi_store_id(0x4f);
         let suggested_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x54);
+        let quick_contacts_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x55);
+        let im_contacts_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x56);
+        let tasks_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x57);
+        let quick_step_shadow_folder_id = crate::mapi::identity::mapi_store_id(0x58);
         crate::mapi::identity::remember_mapi_identity(shadow_id, shadow_folder_id);
         crate::mapi::identity::remember_mapi_identity(
             suggested_shadow_id,
             suggested_shadow_folder_id,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            quick_contacts_shadow_id,
+            quick_contacts_shadow_folder_id,
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            im_contacts_shadow_id,
+            im_contacts_shadow_folder_id,
+        );
+        crate::mapi::identity::remember_mapi_identity(tasks_shadow_id, tasks_shadow_folder_id);
+        crate::mapi::identity::remember_mapi_identity(
+            quick_step_shadow_id,
+            quick_step_shadow_folder_id,
         );
         let mailboxes = vec![
             JmapMailbox {
@@ -4770,6 +4792,50 @@ mod tests {
                 parent_id: None,
                 role: String::new(),
                 name: "Suggested Contacts".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: quick_contacts_shadow_id,
+                parent_id: None,
+                role: "contacts".to_string(),
+                name: "Quick Contacts".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: im_contacts_shadow_id,
+                parent_id: None,
+                role: "contacts".to_string(),
+                name: "IM Contact List".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: tasks_shadow_id,
+                parent_id: None,
+                role: "tasks".to_string(),
+                name: "Tasks".to_string(),
+                sort_order: 0,
+                modseq: 1,
+                total_emails: 0,
+                unread_emails: 0,
+                is_subscribed: true,
+            },
+            JmapMailbox {
+                id: quick_step_shadow_id,
+                parent_id: None,
+                role: String::new(),
+                name: "Quick Step Settings".to_string(),
                 sort_order: 0,
                 modseq: 1,
                 total_emails: 0,
@@ -4801,8 +4867,16 @@ mod tests {
         let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
         assert!(row_ids.contains(&CALENDAR_FOLDER_ID));
         assert!(row_ids.contains(&SUGGESTED_CONTACTS_FOLDER_ID));
+        assert!(row_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
+        assert!(row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
+        assert!(row_ids.contains(&TASKS_FOLDER_ID));
+        assert!(row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
         assert!(!row_ids.contains(&suggested_shadow_folder_id));
+        assert!(!row_ids.contains(&quick_contacts_shadow_folder_id));
+        assert!(!row_ids.contains(&im_contacts_shadow_folder_id));
+        assert!(!row_ids.contains(&tasks_shadow_folder_id));
+        assert!(!row_ids.contains(&quick_step_shadow_folder_id));
 
         let sync_ids = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
             .iter()
@@ -4810,8 +4884,16 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(sync_ids.contains(&CALENDAR_FOLDER_ID));
         assert!(sync_ids.contains(&SUGGESTED_CONTACTS_FOLDER_ID));
+        assert!(sync_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
+        assert!(sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
+        assert!(sync_ids.contains(&TASKS_FOLDER_ID));
+        assert!(sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
         assert!(!sync_ids.contains(&suggested_shadow_folder_id));
+        assert!(!sync_ids.contains(&quick_contacts_shadow_folder_id));
+        assert!(!sync_ids.contains(&im_contacts_shadow_folder_id));
+        assert!(!sync_ids.contains(&tasks_shadow_folder_id));
+        assert!(!sync_ids.contains(&quick_step_shadow_folder_id));
 
         let calendar_row = rows
             .iter()
@@ -4830,6 +4912,31 @@ mod tests {
         assert!(serialized
             .windows(class.len())
             .any(|window| window == class));
+
+        for (folder_id, expected) in [
+            (QUICK_CONTACTS_FOLDER_ID, "IPF.Contact.MOC.QuickContacts"),
+            (IM_CONTACT_LIST_FOLDER_ID, "IPF.Contact.MOC.ImContactList"),
+            (TASKS_FOLDER_ID, "IPF.Task"),
+            (QUICK_STEP_SETTINGS_FOLDER_ID, "IPF.Configuration"),
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| hierarchy_row_id(row) == folder_id)
+                .expect("special folder row");
+            let serialized = serialize_hierarchy_row(
+                *row,
+                &mailboxes,
+                &[PID_TAG_CONTAINER_CLASS_W],
+                Uuid::nil(),
+            );
+            let class = expected
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            assert!(serialized
+                .windows(class.len())
+                .any(|window| window == class));
+        }
     }
 
     #[test]
