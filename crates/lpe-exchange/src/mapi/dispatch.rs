@@ -22,6 +22,7 @@ use lpe_storage::{
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::cmp::Ordering;
 
 const HIERARCHY_SYNC_CURSOR_VERSION: u64 = 2;
 
@@ -4610,6 +4611,16 @@ fn log_outlook_contents_table_query_rows(
     } else {
         folder_message_count(*folder_id, mailboxes, emails, snapshot)
     };
+    let requested_row_count = request.query_row_count().unwrap_or(0);
+    let query_row_window_summary = format_outlook_query_row_window(
+        *folder_id,
+        *associated,
+        *position,
+        request.query_forward_read(),
+        requested_row_count,
+        sort_orders,
+        snapshot,
+    );
 
     tracing::info!(
         rca_debug = true,
@@ -4624,7 +4635,7 @@ fn log_outlook_contents_table_query_rows(
         folder_role = debug_role_for_folder_id(*folder_id),
         associated,
         requested_forward_read = request.query_forward_read(),
-        requested_row_count = request.query_row_count().unwrap_or(0),
+        requested_row_count = requested_row_count,
         current_position = *position,
         table_total_row_count = total_row_count,
         table_has_restriction = restriction.is_some(),
@@ -4635,6 +4646,7 @@ fn log_outlook_contents_table_query_rows(
         selected_property_tags = %format_debug_property_tags(&selected_columns),
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        query_row_window_summary = %query_row_window_summary,
         "rca debug outlook contents table query rows"
     );
 }
@@ -4817,6 +4829,145 @@ fn format_debug_sort_orders(sort_orders: &[MapiSortOrder]) -> String {
         .map(|order| format!("{:#010x}:{}", order.property_tag, order.order))
         .collect::<Vec<_>>()
         .join(",")
+}
+
+fn format_outlook_query_row_window(
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !associated || row_count == 0 {
+        return String::new();
+    }
+    if folder_id == INBOX_FOLDER_ID {
+        return format_inbox_associated_query_row_window(
+            position,
+            forward_read,
+            row_count,
+            sort_orders,
+            snapshot,
+        );
+    }
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        return format_common_views_query_row_window(position, forward_read, row_count, snapshot);
+    }
+    String::new()
+}
+
+fn format_inbox_associated_query_row_window(
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let parts = selected
+        .iter()
+        .map(|index| {
+            let message = &rows[*index];
+            format!(
+                "index={};id=0x{:016x};class={};subject={}",
+                index, message.id, message.message_class, message.subject
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "total={};start={};forward={};returned={};{}",
+        rows.len(),
+        position,
+        forward_read,
+        selected.len(),
+        parts
+    )
+}
+
+fn format_common_views_query_row_window(
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    let rows = snapshot.common_views_messages().collect::<Vec<_>>();
+    let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let parts = selected
+        .iter()
+        .filter_map(|index| match &rows[*index] {
+            crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(message) => {
+                Some(format!(
+                    "index={};id=0x{:016x};subject={};target={};type={};section={};ordinal={}",
+                    index,
+                    message.id,
+                    message.subject,
+                    message
+                        .target_folder_id
+                        .map(|folder_id| format!("0x{folder_id:016x}"))
+                        .unwrap_or_else(|| "none".to_string()),
+                    message.shortcut_type,
+                    message.section,
+                    message.ordinal
+                ))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "total={};start={};forward={};returned={};{}",
+        rows.len(),
+        position,
+        forward_read,
+        selected.len(),
+        parts
+    )
+}
+
+fn select_query_window(
+    total: usize,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+) -> Vec<usize> {
+    if forward_read {
+        let end = total.min(position.saturating_add(row_count));
+        return (position.min(total)..end).collect();
+    }
+    let start = position.saturating_sub(row_count);
+    (start..position.min(total)).rev().collect()
+}
+
+fn sort_associated_config_messages_for_debug(
+    rows: &mut [crate::mapi_store::MapiAssociatedConfigMessage],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match sort_order.property_tag {
+                PID_TAG_MESSAGE_CLASS_W => {
+                    compare_case_insensitive(&left.message_class, &right.message_class)
+                }
+                PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+                    compare_case_insensitive(&left.subject, &right.subject)
+                }
+                PID_TAG_LAST_MODIFICATION_TIME | PID_TAG_MID => left.id.cmp(&right.id),
+                _ => Ordering::Equal,
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        left.id.cmp(&right.id)
+    });
 }
 
 fn format_inbox_associated_config_summary(
