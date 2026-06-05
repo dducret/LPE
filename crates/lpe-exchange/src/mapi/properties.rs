@@ -1559,6 +1559,9 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
             message.id,
         ))),
+        PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            message.id,
+        ))),
         PID_TAG_CHANGE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::change_key_for_change_number(
                 mapi_mailstore::change_number_for_store_id(message.id),
@@ -8511,6 +8514,12 @@ mod tests {
         assert_eq!(
             navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_INSTANCE_NUM),
             Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_RECORD_KEY),
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                shortcut.id
+            )))
         );
     }
 
