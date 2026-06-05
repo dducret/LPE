@@ -1352,6 +1352,8 @@ struct LogonResponseDebugSummary {
     error_code: String,
     logon_flags: String,
     special_folder_ids: String,
+    special_folder_contract: String,
+    special_folder_contract_issues: String,
     response_flags: String,
     mailbox_guid: String,
     replid: String,
@@ -1447,6 +1449,10 @@ fn log_execute_rop_debug(
             logon_flags = %logon.logon_flags,
             response_flags = %logon.response_flags,
             special_folder_ids = %logon.special_folder_ids,
+            special_folder_contract = %logon.special_folder_contract,
+            special_folder_contract_issues = %logon.special_folder_contract_issues,
+            default_folder_identification_contract =
+                %default_folder_identification_contract_for_debug(principal),
             mailbox_guid = %logon.mailbox_guid,
             expected_mailbox_guid = %principal.account_id,
             replid = %logon.replid,
@@ -4413,9 +4419,15 @@ fn summarize_logon_response_rop(
             let bytes = cursor.read_bytes(8)?;
             let folder_id = crate::mapi::identity::object_id_from_wire_id(bytes)
                 .unwrap_or_else(|| u64::from_le_bytes(bytes.try_into().unwrap_or_default()));
-            folder_ids.push(format!("{folder_id:#018x}"));
+            folder_ids.push(folder_id);
         }
-        summary.special_folder_ids = folder_ids.join(",");
+        summary.special_folder_ids = folder_ids
+            .iter()
+            .map(|folder_id| format!("{folder_id:#018x}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        summary.special_folder_contract = format_logon_special_folder_contract(&folder_ids);
+        summary.special_folder_contract_issues = logon_special_folder_contract_issues(&folder_ids);
         summary.response_flags = format!("{:#04x}", cursor.read_u8()?);
         summary.mailbox_guid = read_guid_le(&mut cursor)?;
         summary.replid = cursor.read_u16()?.to_string();
@@ -4439,6 +4451,114 @@ fn read_u64(cursor: &mut Cursor<'_>) -> Result<u64> {
 fn read_guid_le(cursor: &mut Cursor<'_>) -> Result<String> {
     let bytes = cursor.read_bytes(16)?;
     Ok(Uuid::from_bytes_le(bytes.try_into()?).to_string())
+}
+
+fn format_logon_special_folder_contract(folder_ids: &[u64]) -> String {
+    logon_special_folder_contract_entries(folder_ids)
+        .into_iter()
+        .map(|(index, name, folder_id, expected)| {
+            format!(
+                "{index}:{name}=0x{folder_id:016x};expected=0x{expected:016x};matches={}",
+                folder_id == expected
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn logon_special_folder_contract_issues(folder_ids: &[u64]) -> String {
+    logon_special_folder_contract_entries(folder_ids)
+        .into_iter()
+        .filter_map(|(index, name, folder_id, expected)| {
+            (folder_id != expected).then(|| {
+                format!("{index}:{name}:got=0x{folder_id:016x}:expected=0x{expected:016x}")
+            })
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn logon_special_folder_contract_entries(
+    folder_ids: &[u64],
+) -> Vec<(usize, &'static str, u64, u64)> {
+    let names = [
+        "root",
+        "deferred_action",
+        "spooler_queue",
+        "ipm_subtree",
+        "inbox",
+        "outbox",
+        "sent",
+        "trash",
+        "common_views",
+        "schedule",
+        "search",
+        "personal_views",
+        "shortcuts",
+    ];
+    PRIVATE_LOGON_SPECIAL_FOLDER_IDS
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, expected)| {
+            (
+                index,
+                names.get(index).copied().unwrap_or("unknown"),
+                folder_ids.get(index).copied().unwrap_or(0),
+                expected,
+            )
+        })
+        .collect()
+}
+
+fn default_folder_identification_contract_for_debug(principal: &AccountPrincipal) -> String {
+    let tags = [
+        PID_TAG_VALID_FOLDER_MASK,
+        PID_TAG_IPM_SUBTREE_ENTRY_ID,
+        PID_TAG_IPM_OUTBOX_ENTRY_ID,
+        PID_TAG_IPM_WASTEBASKET_ENTRY_ID,
+        PID_TAG_IPM_SENTMAIL_ENTRY_ID,
+        PID_TAG_VIEWS_ENTRY_ID,
+        PID_TAG_COMMON_VIEWS_ENTRY_ID,
+        PID_TAG_FINDER_ENTRY_ID,
+        PID_TAG_IPM_APPOINTMENT_ENTRY_ID,
+        PID_TAG_IPM_CONTACT_ENTRY_ID,
+        PID_TAG_IPM_JOURNAL_ENTRY_ID,
+        PID_TAG_IPM_NOTE_ENTRY_ID,
+        PID_TAG_IPM_TASK_ENTRY_ID,
+        PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_IPM_DRAFTS_ENTRY_ID,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
+        PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
+        PID_TAG_FREE_BUSY_ENTRY_IDS,
+    ];
+    tags.into_iter()
+        .filter_map(|tag| {
+            let value = special_folder_identification_property_value(principal.account_id, tag)?;
+            if tag == PID_TAG_VALID_FOLDER_MASK {
+                return Some(format!(
+                    "{tag:#010x}:PidTagValidFolderMask:{}",
+                    mapi_value_debug_u32_from_value(&value)
+                ));
+            }
+            if tag == PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX {
+                return Some(format!(
+                    "{tag:#010x}:PidTagAdditionalRenEntryIdsEx:{}",
+                    mapi_value_debug_shape(&value)
+                ));
+            }
+            Some(default_folder_entry_id_values_for_debug(&[(tag, value)]))
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn mapi_value_debug_u32_from_value(value: &MapiValue) -> String {
+    match value {
+        MapiValue::U32(value) => format!("{value:#010x}"),
+        MapiValue::I32(value) => format!("{value:#010x}"),
+        _ => mapi_value_debug_shape(value),
+    }
 }
 
 fn bytes_to_hex(bytes: &[u8]) -> String {
@@ -6831,6 +6951,18 @@ where
                     mapi_value_debug_u32(&properties, PID_TAG_CONTENT_UNREAD_COUNT);
                 let inbox_contract_subfolders =
                     mapi_value_debug_bool(&properties, PID_TAG_SUBFOLDERS);
+                let root_ipm_contract_display_name =
+                    mapi_value_debug_string(&properties, PID_TAG_DISPLAY_NAME_W);
+                let root_ipm_contract_folder_type =
+                    mapi_value_debug_u32(&properties, PID_TAG_FOLDER_TYPE);
+                let root_ipm_contract_container_class =
+                    mapi_value_debug_string(&properties, PID_TAG_CONTAINER_CLASS_W);
+                let root_ipm_contract_record_key =
+                    mapi_value_debug_binary_decode(&properties, PID_TAG_RECORD_KEY);
+                let root_ipm_contract_source_key =
+                    mapi_value_debug_binary_decode(&properties, PID_TAG_SOURCE_KEY);
+                let root_ipm_contract_parent_source_key =
+                    mapi_value_debug_binary_decode(&properties, PID_TAG_PARENT_SOURCE_KEY);
                 let handle = session.allocate_output_handle_avoiding(
                     request.output_handle_index,
                     MapiObject::Folder {
@@ -6890,6 +7022,26 @@ where
                     }
                 }
                 if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x02",
+                        folder_id = format!("0x{folder_id:016x}"),
+                        folder_name = post_hierarchy_probe_folder_name(folder_id),
+                        output_handle_id = handle,
+                        display_name = %root_ipm_contract_display_name,
+                        folder_type = %root_ipm_contract_folder_type,
+                        container_class = %root_ipm_contract_container_class,
+                        record_key = %root_ipm_contract_record_key,
+                        source_key = %root_ipm_contract_source_key,
+                        parent_source_key = %root_ipm_contract_parent_source_key,
+                        default_folder_identification_contract =
+                            %default_folder_identification_contract_for_debug(principal),
+                        "rca debug mapi root ipm subtree folder handle contract"
+                    );
                     log_outlook_bootstrap_phase(
                         principal,
                         "root_ipm_subtree_opened",
@@ -16859,11 +17011,45 @@ mod tests {
         assert!(summary
             .special_folder_ids
             .starts_with(&format!("{ROOT_FOLDER_ID:#018x}")));
+        assert!(summary
+            .special_folder_contract
+            .contains(&format!("3:ipm_subtree=0x{IPM_SUBTREE_FOLDER_ID:016x}")));
+        assert!(summary
+            .special_folder_contract
+            .contains(&format!("4:inbox=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(summary.special_folder_contract_issues.is_empty());
         assert_eq!(summary.response_flags, "0x07");
         assert_eq!(summary.mailbox_guid, principal.account_id.to_string());
         assert_eq!(summary.replid, "1");
         assert_eq!(summary.replica_guid.len(), 32);
         assert!(summary.parse_error.is_empty());
+    }
+
+    #[test]
+    fn logon_special_folder_contract_reports_mismatched_inbox() {
+        let mut folder_ids = PRIVATE_LOGON_SPECIAL_FOLDER_IDS.to_vec();
+        folder_ids[4] = ROOT_FOLDER_ID;
+
+        let issues = logon_special_folder_contract_issues(&folder_ids);
+
+        assert!(issues.contains("4:inbox"));
+        assert!(issues.contains(&format!("got=0x{ROOT_FOLDER_ID:016x}")));
+        assert!(issues.contains(&format!("expected=0x{INBOX_FOLDER_ID:016x}")));
+    }
+
+    #[test]
+    fn default_folder_identification_contract_decodes_root_defaults() {
+        let contract = default_folder_identification_contract_for_debug(&test_principal());
+
+        assert!(contract.contains("PidTagValidFolderMask:0x000000ff"));
+        assert!(contract.contains(&format!(
+            "PidTagIpmSubtreeEntryId:bytes=46:decoded_folder_id=0x{IPM_SUBTREE_FOLDER_ID:016x}"
+        )));
+        assert!(contract.contains(&format!(
+            "PidTagCommonViewsEntryId:bytes=46:decoded_folder_id=0x{COMMON_VIEWS_FOLDER_ID:016x}"
+        )));
+        assert!(contract.contains("PidTagAdditionalRenEntryIds:count=5"));
+        assert!(contract.contains("PidTagFreeBusyEntryIds:count=4"));
     }
 
     #[test]
