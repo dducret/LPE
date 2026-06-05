@@ -4892,6 +4892,74 @@ fn log_outlook_contents_table_query_rows(
     );
 }
 
+fn log_outlook_contents_table_seek_row(
+    principal: &AccountPrincipal,
+    request: &RopRequest,
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+    before_position: Option<usize>,
+    response: &[u8],
+) {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        restriction,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return;
+    };
+    if !is_outlook_folder_table_debug_target(*folder_id) {
+        return;
+    }
+
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x18",
+        request_input_handle_index = request.input_handle_index().unwrap_or(0),
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(*folder_id),
+        associated,
+        seek_origin = request.seek_origin().unwrap_or(0),
+        requested_row_count = request.seek_row_count().unwrap_or(0),
+        want_row_moved_count = request.want_row_moved_count(),
+        before_position = before_position.unwrap_or(*position),
+        current_position = *position,
+        response_sought_less = response.get(6).copied().unwrap_or(0),
+        response_rows_sought = response
+            .get(7..11)
+            .and_then(|bytes| bytes.try_into().ok())
+            .map(i32::from_le_bytes)
+            .unwrap_or(0),
+        table_has_restriction = restriction.is_some(),
+        table_sort_order_count = sort_orders.len(),
+        table_sort_orders = %format_debug_sort_orders(sort_orders),
+        selected_column_source = if columns.is_empty() { "default" } else { "setcolumns" },
+        selected_property_tag_count = selected_columns.len(),
+        selected_property_tags = %format_debug_property_tags(&selected_columns),
+        inbox_associated_config_summary =
+            %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        ipm_configuration_contract_summary =
+            %format_ipm_configuration_contract_summary(
+                *folder_id,
+                *associated,
+                &selected_columns,
+                sort_orders,
+                snapshot
+            ),
+        "rca debug outlook contents table seek row"
+    );
+}
+
 fn log_outlook_contents_table_find_row(
     principal: &AccountPrincipal,
     request: &RopRequest,
@@ -8738,14 +8806,27 @@ where
                     principal.account_id,
                 ))
             }
-            Some(RopId::SeekRow) => responses.extend_from_slice(&rop_seek_row_response(
-                &request,
-                input_object_mut(session, &handle_slots, &request),
-                mailboxes,
-                emails,
-                snapshot,
-                principal.account_id,
-            )),
+            Some(RopId::SeekRow) => {
+                let before_position =
+                    input_object(session, &handle_slots, &request).and_then(table_position);
+                let response = rop_seek_row_response(
+                    &request,
+                    input_object_mut(session, &handle_slots, &request),
+                    mailboxes,
+                    emails,
+                    snapshot,
+                    principal.account_id,
+                );
+                log_outlook_contents_table_seek_row(
+                    principal,
+                    &request,
+                    input_object(session, &handle_slots, &request),
+                    snapshot,
+                    before_position,
+                    &response,
+                );
+                responses.extend_from_slice(&response);
+            }
             Some(RopId::SeekRowBookmark) => {
                 responses.extend_from_slice(&rop_seek_row_bookmark_response(
                     &request,
