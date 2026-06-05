@@ -561,6 +561,7 @@ fn hierarchy_rows<'a>(
             snapshot
                 .collaboration_folders()
                 .iter()
+                .filter(|folder| !collaboration_folder_shadows_outlook_special_folder(folder))
                 .filter(|folder| restriction_matches_collaboration_folder(restriction, folder))
                 .map(HierarchyRow::Collaboration),
         )
@@ -709,6 +710,22 @@ pub(in crate::mapi) fn mailbox_shadows_outlook_special_folder(mailbox: &JmapMail
             | "sync issues"
             | "tasks"
     )
+}
+
+fn collaboration_folder_shadows_outlook_special_folder(folder: &MapiCollaborationFolder) -> bool {
+    let display_name = folder.collection.display_name.trim().to_ascii_lowercase();
+    match folder.kind {
+        MapiCollaborationFolderKind::Contacts => matches!(
+            display_name.as_str(),
+            "contacts"
+                | "suggested contacts"
+                | "quick contacts"
+                | "im contact list"
+                | "contacts search"
+        ),
+        MapiCollaborationFolderKind::Calendar => display_name == "calendar",
+        MapiCollaborationFolderKind::Task => display_name == "tasks",
+    }
 }
 
 fn hierarchy_row_content_count(row: &HierarchyRow<'_>) -> u32 {
@@ -4843,13 +4860,28 @@ mod tests {
                 is_subscribed: true,
             },
         ];
+        let task_collection = CollaborationCollection {
+            id: "default".to_string(),
+            kind: "tasks".to_string(),
+            owner_account_id: Uuid::nil(),
+            owner_email: "test@example.test".to_string(),
+            owner_display_name: "Test".to_string(),
+            display_name: "Tasks".to_string(),
+            is_owned: true,
+            rights: CollaborationRights {
+                may_read: true,
+                may_write: true,
+                may_delete: true,
+                may_share: true,
+            },
+        };
         let snapshot = MapiMailStoreSnapshot::new(
             Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            Vec::new(),
+            vec![task_collection],
             Vec::new(),
             Vec::new(),
             Vec::new(),
@@ -4877,6 +4909,12 @@ mod tests {
         assert!(!row_ids.contains(&im_contacts_shadow_folder_id));
         assert!(!row_ids.contains(&tasks_shadow_folder_id));
         assert!(!row_ids.contains(&quick_step_shadow_folder_id));
+        assert_eq!(
+            rows.iter()
+                .filter(|row| hierarchy_row_display_name(row) == "Tasks")
+                .count(),
+            1
+        );
 
         let sync_ids = sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes)
             .iter()
@@ -4937,6 +4975,16 @@ mod tests {
                 .windows(class.len())
                 .any(|window| window == class));
         }
+
+        assert_eq!(
+            folder_message_class(
+                &sync_mailboxes_for(IPM_SUBTREE_FOLDER_ID, 0x02, &[])
+                    .into_iter()
+                    .find(|mailbox| mapi_folder_id(mailbox) == QUICK_CONTACTS_FOLDER_ID)
+                    .expect("quick contacts virtual mailbox")
+            ),
+            "IPF.Contact.MOC.QuickContacts"
+        );
     }
 
     #[test]
@@ -6984,6 +7032,9 @@ pub(in crate::mapi) fn folder_message_class(mailbox: &JmapMailbox) -> &'static s
         "__mapi_search_folder_contact" => "IPF.Contact",
         "__mapi_search_folder_task" => "IPF.Task",
         "__mapi_search_folder_mixed" | "__mapi_search_folder_message" => "IPF.Note",
+        "suggested_contacts" | "contacts_search" => "IPF.Contact",
+        "quick_contacts" => "IPF.Contact.MOC.QuickContacts",
+        "im_contact_list" => "IPF.Contact.MOC.ImContactList",
         "contacts" => "IPF.Contact",
         "calendar" => "IPF.Appointment",
         "journal" => "IPF.Journal",
