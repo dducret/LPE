@@ -1600,8 +1600,8 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                         index,
                         "common_views_associated",
                         common_views_message_id(message),
-                        Some(COMMON_VIEWS_FOLDER_ID),
-                        Some(COMMON_VIEWS_FOLDER_ID),
+                        None,
+                        None,
                         None,
                         |tag| common_views_message_property_value(message, mailbox_guid, tag),
                     )
@@ -1625,8 +1625,8 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
                         index,
                         "inbox_associated",
                         message.id,
-                        Some(INBOX_FOLDER_ID),
-                        Some(INBOX_FOLDER_ID),
+                        None,
+                        None,
                         None,
                         |tag| associated_config_property_value(message, tag),
                     )
@@ -1756,10 +1756,13 @@ where
         .is_some_and(|bytes| !bytes.is_empty() && bytes == source_key.as_ref().unwrap_or(bytes));
     let instance_key_stable_non_empty =
         instance_key.as_ref().is_some_and(|bytes| !bytes.is_empty());
-    let folder_type_valid = folder_type
-        .is_some_and(|value| matches!(value, FOLDER_ROOT | FOLDER_GENERIC | FOLDER_SEARCH));
-    let content_count_present_non_negative = content_count.is_some();
-    let associated_count_present_non_negative = associated_content_count.is_some();
+    let folder_property_row = !row_kind.ends_with("_associated") && row_kind != "inbox_contents";
+    let folder_type_valid = !folder_property_row
+        || folder_type
+            .is_some_and(|value| matches!(value, FOLDER_ROOT | FOLDER_GENERIC | FOLDER_SEARCH));
+    let content_count_present_non_negative = !folder_property_row || content_count.is_some();
+    let associated_count_present_non_negative =
+        !folder_property_row || associated_content_count.is_some();
     let container_class_status = match (expected_container_class, container_class.as_deref()) {
         (Some(expected), Some(actual)) if actual == expected => "match",
         (Some(_), Some(_)) => "mismatch",

@@ -1287,11 +1287,8 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
     saw_open_folder && saw_get_properties
 }
 
-fn is_store_independent_folder_getprops_probe(folder_id: u64, property_tags: &[u32]) -> bool {
-    if is_store_independent_special_folder(folder_id) {
-        return true;
-    }
-    folder_id == INBOX_FOLDER_ID && property_tags.iter().all(|tag| *tag == PID_TAG_FOLDER_TYPE)
+fn is_store_independent_folder_getprops_probe(folder_id: u64, _property_tags: &[u32]) -> bool {
+    is_store_independent_special_folder(folder_id)
 }
 
 fn is_store_independent_special_folder(folder_id: u64) -> bool {
@@ -4423,6 +4420,38 @@ fn outlook_bootstrap_query_rows_phase(
             *folder_id,
             false,
         )),
+        _ => None,
+    }
+}
+
+fn outlook_bootstrap_query_rows_total_count(
+    object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
+    emails: &[JmapEmail],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<u32> {
+    let Some(
+        MapiObject::HierarchyTable { folder_id, .. } | MapiObject::ContentsTable { folder_id, .. },
+    ) = object
+    else {
+        return None;
+    };
+    match object {
+        Some(MapiObject::HierarchyTable { .. })
+            if matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
+        {
+            Some(hierarchy_row_count(*folder_id, mailboxes, snapshot))
+        }
+        Some(MapiObject::ContentsTable { associated, .. }) if *associated => {
+            Some(associated_folder_message_count(*folder_id, snapshot))
+        }
+        Some(MapiObject::ContentsTable { associated, .. })
+            if !*associated && *folder_id == INBOX_FOLDER_ID =>
+        {
+            Some(folder_message_count(
+                *folder_id, mailboxes, emails, snapshot,
+            ))
+        }
         _ => None,
     }
 }
@@ -8653,6 +8682,12 @@ where
                     request.query_forward_read(),
                     request.query_row_count().unwrap_or(0),
                 );
+                let bootstrap_total_row_count = outlook_bootstrap_query_rows_total_count(
+                    query_object,
+                    mailboxes,
+                    emails,
+                    snapshot,
+                );
                 log_calendar_hierarchy_query_rows_contract(principal, query_object, snapshot);
                 log_outlook_contents_table_query_rows(
                     principal,
@@ -8677,7 +8712,7 @@ where
                         "0x15",
                         Some(folder_id),
                         associated,
-                        None,
+                        bootstrap_total_row_count,
                         Some(bootstrap_row_invariants.len() as u32),
                         None,
                         "",
@@ -15439,7 +15474,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_folder_type_getprops_probe_is_store_independent() {
+    fn inbox_folder_type_getprops_probe_loads_store_snapshot() {
         let session = test_mapi_session();
         let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
         probe.extend_from_slice(
@@ -15452,7 +15487,7 @@ mod tests {
         probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
         let probe = rop_buffer_with_response(probe, &[u32::MAX]);
 
-        assert!(rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+        assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
     }
 
     #[test]
