@@ -10,6 +10,7 @@ use super::tables::*;
 use super::transport::*;
 use super::wire::{MapiPropertyType, MapiSyncType, RopId};
 use super::*;
+use crate::mapi::identity::QUICK_STEP_SETTINGS_FOLDER_ID;
 use crate::store::{
     MapiCustomPropertyObjectKind, MapiCustomPropertyValue, MapiIdentityObjectKind,
     MapiIdentityRequest, MapiSyncChangeSet, MapiSyncCheckpoint, UpsertMapiAssociatedConfigInput,
@@ -3718,6 +3719,7 @@ pub(in crate::mapi) fn post_hierarchy_probe_folder_name(folder_id: u64) -> &'sta
         TRACKED_MAIL_PROCESSING_FOLDER_ID => "tracked_mail_processing",
         TODO_SEARCH_FOLDER_ID => "todo_search",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "conversation_action_settings",
+        QUICK_STEP_SETTINGS_FOLDER_ID => "quick_step_settings",
         ARCHIVE_FOLDER_ID => "archive",
         FREEBUSY_DATA_FOLDER_ID => "freebusy_data",
         CONVERSATION_HISTORY_FOLDER_ID => "conversation_history",
@@ -3739,7 +3741,9 @@ pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'
         CONTACTS_SEARCH_FOLDER_ID => "IPF.Contact",
         TODO_SEARCH_FOLDER_ID => "IPF.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
+        RSS_FEEDS_FOLDER_ID => "IPF.Note.OutlookHomepage",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPF.Configuration",
+        QUICK_STEP_SETTINGS_FOLDER_ID => "IPF.Configuration",
         INBOX_FOLDER_ID
         | OUTBOX_FOLDER_ID
         | SENT_FOLDER_ID
@@ -6412,6 +6416,7 @@ fn is_rca_special_contract_folder(folder_id: u64) -> bool {
             | CONTACTS_SEARCH_FOLDER_ID
             | TODO_SEARCH_FOLDER_ID
             | CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+            | QUICK_STEP_SETTINGS_FOLDER_ID
     )
 }
 
@@ -6427,7 +6432,9 @@ fn expected_special_folder_container_class(folder_id: u64) -> &'static str {
         NOTES_FOLDER_ID => "IPF.StickyNote",
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPF.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
+        RSS_FEEDS_FOLDER_ID => "IPF.Note.OutlookHomepage",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPF.Configuration",
+        QUICK_STEP_SETTINGS_FOLDER_ID => "IPF.Configuration",
         _ => "",
     }
 }
@@ -6480,6 +6487,7 @@ fn expected_special_folder_item_message_class(folder_id: u64) -> &'static str {
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => "IPM.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPM.Configuration",
+        QUICK_STEP_SETTINGS_FOLDER_ID => "IPM.Configuration",
         _ => "",
     }
 }
@@ -16264,6 +16272,26 @@ mod tests {
             Some(&MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 INBOX_FOLDER_ID
             )))
+        );
+    }
+
+    #[test]
+    fn outlook_special_folder_debug_classifiers_cover_configuration_folders() {
+        assert_eq!(
+            post_hierarchy_probe_folder_name(QUICK_STEP_SETTINGS_FOLDER_ID),
+            "quick_step_settings"
+        );
+        assert_eq!(
+            debug_container_class_for_folder_id(QUICK_STEP_SETTINGS_FOLDER_ID),
+            "IPF.Configuration"
+        );
+        assert_eq!(
+            debug_container_class_for_folder_id(CONVERSATION_ACTION_SETTINGS_FOLDER_ID),
+            "IPF.Configuration"
+        );
+        assert_eq!(
+            debug_container_class_for_folder_id(RSS_FEEDS_FOLDER_ID),
+            "IPF.Note.OutlookHomepage"
         );
     }
 

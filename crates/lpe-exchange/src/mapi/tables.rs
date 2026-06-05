@@ -1857,21 +1857,25 @@ fn debug_expected_container_class(folder_id: u64) -> Option<&'static str> {
         | IPM_SUBTREE_FOLDER_ID
         | COMMON_VIEWS_FOLDER_ID
         | VIEWS_FOLDER_ID
-        | SHORTCUTS_FOLDER_ID
         | SCHEDULE_FOLDER_ID
         | SEARCH_FOLDER_ID
         | FREEBUSY_DATA_FOLDER_ID
-        | SPOOLER_QUEUE_FOLDER_ID
-        | DOCUMENT_LIBRARIES_FOLDER_ID => None,
+        | SPOOLER_QUEUE_FOLDER_ID => None,
         CALENDAR_FOLDER_ID => Some("IPF.Appointment"),
-        CONTACTS_FOLDER_ID
-        | SUGGESTED_CONTACTS_FOLDER_ID
-        | QUICK_CONTACTS_FOLDER_ID
-        | IM_CONTACT_LIST_FOLDER_ID
-        | CONTACTS_SEARCH_FOLDER_ID => Some("IPF.Contact"),
+        CONTACTS_FOLDER_ID | SUGGESTED_CONTACTS_FOLDER_ID | CONTACTS_SEARCH_FOLDER_ID => {
+            Some("IPF.Contact")
+        }
+        QUICK_CONTACTS_FOLDER_ID => Some("IPF.Contact.MOC.QuickContacts"),
+        IM_CONTACT_LIST_FOLDER_ID => Some("IPF.Contact.MOC.ImContactList"),
         TASKS_FOLDER_ID | TODO_SEARCH_FOLDER_ID => Some("IPF.Task"),
         NOTES_FOLDER_ID => Some("IPF.StickyNote"),
         JOURNAL_FOLDER_ID => Some("IPF.Journal"),
+        SHORTCUTS_FOLDER_ID | DOCUMENT_LIBRARIES_FOLDER_ID => Some("IPF.ShortcutFolder"),
+        RSS_FEEDS_FOLDER_ID => Some("IPF.Note.OutlookHomepage"),
+        CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID => {
+            Some("IPF.Configuration")
+        }
+        REMINDERS_FOLDER_ID => Some("Outlook.Reminder"),
         _ => Some("IPF.Note"),
     }
 }
@@ -4333,6 +4337,20 @@ mod tests {
         assert!(summary.contains("source_key_stable_non_empty=true"));
         assert!(summary.contains("record_key_stable_non_empty=true"));
         assert!(summary.contains("issues=none"));
+    }
+
+    #[test]
+    fn outlook_bootstrap_expected_container_class_matches_special_rows() {
+        for (folder_id, expected) in [
+            (TASKS_FOLDER_ID, "IPF.Task"),
+            (RSS_FEEDS_FOLDER_ID, "IPF.Note.OutlookHomepage"),
+            (CONVERSATION_ACTION_SETTINGS_FOLDER_ID, "IPF.Configuration"),
+            (QUICK_STEP_SETTINGS_FOLDER_ID, "IPF.Configuration"),
+            (QUICK_CONTACTS_FOLDER_ID, "IPF.Contact.MOC.QuickContacts"),
+            (IM_CONTACT_LIST_FOLDER_ID, "IPF.Contact.MOC.ImContactList"),
+        ] {
+            assert_eq!(debug_expected_container_class(folder_id), Some(expected));
+        }
     }
 
     #[test]
