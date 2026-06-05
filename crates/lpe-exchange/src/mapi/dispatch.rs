@@ -4021,13 +4021,12 @@ fn summarize_response_rop_buffer(
         } else {
             results.push(format!("{}:truncated", rop_id_hex(rop_id)));
         }
+        let next_expected_rop_id = expected_ids.get(expected_index + 1).copied();
+        let frame_end = response_rop_frame_end(responses, offset, error_code, next_expected_rop_id);
         frames.push(summarize_response_rop_frame(
-            responses,
-            offset,
-            error_code,
-            expected_ids.get(expected_index + 1).copied(),
+            responses, offset, frame_end, error_code,
         ));
-        offset = offset.saturating_add(6);
+        offset = frame_end;
     }
 
     summary.count = ids.len();
@@ -4060,6 +4059,15 @@ fn rop_name(rop_id: u8) -> String {
 fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static str> {
     if request_rop_ids.contains(&0x70) || request_rop_ids.contains(&0x4E) {
         return Some("hierarchy_sync");
+    }
+    if request_rop_ids
+        .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x02 | 0x07 | 0x49))
+        && request_rop_ids.contains(&0x49)
+        && request_rop_ids.contains(&0x02)
+        && request_rop_ids.contains(&0x07)
+    {
+        return Some("address_types_openfolder_getprops");
     }
     if request_rop_ids
         .iter()
@@ -4096,19 +4104,9 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
 fn summarize_response_rop_frame(
     responses: &[u8],
     start: usize,
+    end: usize,
     error_code: Option<u32>,
-    next_expected_rop_id: Option<u8>,
 ) -> String {
-    let end = next_expected_rop_id
-        .and_then(|rop_id| {
-            responses.get(start + 1..).and_then(|remaining| {
-                remaining
-                    .iter()
-                    .position(|candidate| *candidate == rop_id)
-                    .map(|found| start + 1 + found)
-            })
-        })
-        .unwrap_or(responses.len());
     let rop_id = responses.get(start).copied().unwrap_or_default();
     let output_handle_index = responses
         .get(start + 1)
@@ -4132,6 +4130,44 @@ fn summarize_response_rop_frame(
         result,
         preview
     )
+}
+
+fn response_rop_frame_end(
+    responses: &[u8],
+    start: usize,
+    error_code: Option<u32>,
+    next_expected_rop_id: Option<u8>,
+) -> usize {
+    let rop_id = responses.get(start).copied().unwrap_or_default();
+    let fixed_end = match (rop_id, error_code) {
+        (0x02, Some(0)) => Some(start.saturating_add(8)),
+        (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
+            let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
+            Some(start.saturating_add(10).saturating_add(byte_count))
+        }),
+        (_, Some(code)) if code != 0 => Some(start.saturating_add(6)),
+        (_, Some(_)) => None,
+        (_, None) => None,
+    };
+    fixed_end
+        .filter(|end| *end <= responses.len())
+        .or_else(|| next_response_rop_start(responses, start, next_expected_rop_id))
+        .unwrap_or(responses.len())
+}
+
+fn next_response_rop_start(
+    responses: &[u8],
+    start: usize,
+    next_expected_rop_id: Option<u8>,
+) -> Option<usize> {
+    next_expected_rop_id.and_then(|rop_id| {
+        responses.get(start + 1..).and_then(|remaining| {
+            remaining
+                .iter()
+                .position(|candidate| *candidate == rop_id)
+                .map(|found| start + 1 + found)
+        })
+    })
 }
 
 fn rop_buffer_size_word(rop_buffer: &[u8]) -> Option<u16> {
@@ -15139,9 +15175,53 @@ mod tests {
     }
 
     #[test]
+    fn execute_rop_response_summary_keeps_get_address_types_frame_boundary() {
+        let address_types_request = RopRequest {
+            rop_id: 0x49,
+            input_handle_index: Some(0),
+            output_handle_index: Some(0),
+            payload: Vec::new(),
+        };
+        let open_folder_request = RopRequest {
+            rop_id: 0x02,
+            input_handle_index: Some(1),
+            output_handle_index: Some(2),
+            payload: Vec::new(),
+        };
+        let mut responses = rop_get_address_types_response(&address_types_request);
+        responses.extend_from_slice(&rop_open_folder_response(&open_folder_request, false));
+        responses.extend_from_slice(&[0x07, 0x02, 0, 0, 0, 0, 1, 1, 0, 0, 0]);
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[1, 5, 20]));
+        let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x49, 0x02, 0x07]);
+
+        assert_eq!(response_summary.ids_csv, "0x49,0x02,0x07");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x49:0x00000000,0x02:0x00000000,0x07:0x00000000"
+        );
+        assert!(response_summary
+            .frames
+            .contains("0x49@0..18:len=18:out=0:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x02@18..26:len=8:out=2:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x07@26..37:len=11:out=2:rv=0x00000000"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
     fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
         let mut responses = Vec::new();
-        for rop_id in [0x02, 0x70, 0x75, 0x77, 0x75, 0x77] {
+        responses.push(0x02);
+        responses.push(1);
+        responses.extend_from_slice(&0u32.to_le_bytes());
+        responses.push(0);
+        responses.push(0);
+        for rop_id in [0x70, 0x75, 0x77, 0x75, 0x77] {
             responses.push(rop_id);
             responses.push(1);
             responses.extend_from_slice(&0u32.to_le_bytes());
@@ -15164,7 +15244,7 @@ mod tests {
         );
 
         assert_eq!(response_summary.buffer_layout, "rpc_header_ext_spec");
-        assert_eq!(response_summary.response_payload_bytes, 55);
+        assert_eq!(response_summary.response_payload_bytes, 57);
         assert_eq!(response_summary.handle_table_bytes, 12);
         assert_eq!(response_summary.count, 7);
         assert_eq!(
@@ -15173,10 +15253,10 @@ mod tests {
         );
         assert!(response_summary
             .frames
-            .contains("0x02@0..6:len=6:out=1:rv=0x00000000"));
+            .contains("0x02@0..8:len=8:out=1:rv=0x00000000"));
         assert!(response_summary
             .frames
-            .contains("0x4e@36..55:len=19:out=2:rv=0x00000000"));
+            .contains("0x4e@38..57:len=19:out=2:rv=0x00000000"));
         assert!(response_summary.parse_error.is_empty());
     }
 
@@ -15197,6 +15277,10 @@ mod tests {
         assert_eq!(
             execute_response_framing_context(&[0x02, 0x70, 0x4E]),
             Some("hierarchy_sync")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[0x49, 0x02, 0x07]),
+            Some("address_types_openfolder_getprops")
         );
         assert_eq!(
             execute_response_framing_context(&[0x01, 0x02, 0x07]),
