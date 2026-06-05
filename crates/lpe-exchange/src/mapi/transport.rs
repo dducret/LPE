@@ -27,6 +27,7 @@ pub(in crate::mapi) const NSPI_SEQUENCE_COOKIE: &str = "MapiSequence";
 pub(in crate::mapi) const EMSMDB_COOKIE_PATH: &str = "/mapi/emsmdb";
 pub(in crate::mapi) const NSPI_COOKIE_PATH: &str = "/mapi/nspi";
 pub(in crate::mapi) const MAPI_SESSION_MAX_AGE_SECONDS: u32 = 1_800;
+pub(in crate::mapi) const MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS: u64 = 1_500;
 pub(in crate::mapi) const NSPI_UNICODE_CODEPAGE: u32 = 1200;
 pub(in crate::mapi) const MAPI_MAILUSER_OBJECT_TYPE: u32 = 6;
 pub(in crate::mapi) const NSPI_MID_RESOLVED: u32 = 0x0000_0002;
@@ -1288,6 +1289,10 @@ where
     S: ExchangeStore,
 {
     log_session_cookie_lookup(endpoint, principal, headers, "NotificationWait");
+    let client_info = safe_header(headers, "x-clientinfo").unwrap_or_default();
+    let client_flow_key = client_flow_key(&client_info);
+    let (request_guid, request_counter) = guid_counter_debug(request_id);
+    let (client_info_guid, client_info_counter) = guid_counter_debug(&client_info);
     let Some(session_id) = request_cookie(endpoint, headers) else {
         return mapi_diagnostic_response(
             "NotificationWait",
@@ -1305,6 +1310,23 @@ where
         );
     }
     let Some(_active_request) = begin_active_session_request(&session_id) else {
+        info!(
+            rca_debug = true,
+            adapter = "mapi",
+            operation = "NotificationWait",
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            mapi_request_id = %request_id,
+            request_guid = %request_guid,
+            request_counter = %request_counter,
+            client_info = %client_info,
+            client_flow_key = %client_flow_key,
+            client_info_guid = %client_info_guid,
+            client_info_counter = %client_info_counter,
+            session_id_prefix = %session_id_prefix(&session_id),
+            active_session_overlap = true,
+            "rca debug notification wait overlap empty response"
+        );
         return notification_wait_empty_response(endpoint, request_id, &session_id);
     };
     let Some(session) = remove_session(&session_id) else {
@@ -1326,13 +1348,101 @@ where
 
     let mut session = session;
     let mut events = session.take_pending_notifications();
+    let initial_queued_event_count = events.len();
     let mut event_pending = !events.is_empty();
+    let mut waited_for_empty_events = false;
+    let initial_cursor = session.notification_cursor;
+    let mut first_poll_event_pending = false;
+    let mut first_poll_event_count = 0usize;
+    let mut first_poll_cursor = initial_cursor;
+    let mut second_poll_event_pending = false;
+    let mut second_poll_event_count = 0usize;
+    let mut second_poll_cursor = initial_cursor;
+    let mut active_during_empty_wait = false;
+    let mut reacquire_after_wait_failed = false;
+    let mut empty_wait_elapsed_millis = 0u128;
     if !event_pending {
         if let Some(cursor) = session.notification_cursor {
             if let Ok(poll) = store
                 .poll_mapi_notifications(principal.account_id, cursor)
                 .await
             {
+                first_poll_event_pending = poll.event_pending;
+                first_poll_event_count = poll.events.len();
+                first_poll_cursor = poll.cursor.or(Some(cursor));
+                events = session.matching_notifications(poll.events);
+                event_pending = poll.event_pending || !events.is_empty();
+                session.notification_cursor = poll.cursor.or(Some(cursor));
+            }
+        }
+    }
+    if !event_pending {
+        store_session(session_id.clone(), session);
+        drop(_active_request);
+        let empty_wait_started_at = std::time::Instant::now();
+        tokio::time::sleep(std::time::Duration::from_millis(
+            MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS,
+        ))
+        .await;
+        empty_wait_elapsed_millis = empty_wait_started_at.elapsed().as_millis();
+        active_during_empty_wait = session_request_is_active(&session_id);
+        waited_for_empty_events = true;
+        let Some(_active_request) = begin_active_session_request(&session_id) else {
+            reacquire_after_wait_failed = true;
+            info!(
+                rca_debug = true,
+                adapter = "mapi",
+                operation = "NotificationWait",
+                account_id = %principal.account_id,
+                mailbox = %principal.email,
+                mapi_request_id = %request_id,
+                request_guid = %request_guid,
+                request_counter = %request_counter,
+                client_info = %client_info,
+                client_flow_key = %client_flow_key,
+                client_info_guid = %client_info_guid,
+                client_info_counter = %client_info_counter,
+                session_id_prefix = %session_id_prefix(&session_id),
+                initial_queued_event_count,
+                initial_cursor = ?initial_cursor,
+                first_poll_event_pending,
+                first_poll_event_count,
+                first_poll_cursor = ?first_poll_cursor,
+                waited_for_empty_events,
+                configured_empty_wait_millis = MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS,
+                empty_wait_elapsed_millis,
+                active_during_empty_wait,
+                reacquire_after_wait_failed,
+                "rca debug notification wait reacquire overlap empty response"
+            );
+            return notification_wait_empty_response(endpoint, request_id, &session_id);
+        };
+        let Some(waited_session) = remove_session(&session_id) else {
+            return mapi_diagnostic_response(
+                "NotificationWait",
+                request_id,
+                10,
+                "MAPI session context not found after notification wait",
+            );
+        };
+        if !session_matches(&waited_session, endpoint, principal) {
+            return mapi_diagnostic_response(
+                "NotificationWait",
+                request_id,
+                10,
+                "MAPI authentication context changed after notification wait",
+            );
+        }
+        session = waited_session;
+        second_poll_cursor = session.notification_cursor;
+        if let Some(cursor) = session.notification_cursor {
+            if let Ok(poll) = store
+                .poll_mapi_notifications(principal.account_id, cursor)
+                .await
+            {
+                second_poll_event_pending = poll.event_pending;
+                second_poll_event_count = poll.events.len();
+                second_poll_cursor = poll.cursor.or(Some(cursor));
                 events = session.matching_notifications(poll.events);
                 event_pending = poll.event_pending || !events.is_empty();
                 session.notification_cursor = poll.cursor.or(Some(cursor));
@@ -1340,6 +1450,41 @@ where
         }
     }
     store_session(session_id.clone(), session);
+    info!(
+        rca_debug = true,
+        adapter = "mapi",
+        operation = "NotificationWait",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        mapi_request_id = %request_id,
+        request_guid = %request_guid,
+        request_counter = %request_counter,
+        client_info = %client_info,
+        client_flow_key = %client_flow_key,
+        client_info_guid = %client_info_guid,
+        client_info_counter = %client_info_counter,
+        session_id_prefix = %session_id_prefix(&session_id),
+        initial_queued_event_count,
+        initial_cursor = ?initial_cursor,
+        first_poll_event_pending,
+        first_poll_event_count,
+        first_poll_cursor = ?first_poll_cursor,
+        second_poll_event_pending,
+        second_poll_event_count,
+        second_poll_cursor = ?second_poll_cursor,
+        event_pending,
+        event_count = events.len(),
+        waited_for_empty_events,
+        configured_empty_wait_millis = if waited_for_empty_events {
+            MAPI_NOTIFICATION_WAIT_EMPTY_DELAY_MILLIS
+        } else {
+            0
+        },
+        empty_wait_elapsed_millis,
+        active_during_empty_wait,
+        reacquire_after_wait_failed,
+        "rca debug notification wait result"
+    );
     let body = notification_wait_body_with_events(event_pending, &events);
     mapi_response_with_cookies(
         "NotificationWait",
@@ -1362,6 +1507,14 @@ fn notification_wait_empty_response(
         notification_wait_body_with_events(false, &[]),
         session_context_cookies(endpoint, session_id, false),
     )
+}
+
+fn session_id_prefix(session_id: &str) -> &str {
+    session_id
+        .char_indices()
+        .nth(8)
+        .map(|(index, _)| &session_id[..index])
+        .unwrap_or(session_id)
 }
 
 pub(in crate::mapi) fn ping_response(
