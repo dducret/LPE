@@ -1147,9 +1147,16 @@ pub(in crate::mapi) fn rop_query_rows_response(
             };
             if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
-                    snapshot
-                        .common_views_messages()
-                        .map(|message| serialize_common_views_row(&message, None, &columns))
+                    let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+                    sort_common_views_messages(&mut rows, sort_orders);
+                    rows.iter()
+                        .map(|message| {
+                            serialize_common_views_row_with_mailbox_guid(
+                                message,
+                                mailbox_guid,
+                                &columns,
+                            )
+                        })
                         .collect::<Vec<_>>()
                 } else if *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     snapshot
@@ -1900,6 +1907,74 @@ fn sort_associated_config_messages(
         }
         left.id.cmp(&right.id)
     });
+}
+
+pub(in crate::mapi) fn sort_common_views_messages(
+    rows: &mut [MapiCommonViewsMessage],
+    sort_orders: &[MapiSortOrder],
+) {
+    if sort_orders.is_empty() {
+        return;
+    }
+    rows.sort_by(|left, right| {
+        for sort_order in sort_orders {
+            let ordering = match (left, right) {
+                (
+                    MapiCommonViewsMessage::NavigationShortcut(left),
+                    MapiCommonViewsMessage::NavigationShortcut(right),
+                ) => compare_navigation_shortcuts(left, right, sort_order.property_tag),
+            };
+            let ordering = apply_sort_direction(ordering, sort_order.order);
+            if ordering != Ordering::Equal {
+                return ordering;
+            }
+        }
+        common_views_message_id(left).cmp(&common_views_message_id(right))
+    });
+}
+
+fn compare_navigation_shortcuts(
+    left: &MapiNavigationShortcutMessage,
+    right: &MapiNavigationShortcutMessage,
+    property_tag: u32,
+) -> Ordering {
+    match property_tag & 0xFFFF_0000 {
+        0x684F_0000 => Ordering::Equal,
+        0x6850_0000 => wlink_group_guid_bytes(left).cmp(&wlink_group_guid_bytes(right)),
+        0x684B_0000 => {
+            wlink_ordinal_debug_bytes(left.ordinal).cmp(&wlink_ordinal_debug_bytes(right.ordinal))
+        }
+        0x6849_0000 => left.shortcut_type.cmp(&right.shortcut_type),
+        0x6852_0000 => left.section.cmp(&right.section),
+        0x0037_0000 | 0x3001_0000 => compare_case_insensitive(&left.subject, &right.subject),
+        0x674A_0000 => left.id.cmp(&right.id),
+        _ => Ordering::Equal,
+    }
+}
+
+fn common_views_message_id(message: &MapiCommonViewsMessage) -> u64 {
+    match message {
+        MapiCommonViewsMessage::NavigationShortcut(message) => message.id,
+    }
+}
+
+fn wlink_group_guid_bytes(message: &MapiNavigationShortcutMessage) -> [u8; 16] {
+    message
+        .group_header_id
+        .map(|group_id| *group_id.as_bytes())
+        .unwrap_or_else(default_wlink_group_guid)
+}
+
+fn wlink_ordinal_debug_bytes(value: u32) -> Vec<u8> {
+    if value <= u8::MAX as u32 {
+        vec![value as u8]
+    } else {
+        value
+            .to_be_bytes()
+            .into_iter()
+            .skip_while(|byte| *byte == 0)
+            .collect()
+    }
 }
 
 pub(in crate::mapi) fn sort_recoverable_items(
@@ -2728,7 +2803,8 @@ pub(in crate::mapi) fn rop_find_row_response(
                 columns.clone()
             };
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
-                let rows = snapshot.common_views_messages().collect::<Vec<_>>();
+                let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+                sort_common_views_messages(&mut rows, sort_orders);
                 let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) = find_row(
                     rows.as_slice(),
@@ -2748,7 +2824,11 @@ pub(in crate::mapi) fn rop_find_row_response(
                     response.push(1);
                     write_standard_property_row(
                         &mut response,
-                        &serialize_common_views_row(message, None, &columns),
+                        &serialize_common_views_row_with_mailbox_guid(
+                            message,
+                            mailbox_guid,
+                            &columns,
+                        ),
                     );
                 } else {
                     response.push(0);
@@ -4452,6 +4532,92 @@ mod tests {
     }
 
     #[test]
+    fn common_views_query_rows_uses_account_bound_wlink_entry_ids() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = common_views_sort_snapshot(account_id);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_WLINK_ENTRY_ID],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        let expected =
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, INBOX_FOLDER_ID)
+                .unwrap();
+        let zero_guid_entry_id =
+            crate::mapi::identity::folder_entry_id_from_object_id(Uuid::nil(), INBOX_FOLDER_ID)
+                .unwrap();
+        assert!(response
+            .windows(expected.len())
+            .any(|window| window == expected.as_slice()));
+        assert!(!response
+            .windows(zero_guid_entry_id.len())
+            .any(|window| window == zero_guid_entry_id.as_slice()));
+    }
+
+    #[test]
+    fn common_views_query_rows_uses_wlink_sort_order() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let snapshot = common_views_sort_snapshot(account_id);
+        let mut table = MapiObject::ContentsTable {
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            associated: true,
+            columns: vec![PID_TAG_SUBJECT_W],
+            sort_orders: vec![
+                MapiSortOrder {
+                    property_tag: 0x684F_0102,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: 0x6850_0102,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: 0x684B_0102,
+                    order: 0,
+                },
+            ],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, account_id);
+
+        let alpha = utf16_position(&response, "Alpha").unwrap();
+        let zulu = utf16_position(&response, "Zulu").unwrap();
+        assert!(alpha < zulu);
+    }
+
+    #[test]
     fn inbox_associated_find_row_returns_outlook_eas_config() {
         assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.EAS");
     }
@@ -4601,6 +4767,50 @@ mod tests {
                 message_class: "IPM.Configuration.AccountPrefs".to_string(),
                 subject: "Account prefs".to_string(),
                 properties_json: serde_json::json!({}),
+            },
+        ])
+    }
+
+    fn common_views_sort_snapshot(account_id: Uuid) -> MapiMailStoreSnapshot {
+        let zulu_id = Uuid::from_u128(0x6d617069_776c_5a75_8000_000000000001);
+        let alpha_id = Uuid::from_u128(0x6d617069_776c_416c_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            zulu_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 111,
+            ),
+        );
+        crate::mapi::identity::remember_mapi_identity(
+            alpha_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 112,
+            ),
+        );
+        let group_header_id = Some(default_wlink_group_uuid());
+        MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: zulu_id,
+                account_id,
+                subject: "Zulu".to_string(),
+                target_folder_id: Some(SENT_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 0x20,
+                group_header_id,
+                group_name: "Mail".to_string(),
+            },
+            crate::store::MapiNavigationShortcutRecord {
+                id: alpha_id,
+                account_id,
+                subject: "Alpha".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 0x10,
+                group_header_id,
+                group_name: "Mail".to_string(),
             },
         ])
     }
@@ -5107,16 +5317,31 @@ pub(in crate::mapi) fn serialize_navigation_shortcut_row(
     row
 }
 
-fn serialize_common_views_row(
+fn serialize_common_views_row_with_mailbox_guid(
     message: &MapiCommonViewsMessage,
-    principal: Option<&AccountPrincipal>,
+    mailbox_guid: Uuid,
     columns: &[u32],
 ) -> Vec<u8> {
     match message {
         MapiCommonViewsMessage::NavigationShortcut(message) => {
-            serialize_navigation_shortcut_row(message, principal, columns)
+            serialize_navigation_shortcut_row_with_mailbox_guid(message, mailbox_guid, columns)
         }
     }
+}
+
+fn serialize_navigation_shortcut_row_with_mailbox_guid(
+    message: &MapiNavigationShortcutMessage,
+    mailbox_guid: Uuid,
+    columns: &[u32],
+) -> Vec<u8> {
+    let mut row = Vec::new();
+    for column in columns {
+        match navigation_shortcut_property_value(message, mailbox_guid, *column) {
+            Some(value) => write_mapi_value(&mut row, *column, &value),
+            None => write_property_default(&mut row, *column),
+        }
+    }
+    row
 }
 
 pub(in crate::mapi) fn serialize_conversation_action_row(

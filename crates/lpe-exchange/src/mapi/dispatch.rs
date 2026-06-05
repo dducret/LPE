@@ -4853,7 +4853,13 @@ fn format_outlook_query_row_window(
         );
     }
     if folder_id == COMMON_VIEWS_FOLDER_ID {
-        return format_common_views_query_row_window(position, forward_read, row_count, snapshot);
+        return format_common_views_query_row_window(
+            position,
+            forward_read,
+            row_count,
+            sort_orders,
+            snapshot,
+        );
     }
     String::new()
 }
@@ -4893,9 +4899,11 @@ fn format_common_views_query_row_window(
     position: usize,
     forward_read: bool,
     row_count: usize,
+    sort_orders: &[MapiSortOrder],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
-    let rows = snapshot.common_views_messages().collect::<Vec<_>>();
+    let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+    sort_common_views_messages(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected
         .iter()
