@@ -4062,12 +4062,12 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     }
     if request_rop_ids
         .iter()
-        .all(|rop_id| matches!(*rop_id, 0x01 | 0x02 | 0x07 | 0x49))
-        && request_rop_ids.contains(&0x49)
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x02 | 0x07 | 0x49 | 0x56))
+        && (request_rop_ids.contains(&0x49) || request_rop_ids.contains(&0x56))
         && request_rop_ids.contains(&0x02)
         && request_rop_ids.contains(&0x07)
     {
-        return Some("address_types_openfolder_getprops");
+        return Some("named_props_openfolder_getprops");
     }
     if request_rop_ids
         .iter()
@@ -4144,6 +4144,14 @@ fn response_rop_frame_end(
         (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(10).saturating_add(byte_count))
+        }),
+        (0x56, Some(0)) => responses.get(start + 6..start + 8).and_then(|bytes| {
+            let id_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
+            Some(
+                start
+                    .saturating_add(8)
+                    .saturating_add(id_count.saturating_mul(2)),
+            )
         }),
         (_, Some(code)) if code != 0 => Some(start.saturating_add(6)),
         (_, Some(_)) => None,
@@ -15214,6 +15222,46 @@ mod tests {
     }
 
     #[test]
+    fn execute_rop_response_summary_keeps_get_property_ids_frame_boundary() {
+        let property_ids_request = RopRequest {
+            rop_id: 0x56,
+            input_handle_index: Some(0),
+            output_handle_index: Some(0),
+            payload: Vec::new(),
+        };
+        let open_folder_request = RopRequest {
+            rop_id: 0x02,
+            input_handle_index: Some(1),
+            output_handle_index: Some(2),
+            payload: Vec::new(),
+        };
+        let mut responses =
+            rop_get_property_ids_from_names_response(&property_ids_request, &[0x8003, 0x8004]);
+        responses.extend_from_slice(&rop_open_folder_response(&open_folder_request, false));
+        responses.extend_from_slice(&[0x07, 0x02, 0, 0, 0, 0, 1, 1, 0, 0, 0]);
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[13, 4, 17]));
+        let response_summary = summarize_response_rop_buffer(&response_buffer, &[0x56, 0x02, 0x07]);
+
+        assert_eq!(response_summary.ids_csv, "0x56,0x02,0x07");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x56:0x00000000,0x02:0x00000000,0x07:0x00000000"
+        );
+        assert!(response_summary
+            .frames
+            .contains("0x56@0..12:len=12:out=0:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x02@12..20:len=8:out=2:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x07@20..31:len=11:out=2:rv=0x00000000"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
     fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
         let mut responses = Vec::new();
         responses.push(0x02);
@@ -15280,7 +15328,11 @@ mod tests {
         );
         assert_eq!(
             execute_response_framing_context(&[0x49, 0x02, 0x07]),
-            Some("address_types_openfolder_getprops")
+            Some("named_props_openfolder_getprops")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[0x56, 0x02, 0x07]),
+            Some("named_props_openfolder_getprops")
         );
         assert_eq!(
             execute_response_framing_context(&[0x01, 0x02, 0x07]),
