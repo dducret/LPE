@@ -4984,6 +4984,21 @@ fn log_outlook_contents_table_find_row(
     }
 
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let found_row_value_summary = if response.get(7).copied().unwrap_or(0) == 1 {
+        format_outlook_query_row_values(
+            principal.account_id,
+            *folder_id,
+            *associated,
+            *position,
+            true,
+            1,
+            sort_orders,
+            &selected_columns,
+            snapshot,
+        )
+    } else {
+        String::new()
+    };
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -5020,6 +5035,7 @@ fn log_outlook_contents_table_find_row(
                 sort_orders,
                 snapshot
             ),
+        find_row_value_summary = %found_row_value_summary,
         "rca debug outlook contents table find row"
     );
 }
@@ -5330,7 +5346,7 @@ fn format_outlook_query_row_values(
         return String::new();
     }
     if folder_id == COMMON_VIEWS_FOLDER_ID {
-        let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+        let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
         sort_common_views_messages(&mut rows, sort_orders);
         return select_query_window(rows.len(), position, forward_read, row_count)
             .iter()
@@ -5419,7 +5435,7 @@ fn format_common_views_query_row_window(
     sort_orders: &[MapiSortOrder],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
-    let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+    let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
     sort_common_views_messages(&mut rows, sort_orders);
     let selected = select_query_window(rows.len(), position, forward_read, row_count);
     let parts = selected

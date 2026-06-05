@@ -77,7 +77,7 @@ pub(in crate::mapi) fn associated_folder_message_count(
 ) -> u32 {
     if folder_id == COMMON_VIEWS_FOLDER_ID {
         snapshot
-            .common_views_messages()
+            .common_views_table_messages()
             .count()
             .min(u32::MAX as usize) as u32
     } else if folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
@@ -1183,7 +1183,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
             };
             if *associated {
                 if *folder_id == COMMON_VIEWS_FOLDER_ID {
-                    let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+                    let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
                     sort_common_views_messages(&mut rows, sort_orders);
                     rows.iter()
                         .map(|message| {
@@ -1590,7 +1590,7 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             position,
             ..
         }) if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID => {
-            let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+            let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
             sort_common_views_messages(&mut rows, sort_orders);
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
@@ -3222,7 +3222,7 @@ pub(in crate::mapi) fn rop_find_row_response(
                 columns.clone()
             };
             if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
-                let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+                let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
                 sort_common_views_messages(&mut rows, sort_orders);
                 let rows = rows.iter().collect::<Vec<_>>();
                 if let Some((index, message)) = find_row(
@@ -4927,13 +4927,13 @@ mod tests {
 
         assert_eq!(
             associated_folder_message_count(COMMON_VIEWS_FOLDER_ID, &snapshot),
-            0
+            2
         );
         let response =
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], 0x15);
-        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 0);
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 1);
         let mut shortcut_class = Vec::new();
         for code_unit in "IPM.Microsoft.WunderBar.Link".encode_utf16() {
             shortcut_class.extend_from_slice(&code_unit.to_le_bytes());
@@ -4942,7 +4942,7 @@ mod tests {
         for code_unit in "IPM.Microsoft.WunderBar.SFInfo".encode_utf16() {
             search_class.extend_from_slice(&code_unit.to_le_bytes());
         }
-        assert!(!response
+        assert!(response
             .windows(shortcut_class.len())
             .any(|window| window == shortcut_class.as_slice()));
         assert!(!response

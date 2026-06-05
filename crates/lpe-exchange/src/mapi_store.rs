@@ -189,6 +189,12 @@ const OUTLOOK_INBOX_EAS_CONFIG_CLASS: &str = "IPM.Configuration.EAS";
 const OUTLOOK_INBOX_EAS_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFD);
 const OUTLOOK_INBOX_ELC_CONFIG_CLASS: &str = "IPM.Configuration.ELC";
 const OUTLOOK_INBOX_ELC_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
+const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFA);
+const OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID: u64 =
+    crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFF9);
+const OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID: Uuid =
+    Uuid::from_u128(0x5ba943d8_daaa_462c_a63e_9136f65c8681);
 
 pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
     matches!(
@@ -224,6 +230,37 @@ fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociate
             message_class: OUTLOOK_INBOX_ELC_CONFIG_CLASS.to_string(),
             subject: OUTLOOK_INBOX_ELC_CONFIG_CLASS.to_string(),
             properties_json: serde_json::json!({}),
+        },
+    ]
+}
+
+fn outlook_common_views_navigation_shortcut_defaults() -> Vec<MapiNavigationShortcutMessage> {
+    vec![
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_MAIL_GROUP_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_4772_8000_000000000001),
+            subject: "Mail".to_string(),
+            target_folder_id: None,
+            shortcut_type: 4,
+            flags: 0,
+            section: 1,
+            ordinal: 0,
+            group_header_id: Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID),
+            group_name: "Mail".to_string(),
+        },
+        MapiNavigationShortcutMessage {
+            id: OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID,
+            folder_id: crate::mapi::identity::COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001),
+            subject: "Inbox".to_string(),
+            target_folder_id: Some(crate::mapi::identity::INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 1,
+            ordinal: 0x10,
+            group_header_id: Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID),
+            group_name: "Mail".to_string(),
         },
     ]
 }
@@ -1133,6 +1170,21 @@ impl MapiMailStoreSnapshot {
 
     pub(crate) fn navigation_shortcut_messages(&self) -> Vec<MapiNavigationShortcutMessage> {
         self.navigation_shortcuts.clone()
+    }
+
+    pub(crate) fn common_views_table_messages(
+        &self,
+    ) -> impl Iterator<Item = MapiCommonViewsMessage> {
+        let shortcuts = if self.navigation_shortcuts.is_empty() {
+            outlook_common_views_navigation_shortcut_defaults()
+        } else {
+            self.navigation_shortcut_messages()
+        };
+        shortcuts
+            .into_iter()
+            .map(MapiCommonViewsMessage::NavigationShortcut)
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     pub(crate) fn common_views_messages(&self) -> impl Iterator<Item = MapiCommonViewsMessage> {
@@ -2110,6 +2162,88 @@ mod tests {
                 .map(|message| message.subject.as_str()),
             Some("Client EAS config")
         );
+    }
+
+    #[test]
+    fn common_views_projects_default_mail_shortcuts_when_empty() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        assert!(snapshot.navigation_shortcut_messages().is_empty());
+        assert_eq!(snapshot.common_views_messages().count(), 0);
+        let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(
+            messages
+                .iter()
+                .filter_map(|message| match message {
+                    MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                        if shortcut.shortcut_type == 4 =>
+                    {
+                        Some((shortcut.id, shortcut.subject.as_str()))
+                    }
+                    _ => None,
+                })
+                .next(),
+            Some((OUTLOOK_COMMON_VIEWS_MAIL_GROUP_ID, "Mail"))
+        );
+        let inbox = messages
+            .iter()
+            .filter_map(|message| match message {
+                MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                    if shortcut.id == OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID =>
+                {
+                    Some(shortcut)
+                }
+                _ => None,
+            })
+            .next()
+            .expect("default Inbox shortcut");
+        assert_eq!(inbox.subject, "Inbox");
+        assert_eq!(
+            inbox.target_folder_id,
+            Some(crate::mapi::identity::INBOX_FOLDER_ID)
+        );
+        assert_eq!(
+            inbox.group_header_id,
+            Some(OUTLOOK_COMMON_VIEWS_MAIL_GROUP_UUID)
+        );
+        assert!(snapshot
+            .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
+            .is_none());
+    }
+
+    #[test]
+    fn common_views_preserves_persisted_navigation_shortcuts() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let persisted_id = Uuid::from_u128(0x6d617069_776c_416c_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            persisted_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 72,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            MapiNavigationShortcutRecord {
+                id: persisted_id,
+                account_id,
+                subject: "Alpha".to_string(),
+                target_folder_id: Some(crate::mapi::identity::SENT_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 1,
+                group_header_id: None,
+                group_name: "Mail".to_string(),
+            },
+        ]);
+
+        let messages = snapshot.common_views_table_messages().collect::<Vec<_>>();
+        assert_eq!(messages.len(), 1);
+        let MapiCommonViewsMessage::NavigationShortcut(shortcut) = &messages[0];
+        assert_eq!(shortcut.subject, "Alpha");
+        assert!(snapshot
+            .navigation_shortcut_message_for_id(OUTLOOK_COMMON_VIEWS_INBOX_SHORTCUT_ID)
+            .is_none());
     }
 
     #[test]
