@@ -4424,6 +4424,15 @@ mod tests {
 
     #[test]
     fn inbox_associated_find_row_returns_outlook_eas_config() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.EAS");
+    }
+
+    #[test]
+    fn inbox_associated_find_row_returns_outlook_elc_config() {
+        assert_inbox_associated_find_row_returns_message_class("IPM.Configuration.ELC");
+    }
+
+    fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
         let snapshot = MapiMailStoreSnapshot::empty();
         let mut table = MapiObject::ContentsTable {
             folder_id: INBOX_FOLDER_ID,
@@ -4441,7 +4450,7 @@ mod tests {
         let mut restriction = vec![MapiRestrictionType::Property as u8, 0x04];
         restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
         restriction.extend_from_slice(&PID_TAG_MESSAGE_CLASS_W.to_le_bytes());
-        write_utf16z(&mut restriction, "IPM.Configuration.EAS");
+        write_utf16z(&mut restriction, message_class);
         let mut payload = vec![0];
         payload.extend_from_slice(&(restriction.len() as u16).to_le_bytes());
         payload.extend_from_slice(&restriction);
@@ -4459,11 +4468,11 @@ mod tests {
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
         assert_eq!(response[7], 1);
-        let mut message_class = Vec::new();
-        write_utf16z(&mut message_class, "IPM.Configuration.EAS");
+        let mut encoded_message_class = Vec::new();
+        write_utf16z(&mut encoded_message_class, message_class);
         assert!(response
-            .windows(message_class.len())
-            .any(|window| window == message_class.as_slice()));
+            .windows(encoded_message_class.len())
+            .any(|window| window == encoded_message_class.as_slice()));
     }
 
     #[test]

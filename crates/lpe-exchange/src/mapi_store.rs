@@ -184,6 +184,29 @@ pub(crate) struct MapiAssociatedConfigMessage {
 
 const OUTLOOK_INBOX_EAS_CONFIG_CLASS: &str = "IPM.Configuration.EAS";
 const OUTLOOK_INBOX_EAS_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFD);
+const OUTLOOK_INBOX_ELC_CONFIG_CLASS: &str = "IPM.Configuration.ELC";
+const OUTLOOK_INBOX_ELC_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
+
+fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
+    vec![
+        MapiAssociatedConfigMessage {
+            id: OUTLOOK_INBOX_EAS_CONFIG_ID,
+            folder_id,
+            canonical_id: Uuid::from_u128(0x6d617069_6561_7343_8000_000000000001),
+            message_class: OUTLOOK_INBOX_EAS_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_EAS_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        },
+        MapiAssociatedConfigMessage {
+            id: OUTLOOK_INBOX_ELC_CONFIG_ID,
+            folder_id,
+            canonical_id: Uuid::from_u128(0x6d617069_656c_6343_8000_000000000001),
+            message_class: OUTLOOK_INBOX_ELC_CONFIG_CLASS.to_string(),
+            subject: OUTLOOK_INBOX_ELC_CONFIG_CLASS.to_string(),
+            properties_json: serde_json::json!({}),
+        },
+    ]
+}
 
 pub(crate) enum MapiCommonViewsMessage {
     NavigationShortcut(MapiNavigationShortcutMessage),
@@ -1120,19 +1143,15 @@ impl MapiMailStoreSnapshot {
             .filter(|message| message.folder_id == folder_id)
             .cloned()
             .collect::<Vec<_>>();
-        if folder_id == crate::mapi::identity::INBOX_FOLDER_ID
-            && !messages
-                .iter()
-                .any(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
-        {
-            messages.push(MapiAssociatedConfigMessage {
-                id: OUTLOOK_INBOX_EAS_CONFIG_ID,
-                folder_id,
-                canonical_id: Uuid::from_u128(0x6d617069_6561_7343_8000_000000000001),
-                message_class: OUTLOOK_INBOX_EAS_CONFIG_CLASS.to_string(),
-                subject: OUTLOOK_INBOX_EAS_CONFIG_CLASS.to_string(),
-                properties_json: serde_json::json!({}),
-            });
+        if folder_id == crate::mapi::identity::INBOX_FOLDER_ID {
+            for default_message in outlook_inbox_associated_config_defaults(folder_id) {
+                if !messages
+                    .iter()
+                    .any(|message| message.message_class == default_message.message_class)
+                {
+                    messages.push(default_message);
+                }
+            }
         }
         messages
     }
@@ -1145,6 +1164,11 @@ impl MapiMailStoreSnapshot {
             .iter()
             .find(|message| message.id == item_id)
             .cloned()
+            .or_else(|| {
+                outlook_inbox_associated_config_defaults(crate::mapi::identity::INBOX_FOLDER_ID)
+                    .into_iter()
+                    .find(|message| message.id == item_id)
+            })
     }
 
     pub(crate) fn associated_config_message_for_folder_and_source_key_id(
@@ -1154,14 +1178,14 @@ impl MapiMailStoreSnapshot {
     ) -> Option<MapiAssociatedConfigMessage> {
         crate::mapi::identity::global_counter_from_store_id(item_id)?;
         let source_key = crate::mapi::identity::source_key_for_object_id(item_id);
-        self.associated_configs
-            .iter()
+        self.associated_config_messages_for_folder(folder_id)
+            .into_iter()
             .find(|message| {
                 message.folder_id == folder_id
-                    && associated_config_source_key(&message.properties_json)
-                        .is_some_and(|message_source_key| message_source_key == source_key)
+                    && (message.id == item_id
+                        || associated_config_source_key(&message.properties_json)
+                            .is_some_and(|message_source_key| message_source_key == source_key))
             })
-            .cloned()
     }
 
     pub(crate) fn has_associated_config_identity_id(&self, item_id: u64) -> bool {
@@ -1988,25 +2012,45 @@ mod tests {
     }
 
     #[test]
-    fn inbox_associated_configs_include_outlook_eas_default_without_duplicate() {
+    fn inbox_associated_configs_include_outlook_defaults_without_duplicate() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let messages =
             snapshot.associated_config_messages_for_folder(crate::mapi::identity::INBOX_FOLDER_ID);
 
-        assert_eq!(
-            messages
-                .iter()
-                .filter(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
-                .count(),
-            1
-        );
-        assert_eq!(
-            messages
-                .iter()
-                .find(|message| message.message_class == OUTLOOK_INBOX_EAS_CONFIG_CLASS)
-                .map(|message| message.id),
-            Some(OUTLOOK_INBOX_EAS_CONFIG_ID)
-        );
+        for (message_class, message_id) in [
+            (OUTLOOK_INBOX_EAS_CONFIG_CLASS, OUTLOOK_INBOX_EAS_CONFIG_ID),
+            (OUTLOOK_INBOX_ELC_CONFIG_CLASS, OUTLOOK_INBOX_ELC_CONFIG_ID),
+        ] {
+            assert_eq!(
+                messages
+                    .iter()
+                    .filter(|message| message.message_class == message_class)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                messages
+                    .iter()
+                    .find(|message| message.message_class == message_class)
+                    .map(|message| message.id),
+                Some(message_id)
+            );
+            assert_eq!(
+                snapshot
+                    .associated_config_message_for_id(message_id)
+                    .map(|message| message.message_class),
+                Some(message_class.to_string())
+            );
+            assert_eq!(
+                snapshot
+                    .associated_config_message_for_folder_and_source_key_id(
+                        crate::mapi::identity::INBOX_FOLDER_ID,
+                        message_id,
+                    )
+                    .map(|message| message.message_class),
+                Some(message_class.to_string())
+            );
+        }
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let persisted_id = Uuid::from_u128(0x6d617069_6561_7343_8000_000000000002);
