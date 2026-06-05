@@ -2042,55 +2042,80 @@ async fn folder_properties_for_open<S>(
     principal: &AccountPrincipal,
     _session: &MapiSession,
     folder_id: u64,
+    mailboxes: &[JmapMailbox],
 ) -> HashMap<u32, MapiValue>
 where
     S: ExchangeStore,
 {
-    let mut properties = HashMap::new();
-    if is_advertised_special_folder(folder_id) {
-        for property_tag in [
-            PID_TAG_DISPLAY_NAME_W,
-            PID_TAG_ENTRY_ID,
-            PID_TAG_INSTANCE_KEY,
-            PID_TAG_FOLDER_ID,
-            PID_TAG_PARENT_FOLDER_ID,
-            PID_TAG_FOLDER_TYPE,
-            PID_TAG_CONTENT_COUNT,
-            PID_TAG_CONTENT_UNREAD_COUNT,
-            PID_TAG_DELETED_COUNT_TOTAL,
-            PID_TAG_SUBFOLDERS,
-            PID_TAG_ACCESS,
-            PID_TAG_CONTAINER_CLASS_W,
-            PID_TAG_MESSAGE_CLASS_W,
-            PID_TAG_LAST_MODIFICATION_TIME,
-            PID_TAG_LOCAL_COMMIT_TIME,
-            PID_TAG_LOCAL_COMMIT_TIME_MAX,
-            PID_TAG_HIER_REV,
-            PID_TAG_HIERARCHY_CHANGE_NUMBER,
-            PID_TAG_SOURCE_KEY,
-            PID_TAG_PARENT_SOURCE_KEY,
-            PID_TAG_CHANGE_KEY,
-            PID_TAG_PREDECESSOR_CHANGE_LIST,
-            PID_TAG_CHANGE_NUMBER,
-        ] {
-            if property_tag == PID_TAG_PARENT_SOURCE_KEY
-                && matches!(folder_id, ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID)
-            {
-                continue;
-            }
-            if let Some(value) =
-                special_folder_property_value(folder_id, property_tag, principal.account_id)
-            {
-                properties.insert(property_tag, value);
-            }
-        }
-    }
+    let mut properties = folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes);
     if folder_id == IPM_SUBTREE_FOLDER_ID {
         if let Ok(Some(ost_id)) = store
             .fetch_mapi_ipm_subtree_ost_id(principal.account_id)
             .await
         {
             properties.insert(PID_TAG_OST_OSTID, MapiValue::Binary(ost_id));
+        }
+    }
+    properties
+}
+
+fn folder_properties_for_open_from_mailboxes(
+    principal: &AccountPrincipal,
+    folder_id: u64,
+    mailboxes: &[JmapMailbox],
+) -> HashMap<u32, MapiValue> {
+    let mut properties = HashMap::new();
+    let open_folder_property_tags = [
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_INSTANCE_KEY,
+        PID_TAG_FOLDER_ID,
+        PID_TAG_PARENT_FOLDER_ID,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_DELETED_COUNT_TOTAL,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_ACCESS,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_MESSAGE_CLASS_W,
+        PID_TAG_LAST_MODIFICATION_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME,
+        PID_TAG_LOCAL_COMMIT_TIME_MAX,
+        PID_TAG_HIER_REV,
+        PID_TAG_HIERARCHY_CHANGE_NUMBER,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+        PID_TAG_CHANGE_KEY,
+        PID_TAG_PREDECESSOR_CHANGE_LIST,
+        PID_TAG_CHANGE_NUMBER,
+    ];
+    if let Some(mailbox) = folder_row_for_id(folder_id, mailboxes) {
+        for property_tag in open_folder_property_tags {
+            if let Some(value) = mailbox_property_value_with_context_for_account(
+                mailbox,
+                mailboxes,
+                property_tag,
+                principal.account_id,
+            ) {
+                properties.insert(property_tag, value);
+            }
+        }
+    }
+    if is_advertised_special_folder(folder_id) {
+        for property_tag in open_folder_property_tags {
+            if property_tag == PID_TAG_PARENT_SOURCE_KEY
+                && matches!(folder_id, ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID)
+            {
+                continue;
+            }
+            if !properties.contains_key(&property_tag) {
+                if let Some(value) =
+                    special_folder_property_value(folder_id, property_tag, principal.account_id)
+                {
+                    properties.insert(property_tag, value);
+                }
+            }
         }
     }
     properties
@@ -5996,7 +6021,8 @@ where
                         .is_empty();
                 session.record_opened_folder(folder_id);
                 let properties =
-                    folder_properties_for_open(store, principal, session, folder_id).await;
+                    folder_properties_for_open(store, principal, session, folder_id, mailboxes)
+                        .await;
                 let handle = session.allocate_output_handle_avoiding(
                     request.output_handle_index,
                     MapiObject::Folder {
@@ -8334,7 +8360,8 @@ where
                     advertised_special_folder_id_for_create(parent_folder_id, display_name)
                 {
                     let properties =
-                        folder_properties_for_open(store, principal, session, folder_id).await;
+                        folder_properties_for_open(store, principal, session, folder_id, mailboxes)
+                            .await;
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
                         MapiObject::Folder {
@@ -8355,8 +8382,10 @@ where
                             && mailbox.name.eq_ignore_ascii_case(display_name)
                     }) {
                         let folder_id = mapi_folder_id(existing);
-                        let properties =
-                            folder_properties_for_open(store, principal, session, folder_id).await;
+                        let properties = folder_properties_for_open(
+                            store, principal, session, folder_id, mailboxes,
+                        )
+                        .await;
                         let handle = session.allocate_output_handle(
                             request.output_handle_index,
                             MapiObject::Folder {
@@ -14918,6 +14947,53 @@ mod tests {
         let probe = rop_buffer_with_response(probe, &[u32::MAX]);
 
         assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
+    fn folder_properties_for_open_prefers_loaded_mailbox_for_inbox() {
+        let principal = test_principal();
+        let inbox_id = Uuid::from_u128(0x1111);
+        crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
+        let inbox = JmapMailbox {
+            id: inbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 221,
+            unread_emails: 17,
+            is_subscribed: true,
+        };
+
+        let properties =
+            folder_properties_for_open_from_mailboxes(&principal, INBOX_FOLDER_ID, &[inbox]);
+
+        assert_eq!(
+            properties.get(&PID_TAG_DISPLAY_NAME_W),
+            Some(&MapiValue::String("INBOX".to_string()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTENT_COUNT),
+            Some(&MapiValue::U32(221))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTENT_UNREAD_COUNT),
+            Some(&MapiValue::U32(17))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_CONTAINER_CLASS_W),
+            Some(&MapiValue::String("IPF.Note".to_string()))
+        );
+        let expected_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
+            principal.account_id,
+            INBOX_FOLDER_ID,
+        )
+        .unwrap();
+        assert_eq!(
+            properties.get(&PID_TAG_ENTRY_ID),
+            Some(&MapiValue::Binary(expected_entry_id))
+        );
     }
 
     #[test]
