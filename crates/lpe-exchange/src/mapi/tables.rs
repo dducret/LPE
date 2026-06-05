@@ -824,6 +824,9 @@ pub(in crate::mapi) fn special_folder_property_value(
             crate::mapi::identity::folder_entry_id_from_object_id(mailbox_guid, folder_id)
                 .map(MapiValue::Binary)
         }
+        PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            folder_id,
+        ))),
         PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(folder_id),
         )),
@@ -5440,6 +5443,16 @@ mod tests {
 
         assert_eq!(&row[..expected.len()], expected.as_slice());
         assert_eq!(&row[expected.len()..], expected.as_slice());
+    }
+
+    #[test]
+    fn special_folder_property_projects_record_key() {
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_RECORD_KEY, Uuid::nil()),
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                INBOX_FOLDER_ID
+            )))
+        );
     }
 
     #[test]

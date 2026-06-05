@@ -1521,6 +1521,59 @@ fn log_execute_rop_debug(
     }
 
     if endpoint == "emsmdb"
+        && request.ids.iter().all(|rop_id| *rop_id == 0x01)
+        && !request.ids.is_empty()
+        && response.count == 0
+    {
+        tracing::info!(
+            rca_debug = true,
+            adapter = "mapi",
+            endpoint = endpoint,
+            tenant_id = %principal.tenant_id,
+            account_id = %principal.account_id,
+            mailbox = %principal.email,
+            request_type = "Execute",
+            mapi_request_id = request_id,
+            client_request_id = %client_request_id,
+            client_application = %client_application,
+            client_info = %client_info,
+            trace_id = %trace_id,
+            outlook_event_provider = "Outlook",
+            outlook_event_id = 19,
+            outlook_event_operation = "EcDoRpcExt",
+            outlook_event_hresult = "0x800704d3",
+            outlook_event_data_code = 78,
+            correlation_basis = "release_only_empty_rop_response",
+            request_rop_ids = %request.ids_csv,
+            request_rop_names = %request.names_csv,
+            request_rop_payload_bytes = request.request_payload_bytes,
+            request_handle_table_bytes = request.handle_table_bytes,
+            request_handle_count = request.handle_count,
+            input_handle_table_summary = %request.handle_table_summary,
+            request_rop_raw_frame_count = request.raw_frame_count,
+            request_rop_raw_frames = %request.raw_frames,
+            response_rop_ids = %response.ids_csv,
+            response_rop_names = %response.names_csv,
+            response_rop_buffer_layout = %response.buffer_layout,
+            response_rop_buffer_size_word = %response.buffer_size_word,
+            response_rop_payload_bytes = response.response_payload_bytes,
+            response_handle_table_bytes = response.handle_table_bytes,
+            response_handle_count = response.handle_count,
+            output_handle_table_summary = %response.handle_table_summary,
+            response_rop_frame_count = response.count,
+            response_rop_parse_error = %response.parse_error,
+            live_handle_count = session.handles.len(),
+            last_completed_hierarchy_sync_root =
+                %post_hierarchy.last_completed_hierarchy_sync_root,
+            content_sync_started_after_hierarchy =
+                post_hierarchy.content_sync_configure_observed,
+            post_hierarchy_execute_count = post_hierarchy.execute_count,
+            post_hierarchy_rop_ids_seen = %post_hierarchy.rop_ids_seen,
+            message = "rca debug mapi outlook event 19 candidate"
+        );
+    }
+
+    if endpoint == "emsmdb"
         && (post_hierarchy_observation.first_execute
             || post_hierarchy_observation.first_bootstrap_probe
             || post_hierarchy_observation.first_set_properties_probe)
@@ -2073,6 +2126,7 @@ fn folder_properties_for_open_from_mailboxes(
     let open_folder_property_tags = [
         PID_TAG_DISPLAY_NAME_W,
         PID_TAG_ENTRY_ID,
+        PID_TAG_RECORD_KEY,
         PID_TAG_INSTANCE_KEY,
         PID_TAG_FOLDER_ID,
         PID_TAG_PARENT_FOLDER_ID,
@@ -2724,6 +2778,30 @@ fn mapi_value_debug_shape(value: &MapiValue) -> String {
         MapiValue::MultiBinary(value) => format!("multi_binary:count={}", value.len()),
         MapiValue::MultiGuid(value) => format!("multi_guid:count={}", value.len()),
     }
+}
+
+fn debug_open_folder_property_shapes(properties: &HashMap<u32, MapiValue>) -> String {
+    let mut tags = [
+        PID_TAG_DISPLAY_NAME_W,
+        PID_TAG_FOLDER_TYPE,
+        PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_CONTENT_COUNT,
+        PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_SUBFOLDERS,
+        PID_TAG_ENTRY_ID,
+        PID_TAG_RECORD_KEY,
+        PID_TAG_SOURCE_KEY,
+        PID_TAG_PARENT_SOURCE_KEY,
+    ]
+    .into_iter()
+    .filter_map(|tag| {
+        properties
+            .get(&tag)
+            .map(|value| format!("{tag:#010x}:{}", mapi_value_debug_shape(value)))
+    })
+    .collect::<Vec<_>>();
+    tags.sort();
+    tags.join(",")
 }
 
 async fn apply_supported_object_property_values<S>(
@@ -3577,6 +3655,14 @@ pub(in crate::mapi) fn debug_container_class_for_folder_id(folder_id: u64) -> &'
         TODO_SEARCH_FOLDER_ID => "IPF.Task",
         REMINDERS_FOLDER_ID => "Outlook.Reminder",
         CONVERSATION_ACTION_SETTINGS_FOLDER_ID => "IPF.Configuration",
+        INBOX_FOLDER_ID
+        | OUTBOX_FOLDER_ID
+        | SENT_FOLDER_ID
+        | TRASH_FOLDER_ID
+        | DRAFTS_FOLDER_ID
+        | JUNK_FOLDER_ID
+        | ARCHIVE_FOLDER_ID
+        | CONVERSATION_HISTORY_FOLDER_ID => "IPF.Note",
         _ => expected_special_folder_container_class(folder_id),
     }
 }
@@ -6482,6 +6568,8 @@ where
                     request_rop_id = "0x02",
                     input_handle_index = request.input_handle_index().unwrap_or(0),
                     response_handle_index = request.output_handle_index.unwrap_or(0),
+                    open_mode_flags =
+                        format!("0x{:02x}", request.payload.get(8).copied().unwrap_or(0)),
                     requested_folder_id = format!("0x{requested_folder_id:016x}"),
                     folder_id = format!("0x{folder_id:016x}"),
                     folder_alias_resolved = requested_folder_id != folder_id,
@@ -6531,6 +6619,23 @@ where
                 let properties =
                     folder_properties_for_open(store, principal, session, folder_id, mailboxes)
                         .await;
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x02",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    response_handle_index = request.output_handle_index.unwrap_or(0),
+                    open_mode_flags =
+                        format!("0x{:02x}", request.payload.get(8).copied().unwrap_or(0)),
+                    folder_id = format!("0x{folder_id:016x}"),
+                    folder_name = post_hierarchy_probe_folder_name(folder_id),
+                    role = debug_role_for_folder_id(folder_id),
+                    property_count = properties.len(),
+                    property_shapes = %debug_open_folder_property_shapes(&properties),
+                    message = "rca debug mapi open folder properties"
+                );
                 let handle = session.allocate_output_handle_avoiding(
                     request.output_handle_index,
                     MapiObject::Folder {
@@ -15665,6 +15770,12 @@ mod tests {
         assert_eq!(
             properties.get(&PID_TAG_ENTRY_ID),
             Some(&MapiValue::Binary(expected_entry_id))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_RECORD_KEY),
+            Some(&MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                INBOX_FOLDER_ID
+            )))
         );
     }
 

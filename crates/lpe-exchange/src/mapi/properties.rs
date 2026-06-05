@@ -1235,6 +1235,9 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
             mapi_folder_id(mailbox),
         )
         .map(MapiValue::Binary),
+        PID_TAG_RECORD_KEY => Some(MapiValue::Binary(
+            mapi_mailstore::source_key_for_mailbox_folder(mailbox),
+        )),
         PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(mapi_folder_id(mailbox)),
         )),
@@ -1333,6 +1336,9 @@ pub(in crate::mapi) fn collaboration_folder_property_value(
             folder.id,
         )
         .map(MapiValue::Binary),
+        PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            folder.id,
+        ))),
         PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(folder.id),
         )),
@@ -1394,6 +1400,9 @@ pub(in crate::mapi) fn public_folder_property_value(
             crate::mapi::identity::folder_entry_id_from_object_id(Uuid::nil(), folder.id)
                 .map(MapiValue::Binary)
         }
+        PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+            folder.id,
+        ))),
         PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(folder.id),
         )),
