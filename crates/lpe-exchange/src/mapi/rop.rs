@@ -2378,8 +2378,17 @@ fn format_property_names_for_debug(tags: &[u32]) -> String {
 fn property_tag_debug_name(tag: u32) -> &'static str {
     match tag {
         PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
+        PID_TAG_ENTRY_ID => "PidTagEntryId",
+        PID_TAG_RECORD_KEY => "PidTagRecordKey",
+        PID_TAG_SOURCE_KEY => "PidTagSourceKey",
+        PID_TAG_PARENT_SOURCE_KEY => "PidTagParentSourceKey",
+        PID_TAG_PARENT_ENTRY_ID => "PidTagParentEntryId",
+        PID_TAG_FOLDER_ID => "PidTagFolderId",
+        PID_TAG_INSTANCE_KEY => "PidTagInstanceKey",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
+        PID_TAG_ASSOCIATED_CONTENT_COUNT => "PidTagAssociatedContentCount",
+        PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
         PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
         PID_TAG_IPM_SUBTREE_ENTRY_ID => "PidTagIpmSubtreeEntryId",
         PID_TAG_IPM_OUTBOX_ENTRY_ID => "PidTagIpmOutboxEntryId",

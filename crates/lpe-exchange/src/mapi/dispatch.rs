@@ -4330,6 +4330,103 @@ fn decode_logon_identity_bytes(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).trim().to_string()
 }
 
+fn log_outlook_bootstrap_phase(
+    principal: &AccountPrincipal,
+    phase: &str,
+    rop_id: &str,
+    folder_id: Option<u64>,
+    associated: bool,
+    table_total_row_count: Option<u32>,
+    returned_row_count: Option<u32>,
+    output_handle: Option<u32>,
+    default_folder_ids: &str,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = rop_id,
+        phase,
+        folder_id = %folder_id
+            .map(|folder_id| format!("0x{folder_id:016x}"))
+            .unwrap_or_default(),
+        folder_role = folder_id.map(debug_role_for_folder_id).unwrap_or(""),
+        associated,
+        table_total_row_count = table_total_row_count.unwrap_or(0),
+        returned_row_count = returned_row_count.unwrap_or(0),
+        output_handle = output_handle.unwrap_or(0),
+        default_folder_ids,
+        "rca debug outlook bootstrap phase"
+    );
+}
+
+fn log_outlook_bootstrap_row_invariant(
+    principal: &AccountPrincipal,
+    phase: &str,
+    folder_id: u64,
+    associated: bool,
+    summary: &str,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        account_id = %principal.account_id,
+        mailbox = %principal.email,
+        request_type = "Execute",
+        request_rop_id = "0x15",
+        phase,
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = debug_role_for_folder_id(folder_id),
+        associated,
+        row_invariant_summary = summary,
+        "rca debug outlook bootstrap row invariant"
+    );
+}
+
+fn outlook_bootstrap_query_rows_phase(
+    object: Option<&MapiObject>,
+) -> Option<(&'static str, u64, bool)> {
+    match object {
+        Some(MapiObject::HierarchyTable { folder_id, .. })
+            if matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
+        {
+            Some(("hierarchy_table_query_rows_completed", *folder_id, false))
+        }
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            ..
+        }) if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID => Some((
+            "common_views_associated_table_query_rows_completed",
+            *folder_id,
+            true,
+        )),
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            ..
+        }) if *associated && *folder_id == INBOX_FOLDER_ID => Some((
+            "inbox_associated_table_query_rows_completed",
+            *folder_id,
+            true,
+        )),
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            ..
+        }) if !*associated && *folder_id == INBOX_FOLDER_ID => Some((
+            "inbox_contents_table_query_rows_completed",
+            *folder_id,
+            false,
+        )),
+        _ => None,
+    }
+}
+
 fn log_calendar_folder_contract(
     principal: &AccountPrincipal,
     folder_id: u64,
@@ -6334,6 +6431,31 @@ where
                     &request,
                     is_public_folder_ghosted,
                 ));
+                if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        "root_ipm_subtree_opened",
+                        "0x02",
+                        Some(folder_id),
+                        false,
+                        None,
+                        None,
+                        Some(handle),
+                        "",
+                    );
+                } else if folder_id == INBOX_FOLDER_ID {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        "inbox_opened",
+                        "0x02",
+                        Some(folder_id),
+                        false,
+                        None,
+                        None,
+                        Some(handle),
+                        "",
+                    );
+                }
                 output_handles.push(handle);
             }
             Some(RopId::OpenMessage) => {
@@ -6651,6 +6773,19 @@ where
                     hierarchy_row_count(folder_id, mailboxes, snapshot)
                 };
                 responses.extend_from_slice(&rop_get_hierarchy_table_response(&request, row_count));
+                if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        "hierarchy_table_opened",
+                        "0x04",
+                        Some(folder_id),
+                        false,
+                        Some(row_count),
+                        None,
+                        Some(handle),
+                        "",
+                    );
+                }
                 output_handles.push(handle);
             }
             Some(RopId::GetContentsTable) => {
@@ -6718,6 +6853,43 @@ where
                     row_count,
                     handle,
                 );
+                if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        "common_views_associated_table_opened",
+                        "0x05",
+                        Some(folder_id),
+                        associated,
+                        Some(row_count),
+                        None,
+                        Some(handle),
+                        "",
+                    );
+                } else if associated && folder_id == INBOX_FOLDER_ID {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        "inbox_associated_table_opened",
+                        "0x05",
+                        Some(folder_id),
+                        associated,
+                        Some(row_count),
+                        None,
+                        Some(handle),
+                        "",
+                    );
+                } else if !associated && folder_id == INBOX_FOLDER_ID {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        "inbox_contents_table_opened",
+                        "0x05",
+                        Some(folder_id),
+                        associated,
+                        Some(row_count),
+                        None,
+                        Some(handle),
+                        "",
+                    );
+                }
                 responses.extend_from_slice(&rop_get_contents_table_response(&request, row_count));
                 output_handles.push(handle);
             }
@@ -8470,15 +8642,22 @@ where
                 )),
             },
             Some(RopId::QueryRows) => {
-                log_calendar_hierarchy_query_rows_contract(
-                    principal,
-                    input_object(session, &handle_slots, &request),
+                let query_object = input_object(session, &handle_slots, &request);
+                let bootstrap_query_phase = outlook_bootstrap_query_rows_phase(query_object);
+                let bootstrap_row_invariants = outlook_bootstrap_row_invariant_summaries(
+                    query_object,
+                    mailboxes,
+                    emails,
                     snapshot,
+                    principal.account_id,
+                    request.query_forward_read(),
+                    request.query_row_count().unwrap_or(0),
                 );
+                log_calendar_hierarchy_query_rows_contract(principal, query_object, snapshot);
                 log_outlook_contents_table_query_rows(
                     principal,
                     &request,
-                    input_object(session, &handle_slots, &request),
+                    query_object,
                     mailboxes,
                     emails,
                     snapshot,
@@ -8491,6 +8670,24 @@ where
                     snapshot,
                     principal.account_id,
                 ));
+                if let Some((phase, folder_id, associated)) = bootstrap_query_phase {
+                    log_outlook_bootstrap_phase(
+                        principal,
+                        phase,
+                        "0x15",
+                        Some(folder_id),
+                        associated,
+                        None,
+                        Some(bootstrap_row_invariants.len() as u32),
+                        None,
+                        "",
+                    );
+                    for summary in bootstrap_row_invariants {
+                        log_outlook_bootstrap_row_invariant(
+                            principal, phase, folder_id, associated, &summary,
+                        );
+                    }
+                }
             }
             Some(RopId::GetStatus) => responses.extend_from_slice(&rop_get_status_response(
                 &request,
@@ -14316,7 +14513,7 @@ where
                     replid: STORE_REPLICA_ID.to_string(),
                     replica_guid: bytes_to_hex(&crate::mapi::identity::STORE_REPLICA_GUID),
                     response_flags: if is_private_logon { "0x07" } else { "0x00" }.to_string(),
-                    special_folder_ids,
+                    special_folder_ids: special_folder_ids.clone(),
                 });
                 if is_private_logon {
                     responses.extend_from_slice(&rop_logon_response_body(principal, &request));
@@ -14325,6 +14522,17 @@ where
                         principal, &request,
                     ));
                 }
+                log_outlook_bootstrap_phase(
+                    principal,
+                    "logon_default_folder_ids_returned",
+                    "0xfe",
+                    None,
+                    false,
+                    None,
+                    None,
+                    Some(handle),
+                    &special_folder_ids,
+                );
                 output_handles.push(handle);
             }
             Some(rop_id) => responses.extend_from_slice(&unsupported_rop_response(
