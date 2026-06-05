@@ -1394,6 +1394,12 @@ fn log_get_properties_specific_debug(
     } else {
         OutlookLogonBootstrapRowShape::default()
     };
+    let ipm_configuration_getprops_contract = format_ipm_configuration_getprops_contract(
+        object,
+        columns,
+        snapshot,
+        &fallback_default_tags,
+    );
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1425,6 +1431,7 @@ fn log_get_properties_specific_debug(
         response_property_row_kind = %property_row_kind_for_debug(object, principal, columns),
         unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
         returned_property_value_shapes = %returned_property_value_shapes,
+        ipm_configuration_getprops_contract = %ipm_configuration_getprops_contract,
         outlook_bootstrap_getprops = outlook_bootstrap_getprops,
         outlook_bootstrap_estimated_rop_payload_bytes =
             outlook_bootstrap_row_shape.estimated_rop_payload_bytes,
@@ -1443,6 +1450,59 @@ fn log_get_properties_specific_debug(
         snapshot,
         &unsupported_tags,
     );
+}
+
+fn format_ipm_configuration_getprops_contract(
+    object: Option<&MapiObject>,
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+    fallback_tags: &[u32],
+) -> String {
+    let Some(MapiObject::AssociatedConfig {
+        folder_id,
+        config_id,
+    }) = object
+    else {
+        return String::new();
+    };
+    let Some(message) = snapshot
+        .associated_config_message_for_id(*config_id)
+        .filter(|message| message.folder_id == *folder_id)
+    else {
+        return format!("found=false;folder_id=0x{folder_id:016x};config_id=0x{config_id:016x}");
+    };
+    if !message.message_class.starts_with("IPM.Configuration.") {
+        return String::new();
+    }
+    let datatypes = associated_config_property_value(&message, PID_TAG_ROAMING_DATATYPES)
+        .and_then(|value| value.into_u32());
+    let requested_stream_tags = columns
+        .iter()
+        .copied()
+        .filter(|tag| {
+            matches!(
+                *tag,
+                PID_TAG_ROAMING_DICTIONARY | PID_TAG_ROAMING_XML_STREAM
+            )
+        })
+        .collect::<Vec<_>>();
+    let missing_requested_streams = requested_stream_tags
+        .iter()
+        .copied()
+        .filter(|tag| associated_config_property_value(&message, *tag).is_none())
+        .collect::<Vec<_>>();
+    format!(
+        "found=true;folder_id=0x{folder_id:016x};config_id=0x{config_id:016x};class={};datatypes={};has_dictionary={};has_xml={};requested_streams={};missing_requested_streams={};fallback_tags={}",
+        message.message_class,
+        datatypes
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        associated_config_property_value(&message, PID_TAG_ROAMING_DICTIONARY).is_some(),
+        associated_config_property_value(&message, PID_TAG_ROAMING_XML_STREAM).is_some(),
+        format_property_tags_for_debug(&requested_stream_tags),
+        format_property_tags_for_debug(&missing_requested_streams),
+        format_property_tags_for_debug(fallback_tags)
+    )
 }
 
 fn log_calendar_default_folder_lookup_debug(
@@ -2224,6 +2284,11 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
             "PidLidAppointmentTimeZoneDefinitionEndDisplay"
         }
         PID_TAG_CHANGE_KEY => "PidTagChangeKey",
+        PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
+        PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
+        PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
+        0x7C09_0102 => "PidTagRoamingBinary",
+        0x685D_0003 => "OutlookConfigurationStamp",
         PID_TAG_OST_OSTID => "PR_OST_OSTID",
         _ => "unknown",
     }
@@ -6394,6 +6459,18 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_CHANGE_KEY),
             "PidTagChangeKey"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ROAMING_DATATYPES),
+            "PidTagRoamingDatatypes"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ROAMING_DICTIONARY),
+            "PidTagRoamingDictionary"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ROAMING_XML_STREAM),
+            "PidTagRoamingXmlStream"
         );
         assert_eq!(
             property_tag_debug_name(PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
