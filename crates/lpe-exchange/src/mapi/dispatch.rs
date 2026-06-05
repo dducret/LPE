@@ -1288,7 +1288,8 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
 }
 
 fn is_store_independent_special_folder(folder_id: u64) -> bool {
-    is_advertised_special_folder(folder_id) && folder_id != IPM_SUBTREE_FOLDER_ID
+    is_advertised_special_folder(folder_id)
+        && !matches!(folder_id, IPM_SUBTREE_FOLDER_ID | INBOX_FOLDER_ID)
 }
 
 fn rop_buffer_has_no_requests(rop_buffer: &[u8]) -> bool {
@@ -15178,7 +15179,7 @@ mod tests {
         let session = test_mapi_session();
         let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
         probe.extend_from_slice(
-            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
         );
         probe.push(0);
         probe.extend_from_slice(&[0x07, 0x00, 0x01]);
@@ -15191,11 +15192,28 @@ mod tests {
     }
 
     #[test]
+    fn inbox_getprops_probe_loads_store_snapshot() {
+        let session = test_mapi_session();
+        let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
+        probe.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+        );
+        probe.push(0);
+        probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+        probe.extend_from_slice(&4096u16.to_le_bytes());
+        probe.extend_from_slice(&1u16.to_le_bytes());
+        probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
+        let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+        assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
     fn special_folder_getprops_probe_rejects_custom_properties() {
         let session = test_mapi_session();
         let mut probe = vec![0x02, 0x00, 0x00, 0x01];
         probe.extend_from_slice(
-            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+            &crate::mapi::identity::wire_id_bytes_from_object_id(ROOT_FOLDER_ID).unwrap(),
         );
         probe.push(0);
         probe.extend_from_slice(&[0x07, 0x00, 0x01]);

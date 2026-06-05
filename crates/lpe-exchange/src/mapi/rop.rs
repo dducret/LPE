@@ -1400,6 +1400,8 @@ fn log_get_properties_specific_debug(
         snapshot,
         &fallback_default_tags,
     );
+    let folder_type_getprops_contract =
+        format_folder_type_getprops_contract(object, principal, columns, mailboxes, snapshot);
     let message = "rca debug mapi get properties specific";
     tracing::info!(
         rca_debug = true,
@@ -1432,6 +1434,7 @@ fn log_get_properties_specific_debug(
         unsupported_property_errors = %format_property_errors_for_debug(&unsupported_tags),
         returned_property_value_shapes = %returned_property_value_shapes,
         ipm_configuration_getprops_contract = %ipm_configuration_getprops_contract,
+        folder_type_getprops_contract = %folder_type_getprops_contract,
         outlook_bootstrap_getprops = outlook_bootstrap_getprops,
         outlook_bootstrap_estimated_rop_payload_bytes =
             outlook_bootstrap_row_shape.estimated_rop_payload_bytes,
@@ -1450,6 +1453,148 @@ fn log_get_properties_specific_debug(
         snapshot,
         &unsupported_tags,
     );
+}
+
+fn format_folder_type_getprops_contract(
+    object: Option<&MapiObject>,
+    principal: &AccountPrincipal,
+    columns: &[u32],
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !columns
+        .iter()
+        .any(|tag| canonical_property_storage_tag(*tag) == PID_TAG_FOLDER_TYPE)
+    {
+        return String::new();
+    }
+    let Some(MapiObject::Folder {
+        folder_id,
+        properties,
+    }) = object
+    else {
+        return String::new();
+    };
+
+    let mailbox = folder_row_for_id(*folder_id, mailboxes);
+    let collaboration_folder = snapshot.collaboration_folder_for_id(*folder_id);
+    let public_folder = snapshot.public_folder_for_id(*folder_id);
+    let search_folder_found = snapshot
+        .search_folder_definition_for_folder_id(*folder_id)
+        .is_some();
+    let advertised_special_folder = is_advertised_special_folder(*folder_id);
+
+    let handle_value = properties
+        .get(&PID_TAG_FOLDER_TYPE)
+        .cloned()
+        .and_then(MapiValue::into_u32);
+    let (property_source, returned_value) = if handle_value.is_some() {
+        ("opened_handle", handle_value)
+    } else if let Some(mailbox) = mailbox {
+        (
+            "mailbox",
+            mailbox_property_value_with_context_for_account(
+                mailbox,
+                mailboxes,
+                PID_TAG_FOLDER_TYPE,
+                principal.account_id,
+            )
+            .and_then(MapiValue::into_u32),
+        )
+    } else if let Some(folder) = collaboration_folder {
+        (
+            "collaboration_folder",
+            collaboration_folder_property_value(folder, PID_TAG_FOLDER_TYPE)
+                .and_then(MapiValue::into_u32),
+        )
+    } else if let Some(folder) = public_folder {
+        (
+            "public_folder",
+            public_folder_property_value(folder, PID_TAG_FOLDER_TYPE).and_then(MapiValue::into_u32),
+        )
+    } else {
+        (
+            "special_folder_fallback",
+            special_folder_property_value(*folder_id, PID_TAG_FOLDER_TYPE, principal.account_id)
+                .and_then(MapiValue::into_u32),
+        )
+    };
+    let (expected_kind, expected_value) =
+        expected_folder_type_for_debug(*folder_id, mailbox, search_folder_found);
+
+    let mut issues = Vec::new();
+    if returned_value.is_none() {
+        issues.push("missing_folder_type");
+    }
+    if returned_value
+        .map(|value| !matches!(value, FOLDER_ROOT | FOLDER_GENERIC | FOLDER_SEARCH))
+        .unwrap_or(false)
+    {
+        issues.push("invalid_folder_type_value");
+    }
+    if let (Some(returned), Some(expected)) = (returned_value, expected_value) {
+        if returned != expected {
+            issues.push("folder_type_mismatch");
+        }
+    }
+    if *folder_id == INBOX_FOLDER_ID && mailbox.is_none() {
+        issues.push("inbox_without_loaded_mailbox");
+    }
+    if *folder_id == INBOX_FOLDER_ID && property_source == "special_folder_fallback" {
+        issues.push("inbox_answered_from_special_fallback");
+    }
+    if property_source == "special_folder_fallback" && !advertised_special_folder {
+        issues.push("non_advertised_special_fallback");
+    }
+
+    format!(
+        "folder_id=0x{folder_id:016x};mailbox_folder_found={};collaboration_folder_found={};public_folder_found={};search_folder_definition_found={};advertised_special_folder={};property_source={property_source};returned_value={};returned_kind={};expected_value={};expected_kind={expected_kind};issues={}",
+        mailbox.is_some(),
+        collaboration_folder.is_some(),
+        public_folder.is_some(),
+        search_folder_found,
+        advertised_special_folder,
+        returned_value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "missing".to_string()),
+        returned_value
+            .map(folder_type_kind_for_debug)
+            .unwrap_or("missing"),
+        expected_value
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        issues.join("|")
+    )
+}
+
+fn expected_folder_type_for_debug(
+    folder_id: u64,
+    mailbox: Option<&JmapMailbox>,
+    search_folder_found: bool,
+) -> (&'static str, Option<u32>) {
+    if matches!(folder_id, ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID) {
+        return ("root", Some(FOLDER_ROOT));
+    }
+    if search_folder_found
+        || mailbox
+            .map(|mailbox| mailbox.role == "__mapi_search")
+            .unwrap_or(false)
+    {
+        return ("search", Some(FOLDER_SEARCH));
+    }
+    if mailbox.is_some() || is_advertised_special_folder(folder_id) {
+        return ("generic", Some(FOLDER_GENERIC));
+    }
+    ("unknown", None)
+}
+
+fn folder_type_kind_for_debug(value: u32) -> &'static str {
+    match value {
+        FOLDER_ROOT => "root",
+        FOLDER_GENERIC => "generic",
+        FOLDER_SEARCH => "search",
+        _ => "invalid",
+    }
 }
 
 fn format_ipm_configuration_getprops_contract(
@@ -2233,6 +2378,7 @@ fn format_property_names_for_debug(tags: &[u32]) -> String {
 fn property_tag_debug_name(tag: u32) -> &'static str {
     match tag {
         PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
+        PID_TAG_FOLDER_TYPE => "PidTagFolderType",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
         PID_TAG_CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
         PID_TAG_IPM_SUBTREE_ENTRY_ID => "PidTagIpmSubtreeEntryId",
@@ -6457,6 +6603,10 @@ mod tests {
             "PidTagContentCount"
         );
         assert_eq!(
+            property_tag_debug_name(PID_TAG_FOLDER_TYPE),
+            "PidTagFolderType"
+        );
+        assert_eq!(
             property_tag_debug_name(PID_TAG_CHANGE_KEY),
             "PidTagChangeKey"
         );
@@ -6489,6 +6639,77 @@ mod tests {
             Some(&folder),
             PID_TAG_DELETED_COUNT_TOTAL
         ));
+    }
+
+    #[test]
+    fn folder_type_getprops_contract_reports_loaded_inbox() {
+        let account_id = Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb);
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id,
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        };
+        let inbox_id = Uuid::from_u128(0x1111);
+        crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
+        let inbox = JmapMailbox {
+            id: inbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 221,
+            unread_emails: 17,
+            is_subscribed: true,
+        };
+        let object = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        let contract = format_folder_type_getprops_contract(
+            Some(&object),
+            &principal,
+            &[PID_TAG_FOLDER_TYPE],
+            &[inbox],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(contract.contains("mailbox_folder_found=true"));
+        assert!(contract.contains("property_source=mailbox"));
+        assert!(contract.contains("returned_value=1"));
+        assert!(contract.contains("returned_kind=generic"));
+        assert!(contract.contains("expected_kind=generic"));
+        assert!(contract.ends_with("issues="));
+    }
+
+    #[test]
+    fn folder_type_getprops_contract_flags_inbox_without_snapshot() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        };
+        let object = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        let contract = format_folder_type_getprops_contract(
+            Some(&object),
+            &principal,
+            &[PID_TAG_FOLDER_TYPE],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(contract.contains("mailbox_folder_found=false"));
+        assert!(contract.contains("property_source=special_folder_fallback"));
+        assert!(contract.contains("returned_value=1"));
+        assert!(contract
+            .contains("issues=inbox_without_loaded_mailbox|inbox_answered_from_special_fallback"));
     }
 
     #[test]
