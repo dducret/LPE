@@ -5223,6 +5223,15 @@ mod tests {
             associated_config_property_value(&message, PID_TAG_INSTANCE_NUM),
             Some(MapiValue::U32(0))
         );
+        let source_key = mapi_mailstore::source_key_for_store_id(message.id);
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_SOURCE_KEY),
+            Some(MapiValue::Binary(source_key.clone()))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_RECORD_KEY),
+            Some(MapiValue::Binary(source_key))
+        );
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_LAST_MODIFICATION_TIME),
             Some(MapiValue::I64(
@@ -5979,6 +5988,9 @@ pub(in crate::mapi) fn associated_config_property_value(
             PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
             PID_TAG_PARENT_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
             PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id,
+            ))),
+            PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 message.id,
             ))),
             PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
