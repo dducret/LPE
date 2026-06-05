@@ -187,6 +187,13 @@ const OUTLOOK_INBOX_EAS_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x
 const OUTLOOK_INBOX_ELC_CONFIG_CLASS: &str = "IPM.Configuration.ELC";
 const OUTLOOK_INBOX_ELC_CONFIG_ID: u64 = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
 
+pub(crate) fn is_outlook_inbox_default_associated_config_id(item_id: u64) -> bool {
+    matches!(
+        item_id,
+        OUTLOOK_INBOX_EAS_CONFIG_ID | OUTLOOK_INBOX_ELC_CONFIG_ID
+    )
+}
+
 fn outlook_inbox_associated_config_defaults(folder_id: u64) -> Vec<MapiAssociatedConfigMessage> {
     vec![
         MapiAssociatedConfigMessage {
@@ -1189,9 +1196,7 @@ impl MapiMailStoreSnapshot {
     }
 
     pub(crate) fn has_associated_config_identity_id(&self, item_id: u64) -> bool {
-        self.associated_configs
-            .iter()
-            .any(|message| message.id == item_id)
+        self.associated_config_message_for_id(item_id).is_some()
             || self.associated_config_identity_ids.contains(&item_id)
     }
 
@@ -2050,6 +2055,7 @@ mod tests {
                     .map(|message| message.message_class),
                 Some(message_class.to_string())
             );
+            assert!(snapshot.has_associated_config_identity_id(message_id));
         }
 
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);

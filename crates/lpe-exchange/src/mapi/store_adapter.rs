@@ -985,6 +985,7 @@ fn unresolved_mapi_object_scope(object_id: u64) -> &'static str {
 
 fn is_expected_unbacked_mapi_object(object_id: u64) -> bool {
     is_advertised_special_folder(object_id)
+        || mapi_store::is_outlook_inbox_default_associated_config_id(object_id)
 }
 
 fn format_mapi_identity_kinds(identities: &[MapiIdentityLookupRecord]) -> String {
@@ -1857,12 +1858,14 @@ mod tests {
     }
 
     #[test]
-    fn expected_unbacked_mapi_objects_are_only_advertised_special_folders() {
+    fn expected_unbacked_mapi_objects_include_virtual_outlook_config_messages() {
         let dynamic_id = crate::mapi::identity::mapi_store_id(
             crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 10,
         );
+        let inbox_default_config_id = crate::mapi::identity::mapi_store_id(0x7FFF_FFFF_FFFC);
 
         assert!(is_expected_unbacked_mapi_object(ROOT_FOLDER_ID));
+        assert!(is_expected_unbacked_mapi_object(inbox_default_config_id));
         assert!(!is_expected_unbacked_mapi_object(dynamic_id));
     }
 }
