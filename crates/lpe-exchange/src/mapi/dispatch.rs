@@ -1241,7 +1241,7 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
     let Ok(handle_slots) = read_handle_table(handle_table) else {
         return false;
     };
-    let mut opened_special_folder_indexes = HashSet::new();
+    let mut opened_probe_folder_by_index = HashMap::new();
     let mut saw_open_folder = false;
     let mut saw_get_properties = false;
     let mut cursor = Cursor::new(requests);
@@ -1254,29 +1254,29 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
             Some(RopId::OpenFolder) => {
                 let folder_id = session
                     .resolve_special_folder_alias(request.folder_id().unwrap_or(ROOT_FOLDER_ID));
-                if !is_store_independent_special_folder(folder_id) {
+                if !is_store_independent_special_folder(folder_id) && folder_id != INBOX_FOLDER_ID {
                     return false;
                 }
-                opened_special_folder_indexes.insert(request.output_handle_index.unwrap_or(0));
+                opened_probe_folder_by_index
+                    .insert(request.output_handle_index.unwrap_or(0), folder_id);
                 saw_open_folder = true;
             }
             Some(RopId::GetPropertiesSpecific) => {
-                if request
-                    .property_tags()
-                    .iter()
-                    .copied()
-                    .any(is_custom_property_tag)
-                {
+                let property_tags = request.property_tags();
+                if property_tags.iter().copied().any(is_custom_property_tag) {
                     return false;
                 }
                 let input_handle_index = request.input_handle_index().unwrap_or(0);
-                let opened_in_same_batch =
-                    opened_special_folder_indexes.contains(&input_handle_index);
-                let existing_special_folder = input_handle(&handle_slots, &request)
+                let opened_folder_id = opened_probe_folder_by_index
+                    .get(&input_handle_index)
+                    .copied();
+                let existing_folder_id = input_handle(&handle_slots, &request)
                     .and_then(|handle| session.handles.get(&handle))
-                    .and_then(MapiObject::folder_id)
-                    .is_some_and(is_store_independent_special_folder);
-                if !opened_in_same_batch && !existing_special_folder {
+                    .and_then(MapiObject::folder_id);
+                let Some(folder_id) = opened_folder_id.or(existing_folder_id) else {
+                    return false;
+                };
+                if !is_store_independent_folder_getprops_probe(folder_id, &property_tags) {
                     return false;
                 }
                 saw_get_properties = true;
@@ -1285,6 +1285,13 @@ fn rop_buffer_is_store_independent_special_folder_getprops_probe(
         }
     }
     saw_open_folder && saw_get_properties
+}
+
+fn is_store_independent_folder_getprops_probe(folder_id: u64, property_tags: &[u32]) -> bool {
+    if is_store_independent_special_folder(folder_id) {
+        return true;
+    }
+    folder_id == INBOX_FOLDER_ID && property_tags.iter().all(|tag| *tag == PID_TAG_FOLDER_TYPE)
 }
 
 fn is_store_independent_special_folder(folder_id: u64) -> bool {
@@ -15224,7 +15231,7 @@ mod tests {
     }
 
     #[test]
-    fn inbox_getprops_probe_loads_store_snapshot() {
+    fn inbox_folder_type_getprops_probe_is_store_independent() {
         let session = test_mapi_session();
         let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
         probe.extend_from_slice(
@@ -15235,6 +15242,23 @@ mod tests {
         probe.extend_from_slice(&4096u16.to_le_bytes());
         probe.extend_from_slice(&1u16.to_le_bytes());
         probe.extend_from_slice(&PID_TAG_FOLDER_TYPE.to_le_bytes());
+        let probe = rop_buffer_with_response(probe, &[u32::MAX]);
+
+        assert!(rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
+    }
+
+    #[test]
+    fn inbox_display_name_getprops_probe_loads_store_snapshot() {
+        let session = test_mapi_session();
+        let mut probe = vec![0x01, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01];
+        probe.extend_from_slice(
+            &crate::mapi::identity::wire_id_bytes_from_object_id(INBOX_FOLDER_ID).unwrap(),
+        );
+        probe.push(0);
+        probe.extend_from_slice(&[0x07, 0x00, 0x01]);
+        probe.extend_from_slice(&4096u16.to_le_bytes());
+        probe.extend_from_slice(&1u16.to_le_bytes());
+        probe.extend_from_slice(&PID_TAG_DISPLAY_NAME_W.to_le_bytes());
         let probe = rop_buffer_with_response(probe, &[u32::MAX]);
 
         assert!(!rop_buffer_is_store_independent_special_folder_getprops_probe(&probe, &session));
