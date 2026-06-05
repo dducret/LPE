@@ -2007,6 +2007,28 @@ fn format_optional_debug_handle(handle: Option<u32>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn format_handle_lineage_context(object: Option<&MapiObject>) -> String {
+    match object {
+        Some(MapiObject::Logon) => "logon=private_mailbox".to_string(),
+        Some(MapiObject::PublicFolderLogon) => "logon=public_folder".to_string(),
+        Some(MapiObject::Folder { folder_id, .. }) => format!(
+            "folder=0x{folder_id:016x};role={};container={}",
+            debug_role_for_folder_id(*folder_id),
+            debug_container_class_for_folder_id(*folder_id)
+        ),
+        Some(object) => object
+            .folder_id()
+            .map(|folder_id| {
+                format!(
+                    "parent_folder=0x{folder_id:016x};parent_role={}",
+                    debug_role_for_folder_id(folder_id)
+                )
+            })
+            .unwrap_or_else(|| "context=none".to_string()),
+        None => "context=missing_handle".to_string(),
+    }
+}
+
 fn mapi_object_debug_kind(object: Option<&MapiObject>) -> &'static str {
     match object {
         None => "none",
@@ -2055,6 +2077,63 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
         .and_then(MapiObject::folder_id)
         .map(|folder_id| format!("0x{folder_id:016x}"))
         .unwrap_or_else(|| "none".to_string())
+}
+
+fn mapi_value_debug_string(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
+    match properties.get(&tag) {
+        Some(MapiValue::String(value)) => value.clone(),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn mapi_value_debug_u32(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
+    match properties.get(&tag) {
+        Some(MapiValue::U32(value)) => value.to_string(),
+        Some(MapiValue::I32(value)) => value.to_string(),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn mapi_value_debug_bool(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
+    match properties.get(&tag) {
+        Some(MapiValue::Bool(value)) => value.to_string(),
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn mapi_value_debug_binary_decode(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
+    match properties.get(&tag) {
+        Some(MapiValue::Binary(bytes)) => {
+            let decoded_folder_id = crate::mapi::identity::object_id_from_source_key(bytes)
+                .or_else(|| crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes));
+            format!(
+                "bytes={};decoded={}",
+                bytes.len(),
+                format_optional_folder_id(decoded_folder_id)
+            )
+        }
+        Some(value) => mapi_value_debug_shape(value),
+        None => "missing".to_string(),
+    }
+}
+
+fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<String> {
+    if state.inbox_open_folder_probe_count < 2
+        || state.inbox_folder_type_getprops_probe_count < 2
+        || state.inbox_normal_contents_table_observed
+    {
+        return None;
+    }
+    Some(format!(
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};recent_actions={}",
+        state.inbox_open_folder_probe_count,
+        state.inbox_folder_type_getprops_probe_count,
+        state.inbox_normal_contents_table_observed,
+        state.recent_probe_actions.join(">")
+    ))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4974,6 +5053,11 @@ fn log_outlook_contents_table_query_rows(
             ),
         query_row_window_summary = %query_row_window_summary,
         query_row_value_summary = %query_row_value_summary,
+        common_views_wlink_target_decoding = %if *folder_id == COMMON_VIEWS_FOLDER_ID && *associated {
+            format_common_views_wlink_target_decoding(principal.account_id, snapshot)
+        } else {
+            String::new()
+        },
         "rca debug outlook contents table query rows"
     );
 }
@@ -5478,6 +5562,52 @@ fn format_outlook_query_row_values(
                 .collect::<Vec<_>>()
                 .join(",");
             format!("index={};id=0x{:016x};{}", index, message.id, values)
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn format_common_views_wlink_target_decoding(
+    account_id: Uuid,
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    snapshot
+        .common_views_table_messages()
+        .filter_map(|message| match message {
+            crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+                if shortcut.shortcut_type == 4 {
+                    return None;
+                }
+                let entry_id = shortcut
+                    .target_folder_id
+                    .and_then(|folder_id| {
+                        crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
+                    })
+                    .unwrap_or_default();
+                let entry_id_decoded =
+                    crate::mapi::identity::object_id_from_folder_entry_id(&entry_id);
+                let source_key = shortcut
+                    .target_folder_id
+                    .map(mapi_mailstore::source_key_for_store_id)
+                    .unwrap_or_default();
+                let source_key_decoded =
+                    crate::mapi::identity::object_id_from_source_key(&source_key);
+                Some(format!(
+                    "id=0x{:016x};subject={};target_folder={};entry_id_bytes={};entry_id_decoded={};entry_id_matches_inbox={};source_key_bytes={};source_key_decoded={};source_key_matches_inbox={};expected_inbox=0x{INBOX_FOLDER_ID:016x}",
+                    shortcut.id,
+                    shortcut.subject,
+                    shortcut
+                        .target_folder_id
+                        .map(|folder_id| format!("0x{folder_id:016x}"))
+                        .unwrap_or_else(|| "none".to_string()),
+                    entry_id.len(),
+                    format_optional_folder_id(entry_id_decoded),
+                    entry_id_decoded == Some(INBOX_FOLDER_ID),
+                    source_key.len(),
+                    format_optional_folder_id(source_key_decoded),
+                    source_key_decoded == Some(INBOX_FOLDER_ID)
+                ))
+            }
         })
         .collect::<Vec<_>>()
         .join("|")
@@ -6512,13 +6642,15 @@ where
             Some(RopId::Release) => {
                 let released_handle = input_handle(&handle_slots, &request);
                 let released_object = input_object(session, &handle_slots, &request);
+                let released_object_kind = mapi_object_debug_kind(released_object);
+                let released_folder_id = mapi_object_debug_folder_id(released_object);
                 if session.hierarchy_sync_completed() {
                     let remaining_before = session.handles.len();
                     post_hierarchy_release_events.push(PostHierarchyReleaseDebugEvent {
                         input_handle_index: request.input_handle_index().unwrap_or(0),
                         handle: format_optional_debug_handle(released_handle),
-                        object_kind: mapi_object_debug_kind(released_object).to_string(),
-                        folder_id: mapi_object_debug_folder_id(released_object),
+                        object_kind: released_object_kind.to_string(),
+                        folder_id: released_folder_id.clone(),
                         remaining_before,
                         remaining_after: remaining_before,
                         logon_before_content_sync: matches!(
@@ -6542,8 +6674,36 @@ where
                 if let Some(event) = post_hierarchy_release_events.last_mut() {
                     event.remaining_after = session.handles.len();
                 }
+                session.record_recent_probe_action(format!(
+                    "Release(in={},handle={},kind={},folder={})",
+                    request.input_handle_index().unwrap_or(0),
+                    format_optional_debug_handle(released_handle),
+                    released_object_kind,
+                    released_folder_id
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x01",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(released_handle),
+                    object_kind = released_object_kind,
+                    folder_id = %released_folder_id,
+                    remaining_handle_count = session.handles.len(),
+                    "rca debug mapi release before inbox probe"
+                );
             }
             Some(RopId::OpenFolder) => {
+                let input_handle_value = input_handle(&handle_slots, &request);
+                let input_object_kind =
+                    mapi_object_debug_kind(input_object(session, &handle_slots, &request));
+                let input_folder_id =
+                    mapi_object_debug_folder_id(input_object(session, &handle_slots, &request));
+                let input_context =
+                    format_handle_lineage_context(input_object(session, &handle_slots, &request));
                 let requested_folder_id = request.folder_id().unwrap_or(ROOT_FOLDER_ID);
                 let folder_id = session.resolve_special_folder_alias(requested_folder_id);
                 let mailbox_folder_found = folder_row_for_id(folder_id, mailboxes).is_some();
@@ -6582,6 +6742,23 @@ where
                     advertised_special_folder = advertised_special_folder,
                     result = open_folder_result,
                     message = "rca debug mapi open folder"
+                );
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x02",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = %format_optional_debug_handle(input_handle_value),
+                    input_object_kind,
+                    input_folder_id,
+                    input_handle_context = %input_context,
+                    requested_folder_id = format!("0x{requested_folder_id:016x}"),
+                    resolved_folder_id = format!("0x{folder_id:016x}"),
+                    output_handle_index = request.output_handle_index.unwrap_or(0),
+                    "rca debug mapi open folder handle lineage"
                 );
                 log_calendar_folder_contract(
                     principal,
@@ -6636,6 +6813,24 @@ where
                     property_shapes = %debug_open_folder_property_shapes(&properties),
                     message = "rca debug mapi open folder properties"
                 );
+                let inbox_contract_display_name =
+                    mapi_value_debug_string(&properties, PID_TAG_DISPLAY_NAME_W);
+                let inbox_contract_folder_type =
+                    mapi_value_debug_u32(&properties, PID_TAG_FOLDER_TYPE);
+                let inbox_contract_container_class =
+                    mapi_value_debug_string(&properties, PID_TAG_CONTAINER_CLASS_W);
+                let inbox_contract_record_key =
+                    mapi_value_debug_binary_decode(&properties, PID_TAG_RECORD_KEY);
+                let inbox_contract_source_key =
+                    mapi_value_debug_binary_decode(&properties, PID_TAG_SOURCE_KEY);
+                let inbox_contract_parent_source_key =
+                    mapi_value_debug_binary_decode(&properties, PID_TAG_PARENT_SOURCE_KEY);
+                let inbox_contract_content_count =
+                    mapi_value_debug_u32(&properties, PID_TAG_CONTENT_COUNT);
+                let inbox_contract_unread_count =
+                    mapi_value_debug_u32(&properties, PID_TAG_CONTENT_UNREAD_COUNT);
+                let inbox_contract_subfolders =
+                    mapi_value_debug_bool(&properties, PID_TAG_SUBFOLDERS);
                 let handle = session.allocate_output_handle_avoiding(
                     request.output_handle_index,
                     MapiObject::Folder {
@@ -6645,10 +6840,55 @@ where
                     &same_execute_released_handles,
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                if folder_id == INBOX_FOLDER_ID {
+                    session.record_inbox_open_folder_probe();
+                    session.record_recent_probe_action(format!(
+                        "OpenFolder(in={},handle={},out={},folder=0x{folder_id:016x})",
+                        request.input_handle_index().unwrap_or(0),
+                        format_optional_debug_handle(input_handle_value),
+                        handle
+                    ));
+                }
                 responses.extend_from_slice(&rop_open_folder_response(
                     &request,
                     is_public_folder_ghosted,
                 ));
+                if folder_id == INBOX_FOLDER_ID {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x02",
+                        folder_id = format!("0x{folder_id:016x}"),
+                        output_handle_id = handle,
+                        display_name = %inbox_contract_display_name,
+                        folder_type = %inbox_contract_folder_type,
+                        container_class = %inbox_contract_container_class,
+                        record_key = %inbox_contract_record_key,
+                        source_key = %inbox_contract_source_key,
+                        parent_source_key = %inbox_contract_parent_source_key,
+                        content_count = %inbox_contract_content_count,
+                        unread_count = %inbox_contract_unread_count,
+                        subfolders = %inbox_contract_subfolders,
+                        "rca debug mapi opened inbox folder handle contract"
+                    );
+                    if let Some(summary) =
+                        format_inbox_open_loop_summary(&session.post_hierarchy_actions)
+                    {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
+                            loop_summary = %summary,
+                            "rca debug mapi repeated inbox open folder loop summary"
+                        );
+                    }
+                }
                 if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
                     log_outlook_bootstrap_phase(
                         principal,
@@ -7071,6 +7311,14 @@ where
                     row_count,
                     handle,
                 );
+                if folder_id == INBOX_FOLDER_ID && !associated {
+                    session.record_inbox_normal_contents_table();
+                    session.record_recent_probe_action(format!(
+                        "GetContentsTable(in={},out={},associated=false,row_count={row_count})",
+                        request.input_handle_index().unwrap_or(0),
+                        handle
+                    ));
+                }
                 if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
                     log_outlook_bootstrap_phase(
                         principal,
@@ -7226,6 +7474,43 @@ where
             }
             Some(RopId::GetPropertiesSpecific) => {
                 echo_input_handle_table = true;
+                let is_inbox_folder_type_probe = matches!(
+                    input_object(session, &handle_slots, &request),
+                    Some(MapiObject::Folder {
+                        folder_id: INBOX_FOLDER_ID,
+                        ..
+                    })
+                ) && request
+                    .property_tags()
+                    .iter()
+                    .any(|tag| canonical_property_storage_tag(*tag) == PID_TAG_FOLDER_TYPE);
+                if is_inbox_folder_type_probe {
+                    let input_handle_value = input_handle(&handle_slots, &request);
+                    session.record_inbox_folder_type_getprops_probe();
+                    session.record_recent_probe_action(format!(
+                        "GetPropertiesSpecific(in={},handle={},tags={})",
+                        request.input_handle_index().unwrap_or(0),
+                        format_optional_debug_handle(input_handle_value),
+                        format_debug_property_tags(&request.property_tags())
+                    ));
+                    if let Some(summary) =
+                        format_inbox_open_loop_summary(&session.post_hierarchy_actions)
+                    {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x07",
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            input_handle_value = %format_optional_debug_handle(input_handle_value),
+                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
+                            loop_summary = %summary,
+                            "rca debug mapi repeated inbox open folder loop summary"
+                        );
+                    }
+                }
                 let object = input_object(session, &handle_slots, &request);
                 let visible_emails;
                 let emails_for_request = if created_emails.is_empty() {
@@ -7298,6 +7583,14 @@ where
                     set_properties_object.as_ref(),
                     &set_properties_probe,
                 );
+                session.record_recent_probe_action(format!(
+                    "{}(in={},kind={},folder={},tags={})",
+                    rop_id_hex(request.rop_id),
+                    request.input_handle_index().unwrap_or(0),
+                    mapi_object_debug_kind(set_properties_object.as_ref()),
+                    mapi_object_debug_folder_id(set_properties_object.as_ref()),
+                    format_debug_property_tags(&set_properties_probe.property_tags)
+                ));
                 let values = match request.property_values() {
                     Ok(values) => values,
                     Err(_) => {
@@ -7447,6 +7740,28 @@ where
                     ));
                     continue;
                 };
+                let save_changes_object = session.handles.get(&handle).cloned();
+                session.record_recent_probe_action(format!(
+                    "SaveChangesMessage(in={},handle={},kind={},folder={})",
+                    request.input_handle_index().unwrap_or(0),
+                    handle,
+                    mapi_object_debug_kind(save_changes_object.as_ref()),
+                    mapi_object_debug_folder_id(save_changes_object.as_ref())
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x0c",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = handle,
+                    object_kind = mapi_object_debug_kind(save_changes_object.as_ref()),
+                    folder_id = %mapi_object_debug_folder_id(save_changes_object.as_ref()),
+                    save_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
+                    "rca debug mapi save changes before inbox probe"
+                );
                 match session.handles.get(&handle).cloned() {
                     Some(MapiObject::PendingContact {
                         folder_id,
@@ -10028,6 +10343,27 @@ where
                     ));
                     continue;
                 };
+                let save_attachment_object = session.handles.get(&handle).cloned();
+                session.record_recent_probe_action(format!(
+                    "SaveChangesAttachment(in={},handle={},kind={},folder={})",
+                    request.input_handle_index().unwrap_or(0),
+                    handle,
+                    mapi_object_debug_kind(save_attachment_object.as_ref()),
+                    mapi_object_debug_folder_id(save_attachment_object.as_ref())
+                ));
+                tracing::info!(
+                    rca_debug = true,
+                    adapter = "mapi",
+                    endpoint = "emsmdb",
+                    mailbox = %principal.email,
+                    request_type = "Execute",
+                    request_rop_id = "0x25",
+                    input_handle_index = request.input_handle_index().unwrap_or(0),
+                    input_handle_value = handle,
+                    object_kind = mapi_object_debug_kind(save_attachment_object.as_ref()),
+                    folder_id = %mapi_object_debug_folder_id(save_attachment_object.as_ref()),
+                    "rca debug mapi save changes before inbox probe"
+                );
                 let Some(MapiObject::PendingAttachment {
                     folder_id,
                     message_id,
@@ -15937,6 +16273,62 @@ mod tests {
         assert!(summary.contains("0x674e0003=0"));
         assert!(summary.contains("0x0037001f=Inbox"));
         assert!(summary.contains("0x684c0102=binary:"));
+    }
+
+    #[test]
+    fn common_views_wlink_target_decoding_reports_inbox_match() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 131,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 0x10,
+                group_header_id: Some(default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            },
+        ]);
+
+        let summary = format_common_views_wlink_target_decoding(account_id, &snapshot);
+
+        assert!(summary.contains("subject=Inbox"));
+        assert!(summary.contains(&format!("target_folder=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(summary.contains(&format!("entry_id_decoded=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(summary.contains("entry_id_matches_inbox=true"));
+        assert!(summary.contains(&format!("source_key_decoded=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(summary.contains("source_key_matches_inbox=true"));
+    }
+
+    #[test]
+    fn inbox_open_loop_summary_requires_repeated_probe_without_contents_table() {
+        let mut state = PostHierarchyActionState::default();
+        state.inbox_open_folder_probe_count = 2;
+        state.inbox_folder_type_getprops_probe_count = 2;
+        state
+            .recent_probe_actions
+            .push("Release(in=1,handle=2,kind=folder,folder=0x1)".to_string());
+
+        let summary = format_inbox_open_loop_summary(&state).unwrap();
+
+        assert!(summary.contains(&format!("folder=0x{INBOX_FOLDER_ID:016x}")));
+        assert!(summary.contains("open_folder_count=2"));
+        assert!(summary.contains("folder_type_getprops_count=2"));
+        assert!(summary.contains("normal_contents_table_observed=false"));
+        assert!(summary.contains("recent_actions=Release("));
+
+        state.inbox_normal_contents_table_observed = true;
+        assert_eq!(format_inbox_open_loop_summary(&state), None);
     }
 
     #[test]

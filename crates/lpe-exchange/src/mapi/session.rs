@@ -72,6 +72,10 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) logoff_client_initiated: bool,
     pub(in crate::mapi) completed_sync_checkpoint_folder_ids: Vec<u64>,
     pub(in crate::mapi) completed_sync_checkpoint_summaries: Vec<String>,
+    pub(in crate::mapi) inbox_open_folder_probe_count: usize,
+    pub(in crate::mapi) inbox_folder_type_getprops_probe_count: usize,
+    pub(in crate::mapi) inbox_normal_contents_table_observed: bool,
+    pub(in crate::mapi) recent_probe_actions: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -742,6 +746,35 @@ impl MapiSession {
         self.post_hierarchy_actions
             .opened_folder_ids
             .push(folder_id);
+    }
+
+    pub(in crate::mapi) fn record_inbox_open_folder_probe(&mut self) {
+        self.post_hierarchy_actions.inbox_open_folder_probe_count = self
+            .post_hierarchy_actions
+            .inbox_open_folder_probe_count
+            .saturating_add(1);
+    }
+
+    pub(in crate::mapi) fn record_inbox_folder_type_getprops_probe(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_folder_type_getprops_probe_count = self
+            .post_hierarchy_actions
+            .inbox_folder_type_getprops_probe_count
+            .saturating_add(1);
+    }
+
+    pub(in crate::mapi) fn record_inbox_normal_contents_table(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_normal_contents_table_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_recent_probe_action(&mut self, action: String) {
+        if self.post_hierarchy_actions.recent_probe_actions.len() >= 8 {
+            self.post_hierarchy_actions.recent_probe_actions.remove(0);
+        }
+        self.post_hierarchy_actions
+            .recent_probe_actions
+            .push(action);
     }
 
     pub(in crate::mapi) fn record_special_folder_alias(&mut self, alias_id: u64, folder_id: u64) {
