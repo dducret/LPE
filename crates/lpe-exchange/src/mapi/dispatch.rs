@@ -4546,6 +4546,8 @@ fn log_outlook_contents_table_set_columns(
         set_columns_flags = %format!("0x{:02x}", request.payload.first().copied().unwrap_or(0)),
         requested_property_tag_count = columns.len(),
         requested_property_tags = %format_debug_property_tags(columns),
+        ipm_configuration_column_contract =
+            %format_ipm_configuration_set_columns_contract(folder_id, associated, columns),
         "rca debug outlook contents table columns selected"
     );
 }
@@ -4597,6 +4599,14 @@ fn log_outlook_contents_table_sort(
         selected_property_tags = %format_debug_property_tags(&selected_columns),
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        ipm_configuration_contract_summary =
+            %format_ipm_configuration_contract_summary(
+                *folder_id,
+                *associated,
+                &selected_columns,
+                sort_orders,
+                snapshot
+            ),
         "rca debug outlook contents table sorted"
     );
 }
@@ -4646,6 +4656,14 @@ fn log_outlook_contents_table_restrict(
         selected_property_tags = %format_debug_property_tags(&selected_columns),
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        ipm_configuration_contract_summary =
+            %format_ipm_configuration_contract_summary(
+                *folder_id,
+                *associated,
+                &selected_columns,
+                &[],
+                snapshot
+            ),
         "rca debug outlook contents table restricted"
     );
 }
@@ -4725,6 +4743,14 @@ fn log_outlook_contents_table_query_rows(
         selected_property_tags = %format_debug_property_tags(&selected_columns),
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        ipm_configuration_contract_summary =
+            %format_ipm_configuration_contract_summary(
+                *folder_id,
+                *associated,
+                &selected_columns,
+                sort_orders,
+                snapshot
+            ),
         query_row_window_summary = %query_row_window_summary,
         query_row_value_summary = %query_row_value_summary,
         "rca debug outlook contents table query rows"
@@ -4783,6 +4809,14 @@ fn log_outlook_contents_table_find_row(
         selected_property_tags = %format_debug_property_tags(&selected_columns),
         inbox_associated_config_summary =
             %format_inbox_associated_config_summary(*folder_id, *associated, snapshot),
+        ipm_configuration_contract_summary =
+            %format_ipm_configuration_contract_summary(
+                *folder_id,
+                *associated,
+                &selected_columns,
+                sort_orders,
+                snapshot
+            ),
         "rca debug outlook contents table find row"
     );
 }
@@ -4798,6 +4832,140 @@ fn effective_contents_table_columns(folder_id: u64, associated: bool, columns: &
     } else {
         default_contents_columns()
     }
+}
+
+fn format_ipm_configuration_set_columns_contract(
+    folder_id: u64,
+    associated: bool,
+    columns: &[u32],
+) -> String {
+    if !associated || folder_id != INBOX_FOLDER_ID {
+        return String::new();
+    }
+    let missing = missing_debug_property_tags(
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_ROAMING_DATATYPES,
+        ],
+        columns,
+    );
+    format!(
+        "ms_oxocfg_required_columns_present={};missing_required_columns={}",
+        missing.is_empty(),
+        missing
+    )
+}
+
+fn format_ipm_configuration_contract_summary(
+    folder_id: u64,
+    associated: bool,
+    columns: &[u32],
+    sort_orders: &[MapiSortOrder],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !associated || folder_id != INBOX_FOLDER_ID {
+        return String::new();
+    }
+    let rows = snapshot
+        .associated_config_messages_for_folder(folder_id)
+        .into_iter()
+        .filter(|message| message.message_class.starts_with("IPM.Configuration."))
+        .collect::<Vec<_>>();
+    let missing_columns = missing_debug_property_tags(
+        &[
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_ROAMING_DATATYPES,
+        ],
+        columns,
+    );
+    let sort_ok = sort_orders.len() >= 2
+        && sort_orders[0].property_tag == PID_TAG_MESSAGE_CLASS_W
+        && sort_orders[1].property_tag == PID_TAG_LAST_MODIFICATION_TIME;
+    let row_summaries = rows
+        .iter()
+        .take(16)
+        .map(format_ipm_configuration_row_contract)
+        .collect::<Vec<_>>()
+        .join("|");
+    let issue_count = rows
+        .iter()
+        .filter(|message| !ipm_configuration_row_issues(message).is_empty())
+        .count();
+    format!(
+        "rows={};missing_required_columns={};sort_by_message_class_then_lastmod={};row_issue_count={};{}",
+        rows.len(),
+        missing_columns,
+        sort_ok,
+        issue_count,
+        row_summaries
+    )
+}
+
+fn missing_debug_property_tags(required: &[u32], present: &[u32]) -> String {
+    required
+        .iter()
+        .copied()
+        .filter(|tag| !present.contains(tag))
+        .map(|tag| format!("0x{tag:08x}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn format_ipm_configuration_row_contract(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> String {
+    let datatypes = associated_config_property_value(message, PID_TAG_ROAMING_DATATYPES)
+        .and_then(|value| value.into_u32());
+    let has_dictionary_stream =
+        associated_config_property_value(message, PID_TAG_ROAMING_DICTIONARY).is_some();
+    let has_xml_stream =
+        associated_config_property_value(message, PID_TAG_ROAMING_XML_STREAM).is_some();
+    let has_binary_stream = associated_config_property_value(message, 0x7C09_0102).is_some();
+    let issues = ipm_configuration_row_issues(message);
+    format!(
+        "id=0x{:016x};class={};datatypes={};has_dict={};has_xml={};has_binary={};issues={}",
+        message.id,
+        message.message_class,
+        datatypes
+            .map(|value| format!("0x{value:08x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        has_dictionary_stream,
+        has_xml_stream,
+        has_binary_stream,
+        issues
+    )
+}
+
+fn ipm_configuration_row_issues(
+    message: &crate::mapi_store::MapiAssociatedConfigMessage,
+) -> String {
+    let datatypes = associated_config_property_value(message, PID_TAG_ROAMING_DATATYPES)
+        .and_then(|value| value.into_u32());
+    let has_dictionary_stream =
+        associated_config_property_value(message, PID_TAG_ROAMING_DICTIONARY).is_some();
+    let has_xml_stream =
+        associated_config_property_value(message, PID_TAG_ROAMING_XML_STREAM).is_some();
+    let mut issues = Vec::new();
+    match datatypes {
+        Some(value) => {
+            let invalid_bits = value & !0x0000_0006;
+            if invalid_bits != 0 {
+                issues.push(format!("invalid_datatype_bits=0x{invalid_bits:08x}"));
+            }
+            if value & 0x0000_0002 != 0 && !has_xml_stream {
+                issues.push("xml_bit_without_stream".to_string());
+            }
+            if value & 0x0000_0004 != 0 && !has_dictionary_stream {
+                issues.push("dictionary_bit_without_stream".to_string());
+            }
+        }
+        None => issues.push("missing_roaming_datatypes".to_string()),
+    }
+    issues.join(",")
 }
 
 fn is_outlook_folder_table_debug_target(folder_id: u64) -> bool {
@@ -15143,6 +15311,58 @@ mod tests {
         assert!(required_tags.contains("0x7c080102"));
         assert!(!required_tags.contains("0x00600040"));
         assert!(!required_tags.contains("0x820d0102"));
+    }
+
+    #[test]
+    fn ipm_configuration_contract_summary_reports_required_columns_and_streams() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let canonical_id = Uuid::from_u128(0x6d617069_6970_6d43_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            canonical_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 121,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: canonical_id,
+                account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.MessageListSettings".to_string(),
+                subject: "Message list settings".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+        let columns = [
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_ROAMING_DATATYPES,
+        ];
+        let sort_orders = [
+            MapiSortOrder {
+                property_tag: PID_TAG_MESSAGE_CLASS_W,
+                order: 0,
+            },
+            MapiSortOrder {
+                property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                order: 0,
+            },
+        ];
+
+        let summary = format_ipm_configuration_contract_summary(
+            INBOX_FOLDER_ID,
+            true,
+            &columns,
+            &sort_orders,
+            &snapshot,
+        );
+
+        assert!(summary.contains("missing_required_columns="));
+        assert!(summary.contains("sort_by_message_class_then_lastmod=true"));
+        assert!(summary.contains("row_issue_count=0"));
+        assert!(summary.contains("datatypes=0x00000004"));
+        assert!(summary.contains("has_dict=true"));
     }
 
     #[test]

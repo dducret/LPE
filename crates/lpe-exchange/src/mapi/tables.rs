@@ -4739,6 +4739,28 @@ mod tests {
                 mapi_mailstore::filetime_from_change_number(change_number) as i64
             ))
         );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_ROAMING_DATATYPES),
+            Some(MapiValue::U32(4))
+        );
+        assert!(matches!(
+            associated_config_property_value(&message, PID_TAG_ROAMING_DICTIONARY),
+            Some(MapiValue::Binary(value)) if value.starts_with(br#"<?xml version="1.0" encoding="utf-8"?>"#)
+        ));
+        assert!(matches!(
+            associated_config_property_value(&message, 0x685D_0003),
+            Some(MapiValue::U32(value)) if value != 0
+        ));
+        let explicit_marker = MapiAssociatedConfigMessage {
+            properties_json: serde_json::json!({
+                "0x685d0003": {"type": "u32", "value": 42}
+            }),
+            ..message.clone()
+        };
+        assert_eq!(
+            associated_config_property_value(&explicit_marker, 0x685D_0003),
+            Some(MapiValue::U32(42))
+        );
 
         let row = serialize_associated_config_row(
             &message,
@@ -4747,11 +4769,13 @@ mod tests {
                 PID_TAG_MID,
                 PID_TAG_INST_ID,
                 PID_TAG_INSTANCE_NUM,
+                PID_TAG_ROAMING_DATATYPES,
+                0x685D_0003,
                 PID_TAG_LAST_MODIFICATION_TIME,
             ],
         );
 
-        assert_eq!(row.len(), 36);
+        assert_eq!(row.len(), 44);
     }
 
     fn assert_inbox_associated_find_row_returns_message_class(message_class: &str) {
@@ -5482,10 +5506,41 @@ pub(in crate::mapi) fn associated_config_property_value(
             | PID_TAG_MESSAGE_DELIVERY_TIME => Some(MapiValue::I64(
                 mapi_mailstore::filetime_from_change_number(change_number) as i64,
             )),
+            PID_TAG_ROAMING_DATATYPES
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::U32(4))
+            }
+            PID_TAG_ROAMING_DICTIONARY
+                if message.message_class.starts_with("IPM.Configuration.") =>
+            {
+                Some(MapiValue::Binary(minimal_roaming_dictionary_stream()))
+            }
+            0x685D_0003 if message.message_class.starts_with("IPM.Configuration.") => {
+                Some(MapiValue::U32(outlook_configuration_stamp(message)))
+            }
             PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
             _ => None,
         }
     })
+}
+
+fn minimal_roaming_dictionary_stream() -> Vec<u8> {
+    br#"<?xml version="1.0" encoding="utf-8"?><UserConfiguration xmlns="dictionary.xsd"><Info version="LPE.1"/><Data/></UserConfiguration>"#.to_vec()
+}
+
+fn outlook_configuration_stamp(message: &MapiAssociatedConfigMessage) -> u32 {
+    let mut hash = 0x811c_9dc5u32;
+    for byte in message
+        .message_class
+        .as_bytes()
+        .iter()
+        .chain(message.subject.as_bytes())
+    {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash.max(1)
 }
 
 pub(in crate::mapi) fn delegate_freebusy_property_value(
