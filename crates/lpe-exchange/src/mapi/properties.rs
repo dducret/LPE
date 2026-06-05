@@ -1534,7 +1534,10 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
     let requested_property_tag = property_tag;
     let property_tag = canonical_property_storage_tag(property_tag);
     match property_tag {
+        PID_TAG_FOLDER_ID => Some(MapiValue::U64(message.folder_id)),
         PID_TAG_MID => Some(MapiValue::U64(message.id)),
+        PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
+        PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(message.id),
         )),
@@ -8475,6 +8478,36 @@ mod tests {
         assert_eq!(
             navigation_shortcut_property_value(&link, account_id, PID_TAG_WLINK_GROUP_NAME_W),
             Some(MapiValue::String("Projects".to_string()))
+        );
+    }
+
+    #[test]
+    fn navigation_shortcut_projects_associated_table_identity_columns() {
+        let shortcut = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(901),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x2222),
+            subject: "Project Inbox".to_string(),
+            target_folder_id: Some(INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 3,
+            ordinal: 0x81,
+            group_header_id: None,
+            group_name: "Projects".to_string(),
+        };
+
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_FOLDER_ID),
+            Some(MapiValue::U64(COMMON_VIEWS_FOLDER_ID))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_INST_ID),
+            Some(MapiValue::U64(shortcut.id))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_INSTANCE_NUM),
+            Some(MapiValue::U32(0))
         );
     }
 

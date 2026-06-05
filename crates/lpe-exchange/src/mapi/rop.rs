@@ -2431,6 +2431,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
             "PidLidAppointmentTimeZoneDefinitionEndDisplay"
         }
         PID_TAG_CHANGE_KEY => "PidTagChangeKey",
+        PID_TAG_ACCESS => "PidTagAccess",
         PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
         PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
         PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
@@ -6611,6 +6612,7 @@ mod tests {
             property_tag_debug_name(PID_TAG_CHANGE_KEY),
             "PidTagChangeKey"
         );
+        assert_eq!(property_tag_debug_name(PID_TAG_ACCESS), "PidTagAccess");
         assert_eq!(
             property_tag_debug_name(PID_TAG_ROAMING_DATATYPES),
             "PidTagRoamingDatatypes"

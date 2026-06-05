@@ -4710,6 +4710,7 @@ fn log_outlook_contents_table_query_rows(
         snapshot,
     );
     let query_row_value_summary = format_outlook_query_row_values(
+        principal.account_id,
         *folder_id,
         *associated,
         *position,
@@ -5114,6 +5115,7 @@ fn format_outlook_query_row_window(
 }
 
 fn format_outlook_query_row_values(
+    account_id: Uuid,
     folder_id: u64,
     associated: bool,
     position: usize,
@@ -5139,7 +5141,7 @@ fn format_outlook_query_row_values(
                             .iter()
                             .map(|tag| {
                                 let value =
-                                    navigation_shortcut_property_value(shortcut, Uuid::nil(), *tag)
+                                    navigation_shortcut_property_value(shortcut, account_id, *tag)
                                         .map(|value| format_debug_mapi_value(&value))
                                         .unwrap_or_else(|| "default".to_string());
                                 format!("0x{tag:08x}={value}")
@@ -15417,12 +15419,10 @@ mod tests {
     fn common_views_query_row_values_report_selected_wlink_columns() {
         let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001);
-        crate::mapi::identity::remember_mapi_identity(
-            shortcut_id,
-            crate::mapi::identity::mapi_store_id(
-                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 131,
-            ),
+        let shortcut_store_id = crate::mapi::identity::mapi_store_id(
+            crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 131,
         );
+        crate::mapi::identity::remember_mapi_identity(shortcut_id, shortcut_store_id);
         let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
             crate::store::MapiNavigationShortcutRecord {
                 id: shortcut_id,
@@ -15439,17 +15439,27 @@ mod tests {
         ]);
 
         let summary = format_outlook_query_row_values(
+            account_id,
             COMMON_VIEWS_FOLDER_ID,
             true,
             0,
             true,
             10,
             &[],
-            &[PID_TAG_SUBJECT_W, PID_TAG_WLINK_ENTRY_ID],
+            &[
+                PID_TAG_FOLDER_ID,
+                PID_TAG_INST_ID,
+                PID_TAG_INSTANCE_NUM,
+                PID_TAG_SUBJECT_W,
+                PID_TAG_WLINK_ENTRY_ID,
+            ],
             &snapshot,
         );
 
         assert!(summary.contains("index=0"));
+        assert!(summary.contains(&format!("0x67480014={COMMON_VIEWS_FOLDER_ID}")));
+        assert!(summary.contains(&format!("0x674d0014={shortcut_store_id}")));
+        assert!(summary.contains("0x674e0003=0"));
         assert!(summary.contains("0x0037001f=Inbox"));
         assert!(summary.contains("0x684c0102=binary:"));
     }
