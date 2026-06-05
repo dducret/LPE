@@ -5123,7 +5123,37 @@ fn format_outlook_query_row_values(
     columns: &[u32],
     snapshot: &MapiMailStoreSnapshot,
 ) -> String {
-    if !associated || folder_id != INBOX_FOLDER_ID || row_count == 0 || columns.is_empty() {
+    if !associated || row_count == 0 || columns.is_empty() {
+        return String::new();
+    }
+    if folder_id == COMMON_VIEWS_FOLDER_ID {
+        let mut rows = snapshot.common_views_messages().collect::<Vec<_>>();
+        sort_common_views_messages(&mut rows, sort_orders);
+        return select_query_window(rows.len(), position, forward_read, row_count)
+            .iter()
+            .map(|index| {
+                let message = &rows[*index];
+                match message {
+                    crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut) => {
+                        let values = columns
+                            .iter()
+                            .map(|tag| {
+                                let value =
+                                    navigation_shortcut_property_value(shortcut, Uuid::nil(), *tag)
+                                        .map(|value| format_debug_mapi_value(&value))
+                                        .unwrap_or_else(|| "default".to_string());
+                                format!("0x{tag:08x}={value}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        format!("index={};id=0x{:016x};{}", index, shortcut.id, values)
+                    }
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("|");
+    }
+    if folder_id != INBOX_FOLDER_ID {
         return String::new();
     }
     let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
@@ -15381,6 +15411,47 @@ mod tests {
         assert!(summary.contains("row_issue_count=0"));
         assert!(summary.contains("datatypes=0x00000004"));
         assert!(summary.contains("has_dict=true"));
+    }
+
+    #[test]
+    fn common_views_query_row_values_report_selected_wlink_columns() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut_id = Uuid::from_u128(0x6d617069_776c_496e_8000_000000000001);
+        crate::mapi::identity::remember_mapi_identity(
+            shortcut_id,
+            crate::mapi::identity::mapi_store_id(
+                crate::mapi::identity::FIRST_DYNAMIC_GLOBAL_COUNTER + 131,
+            ),
+        );
+        let snapshot = MapiMailStoreSnapshot::empty().with_navigation_shortcuts(vec![
+            crate::store::MapiNavigationShortcutRecord {
+                id: shortcut_id,
+                account_id,
+                subject: "Inbox".to_string(),
+                target_folder_id: Some(INBOX_FOLDER_ID),
+                shortcut_type: 0,
+                flags: 0,
+                section: 1,
+                ordinal: 0x10,
+                group_header_id: Some(default_wlink_group_uuid()),
+                group_name: "Mail".to_string(),
+            },
+        ]);
+
+        let summary = format_outlook_query_row_values(
+            COMMON_VIEWS_FOLDER_ID,
+            true,
+            0,
+            true,
+            10,
+            &[],
+            &[PID_TAG_SUBJECT_W, PID_TAG_WLINK_ENTRY_ID],
+            &snapshot,
+        );
+
+        assert!(summary.contains("index=0"));
+        assert!(summary.contains("0x0037001f=Inbox"));
+        assert!(summary.contains("0x684c0102=binary:"));
     }
 
     #[test]

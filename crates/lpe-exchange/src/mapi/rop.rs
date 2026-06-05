@@ -2403,6 +2403,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_USER_ENTRY_ID => "PidTagUserEntryId",
         PID_TAG_MAILBOX_OWNER_ENTRY_ID => "PidTagMailboxOwnerEntryId",
         PID_TAG_MAILBOX_OWNER_NAME_W => "PidTagMailboxOwnerName",
+        PID_TAG_ASSOCIATED_SHARING_PROVIDER => "PidTagAssociatedSharingProvider",
         PID_TAG_IPM_PUBLIC_FOLDERS_ENTRY_ID => "PidTagIpmPublicFoldersEntryId",
         PID_TAG_SERVER_TYPE_DISPLAY_NAME_W => "PidTagServerTypeDisplayName",
         PID_TAG_SERVER_CONNECTED_ICON => "PidTagServerConnectedIcon",
@@ -6625,6 +6626,10 @@ mod tests {
         assert_eq!(
             property_tag_debug_name(PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
             "PidTagDefaultPostMessageClass"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ASSOCIATED_SHARING_PROVIDER),
+            "PidTagAssociatedSharingProvider"
         );
     }
 
