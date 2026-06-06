@@ -17938,6 +17938,7 @@ async fn mapi_over_http_freebusy_data_sync_projects_postgresql_delegate_state() 
                 kind: CollaborationResourceKind::Calendar,
                 owner_account_id: fixture.account_id,
                 grantee_email: "delegate@example.test".to_string(),
+                calendar_id: None,
                 may_read: true,
                 may_write: true,
                 may_delete: false,

@@ -2194,6 +2194,8 @@ impl JmapStore for FakeStore {
             "granteeAccountId": grantee_account_id.to_string(),
             "granteeEmail": input.grantee_email,
             "granteeDisplayName": "Shared User",
+            "calendarId": input.calendar_id.map(|id| id.to_string()),
+            "calendarName": input.calendar_id.map(|_| "Team Calendar"),
             "taskListId": input.task_list_id.map(|id| id.to_string()),
             "senderRight": input.sender_right,
             "rights": {
@@ -13199,6 +13201,7 @@ async fn reminder_writes_update_canonical_source_metadata() {
 
 #[tokio::test]
 async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
+    let calendar_id = Uuid::new_v4();
     let service = JmapService::new(FakeStore {
         session: Some(FakeStore::account()),
         shares: Arc::new(Mutex::new(Vec::new())),
@@ -13250,6 +13253,20 @@ async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
                         }),
                         "copy".to_string(),
                     ),
+                    JmapMethodCall(
+                        "Share/set".to_string(),
+                        json!({
+                            "create": {
+                                "calendarShare": {
+                                    "type": "calendar",
+                                    "calendarId": calendar_id.to_string(),
+                                    "granteeEmail": "erin@example.test",
+                                    "rights": {"mayRead": true, "mayWrite": true}
+                                }
+                            }
+                        }),
+                        "calendar".to_string(),
+                    ),
                     JmapMethodCall("Share/query".to_string(), json!({}), "query".to_string()),
                 ],
             },
@@ -13290,7 +13307,15 @@ async fn share_writes_create_copy_import_and_destroy_canonical_grants() {
         response.method_responses[2].1["created"]["senderShare"]["rights"]["maySendAs"],
         true
     );
-    assert_eq!(response.method_responses[3].1["total"], 3);
+    assert_eq!(
+        response.method_responses[3].1["created"]["calendarShare"]["calendarId"],
+        calendar_id.to_string()
+    );
+    assert_eq!(
+        response.method_responses[3].1["created"]["calendarShare"]["calendarName"],
+        "Team Calendar"
+    );
+    assert_eq!(response.method_responses[4].1["total"], 4);
 
     let get = service
         .handle_api_request(

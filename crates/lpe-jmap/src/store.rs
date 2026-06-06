@@ -24,6 +24,7 @@ pub struct JmapShareInput {
     pub owner_account_id: Uuid,
     pub share_type: String,
     pub grantee_email: String,
+    pub calendar_id: Option<Uuid>,
     pub task_list_id: Option<Uuid>,
     pub sender_right: Option<String>,
     pub may_read: bool,
@@ -1277,6 +1278,7 @@ impl JmapStore for Storage {
                         kind: parse_collaboration_kind(share_type)?,
                         owner_account_id: input.owner_account_id,
                         grantee_email: input.grantee_email,
+                        calendar_id: input.calendar_id,
                         may_read: input.may_read,
                         may_write: input.may_write,
                         may_delete: input.may_delete,
@@ -1327,6 +1329,18 @@ impl JmapStore for Storage {
                 .await
             }
             "contacts" | "calendar" | "tasks" => {
+                if share_type == "calendar" {
+                    if let Some(calendar_id) = share.get("calendarId").and_then(Value::as_str) {
+                        return self
+                            .delete_calendar_collection_grant(
+                                owner_account_id,
+                                calendar_id,
+                                grantee_account_id,
+                                audit,
+                            )
+                            .await;
+                    }
+                }
                 self.delete_collaboration_grant(
                     owner_account_id,
                     parse_collaboration_kind(share_type)?,
@@ -1410,6 +1424,10 @@ fn project_share(share_type: &str, value: Value) -> Result<Value> {
             );
         }
         "contacts" | "calendar" | "tasks" => {
+            if share_type == "calendar" {
+                copy_share_field(object, &mut projected, "calendarId");
+                copy_share_field(object, &mut projected, "calendarName");
+            }
             projected.insert(
                 "rights".to_string(),
                 share_rights(object).unwrap_or_else(default_share_rights),

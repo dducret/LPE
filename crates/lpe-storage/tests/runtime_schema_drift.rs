@@ -2,13 +2,14 @@ use std::{env, str::FromStr};
 
 use anyhow::{Context, Result};
 use lpe_storage::{
-    AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CreatePublicFolderTreeInput,
-    JmapImportedEmailInput, JmapMailboxCreateInput, JmapMailboxUpdateInput,
-    ManagedRetentionFolderCreateInput, NewAccount, NewDomain, NewMailbox, NewPstTransferJob,
-    PublicFolderPerUserStatePatch, PublicFolderPermissionInput, PublicFolderReplicaInput,
-    ReminderQuery, SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
-    SubmittedMessage, SubmittedRecipientInput, UpsertClientNoteInput, UpsertJournalEntryInput,
-    UpsertPublicFolderItemInput, UpsertSearchFolderInput,
+    AttachmentUploadInput, AuditEntryInput, CancelSubmissionResult, CollaborationGrantInput,
+    CollaborationResourceKind, CreatePublicFolderTreeInput, JmapImportedEmailInput,
+    JmapMailboxCreateInput, JmapMailboxUpdateInput, ManagedRetentionFolderCreateInput, NewAccount,
+    NewDomain, NewMailbox, NewPstTransferJob, PublicFolderPerUserStatePatch,
+    PublicFolderPermissionInput, PublicFolderReplicaInput, ReminderQuery,
+    SenderDelegationGrantInput, SenderDelegationRight, Storage, SubmitMessageInput,
+    SubmittedMessage, SubmittedRecipientInput, UpsertClientEventInput, UpsertClientNoteInput,
+    UpsertJournalEntryInput, UpsertPublicFolderItemInput, UpsertSearchFolderInput,
 };
 use sqlx::{
     postgres::{PgConnectOptions, PgPoolOptions, PgRow},
@@ -190,6 +191,12 @@ async fn run_runtime_drift_validation(pool: &PgPool) -> Result<()> {
             &mut failures,
             "public-folder per-user replay SQL path",
             exercise_public_folder_per_user_replay_path(&storage, pool, &fixture).await,
+        );
+
+        collect(
+            &mut failures,
+            "custom calendar grant visibility and replay SQL path",
+            exercise_custom_calendar_grant_path(&storage, pool, &fixture).await,
         );
 
         collect(
@@ -2174,6 +2181,236 @@ fn assert_plan_uses_index(label: &str, plan: &str, index_name: &str) -> Result<(
         "{label} did not use {index_name}; plan:\n{plan}"
     );
     Ok(())
+}
+
+async fn exercise_custom_calendar_grant_path(
+    storage: &Storage,
+    pool: &PgPool,
+    fixture: &RuntimeFixture,
+) -> Result<()> {
+    let domain_id =
+        sqlx::query_scalar::<_, Uuid>("SELECT primary_domain_id FROM accounts WHERE id = $1")
+            .bind(fixture.account_id)
+            .fetch_one(pool)
+            .await
+            .context("load runtime fixture domain for custom calendar grantee")?;
+    let grantee_account_id = Uuid::new_v4();
+    let grantee_email = format!("calendar-grantee-{}@example.test", Uuid::new_v4().simple());
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        VALUES ($1, $2, $3, $4, 'Calendar Grantee')
+        "#,
+    )
+    .bind(grantee_account_id)
+    .bind(fixture.tenant_id)
+    .bind(domain_id)
+    .bind(&grantee_email)
+    .execute(pool)
+    .await
+    .context("seed custom calendar grantee account")?;
+
+    let custom_calendar = storage
+        .create_accessible_calendar_collection(fixture.account_id, "Runtime Shared Calendar")
+        .await
+        .context("create custom calendar for sharing")?;
+    let calendar_id =
+        Uuid::parse_str(&custom_calendar.id).context("custom calendar id should be a UUID")?;
+
+    storage
+        .upsert_collaboration_grant(
+            CollaborationGrantInput {
+                kind: CollaborationResourceKind::Calendar,
+                owner_account_id: fixture.account_id,
+                grantee_email: grantee_email.clone(),
+                calendar_id: Some(calendar_id),
+                may_read: true,
+                may_write: false,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "calendar-share-upsert",
+                "runtime custom calendar read grant",
+            ),
+        )
+        .await
+        .context("share custom calendar through collaboration grant input")?;
+
+    let outgoing = storage
+        .fetch_outgoing_collaboration_grants(
+            fixture.account_id,
+            CollaborationResourceKind::Calendar,
+        )
+        .await
+        .context("fetch outgoing calendar grants after custom share")?;
+    anyhow::ensure!(
+        outgoing.iter().any(|grant| {
+            grant.calendar_id == Some(calendar_id)
+                && grant.grantee_account_id == grantee_account_id
+                && grant.rights.may_read
+                && !grant.rights.may_write
+        }),
+        "custom calendar grant must appear in outgoing calendar shares"
+    );
+
+    let incoming = storage
+        .fetch_accessible_calendar_collections(grantee_account_id)
+        .await
+        .context("fetch incoming custom calendar collections")?;
+    anyhow::ensure!(
+        incoming.iter().any(|collection| {
+            collection.id == custom_calendar.id
+                && collection.owner_account_id == fixture.account_id
+                && !collection.is_owned
+                && collection.rights.may_read
+                && !collection.rights.may_write
+        }),
+        "custom shared calendar must be visible to read grantee"
+    );
+
+    let read_only_create = storage
+        .create_accessible_event(
+            grantee_account_id,
+            Some(&custom_calendar.id),
+            runtime_calendar_event_input(grantee_account_id, None, "Read-only write should fail"),
+        )
+        .await;
+    expect_anyhow_failure("read-only custom calendar event create", read_only_create)?;
+
+    storage
+        .upsert_collaboration_grant(
+            CollaborationGrantInput {
+                kind: CollaborationResourceKind::Calendar,
+                owner_account_id: fixture.account_id,
+                grantee_email: grantee_email.clone(),
+                calendar_id: Some(calendar_id),
+                may_read: true,
+                may_write: true,
+                may_delete: false,
+                may_share: false,
+            },
+            audit(
+                &fixture.account_email,
+                "calendar-share-upsert",
+                "runtime custom calendar write grant",
+            ),
+        )
+        .await
+        .context("upgrade custom calendar grant to write")?;
+
+    let before_event_sequence = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT MAX(sequence) FROM canonical_change_journal WHERE tenant_id = $1",
+    )
+    .bind(fixture.tenant_id)
+    .fetch_one(pool)
+    .await
+    .context("load custom calendar event starting canonical sequence")?
+    .unwrap_or(0);
+
+    let event = storage
+        .create_accessible_event(
+            grantee_account_id,
+            Some(&custom_calendar.id),
+            runtime_calendar_event_input(grantee_account_id, None, "Writable custom event"),
+        )
+        .await
+        .context("create event through custom calendar write grant")?;
+    anyhow::ensure!(
+        event.owner_account_id == fixture.account_id && event.collection_id == custom_calendar.id,
+        "custom calendar grantee writes must land in the owner's canonical calendar"
+    );
+
+    let grantee_woken = sqlx::query_scalar::<_, bool>(
+        r#"
+        SELECT EXISTS (
+            SELECT 1
+            FROM canonical_change_journal
+            WHERE tenant_id = $1
+              AND category = 'calendar'
+              AND sequence > $2
+              AND (
+                  principal_account_ids @> ARRAY[$3]::uuid[]
+                  OR account_ids @> ARRAY[$3]::uuid[]
+              )
+        )
+        "#,
+    )
+    .bind(fixture.tenant_id)
+    .bind(before_event_sequence)
+    .bind(grantee_account_id)
+    .fetch_one(pool)
+    .await
+    .context("check custom calendar event wakeup audience")?;
+    anyhow::ensure!(
+        grantee_woken,
+        "custom calendar event changes must wake affected grantees"
+    );
+
+    storage
+        .delete_calendar_collection_grant(
+            fixture.account_id,
+            &custom_calendar.id,
+            grantee_account_id,
+            audit(
+                &fixture.account_email,
+                "calendar-share-delete",
+                "runtime custom calendar revoke",
+            ),
+        )
+        .await
+        .context("delete custom calendar grant")?;
+
+    let after_revoke = storage
+        .fetch_accessible_calendar_collections(grantee_account_id)
+        .await
+        .context("fetch incoming custom calendars after revoke")?;
+    anyhow::ensure!(
+        after_revoke
+            .iter()
+            .all(|collection| collection.id != custom_calendar.id),
+        "revoked custom calendar grant must remove calendar visibility"
+    );
+    let events_after_revoke = storage
+        .fetch_accessible_events_by_ids(grantee_account_id, &[event.id])
+        .await
+        .context("fetch shared event after calendar revoke")?;
+    anyhow::ensure!(
+        events_after_revoke.is_empty(),
+        "revoked custom calendar grant must remove event visibility"
+    );
+
+    Ok(())
+}
+
+fn runtime_calendar_event_input(
+    account_id: Uuid,
+    id: Option<Uuid>,
+    title: &str,
+) -> UpsertClientEventInput {
+    UpsertClientEventInput {
+        id,
+        account_id,
+        uid: String::new(),
+        date: "2026-06-06".to_string(),
+        time: "09:00".to_string(),
+        time_zone: "UTC".to_string(),
+        duration_minutes: 30,
+        all_day: false,
+        status: "confirmed".to_string(),
+        sequence: 0,
+        recurrence_rule: String::new(),
+        recurrence_json: "{}".to_string(),
+        recurrence_exceptions_json: "[]".to_string(),
+        title: title.to_string(),
+        location: String::new(),
+        organizer_json: "{}".to_string(),
+        attendees: String::new(),
+        attendees_json: "{}".to_string(),
+        notes: String::new(),
+        body_html: String::new(),
+    }
 }
 
 async fn exercise_activesync_path(storage: &Storage, fixture: &RuntimeFixture) -> Result<()> {

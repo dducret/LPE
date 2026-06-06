@@ -532,6 +532,7 @@ pub struct UpsertClientEventRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UpsertCollaborationGrantRequest {
     pub kind: String,
+    pub calendar_id: Option<Uuid>,
     pub grantee_email: String,
     pub may_read: bool,
     pub may_write: bool,

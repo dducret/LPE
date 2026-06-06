@@ -2609,6 +2609,11 @@ fn parse_share_input(owner_account_id: Uuid, value: &Value) -> Result<JmapShareI
             .and_then(Value::as_str)
             .ok_or_else(|| anyhow!("granteeEmail is required"))?
             .to_string(),
+        calendar_id: value
+            .get("calendarId")
+            .and_then(Value::as_str)
+            .map(parse_uuid)
+            .transpose()?,
         task_list_id: value
             .get("taskListId")
             .and_then(Value::as_str)

@@ -112,6 +112,10 @@ pub struct AccessibleEvent {
 pub struct CollaborationGrant {
     pub id: Uuid,
     pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calendar_name: Option<String>,
     pub owner_account_id: Uuid,
     pub owner_email: String,
     pub owner_display_name: String,
@@ -170,6 +174,7 @@ pub struct CollaborationGrantInput {
     pub kind: CollaborationResourceKind,
     pub owner_account_id: Uuid,
     pub grantee_email: String,
+    pub calendar_id: Option<Uuid>,
     pub may_read: bool,
     pub may_write: bool,
     pub may_delete: bool,
@@ -248,8 +253,30 @@ impl Storage {
                 )
             }
             CollaborationResourceKind::Calendar => {
-                let collection_id =
-                    Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, owner.id).await?;
+                let collection_id = if let Some(calendar_id) = input.calendar_id {
+                    let calendar_exists = sqlx::query_scalar::<_, bool>(
+                        r#"
+                        SELECT EXISTS (
+                            SELECT 1
+                            FROM calendars
+                            WHERE tenant_id = $1
+                              AND owner_account_id = $2
+                              AND id = $3
+                        )
+                        "#,
+                    )
+                    .bind(&tenant_id)
+                    .bind(owner.id)
+                    .bind(calendar_id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+                    if !calendar_exists {
+                        bail!("calendar collection not found");
+                    }
+                    calendar_id
+                } else {
+                    Self::ensure_default_calendar_in_tx(&mut tx, &tenant_id, owner.id).await?
+                };
                 let grant_id = sqlx::query_scalar::<_, Uuid>(
                     r#"
                     INSERT INTO calendar_grants (
@@ -350,6 +377,23 @@ impl Storage {
         )
         .await?;
         tx.commit().await?;
+
+        if input.kind == CollaborationResourceKind::Calendar {
+            if let Some(calendar_id) = input.calendar_id {
+                return self
+                    .fetch_outgoing_collaboration_grants(
+                        owner.id,
+                        CollaborationResourceKind::Calendar,
+                    )
+                    .await?
+                    .into_iter()
+                    .find(|grant| {
+                        grant.calendar_id == Some(calendar_id)
+                            && grant.grantee_account_id == grantee.id
+                    })
+                    .ok_or_else(|| anyhow!("collaboration grant not found after upsert"));
+            }
+        }
 
         self.fetch_collaboration_grant(input.kind, owner.id, grantee.id)
             .await?
@@ -483,6 +527,76 @@ impl Storage {
             &mut tx,
             &tenant_id,
             kind,
+            owner_account_id,
+            grantee_account_id,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn delete_calendar_collection_grant(
+        &self,
+        owner_account_id: Uuid,
+        calendar_collection_id: &str,
+        grantee_account_id: Uuid,
+        audit: AuditEntryInput,
+    ) -> Result<()> {
+        let calendar_id = Uuid::parse_str(calendar_collection_id.trim())
+            .map_err(|_| anyhow!("calendarId must be a custom calendar UUID"))?;
+        let tenant_id = self.tenant_id_for_account_id(owner_account_id).await?;
+        let mut tx = self.pool.begin().await?;
+        let grant_id = sqlx::query_scalar::<_, Uuid>(
+            r#"
+            DELETE FROM calendar_grants g
+            USING calendars c
+            WHERE g.tenant_id = $1
+              AND g.owner_account_id = $2
+              AND g.calendar_id = $3
+              AND g.grantee_account_id = $4
+              AND c.tenant_id = g.tenant_id
+              AND c.owner_account_id = g.owner_account_id
+              AND c.id = g.calendar_id
+            RETURNING g.id
+            "#,
+        )
+        .bind(&tenant_id)
+        .bind(owner_account_id)
+        .bind(calendar_id)
+        .bind(grantee_account_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or_else(|| anyhow!("calendar grant not found"))?;
+
+        let modseq = self
+            .allocate_account_modseq_in_tx(
+                &mut tx,
+                &tenant_id,
+                owner_account_id,
+                CanonicalChangeCategory::Calendar.as_str(),
+            )
+            .await?;
+        Self::insert_mail_change_log_in_tx(
+            &mut tx,
+            &tenant_id,
+            Some(owner_account_id),
+            None,
+            "calendar_grant",
+            grant_id,
+            "destroyed",
+            modseq,
+            &[owner_account_id, grantee_account_id],
+            serde_json::json!({
+                "collectionId": calendar_id,
+                "granteeId": grantee_account_id
+            }),
+        )
+        .await?;
+        self.insert_audit(&mut tx, &tenant_id, audit).await?;
+        Self::emit_collaboration_grant_change(
+            &mut tx,
+            &tenant_id,
+            CollaborationResourceKind::Calendar,
             owner_account_id,
             grantee_account_id,
         )
@@ -638,6 +752,8 @@ impl Storage {
                 SELECT
                     g.id,
                     'contacts'::text AS kind,
+                    NULL::uuid AS calendar_id,
+                    NULL::text AS calendar_name,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
@@ -674,6 +790,8 @@ impl Storage {
                 SELECT
                     g.id,
                     'calendar'::text AS kind,
+                    g.calendar_id,
+                    c.display_name AS calendar_name,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
@@ -691,6 +809,7 @@ impl Storage {
                   ON c.tenant_id = g.tenant_id
                  AND c.owner_account_id = g.owner_account_id
                  AND c.id = g.calendar_id
+                 AND c.role = 'calendar'
                 JOIN accounts owner ON owner.id = g.owner_account_id
                 JOIN accounts grantee ON grantee.id = g.grantee_account_id
                 WHERE g.tenant_id = $1
@@ -709,6 +828,8 @@ impl Storage {
                 SELECT
                     g.id,
                     'tasks'::text AS kind,
+                    NULL::uuid AS calendar_id,
+                    NULL::text AS calendar_name,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
@@ -758,6 +879,8 @@ impl Storage {
                 SELECT
                     g.id,
                     'contacts'::text AS kind,
+                    NULL::uuid AS calendar_id,
+                    NULL::text AS calendar_name,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
@@ -792,6 +915,8 @@ impl Storage {
                 SELECT
                     g.id,
                     'calendar'::text AS kind,
+                    g.calendar_id,
+                    c.display_name AS calendar_name,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
@@ -806,10 +931,9 @@ impl Storage {
                     to_char(g.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                 FROM calendar_grants g
                 JOIN calendars c
-                  ON c.tenant_id = g.tenant_id
+                 ON c.tenant_id = g.tenant_id
                  AND c.owner_account_id = g.owner_account_id
                  AND c.id = g.calendar_id
-                 AND c.role = 'calendar'
                 JOIN accounts owner ON owner.id = g.owner_account_id
                 JOIN accounts grantee ON grantee.id = g.grantee_account_id
                 WHERE g.tenant_id = $1
@@ -826,6 +950,8 @@ impl Storage {
                 SELECT
                     g.id,
                     'tasks'::text AS kind,
+                    NULL::uuid AS calendar_id,
+                    NULL::text AS calendar_name,
                     g.owner_account_id,
                     owner.primary_email AS owner_email,
                     owner.display_name AS owner_display_name,
@@ -903,7 +1029,7 @@ impl Storage {
                 ) AS may_send_on_behalf
             FROM calendar_grants g
             JOIN calendars c
-              ON c.tenant_id = g.tenant_id
+             ON c.tenant_id = g.tenant_id
              AND c.owner_account_id = g.owner_account_id
              AND c.id = g.calendar_id
              AND c.role = 'calendar'
@@ -1852,10 +1978,9 @@ impl Storage {
                     g.may_share
                 FROM calendar_grants g
                 JOIN calendars c
-                  ON c.tenant_id = g.tenant_id
+                 ON c.tenant_id = g.tenant_id
                  AND c.owner_account_id = g.owner_account_id
                  AND c.id = g.calendar_id
-                 AND c.role = 'calendar'
                 JOIN accounts owner ON owner.id = g.owner_account_id
                 WHERE g.tenant_id = $1
                   AND g.grantee_account_id = $2
@@ -2346,6 +2471,8 @@ fn map_collaboration_grant(row: CollaborationGrantRow) -> CollaborationGrant {
     CollaborationGrant {
         id: row.id,
         kind: row.kind,
+        calendar_id: row.calendar_id,
+        calendar_name: row.calendar_name,
         owner_account_id: row.owner_account_id,
         owner_email: row.owner_email,
         owner_display_name: row.owner_display_name,

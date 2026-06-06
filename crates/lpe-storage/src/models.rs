@@ -481,6 +481,8 @@ pub(crate) struct CollaborationCollectionRow {
 pub(crate) struct CollaborationGrantRow {
     pub(crate) id: Uuid,
     pub(crate) kind: String,
+    pub(crate) calendar_id: Option<Uuid>,
+    pub(crate) calendar_name: Option<String>,
     pub(crate) owner_account_id: Uuid,
     pub(crate) owner_email: String,
     pub(crate) owner_display_name: String,

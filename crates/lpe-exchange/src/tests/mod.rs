@@ -2027,6 +2027,8 @@ impl ExchangeStore for FakeStore {
             let grant = CollaborationGrant {
                 id: Uuid::new_v4(),
                 kind: kind.as_str().to_string(),
+                calendar_id: None,
+                calendar_name: None,
                 owner_account_id,
                 owner_email: owner.email,
                 owner_display_name: owner.display_name,

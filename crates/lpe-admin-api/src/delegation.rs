@@ -84,6 +84,7 @@ pub(crate) async fn upsert_collaboration_grant(
                     kind,
                     owner_account_id: account.account_id,
                     grantee_email: request.grantee_email.clone(),
+                    calendar_id: request.calendar_id,
                     may_read: request.may_read,
                     may_write: request.may_write,
                     may_delete: request.may_delete,
@@ -93,6 +94,44 @@ pub(crate) async fn upsert_collaboration_grant(
                     actor: account.email.clone(),
                     action: format!("collaboration-share-upsert:{}", kind.as_str()),
                     subject: request.grantee_email,
+                },
+            )
+            .await
+            .map_err(bad_request_error)?,
+    ))
+}
+
+pub(crate) async fn upsert_calendar_collection_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath(calendar_id): AxumPath<Uuid>,
+    Json(request): Json<UpsertCollaborationGrantRequest>,
+) -> ApiResult<lpe_storage::CollaborationGrant> {
+    let account = require_account(&storage, &headers).await?;
+    let kind = parse_collaboration_kind(&request.kind).map_err(bad_request_error)?;
+    if kind != CollaborationResourceKind::Calendar {
+        return Err(bad_request_error(
+            "calendar share route requires kind=calendar",
+        ));
+    }
+
+    Ok(Json(
+        storage
+            .upsert_collaboration_grant(
+                CollaborationGrantInput {
+                    kind,
+                    owner_account_id: account.account_id,
+                    grantee_email: request.grantee_email.clone(),
+                    calendar_id: Some(calendar_id),
+                    may_read: request.may_read,
+                    may_write: request.may_write,
+                    may_delete: request.may_delete,
+                    may_share: request.may_share,
+                },
+                AuditEntryInput {
+                    actor: account.email,
+                    action: "calendar-share-upsert".to_string(),
+                    subject: format!("{calendar_id}:{}", request.grantee_email),
                 },
             )
             .await
@@ -116,6 +155,32 @@ pub(crate) async fn delete_collaboration_grant(
                 actor: account.email,
                 action: format!("collaboration-share-delete:{}", kind.as_str()),
                 subject: grantee_account_id.to_string(),
+            },
+        )
+        .await
+        .map_err(bad_request_error)?;
+
+    Ok(Json(HealthResponse {
+        service: "lpe-admin-api",
+        status: "ok",
+    }))
+}
+
+pub(crate) async fn delete_calendar_collection_grant(
+    State(storage): State<Storage>,
+    headers: HeaderMap,
+    AxumPath((calendar_id, grantee_account_id)): AxumPath<(Uuid, Uuid)>,
+) -> ApiResult<HealthResponse> {
+    let account = require_account(&storage, &headers).await?;
+    storage
+        .delete_calendar_collection_grant(
+            account.account_id,
+            &calendar_id.to_string(),
+            grantee_account_id,
+            AuditEntryInput {
+                actor: account.email,
+                action: "calendar-share-delete".to_string(),
+                subject: format!("{calendar_id}:{grantee_account_id}"),
             },
         )
         .await

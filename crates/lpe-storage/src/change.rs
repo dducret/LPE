@@ -322,10 +322,9 @@ impl Storage {
                 SELECT g.grantee_account_id
                 FROM calendar_grants g
                 JOIN calendars c
-                  ON c.tenant_id = g.tenant_id
+                 ON c.tenant_id = g.tenant_id
                  AND c.owner_account_id = g.owner_account_id
                  AND c.id = g.calendar_id
-                 AND c.role = 'calendar'
                 WHERE g.tenant_id = $1
                   AND g.owner_account_id = $2
                 "#,

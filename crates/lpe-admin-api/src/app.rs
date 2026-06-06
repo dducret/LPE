@@ -32,9 +32,10 @@ use crate::{
         update_security_settings, update_server_settings, upload_pst_import,
     },
     delegation::{
-        delete_collaboration_grant, delete_mailbox_delegation_grant,
-        delete_sender_delegation_grant, delete_task_list_grant, get_free_busy,
-        get_mailbox_delegation, list_collaboration_overview, upsert_collaboration_grant,
+        delete_calendar_collection_grant, delete_collaboration_grant,
+        delete_mailbox_delegation_grant, delete_sender_delegation_grant, delete_task_list_grant,
+        get_free_busy, get_mailbox_delegation, list_collaboration_overview,
+        upsert_calendar_collection_grant, upsert_collaboration_grant,
         upsert_mailbox_delegation_grant, upsert_sender_delegation_grant, upsert_task_list_grant,
     },
     health::{health, health_live, health_ready},
@@ -263,6 +264,14 @@ pub fn router(storage: Storage) -> Router {
         .route(
             "/mail/shares/{kind}/{grantee_account_id}",
             delete(delete_collaboration_grant),
+        )
+        .route(
+            "/mail/calendars/{calendar_id}/shares",
+            put(upsert_calendar_collection_grant),
+        )
+        .route(
+            "/mail/calendars/{calendar_id}/shares/{grantee_account_id}",
+            delete(delete_calendar_collection_grant),
         )
         .route(
             "/mail/task-lists/{task_list_id}/shares",

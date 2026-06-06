@@ -26,6 +26,9 @@
 - Delegate / free-busy object layer:
   - `/api/mail/delegation/free-busy` returns canonical delegate access objects
     and computed free/busy blocks for Outlook, EWS, and MAPI consumers
+  - free/busy is scoped to the target mailbox owner's default calendar; custom
+    shared calendars are visible through calendar collection grants but are not
+    merged into this availability response
   - free/busy is computed from canonical `calendar_events`, not stored as an
     Exchange-specific public-folder free/busy store
   - same-tenant users can retrieve availability blocks; users with canonical
