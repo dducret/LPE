@@ -1550,7 +1550,8 @@ fn log_execute_rop_debug(
             outlook_event_operation = "EcDoRpcExt",
             outlook_event_hresult = "0x800704d3",
             outlook_event_data_code = 78,
-            correlation_basis = "release_only_empty_rop_response",
+            correlation_basis = "release_only_empty_rop_response_spec_compliant",
+            release_response_spec_compliant = true,
             request_rop_ids = %request.ids_csv,
             request_rop_names = %request.names_csv,
             request_rop_payload_bytes = request.request_payload_bytes,
@@ -2125,6 +2126,27 @@ fn mapi_value_debug_binary_decode(properties: &HashMap<u32, MapiValue>, tag: u32
         Some(value) => mapi_value_debug_shape(value),
         None => "missing".to_string(),
     }
+}
+
+fn format_inbox_folder_type_getprops_response_context(response: &[u8]) -> String {
+    let return_value = response
+        .get(2..6)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
+        .map(|value| format!("0x{value:08x}"))
+        .unwrap_or_else(|| "truncated".to_string());
+    let row_preview = if response.len() > 6 {
+        hex_preview(&response[6..], 64)
+    } else {
+        String::new()
+    };
+    format!(
+        "response_bytes={};return_value={};row_bytes={};row_preview={}",
+        response.len(),
+        return_value,
+        response.len().saturating_sub(6),
+        row_preview
+    )
 }
 
 fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<String> {
@@ -5015,7 +5037,10 @@ fn outlook_bootstrap_query_rows_total_count(
     };
     match object {
         Some(MapiObject::HierarchyTable { .. })
-            if matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
+            if matches!(
+                *folder_id,
+                ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
+            ) =>
         {
             Some(hierarchy_row_count(*folder_id, mailboxes, snapshot))
         }
@@ -8211,7 +8236,13 @@ where
                 responses.extend_from_slice(&property_response);
                 if is_inbox_folder_type_probe {
                     if let Some(context) = inbox_folder_type_getprops_context {
-                        session.record_last_inbox_folder_type_getprops_context(context);
+                        session.record_last_inbox_folder_type_getprops_context(format!(
+                            "{};{}",
+                            context,
+                            format_inbox_folder_type_getprops_response_context(
+                                &property_response
+                            )
+                        ));
                     }
                     if let Some(summary) =
                         format_inbox_open_loop_summary(&session.post_hierarchy_actions)
@@ -17210,6 +17241,18 @@ mod tests {
     }
 
     #[test]
+    fn inbox_folder_type_getprops_response_context_includes_wire_preview() {
+        let context = format_inbox_folder_type_getprops_response_context(&[
+            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        ]);
+
+        assert!(context.contains("response_bytes=10"));
+        assert!(context.contains("return_value=0x00000000"));
+        assert!(context.contains("row_bytes=4"));
+        assert!(context.contains("row_preview=01000000"));
+    }
+
+    #[test]
     fn execute_rop_debug_summary_decodes_ids_and_return_codes() {
         let mut request_bytes = vec![0x02, 0, 0, 1];
         request_bytes.extend_from_slice(
@@ -17558,6 +17601,32 @@ mod tests {
         assert!(debug.contains("index=0"));
         assert!(debug.contains("decoded_name=conflicts"));
         assert!(debug.contains("omitted_preserved_indexes=4"));
+    }
+
+    #[test]
+    fn bootstrap_query_rows_total_count_includes_sync_issues_children() {
+        let object = MapiObject::HierarchyTable {
+            folder_id: SYNC_ISSUES_FOLDER_ID,
+            columns: default_hierarchy_columns(),
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+
+        assert_eq!(
+            outlook_bootstrap_query_rows_total_count(
+                Some(&object),
+                &[],
+                &[],
+                &MapiMailStoreSnapshot::empty(),
+            ),
+            Some(3)
+        );
     }
 
     #[test]
