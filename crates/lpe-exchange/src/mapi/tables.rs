@@ -5636,6 +5636,16 @@ mod tests {
             associated_config_property_value(&message, PID_TAG_INSTANCE_NUM),
             Some(MapiValue::U32(0))
         );
+        let entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            Uuid::nil(),
+            INBOX_FOLDER_ID,
+            message.id,
+        )
+        .unwrap();
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_ENTRY_ID),
+            Some(MapiValue::Binary(entry_id))
+        );
         let source_key = mapi_mailstore::source_key_for_store_id(message.id);
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_SOURCE_KEY),
@@ -6391,7 +6401,13 @@ pub(in crate::mapi) fn associated_config_property_value(
             PID_TAG_MID => Some(MapiValue::U64(message.id)),
             PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
             PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
-            PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+            PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+                Uuid::nil(),
+                message.folder_id,
+                message.id,
+            )
+            .map(MapiValue::Binary),
+            PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
                 crate::mapi::identity::instance_key_for_object_id(message.id),
             )),
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
