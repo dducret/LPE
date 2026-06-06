@@ -4103,8 +4103,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
 fn special_folder_type(folder_id: u64) -> u32 {
     match folder_id {
         ROOT_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID => FOLDER_ROOT,
-        SEARCH_FOLDER_ID
-        | CONTACTS_SEARCH_FOLDER_ID
+        CONTACTS_SEARCH_FOLDER_ID
         | REMINDERS_FOLDER_ID
         | TRACKED_MAIL_PROCESSING_FOLDER_ID
         | TODO_SEARCH_FOLDER_ID => FOLDER_SEARCH,
@@ -4736,8 +4735,14 @@ mod tests {
             FOLDER_GENERIC
         );
 
+        let finder_root_row =
+            serialize_special_folder_row(SEARCH_FOLDER_ID, &[], &[PID_TAG_FOLDER_TYPE], None);
+        assert_eq!(
+            u32::from_le_bytes(finder_root_row.try_into().unwrap()),
+            FOLDER_GENERIC
+        );
+
         for folder_id in [
-            SEARCH_FOLDER_ID,
             CONTACTS_SEARCH_FOLDER_ID,
             REMINDERS_FOLDER_ID,
             TRACKED_MAIL_PROCESSING_FOLDER_ID,
