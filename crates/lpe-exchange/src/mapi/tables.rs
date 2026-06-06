@@ -653,7 +653,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
     CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
-    QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
@@ -946,6 +945,9 @@ pub(in crate::mapi) fn special_folder_property_value(
             Some(MapiValue::U32(0))
         }
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
+        PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(
+            folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+        )),
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W if message_class.is_empty() => None,
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(message_class.to_string()))
@@ -4033,6 +4035,9 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
                 write_u32(&mut row, 0)
             }
             PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
+            PID_TAG_ATTRIBUTE_HIDDEN => {
+                row.push((folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID) as u8)
+            }
             PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W if message_class.is_empty() => {
                 write_property_default(&mut row, *column)
             }
@@ -4688,6 +4693,34 @@ mod tests {
     }
 
     #[test]
+    fn conversation_action_settings_projects_hidden_attribute() {
+        assert_eq!(
+            special_folder_property_value(
+                CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+                PID_TAG_ATTRIBUTE_HIDDEN,
+                Uuid::nil()
+            ),
+            Some(MapiValue::Bool(true))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                QUICK_STEP_SETTINGS_FOLDER_ID,
+                PID_TAG_ATTRIBUTE_HIDDEN,
+                Uuid::nil()
+            ),
+            Some(MapiValue::Bool(false))
+        );
+
+        let row = serialize_special_folder_row(
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            &[],
+            &[PID_TAG_ATTRIBUTE_HIDDEN],
+            None,
+        );
+        assert_eq!(row, vec![1]);
+    }
+
+    #[test]
     fn sync_issues_hierarchy_table_projects_special_child_folders() {
         let snapshot = MapiMailStoreSnapshot::empty();
         let inbox = JmapMailbox {
@@ -5154,7 +5187,7 @@ mod tests {
         assert!(row_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
         assert!(row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(row_ids.contains(&TASKS_FOLDER_ID));
-        assert!(row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
+        assert!(!row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
         assert!(!row_ids.contains(&suggested_shadow_folder_id));
         assert!(!row_ids.contains(&quick_contacts_shadow_folder_id));
@@ -5177,7 +5210,7 @@ mod tests {
         assert!(sync_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
         assert!(sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(sync_ids.contains(&TASKS_FOLDER_ID));
-        assert!(sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
+        assert!(!sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
         assert!(!sync_ids.contains(&suggested_shadow_folder_id));
         assert!(!sync_ids.contains(&quick_contacts_shadow_folder_id));
@@ -5207,7 +5240,6 @@ mod tests {
             (QUICK_CONTACTS_FOLDER_ID, "IPF.Contact.MOC.QuickContacts"),
             (IM_CONTACT_LIST_FOLDER_ID, "IPF.Contact.MOC.ImContactList"),
             (TASKS_FOLDER_ID, "IPF.Task"),
-            (QUICK_STEP_SETTINGS_FOLDER_ID, "IPF.Configuration"),
         ] {
             let row = rows
                 .iter()
