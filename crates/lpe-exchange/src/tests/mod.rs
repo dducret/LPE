@@ -225,6 +225,77 @@ async fn mapi_identity_mapping_survives_restart_style_store_reload() {
 }
 
 #[tokio::test]
+async fn mapi_associated_config_storage_is_account_scoped() {
+    let Some(fixture) = postgres_mapi_calendar_fixture().await.unwrap() else {
+        return;
+    };
+    let other_account_id = Uuid::parse_str("10000000-0000-0000-0000-000000000005").unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO accounts (id, tenant_id, primary_domain_id, primary_email, display_name)
+        SELECT $1, tenant_id, primary_domain_id, 'bob@example.test', 'Bob Config'
+        FROM accounts
+        WHERE id = $2
+        "#,
+    )
+    .bind(other_account_id)
+    .bind(fixture.account_id)
+    .execute(fixture.storage.pool())
+    .await
+    .unwrap();
+
+    let config_id = Uuid::parse_str("10000000-0000-0000-0000-000000000006").unwrap();
+    fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(config_id),
+            account_id: fixture.account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.AccountPrefs".to_string(),
+            subject: "IPM.Configuration.AccountPrefs".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 4}
+            }),
+        })
+        .await
+        .unwrap();
+
+    let overwrite = fixture
+        .storage
+        .upsert_mapi_associated_config(crate::store::UpsertMapiAssociatedConfigInput {
+            id: Some(config_id),
+            account_id: other_account_id,
+            folder_id: crate::mapi::identity::INBOX_FOLDER_ID,
+            message_class: "IPM.Configuration.AccountPrefs".to_string(),
+            subject: "Cross-account overwrite".to_string(),
+            properties_json: serde_json::json!({
+                "0x7c060003": {"type": "u32", "value": 8}
+            }),
+        })
+        .await;
+    assert!(overwrite.is_err());
+
+    let owner_configs = fixture
+        .storage
+        .fetch_mapi_associated_configs(fixture.account_id)
+        .await
+        .unwrap();
+    assert_eq!(owner_configs.len(), 1);
+    assert_eq!(owner_configs[0].id, config_id);
+    assert_eq!(owner_configs[0].subject, "IPM.Configuration.AccountPrefs");
+    assert_eq!(
+        fixture
+            .storage
+            .fetch_mapi_associated_configs(other_account_id)
+            .await
+            .unwrap(),
+        Vec::new()
+    );
+
+    fixture.cleanup().await.unwrap();
+}
+
+#[tokio::test]
 async fn mapi_default_calendar_folder_identity_is_persisted() {
     let account = FakeStore::account();
     let store = FakeStore {
@@ -4238,9 +4309,16 @@ impl ExchangeStore for FakeStore {
 
     fn fetch_mapi_associated_configs<'a>(
         &'a self,
-        _account_id: Uuid,
+        account_id: Uuid,
     ) -> StoreFuture<'a, Vec<crate::store::MapiAssociatedConfigRecord>> {
-        let configs = self.associated_configs.lock().unwrap().clone();
+        let configs = self
+            .associated_configs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|config| config.account_id == account_id)
+            .cloned()
+            .collect();
         Box::pin(async move { Ok(configs) })
     }
 
@@ -4253,7 +4331,15 @@ impl ExchangeStore for FakeStore {
         Box::pin(async move {
             let mut configs = configs.lock().unwrap();
             let id = input.id.unwrap_or_else(Uuid::new_v4);
-            let is_update = configs.iter().any(|config| config.id == id);
+            if configs
+                .iter()
+                .any(|config| config.id == id && config.account_id != input.account_id)
+            {
+                return Err(anyhow::anyhow!("MAPI associated config message not found"));
+            }
+            let is_update = configs
+                .iter()
+                .any(|config| config.id == id && config.account_id == input.account_id);
             let record = crate::store::MapiAssociatedConfigRecord {
                 id,
                 account_id: input.account_id,
@@ -4262,7 +4348,10 @@ impl ExchangeStore for FakeStore {
                 subject: input.subject,
                 properties_json: input.properties_json,
             };
-            if let Some(existing) = configs.iter_mut().find(|config| config.id == id) {
+            if let Some(existing) = configs
+                .iter_mut()
+                .find(|config| config.id == id && config.account_id == input.account_id)
+            {
                 *existing = record.clone();
             } else {
                 configs.push(record.clone());
@@ -4287,13 +4376,13 @@ impl ExchangeStore for FakeStore {
 
     fn delete_mapi_associated_config<'a>(
         &'a self,
-        _account_id: Uuid,
+        account_id: Uuid,
         config_id: Uuid,
     ) -> StoreFuture<'a, ()> {
         let mut configs = self.associated_configs.lock().unwrap();
         if let Some(folder_id) = configs
             .iter()
-            .find(|config| config.id == config_id)
+            .find(|config| config.id == config_id && config.account_id == account_id)
             .map(|config| config.folder_id)
         {
             let mut changes = self.mapi_sync_changes.lock().unwrap();
@@ -4309,7 +4398,7 @@ impl ExchangeStore for FakeStore {
                     config_id,
                 });
         }
-        configs.retain(|config| config.id != config_id);
+        configs.retain(|config| !(config.id == config_id && config.account_id == account_id));
         Box::pin(async move { Ok(()) })
     }
 

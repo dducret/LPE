@@ -5729,6 +5729,7 @@ impl ExchangeStore for Storage {
                     subject = EXCLUDED.subject,
                     properties_json = EXCLUDED.properties_json,
                     updated_at = NOW()
+                WHERE mapi_associated_config_messages.account_id = EXCLUDED.account_id
                 RETURNING id, account_id, folder_id, message_class, subject, properties_json
                 "#,
             )
@@ -5739,8 +5740,9 @@ impl ExchangeStore for Storage {
             .bind(input.message_class)
             .bind(input.subject)
             .bind(input.properties_json)
-            .fetch_one(&mut *tx)
-            .await?;
+            .fetch_optional(&mut *tx)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("MAPI associated config message not found"))?;
             let saved = mapi_associated_config_from_row(row)?;
             insert_mapi_associated_config_change(
                 &mut tx,
