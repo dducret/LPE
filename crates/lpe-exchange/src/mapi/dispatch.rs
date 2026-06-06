@@ -2135,11 +2135,14 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};last_open={};last_contents_table={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};last_open={};last_contents_table={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
         state.inbox_associated_contents_table_observed,
+        state.inbox_associated_config_open_observed,
+        state.inbox_associated_config_stream_open_observed,
+        state.inbox_associated_config_stream_read_observed,
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
         debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
@@ -7272,6 +7275,17 @@ where
                             config_id: message.id,
                         },
                     );
+                    if folder_id == INBOX_FOLDER_ID
+                        && message.message_class.starts_with("IPM.Configuration.")
+                    {
+                        session.record_inbox_associated_config_open();
+                        session.record_recent_probe_action(format!(
+                            "OpenAssociatedConfig(out={},folder=0x{folder_id:016x},id=0x{:016x},class={})",
+                            request.output_handle_index.unwrap_or(0),
+                            message.id,
+                            message.message_class
+                        ));
+                    }
                     set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                     responses.extend_from_slice(&rop_open_message_response(
                         &request,
@@ -10811,6 +10825,22 @@ where
                     ));
                     continue;
                 };
+                let is_inbox_associated_config_stream = matches!(
+                    session.handles.get(&input_handle),
+                    Some(MapiObject::AssociatedConfig {
+                        folder_id: INBOX_FOLDER_ID,
+                        ..
+                    })
+                );
+                if is_inbox_associated_config_stream {
+                    session.record_inbox_associated_config_stream_open();
+                    session.record_recent_probe_action(format!(
+                        "OpenAssociatedConfigStream(in={},tag=0x{:08x},mode=0x{:02x})",
+                        input_handle,
+                        request.stream_property_tag().unwrap_or(0),
+                        request.stream_open_mode().unwrap_or(0)
+                    ));
+                }
                 let Some((stream_data, writable_target)) = open_stream_data(
                     store,
                     principal,
@@ -10840,11 +10870,24 @@ where
                         writable_target,
                     },
                 );
+                if is_inbox_associated_config_stream {
+                    session.record_inbox_associated_config_stream_handle(handle);
+                }
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 responses.extend_from_slice(&rop_open_stream_response(&request, stream_size));
                 output_handles.push(handle);
             }
             Some(RopId::ReadStream) => {
+                if let Some(input_handle) = input_handle(&handle_slots, &request) {
+                    if session.is_inbox_associated_config_stream_handle(input_handle) {
+                        session.record_inbox_associated_config_stream_read();
+                        session.record_recent_probe_action(format!(
+                            "ReadAssociatedConfigStream(in={},max={})",
+                            input_handle,
+                            request.read_byte_count().unwrap_or(0)
+                        ));
+                    }
+                }
                 let Some(stream) = input_object_mut(session, &handle_slots, &request) else {
                     responses.extend_from_slice(&rop_error_response(
                         0x2C,
@@ -17436,6 +17479,7 @@ mod tests {
             completed_execute_requests: HashMap::new(),
             completed_execute_request_order: VecDeque::new(),
             post_hierarchy_actions: PostHierarchyActionState::default(),
+            inbox_associated_config_stream_handles: HashSet::new(),
             logon_identity: None,
         }
     }

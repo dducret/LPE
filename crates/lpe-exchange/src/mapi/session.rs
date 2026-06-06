@@ -36,6 +36,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) completed_execute_requests: HashMap<String, CachedExecuteResponse>,
     pub(in crate::mapi) completed_execute_request_order: VecDeque<String>,
     pub(in crate::mapi) post_hierarchy_actions: PostHierarchyActionState,
+    pub(in crate::mapi) inbox_associated_config_stream_handles: HashSet<u32>,
     pub(in crate::mapi) logon_identity: Option<MapiLogonIdentityDebug>,
 }
 
@@ -76,6 +77,9 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) inbox_folder_type_getprops_probe_count: usize,
     pub(in crate::mapi) inbox_normal_contents_table_observed: bool,
     pub(in crate::mapi) inbox_associated_contents_table_observed: bool,
+    pub(in crate::mapi) inbox_associated_config_open_observed: bool,
+    pub(in crate::mapi) inbox_associated_config_stream_open_observed: bool,
+    pub(in crate::mapi) inbox_associated_config_stream_read_observed: bool,
     pub(in crate::mapi) last_inbox_open_folder_context: String,
     pub(in crate::mapi) last_inbox_contents_table_context: String,
     pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
@@ -449,6 +453,7 @@ pub(in crate::mapi) fn create_session(
         completed_execute_requests: HashMap::new(),
         completed_execute_request_order: VecDeque::new(),
         post_hierarchy_actions: PostHierarchyActionState::default(),
+        inbox_associated_config_stream_handles: HashSet::new(),
         logon_identity: None,
     };
     session.record_transport_request(request_type, request_id);
@@ -775,6 +780,30 @@ impl MapiSession {
     pub(in crate::mapi) fn record_inbox_associated_contents_table(&mut self) {
         self.post_hierarchy_actions
             .inbox_associated_contents_table_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_config_open(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_associated_config_open_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_config_stream_open(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_associated_config_stream_open_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_config_stream_handle(&mut self, handle: u32) {
+        self.inbox_associated_config_stream_handles.insert(handle);
+    }
+
+    pub(in crate::mapi) fn is_inbox_associated_config_stream_handle(&self, handle: u32) -> bool {
+        self.inbox_associated_config_stream_handles
+            .contains(&handle)
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_config_stream_read(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_associated_config_stream_read_observed = true;
     }
 
     pub(in crate::mapi) fn record_last_inbox_open_folder_context(&mut self, context: String) {
