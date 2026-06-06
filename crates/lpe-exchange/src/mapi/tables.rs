@@ -652,7 +652,6 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     SERVER_FAILURES_FOLDER_ID,
     JUNK_FOLDER_ID,
     RSS_FEEDS_FOLDER_ID,
-    CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
 ];
@@ -5187,6 +5186,7 @@ mod tests {
         assert!(row_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
         assert!(row_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(row_ids.contains(&TASKS_FOLDER_ID));
+        assert!(!row_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!row_ids.contains(&shadow_folder_id));
         assert!(!row_ids.contains(&suggested_shadow_folder_id));
@@ -5210,6 +5210,7 @@ mod tests {
         assert!(sync_ids.contains(&QUICK_CONTACTS_FOLDER_ID));
         assert!(sync_ids.contains(&IM_CONTACT_LIST_FOLDER_ID));
         assert!(sync_ids.contains(&TASKS_FOLDER_ID));
+        assert!(!sync_ids.contains(&CONVERSATION_ACTION_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
         assert!(!sync_ids.contains(&shadow_folder_id));
         assert!(!sync_ids.contains(&suggested_shadow_folder_id));

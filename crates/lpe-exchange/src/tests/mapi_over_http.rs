@@ -19354,7 +19354,6 @@ async fn mapi_over_http_hierarchy_sync_includes_default_ipm_special_folders() {
         crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
         crate::mapi::identity::IM_CONTACT_LIST_FOLDER_ID,
         crate::mapi::identity::CONTACTS_SEARCH_FOLDER_ID,
-        crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
     ] {
         let counter = crate::mapi::identity::global_counter_from_store_id(folder_id)
             .expect("stable folder counter");
@@ -19612,11 +19611,6 @@ async fn mapi_over_http_hierarchy_table_includes_default_ipm_special_folders() {
             "RSS Feeds",
             "IPF.Note.OutlookHomepage",
             crate::mapi::identity::RSS_FEEDS_FOLDER_ID,
-        ),
-        (
-            "Conversation Action Settings",
-            "IPF.Configuration",
-            crate::mapi::identity::CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
         ),
         (
             "Archive",
