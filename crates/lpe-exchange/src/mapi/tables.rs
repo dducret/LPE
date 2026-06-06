@@ -4777,6 +4777,27 @@ mod tests {
     }
 
     #[test]
+    fn mapi_hierarchy_row_projects_inbox_display_name() {
+        let inbox = JmapMailbox {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 18,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+
+        let row =
+            serialize_folder_row_with_context(&inbox, &[], &[PID_TAG_DISPLAY_NAME_W], Uuid::nil());
+
+        assert!(utf16_position(&row, "INBOX").is_none());
+        assert_response_contains_utf16(&row, "Inbox");
+    }
+
+    #[test]
     fn ipm_subtree_row_projects_principal_ost_identity_when_available() {
         let principal = AccountPrincipal {
             tenant_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
@@ -6032,7 +6053,7 @@ pub(in crate::mapi) fn serialize_folder_row_with_context(
     let mut row = Vec::new();
     for column in columns {
         match *column {
-            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &mailbox.name),
+            PID_TAG_DISPLAY_NAME_W => write_utf16z(&mut row, &mapi_mailbox_display_name(mailbox)),
             PID_TAG_FOLDER_ID => write_object_id(&mut row, mapi_folder_id(mailbox)),
             PID_TAG_PARENT_FOLDER_ID => write_object_id(&mut row, mapi_parent_folder_id(mailbox)),
             PID_TAG_CONTENT_COUNT => write_u32(&mut row, mailbox.total_emails),

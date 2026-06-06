@@ -1228,7 +1228,7 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         }
     }
     match property_tag {
-        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mailbox.name.clone())),
+        PID_TAG_DISPLAY_NAME_W => Some(MapiValue::String(mapi_mailbox_display_name(mailbox))),
         PID_TAG_CONTENT_COUNT => Some(MapiValue::U32(mailbox.total_emails)),
         PID_TAG_CONTENT_UNREAD_COUNT => Some(MapiValue::U32(mailbox.unread_emails)),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(mailbox_has_subfolders(mailbox, mailboxes))),
@@ -1287,6 +1287,14 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
             mapi_mailstore::canonical_folder_change_number(mailbox),
         )),
         _ => None,
+    }
+}
+
+pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> String {
+    if mailbox.role.eq_ignore_ascii_case("inbox") {
+        "Inbox".to_string()
+    } else {
+        mailbox.name.clone()
     }
 }
 
@@ -1565,7 +1573,13 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
         PID_TAG_MID => Some(MapiValue::U64(message.id)),
         PID_TAG_INST_ID => Some(MapiValue::U64(message.id)),
         PID_TAG_INSTANCE_NUM => Some(MapiValue::U32(0)),
-        PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
+        PID_TAG_ENTRY_ID => crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            message.folder_id,
+            message.id,
+        )
+        .map(MapiValue::Binary),
+        PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(message.id),
         )),
         PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_DISPLAY_NAME_W => {
@@ -8523,6 +8537,7 @@ mod tests {
 
     #[test]
     fn navigation_shortcut_projects_associated_table_identity_columns() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
         let shortcut = MapiNavigationShortcutMessage {
             id: crate::mapi::identity::mapi_store_id(901),
             folder_id: COMMON_VIEWS_FOLDER_ID,
@@ -8538,23 +8553,62 @@ mod tests {
         };
 
         assert_eq!(
-            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_FOLDER_ID),
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_FOLDER_ID),
             Some(MapiValue::U64(COMMON_VIEWS_FOLDER_ID))
         );
         assert_eq!(
-            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_INST_ID),
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_INST_ID),
             Some(MapiValue::U64(shortcut.id))
         );
         assert_eq!(
-            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_INSTANCE_NUM),
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_INSTANCE_NUM),
             Some(MapiValue::U32(0))
         );
+        let expected_entry_id = crate::mapi::identity::message_entry_id_from_object_ids(
+            account_id,
+            COMMON_VIEWS_FOLDER_ID,
+            shortcut.id,
+        )
+        .unwrap();
         assert_eq!(
-            navigation_shortcut_property_value(&shortcut, Uuid::nil(), PID_TAG_RECORD_KEY),
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_ENTRY_ID),
+            Some(MapiValue::Binary(expected_entry_id))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_INSTANCE_KEY),
+            Some(MapiValue::Binary(
+                crate::mapi::identity::instance_key_for_object_id(shortcut.id)
+            ))
+        );
+        assert_eq!(
+            navigation_shortcut_property_value(&shortcut, account_id, PID_TAG_RECORD_KEY),
             Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 shortcut.id
             )))
         );
+    }
+
+    #[test]
+    fn mapi_mailbox_display_name_normalizes_canonical_inbox() {
+        let inbox = mailbox(
+            "11111111-1111-1111-1111-111111111111",
+            None,
+            "inbox",
+            "INBOX",
+        );
+        let custom = mailbox(
+            "22222222-2222-2222-2222-222222222222",
+            None,
+            "",
+            "INBOX Reports",
+        );
+
+        assert_eq!(mapi_mailbox_display_name(&inbox), "Inbox");
+        assert_eq!(
+            mailbox_property_value_with_context(&inbox, &[], PID_TAG_DISPLAY_NAME_W),
+            Some(MapiValue::String("Inbox".to_string()))
+        );
+        assert_eq!(mapi_mailbox_display_name(&custom), "INBOX Reports");
     }
 
     #[test]
