@@ -546,28 +546,32 @@ fn hierarchy_rows<'a>(
         sort_hierarchy_rows(&mut rows, sort_orders);
         return rows;
     }
-    let mut rows = mailboxes
-        .iter()
-        .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
-        .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
-        .filter(|mailbox| {
-            restriction_matches_mailbox_with_context_for_account(
-                restriction,
-                mailbox,
-                mailboxes,
-                mailbox_guid,
+    let mut rows = if folder_id == SYNC_ISSUES_FOLDER_ID {
+        Vec::new()
+    } else {
+        mailboxes
+            .iter()
+            .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
+            .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
+            .filter(|mailbox| {
+                restriction_matches_mailbox_with_context_for_account(
+                    restriction,
+                    mailbox,
+                    mailboxes,
+                    mailbox_guid,
+                )
+            })
+            .map(HierarchyRow::Mailbox)
+            .chain(
+                snapshot
+                    .collaboration_folders()
+                    .iter()
+                    .filter(|folder| !collaboration_folder_shadows_outlook_special_folder(folder))
+                    .filter(|folder| restriction_matches_collaboration_folder(restriction, folder))
+                    .map(HierarchyRow::Collaboration),
             )
-        })
-        .map(HierarchyRow::Mailbox)
-        .chain(
-            snapshot
-                .collaboration_folders()
-                .iter()
-                .filter(|folder| !collaboration_folder_shadows_outlook_special_folder(folder))
-                .filter(|folder| restriction_matches_collaboration_folder(restriction, folder))
-                .map(HierarchyRow::Collaboration),
-        )
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    };
     let mut folder_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
     if folder_id == ROOT_FOLDER_ID {
         for special_folder_id in ROOT_HIERARCHY_FOLDER_IDS {
@@ -4686,9 +4690,21 @@ mod tests {
     #[test]
     fn sync_issues_hierarchy_table_projects_special_child_folders() {
         let snapshot = MapiMailStoreSnapshot::empty();
+        let inbox = JmapMailbox {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 18,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let mailboxes = [inbox];
         let rows = hierarchy_rows(
             SYNC_ISSUES_FOLDER_ID,
-            &[],
+            &mailboxes,
             &snapshot,
             None,
             &[],
@@ -4712,6 +4728,17 @@ mod tests {
     #[test]
     fn sync_issues_query_rows_projects_special_child_folders() {
         let snapshot = MapiMailStoreSnapshot::empty();
+        let inbox = JmapMailbox {
+            id: Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap(),
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 1,
+            total_emails: 18,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
         let mut table = MapiObject::HierarchyTable {
             folder_id: SYNC_ISSUES_FOLDER_ID,
             columns: vec![PID_TAG_DISPLAY_NAME_W, PID_TAG_FOLDER_ID],
@@ -4731,11 +4758,18 @@ mod tests {
             payload: vec![0, 1, 10, 0],
         };
 
-        let response =
-            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+        let response = rop_query_rows_response(
+            &request,
+            Some(&mut table),
+            &[inbox],
+            &[],
+            &snapshot,
+            Uuid::nil(),
+        );
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
         assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 3);
+        assert!(utf16_position(&response, "INBOX").is_none());
         assert_response_contains_utf16(&response, "Conflicts");
         assert_response_contains_utf16(&response, "Local Failures");
         assert_response_contains_utf16(&response, "Server Failures");
