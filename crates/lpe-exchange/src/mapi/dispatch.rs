@@ -2199,11 +2199,13 @@ async fn folder_properties_for_open<S>(
     _session: &MapiSession,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> HashMap<u32, MapiValue>
 where
     S: ExchangeStore,
 {
-    let mut properties = folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes);
+    let mut properties =
+        folder_properties_for_open_from_mailboxes(principal, folder_id, mailboxes, snapshot);
     if folder_id == IPM_SUBTREE_FOLDER_ID {
         if let Ok(Some(ost_id)) = store
             .fetch_mapi_ipm_subtree_ost_id(principal.account_id)
@@ -2219,6 +2221,7 @@ fn folder_properties_for_open_from_mailboxes(
     principal: &AccountPrincipal,
     folder_id: u64,
     mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
 ) -> HashMap<u32, MapiValue> {
     let mut properties = HashMap::new();
     let open_folder_property_tags = [
@@ -2231,6 +2234,7 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_FOLDER_TYPE,
         PID_TAG_CONTENT_COUNT,
         PID_TAG_CONTENT_UNREAD_COUNT,
+        PID_TAG_ASSOCIATED_CONTENT_COUNT,
         PID_TAG_DELETED_COUNT_TOTAL,
         PID_TAG_SUBFOLDERS,
         PID_TAG_ACCESS,
@@ -2275,6 +2279,10 @@ fn folder_properties_for_open_from_mailboxes(
             }
         }
     }
+    properties.insert(
+        PID_TAG_ASSOCIATED_CONTENT_COUNT,
+        MapiValue::U32(associated_folder_message_count(folder_id, snapshot)),
+    );
     properties
 }
 
@@ -6933,9 +6941,10 @@ where
                         .public_folder_replica_server_names(folder_id)
                         .is_empty();
                 session.record_opened_folder(folder_id);
-                let properties =
-                    folder_properties_for_open(store, principal, session, folder_id, mailboxes)
-                        .await;
+                let properties = folder_properties_for_open(
+                    store, principal, session, folder_id, mailboxes, snapshot,
+                )
+                .await;
                 tracing::info!(
                     rca_debug = true,
                     adapter = "mapi",
@@ -9653,9 +9662,10 @@ where
                 if let Some(folder_id) =
                     advertised_special_folder_id_for_create(parent_folder_id, display_name)
                 {
-                    let properties =
-                        folder_properties_for_open(store, principal, session, folder_id, mailboxes)
-                            .await;
+                    let properties = folder_properties_for_open(
+                        store, principal, session, folder_id, mailboxes, snapshot,
+                    )
+                    .await;
                     let handle = session.allocate_output_handle(
                         request.output_handle_index,
                         MapiObject::Folder {
@@ -9677,7 +9687,7 @@ where
                     }) {
                         let folder_id = mapi_folder_id(existing);
                         let properties = folder_properties_for_open(
-                            store, principal, session, folder_id, mailboxes,
+                            store, principal, session, folder_id, mailboxes, snapshot,
                         )
                         .await;
                         let handle = session.allocate_output_handle(
@@ -16326,8 +16336,12 @@ mod tests {
             is_subscribed: true,
         };
 
-        let properties =
-            folder_properties_for_open_from_mailboxes(&principal, INBOX_FOLDER_ID, &[inbox]);
+        let properties = folder_properties_for_open_from_mailboxes(
+            &principal,
+            INBOX_FOLDER_ID,
+            &[inbox],
+            &MapiMailStoreSnapshot::empty(),
+        );
 
         assert_eq!(
             properties.get(&PID_TAG_DISPLAY_NAME_W),
@@ -16340,6 +16354,13 @@ mod tests {
         assert_eq!(
             properties.get(&PID_TAG_CONTENT_UNREAD_COUNT),
             Some(&MapiValue::U32(17))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_ASSOCIATED_CONTENT_COUNT),
+            Some(&MapiValue::U32(associated_folder_message_count(
+                INBOX_FOLDER_ID,
+                &MapiMailStoreSnapshot::empty()
+            )))
         );
         assert_eq!(
             properties.get(&PID_TAG_CONTAINER_CLASS_W),
@@ -16358,6 +16379,51 @@ mod tests {
             properties.get(&PID_TAG_RECORD_KEY),
             Some(&MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 INBOX_FOLDER_ID
+            )))
+        );
+    }
+
+    #[test]
+    fn folder_properties_for_open_reports_inbox_associated_content_count() {
+        let principal = test_principal();
+        let inbox_id = Uuid::from_u128(0x2222);
+        let config_id = Uuid::from_u128(0x3333);
+        crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
+        crate::mapi::identity::remember_mapi_identity(config_id, 0x7fff_ffff_fffb_0001);
+        let inbox = JmapMailbox {
+            id: inbox_id,
+            parent_id: None,
+            role: "inbox".to_string(),
+            name: "INBOX".to_string(),
+            sort_order: 0,
+            modseq: 42,
+            total_emails: 18,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let snapshot = MapiMailStoreSnapshot::empty().with_associated_configs(vec![
+            crate::store::MapiAssociatedConfigRecord {
+                id: config_id,
+                account_id: principal.account_id,
+                folder_id: INBOX_FOLDER_ID,
+                message_class: "IPM.Configuration.EAS".to_string(),
+                subject: "IPM.Configuration.EAS".to_string(),
+                properties_json: serde_json::json!({}),
+            },
+        ]);
+
+        let properties = folder_properties_for_open_from_mailboxes(
+            &principal,
+            INBOX_FOLDER_ID,
+            &[inbox],
+            &snapshot,
+        );
+
+        assert_eq!(
+            properties.get(&PID_TAG_ASSOCIATED_CONTENT_COUNT),
+            Some(&MapiValue::U32(associated_folder_message_count(
+                INBOX_FOLDER_ID,
+                &snapshot
             )))
         );
     }
