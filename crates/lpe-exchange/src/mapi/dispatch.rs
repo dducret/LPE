@@ -5172,6 +5172,16 @@ fn log_outlook_contents_table_query_rows(
         &selected_columns,
         snapshot,
     );
+    let inbox_associated_wire_row_summary = format_inbox_associated_wire_row_summary(
+        *folder_id,
+        *associated,
+        *position,
+        request.query_forward_read(),
+        requested_row_count,
+        sort_orders,
+        &selected_columns,
+        snapshot,
+    );
 
     tracing::info!(
         rca_debug = true,
@@ -5204,9 +5214,10 @@ fn log_outlook_contents_table_query_rows(
                 &selected_columns,
                 sort_orders,
                 snapshot
-            ),
+        ),
         query_row_window_summary = %query_row_window_summary,
         query_row_value_summary = %query_row_value_summary,
+        inbox_associated_wire_row_summary = %inbox_associated_wire_row_summary,
         common_views_wlink_target_decoding = %if *folder_id == COMMON_VIEWS_FOLDER_ID && *associated {
             format_common_views_wlink_target_decoding(principal.account_id, snapshot)
         } else {
@@ -5323,6 +5334,20 @@ fn log_outlook_contents_table_find_row(
     } else {
         String::new()
     };
+    let found_wire_row_summary = if response.get(7).copied().unwrap_or(0) == 1 {
+        format_inbox_associated_wire_row_summary(
+            *folder_id,
+            *associated,
+            *position,
+            true,
+            1,
+            sort_orders,
+            &selected_columns,
+            snapshot,
+        )
+    } else {
+        String::new()
+    };
     tracing::info!(
         rca_debug = true,
         adapter = "mapi",
@@ -5360,6 +5385,12 @@ fn log_outlook_contents_table_find_row(
                 snapshot
             ),
         find_row_value_summary = %found_row_value_summary,
+        find_row_wire_summary = %found_wire_row_summary,
+        response_row_wire_preview = %if response.get(7).copied().unwrap_or(0) == 1 {
+            hex_preview(response.get(8..).unwrap_or_default(), 160)
+        } else {
+            String::new()
+        },
         "rca debug outlook contents table find row"
     );
 }
@@ -5719,6 +5750,59 @@ fn format_outlook_query_row_values(
         })
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn format_inbox_associated_wire_row_summary(
+    folder_id: u64,
+    associated: bool,
+    position: usize,
+    forward_read: bool,
+    row_count: usize,
+    sort_orders: &[MapiSortOrder],
+    columns: &[u32],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    if !associated || folder_id != INBOX_FOLDER_ID || row_count == 0 || columns.is_empty() {
+        return String::new();
+    }
+    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    let selected = select_query_window(rows.len(), position, forward_read, row_count);
+    let column_shape = columns
+        .iter()
+        .map(|tag| format!("0x{tag:08x}:type=0x{:04x}", *tag & 0x0000_ffff))
+        .collect::<Vec<_>>()
+        .join(",");
+    let row_summaries = selected
+        .iter()
+        .map(|index| {
+            let message = &rows[*index];
+            let values = serialize_associated_config_row(message, columns);
+            let standard_row = standard_property_row_bytes(&values);
+            format!(
+                "index={};id=0x{:016x};class={};status=0x{:02x};value_len={};standard_len={};value_preview={};standard_preview={}",
+                index,
+                message.id,
+                message.message_class,
+                standard_row.first().copied().unwrap_or(0xff),
+                values.len(),
+                standard_row.len(),
+                hex_preview(&values, 160),
+                hex_preview(&standard_row, 160)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "total={};position={};forward={};requested={};returned={};columns={};{}",
+        rows.len(),
+        position,
+        forward_read,
+        row_count,
+        selected.len(),
+        column_shape,
+        row_summaries
+    )
 }
 
 fn format_common_views_wlink_target_decoding(

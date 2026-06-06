@@ -4259,6 +4259,12 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
     response.extend_from_slice(values);
 }
 
+pub(in crate::mapi) fn standard_property_row_bytes(values: &[u8]) -> Vec<u8> {
+    let mut row = Vec::with_capacity(values.len().saturating_add(1));
+    write_standard_property_row(&mut row, values);
+    row
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
