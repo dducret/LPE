@@ -2135,7 +2135,7 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};last_open={};last_contents_table={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
@@ -2145,8 +2145,84 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         state.inbox_associated_config_stream_read_observed,
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
+        debug_context_or_none(&state.last_inbox_associated_query_context),
+        debug_context_or_none(&state.last_inbox_associated_find_context),
         debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
         state.recent_probe_actions.join(">")
+    ))
+}
+
+fn format_inbox_associated_query_context(
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<String> {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return None;
+    };
+    if !*associated || *folder_id != INBOX_FOLDER_ID {
+        return None;
+    }
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let requested_row_count = request.query_row_count().unwrap_or(0);
+    Some(format!(
+        "input_index={};position={};forward={};requested_rows={};columns={};sort={};window={}",
+        request.input_handle_index().unwrap_or(0),
+        position,
+        request.query_forward_read(),
+        requested_row_count,
+        format_debug_property_tags(&selected_columns),
+        format_debug_sort_orders(sort_orders),
+        format_inbox_associated_query_row_window(
+            *position,
+            request.query_forward_read(),
+            requested_row_count,
+            sort_orders,
+            snapshot
+        )
+    ))
+}
+
+fn format_inbox_associated_find_context(
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    snapshot: &MapiMailStoreSnapshot,
+    response: &[u8],
+) -> Option<String> {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return None;
+    };
+    if !*associated || *folder_id != INBOX_FOLDER_ID {
+        return None;
+    }
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    Some(format!(
+        "input_index={};origin={};backward={};found={};position={};columns={};sort={};restriction={};row={}",
+        request.input_handle_index().unwrap_or(0),
+        request.find_origin().unwrap_or(0),
+        request.find_backward(),
+        response.get(7).copied().unwrap_or(0),
+        position,
+        format_debug_property_tags(&selected_columns),
+        format_debug_sort_orders(sort_orders),
+        format_debug_restriction(request_restriction_bytes(request)),
+        format_inbox_associated_query_row_window(*position, true, 1, sort_orders, snapshot)
     ))
 }
 
@@ -9565,6 +9641,11 @@ where
                     emails,
                     snapshot,
                 );
+                if let Some(context) =
+                    format_inbox_associated_query_context(query_object, &request, snapshot)
+                {
+                    session.record_last_inbox_associated_query_context(context);
+                }
                 responses.extend_from_slice(&rop_query_rows_response(
                     &request,
                     input_object_mut(session, &handle_slots, &request),
@@ -10450,6 +10531,14 @@ where
                     snapshot,
                     &response,
                 );
+                if let Some(context) = format_inbox_associated_find_context(
+                    input_object(session, &handle_slots, &request),
+                    &request,
+                    snapshot,
+                    &response,
+                ) {
+                    session.record_last_inbox_associated_find_context(context);
+                }
                 responses.extend_from_slice(&response);
             }
             Some(RopId::GetValidAttachments) => {
