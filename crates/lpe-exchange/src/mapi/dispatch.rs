@@ -2157,7 +2157,7 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};next_debug_focus={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};next_debug_focus={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
@@ -2166,6 +2166,7 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         state.inbox_associated_config_stream_open_observed,
         state.inbox_associated_config_stream_read_observed,
         inbox_open_loop_next_debug_focus(state),
+        debug_context_or_none(&state.first_inbox_loop_transition_context),
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
         debug_context_or_none(&state.last_inbox_associated_query_context),
@@ -7446,6 +7447,34 @@ where
                 );
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 if folder_id == INBOX_FOLDER_ID {
+                    let first_loop_transition = format!(
+                        "trigger=open_folder;open_probe_before={};folder_type_probe_before={};input_index={};input_handle={};input_kind={};input_folder={};input_context={};output_index={};output_handle={};open_mode=0x{:02x};requested_folder=0x{requested_folder_id:016x};resolved_folder=0x{folder_id:016x};alias_resolved={};recent_before={}",
+                        session
+                            .post_hierarchy_actions
+                            .inbox_open_folder_probe_count,
+                        session
+                            .post_hierarchy_actions
+                            .inbox_folder_type_getprops_probe_count,
+                        request.input_handle_index().unwrap_or(0),
+                        format_optional_debug_handle(input_handle_value),
+                        input_object_kind,
+                        input_folder_id,
+                        input_context,
+                        request.output_handle_index.unwrap_or(0),
+                        handle,
+                        request.payload.get(8).copied().unwrap_or(0),
+                        requested_folder_id != folder_id,
+                        session.post_hierarchy_actions.recent_probe_actions.join(">")
+                    );
+                    if session.post_hierarchy_actions.inbox_open_folder_probe_count >= 1
+                        && !session
+                            .post_hierarchy_actions
+                            .inbox_normal_contents_table_observed
+                    {
+                        session.record_first_inbox_loop_transition_context(
+                            first_loop_transition.clone(),
+                        );
+                    }
                     session.record_inbox_open_folder_probe();
                     session.record_last_inbox_open_folder_context(format!(
                         "input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={};open_mode=0x{:02x};display_name={};folder_type={};container_class={};content_count={};unread_count={};subfolders={};record_key={};source_key={};parent_source_key={}",
@@ -7501,6 +7530,26 @@ where
                     if let Some(summary) =
                         format_inbox_open_loop_summary(&session.post_hierarchy_actions)
                     {
+                        if !session.post_hierarchy_actions.inbox_loop_transition_logged {
+                            tracing::info!(
+                                rca_debug = true,
+                                adapter = "mapi",
+                                endpoint = "emsmdb",
+                                mailbox = %principal.email,
+                                request_type = "Execute",
+                                request_rop_id = "0x02",
+                                folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
+                                transition_context =
+                                    %debug_context_or_none(
+                                        &session
+                                            .post_hierarchy_actions
+                                            .first_inbox_loop_transition_context
+                                    ),
+                                loop_summary = %summary,
+                                "rca debug mapi inbox open loop transition"
+                            );
+                            session.mark_inbox_loop_transition_logged();
+                        }
                         tracing::info!(
                             rca_debug = true,
                             adapter = "mapi",

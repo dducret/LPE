@@ -89,6 +89,8 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_hierarchy_query_context: String,
     pub(in crate::mapi) last_inbox_related_release_context: String,
     pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
+    pub(in crate::mapi) first_inbox_loop_transition_context: String,
+    pub(in crate::mapi) inbox_loop_transition_logged: bool,
     pub(in crate::mapi) recent_probe_actions: Vec<String>,
 }
 
@@ -860,6 +862,21 @@ impl MapiSession {
     ) {
         self.post_hierarchy_actions
             .last_inbox_folder_type_getprops_context = context;
+    }
+
+    pub(in crate::mapi) fn record_first_inbox_loop_transition_context(&mut self, context: String) {
+        if self
+            .post_hierarchy_actions
+            .first_inbox_loop_transition_context
+            .is_empty()
+        {
+            self.post_hierarchy_actions
+                .first_inbox_loop_transition_context = context;
+        }
+    }
+
+    pub(in crate::mapi) fn mark_inbox_loop_transition_logged(&mut self) {
+        self.post_hierarchy_actions.inbox_loop_transition_logged = true;
     }
 
     pub(in crate::mapi) fn record_recent_probe_action(&mut self, action: String) {
