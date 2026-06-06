@@ -2279,6 +2279,13 @@ fn folder_properties_for_open_from_mailboxes(
             }
         }
     }
+    if folder_id == INBOX_FOLDER_ID {
+        if let Some(value) =
+            special_folder_property_value(folder_id, PID_TAG_DISPLAY_NAME_W, principal.account_id)
+        {
+            properties.insert(PID_TAG_DISPLAY_NAME_W, value);
+        }
+    }
     properties.insert(
         PID_TAG_ASSOCIATED_CONTENT_COUNT,
         MapiValue::U32(associated_folder_message_count(folder_id, snapshot)),
@@ -16320,7 +16327,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_properties_for_open_prefers_loaded_mailbox_for_inbox() {
+    fn folder_properties_for_open_keeps_loaded_inbox_counts_and_mapi_name() {
         let principal = test_principal();
         let inbox_id = Uuid::from_u128(0x1111);
         crate::mapi::identity::remember_mapi_identity(inbox_id, INBOX_FOLDER_ID);
@@ -16345,7 +16352,7 @@ mod tests {
 
         assert_eq!(
             properties.get(&PID_TAG_DISPLAY_NAME_W),
-            Some(&MapiValue::String("INBOX".to_string()))
+            Some(&MapiValue::String("Inbox".to_string()))
         );
         assert_eq!(
             properties.get(&PID_TAG_CONTENT_COUNT),
