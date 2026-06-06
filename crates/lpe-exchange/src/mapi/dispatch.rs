@@ -8239,9 +8239,7 @@ where
                         session.record_last_inbox_folder_type_getprops_context(format!(
                             "{};{}",
                             context,
-                            format_inbox_folder_type_getprops_response_context(
-                                &property_response
-                            )
+                            format_inbox_folder_type_getprops_response_context(&property_response)
                         ));
                     }
                     if let Some(summary) =
@@ -17243,13 +17241,13 @@ mod tests {
     #[test]
     fn inbox_folder_type_getprops_response_context_includes_wire_preview() {
         let context = format_inbox_folder_type_getprops_response_context(&[
-            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+            0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
         ]);
 
-        assert!(context.contains("response_bytes=10"));
+        assert!(context.contains("response_bytes=11"));
         assert!(context.contains("return_value=0x00000000"));
-        assert!(context.contains("row_bytes=4"));
-        assert!(context.contains("row_preview=01000000"));
+        assert!(context.contains("row_bytes=5"));
+        assert!(context.contains("row_preview=0001000000"));
     }
 
     #[test]

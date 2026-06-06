@@ -40,7 +40,9 @@ where
         MapiRequestType::GetProps => {
             nspi_props_response(store, principal, request, "GetProps", request_id).await
         }
-        MapiRequestType::GetSpecialTable => nspi_special_table_response(request_id),
+        MapiRequestType::GetSpecialTable => {
+            nspi_special_table_response(principal, request, request_id)
+        }
         MapiRequestType::GetTemplateInfo => {
             nspi_template_info_response(store, principal, request_id).await
         }
@@ -175,6 +177,8 @@ const PID_TAG_ADDRESS_BOOK_IS_MASTER: u32 = 0xFFFB_000B;
 const AB_RECIPIENTS: u32 = 0x0000_0001;
 const AB_UNMODIFIABLE: u32 = 0x0000_0008;
 const DT_CONTAINER: u32 = 0x0000_0100;
+const NSPI_ADDRESS_CREATION_TEMPLATES_FLAG: u32 = 0x0000_0002;
+const NSPI_UNICODE_STRINGS_FLAG: u32 = 0x0000_0004;
 
 const NSPI_ADDITIONAL_REQUESTED_PROPERTY_TAGS: &[u32] = &[
     0x0FFF_0102, // PidTagEntryId
@@ -958,6 +962,57 @@ fn log_nspi_rowset_debug(
     );
 }
 
+fn log_nspi_response_contract(
+    principal: &AccountPrincipal,
+    request_type: &str,
+    request_id: &str,
+    method_return_value: u32,
+    body: &[u8],
+    rowset_present: bool,
+    returned_row_count: usize,
+    property_tags: &[u32],
+    context: &str,
+) {
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "nspi",
+        mailbox = %principal.email,
+        request_type = request_type,
+        mapi_request_id = request_id,
+        transport_response_code = 0u16,
+        method_return_value = %format!("{method_return_value:#010x}"),
+        method_return_status = nspi_method_status_name(method_return_value),
+        item_not_found_encoded = method_return_value == 0x8004_010f,
+        body_contains_item_not_found = nspi_body_contains_status(body, 0x8004_010f),
+        rowset_present = rowset_present,
+        returned_row_count = returned_row_count,
+        property_tag_count = property_tags.len(),
+        property_tags = %format_nspi_property_tags_for_debug(property_tags),
+        body_bytes = body.len(),
+        body_preview_hex = %hex_preview(body, 160),
+        context = context,
+        message = "rca debug mapi nspi response contract",
+    );
+}
+
+fn nspi_body_contains_status(body: &[u8], status: u32) -> bool {
+    let status = status.to_le_bytes();
+    body.windows(status.len()).any(|bytes| bytes == status)
+}
+
+fn nspi_method_status_name(value: u32) -> &'static str {
+    match value {
+        0x0000_0000 => "Success",
+        0x0004_03A9 => "ErrorsReturned",
+        0x8004_010F => "NotFound",
+        0x8004_010B => "InvalidParameter",
+        0x8004_0102 => "NotEnoughMemory",
+        0x8004_0106 => "InvalidBookmark",
+        _ => "Unknown",
+    }
+}
+
 fn format_nspi_entry_summaries_for_debug(
     account_id: Uuid,
     entries: &[ExchangeAddressBookEntry],
@@ -1080,6 +1135,17 @@ where
         }
     }
     write_u32(&mut body, 0);
+    log_nspi_response_contract(
+        principal,
+        request_type,
+        request_id,
+        0,
+        &body,
+        !entries.is_empty(),
+        entries.len(),
+        &tags,
+        "rowset",
+    );
     mapi_response(request_type, request_id, 0, body, None)
 }
 
@@ -1245,6 +1311,17 @@ where
         }
     }
     write_u32(&mut body, 0);
+    log_nspi_response_contract(
+        principal,
+        "GetMatches",
+        request_id,
+        0,
+        &body,
+        !entries.is_empty(),
+        entries.len(),
+        &tags,
+        "matches",
+    );
     mapi_response("GetMatches", request_id, 0, body, None)
 }
 
@@ -1276,8 +1353,29 @@ where
     mapi_response(request_type, request_id, 0, body, None)
 }
 
-pub(in crate::mapi) fn nspi_special_table_response(request_id: &str) -> Response {
+pub(in crate::mapi) fn nspi_special_table_response(
+    principal: &AccountPrincipal,
+    request: &[u8],
+    request_id: &str,
+) -> Response {
+    let flags = nspi_request_flags(request);
+    let context = format!(
+        "special_table;request_flags={};unicode_strings={};address_creation_templates={}",
+        flags
+            .map(|value| format!("{value:#010x}"))
+            .unwrap_or_else(|| "missing".to_string()),
+        flags.is_some_and(|value| value & NSPI_UNICODE_STRINGS_FLAG != 0),
+        flags.is_some_and(|value| value & NSPI_ADDRESS_CREATION_TEMPLATES_FLAG != 0)
+    );
     let mut table_row = Vec::new();
+    let property_tags = [
+        PID_TAG_ENTRY_ID,
+        PID_TAG_CONTAINER_FLAGS,
+        PID_TAG_DEPTH,
+        PID_TAG_ADDRESS_BOOK_CONTAINER_ID,
+        0x3001_001F,
+        PID_TAG_ADDRESS_BOOK_IS_MASTER,
+    ];
     write_u32(&mut table_row, 6);
     write_address_book_tagged_property_value(
         &mut table_row,
@@ -1316,7 +1414,25 @@ pub(in crate::mapi) fn nspi_special_table_response(request_id: &str) -> Response
     write_u32(&mut body, 1);
     body.extend_from_slice(&table_row);
     write_u32(&mut body, 0);
+    log_nspi_response_contract(
+        principal,
+        "GetSpecialTable",
+        request_id,
+        0,
+        &body,
+        true,
+        1,
+        &property_tags,
+        &context,
+    );
     mapi_response("GetSpecialTable", request_id, 0, body, None)
+}
+
+fn nspi_request_flags(request: &[u8]) -> Option<u32> {
+    request
+        .get(..4)
+        .and_then(|bytes| bytes.try_into().ok())
+        .map(u32::from_le_bytes)
 }
 
 fn nspi_gal_container_entry_id() -> Vec<u8> {
