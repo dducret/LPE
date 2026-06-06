@@ -4070,7 +4070,7 @@ fn special_folder_metadata(folder_id: u64) -> (&'static str, u64, &'static str, 
             "Quick Step Settings",
             IPM_SUBTREE_FOLDER_ID,
             "IPF.Configuration",
-            true,
+            false,
         ),
         ARCHIVE_FOLDER_ID => ("Archive", IPM_SUBTREE_FOLDER_ID, "IPF.Note", false),
         FREEBUSY_DATA_FOLDER_ID => ("FreeBusy Data", ROOT_FOLDER_ID, "", false),
@@ -4555,6 +4555,26 @@ mod tests {
         assert_eq!(u32::from_le_bytes(row[8..12].try_into().unwrap()), 0);
         assert_eq!(u32::from_le_bytes(row[12..16].try_into().unwrap()), 0);
         assert_eq!(u32::from_le_bytes(row[16..20].try_into().unwrap()), 0);
+    }
+
+    #[test]
+    fn quick_step_settings_is_projected_as_leaf_configuration_folder() {
+        assert_eq!(
+            special_folder_property_value(
+                QUICK_STEP_SETTINGS_FOLDER_ID,
+                PID_TAG_SUBFOLDERS,
+                Uuid::nil()
+            ),
+            Some(MapiValue::Bool(false))
+        );
+
+        let row = serialize_special_folder_row(
+            QUICK_STEP_SETTINGS_FOLDER_ID,
+            &[],
+            &[PID_TAG_SUBFOLDERS],
+            None,
+        );
+        assert_eq!(row, vec![0]);
     }
 
     #[test]
