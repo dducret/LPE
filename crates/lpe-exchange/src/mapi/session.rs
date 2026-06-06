@@ -75,6 +75,10 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) inbox_open_folder_probe_count: usize,
     pub(in crate::mapi) inbox_folder_type_getprops_probe_count: usize,
     pub(in crate::mapi) inbox_normal_contents_table_observed: bool,
+    pub(in crate::mapi) inbox_associated_contents_table_observed: bool,
+    pub(in crate::mapi) last_inbox_open_folder_context: String,
+    pub(in crate::mapi) last_inbox_contents_table_context: String,
+    pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
     pub(in crate::mapi) recent_probe_actions: Vec<String>,
 }
 
@@ -766,6 +770,28 @@ impl MapiSession {
     pub(in crate::mapi) fn record_inbox_normal_contents_table(&mut self) {
         self.post_hierarchy_actions
             .inbox_normal_contents_table_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_inbox_associated_contents_table(&mut self) {
+        self.post_hierarchy_actions
+            .inbox_associated_contents_table_observed = true;
+    }
+
+    pub(in crate::mapi) fn record_last_inbox_open_folder_context(&mut self, context: String) {
+        self.post_hierarchy_actions.last_inbox_open_folder_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_inbox_contents_table_context(&mut self, context: String) {
+        self.post_hierarchy_actions
+            .last_inbox_contents_table_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_inbox_folder_type_getprops_context(
+        &mut self,
+        context: String,
+    ) {
+        self.post_hierarchy_actions
+            .last_inbox_folder_type_getprops_context = context;
     }
 
     pub(in crate::mapi) fn record_recent_probe_action(&mut self, action: String) {

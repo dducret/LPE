@@ -2135,12 +2135,24 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};last_open={};last_contents_table={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
+        state.inbox_associated_contents_table_observed,
+        debug_context_or_none(&state.last_inbox_open_folder_context),
+        debug_context_or_none(&state.last_inbox_contents_table_context),
+        debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
         state.recent_probe_actions.join(">")
     ))
+}
+
+fn debug_context_or_none(context: &str) -> &str {
+    if context.is_empty() {
+        "none"
+    } else {
+        context
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -6982,6 +6994,25 @@ where
                 set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
                 if folder_id == INBOX_FOLDER_ID {
                     session.record_inbox_open_folder_probe();
+                    session.record_last_inbox_open_folder_context(format!(
+                        "input_index={};input_handle={};input_kind={};input_folder={};output_index={};output_handle={};open_mode=0x{:02x};display_name={};folder_type={};container_class={};content_count={};unread_count={};subfolders={};record_key={};source_key={};parent_source_key={}",
+                        request.input_handle_index().unwrap_or(0),
+                        format_optional_debug_handle(input_handle_value),
+                        input_object_kind,
+                        input_folder_id,
+                        request.output_handle_index.unwrap_or(0),
+                        handle,
+                        request.payload.get(8).copied().unwrap_or(0),
+                        inbox_contract_display_name,
+                        inbox_contract_folder_type,
+                        inbox_contract_container_class,
+                        inbox_contract_content_count,
+                        inbox_contract_unread_count,
+                        inbox_contract_subfolders,
+                        inbox_contract_record_key,
+                        inbox_contract_source_key,
+                        inbox_contract_parent_source_key
+                    ));
                     session.record_recent_probe_action(format!(
                         "OpenFolder(in={},handle={},out={},folder=0x{folder_id:016x})",
                         request.input_handle_index().unwrap_or(0),
@@ -7471,13 +7502,25 @@ where
                     row_count,
                     handle,
                 );
-                if folder_id == INBOX_FOLDER_ID && !associated {
-                    session.record_inbox_normal_contents_table();
-                    session.record_recent_probe_action(format!(
-                        "GetContentsTable(in={},out={},associated=false,row_count={row_count})",
+                if folder_id == INBOX_FOLDER_ID {
+                    if associated {
+                        session.record_inbox_associated_contents_table();
+                    } else {
+                        session.record_inbox_normal_contents_table();
+                    }
+                    session.record_last_inbox_contents_table_context(format!(
+                        "input_index={};output_index={};output_handle={};table_flags=0x{table_flags:02x};associated={associated};row_count={row_count}",
                         request.input_handle_index().unwrap_or(0),
+                        request.output_handle_index.unwrap_or(0),
                         handle
                     ));
+                    if !associated {
+                        session.record_recent_probe_action(format!(
+                            "GetContentsTable(in={},out={},associated=false,row_count={row_count})",
+                            request.input_handle_index().unwrap_or(0),
+                            handle
+                        ));
+                    }
                 }
                 if associated && folder_id == COMMON_VIEWS_FOLDER_ID {
                     log_outlook_bootstrap_phase(
@@ -7707,7 +7750,27 @@ where
                 )
                 .await
                 .unwrap_or_default();
-                responses.extend_from_slice(&rop_get_properties_specific_response_with_custom(
+                let inbox_folder_type_getprops_context = if let (
+                    true,
+                    Some(MapiObject::Folder { properties, .. }),
+                ) = (is_inbox_folder_type_probe, object)
+                {
+                    Some(format!(
+                            "input_index={};input_handle={};requested_tags={};folder_type={};display_name={};container_class={};content_count={};unread_count={};associated_count={}",
+                            request.input_handle_index().unwrap_or(0),
+                            format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                            format_debug_property_tags(&request.property_tags()),
+                            mapi_value_debug_u32(properties, PID_TAG_FOLDER_TYPE),
+                            mapi_value_debug_string(properties, PID_TAG_DISPLAY_NAME_W),
+                            mapi_value_debug_string(properties, PID_TAG_CONTAINER_CLASS_W),
+                            mapi_value_debug_u32(properties, PID_TAG_CONTENT_COUNT),
+                            mapi_value_debug_u32(properties, PID_TAG_CONTENT_UNREAD_COUNT),
+                            mapi_value_debug_u32(properties, PID_TAG_ASSOCIATED_CONTENT_COUNT)
+                        ))
+                } else {
+                    None
+                };
+                let property_response = rop_get_properties_specific_response_with_custom(
                     &request,
                     object,
                     principal,
@@ -7715,7 +7778,31 @@ where
                     emails_for_request,
                     snapshot,
                     &custom_values,
-                ));
+                );
+                responses.extend_from_slice(&property_response);
+                if is_inbox_folder_type_probe {
+                    if let Some(context) = inbox_folder_type_getprops_context {
+                        session.record_last_inbox_folder_type_getprops_context(context);
+                    }
+                    if let Some(summary) =
+                        format_inbox_open_loop_summary(&session.post_hierarchy_actions)
+                    {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x07",
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            input_handle_value =
+                                %format_optional_debug_handle(input_handle(&handle_slots, &request)),
+                            folder_id = format!("0x{INBOX_FOLDER_ID:016x}"),
+                            loop_summary = %summary,
+                            "rca debug mapi repeated inbox open folder loop summary"
+                        );
+                    }
+                }
             }
             Some(RopId::GetPropertiesAll) => {
                 responses.extend_from_slice(&rop_get_properties_all_response(
