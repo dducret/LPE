@@ -2102,10 +2102,35 @@ fn format_live_handle_debug_summary(session: &MapiSession) -> String {
                     )
                 })
                 .unwrap_or_else(|| "folder=;role=;container=".to_string());
+            let table = match object {
+                MapiObject::ContentsTable {
+                    associated,
+                    position,
+                    columns,
+                    sort_orders,
+                    ..
+                } => format!(
+                    ";associated={associated};position={position};columns={};sort={}",
+                    format_debug_property_tags(columns),
+                    format_debug_sort_orders(sort_orders)
+                ),
+                MapiObject::HierarchyTable {
+                    position,
+                    columns,
+                    sort_orders,
+                    ..
+                } => format!(
+                    ";position={position};columns={};sort={}",
+                    format_debug_property_tags(columns),
+                    format_debug_sort_orders(sort_orders)
+                ),
+                _ => String::new(),
+            };
             format!(
-                "handle={handle};kind={};{}",
+                "handle={handle};kind={};{}{}",
                 mapi_object_debug_kind(Some(object)),
-                folder
+                folder,
+                table
             )
         })
         .collect::<Vec<_>>()
