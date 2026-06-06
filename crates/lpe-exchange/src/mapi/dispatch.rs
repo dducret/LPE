@@ -2135,7 +2135,7 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};next_debug_focus={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
@@ -2143,13 +2143,27 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         state.inbox_associated_config_open_observed,
         state.inbox_associated_config_stream_open_observed,
         state.inbox_associated_config_stream_read_observed,
+        inbox_open_loop_next_debug_focus(state),
         debug_context_or_none(&state.last_inbox_open_folder_context),
         debug_context_or_none(&state.last_inbox_contents_table_context),
         debug_context_or_none(&state.last_inbox_associated_query_context),
         debug_context_or_none(&state.last_inbox_associated_find_context),
+        debug_context_or_none(&state.last_common_views_inbox_shortcut_context),
+        debug_context_or_none(&state.last_inbox_related_release_context),
         debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
         state.recent_probe_actions.join(">")
     ))
+}
+
+fn inbox_open_loop_next_debug_focus(state: &PostHierarchyActionState) -> &'static str {
+    if state.inbox_associated_contents_table_observed
+        && !state.inbox_associated_config_open_observed
+        && !state.inbox_normal_contents_table_observed
+    {
+        "common_views_or_inbox_fai_handoff"
+    } else {
+        "inbox_open_folder_loop"
+    }
 }
 
 fn format_inbox_associated_query_context(
@@ -2213,7 +2227,7 @@ fn format_inbox_associated_find_context(
     }
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
     Some(format!(
-        "input_index={};origin={};backward={};found={};position={};columns={};sort={};restriction={};row={}",
+        "input_index={};origin={};backward={};found={};position={};columns={};sort={};restriction={};row={};prefix_find_summary={}",
         request.input_handle_index().unwrap_or(0),
         request.find_origin().unwrap_or(0),
         request.find_backward(),
@@ -2222,8 +2236,128 @@ fn format_inbox_associated_find_context(
         format_debug_property_tags(&selected_columns),
         format_debug_sort_orders(sort_orders),
         format_debug_restriction(request_restriction_bytes(request)),
-        format_inbox_associated_query_row_window(*position, true, 1, sort_orders, snapshot)
+        format_inbox_associated_query_row_window(*position, true, 1, sort_orders, snapshot),
+        format_inbox_associated_prefix_find_summary(*position, sort_orders, snapshot)
     ))
+}
+
+fn format_inbox_associated_prefix_find_summary(
+    position: usize,
+    sort_orders: &[MapiSortOrder],
+    snapshot: &MapiMailStoreSnapshot,
+) -> String {
+    let mut rows = snapshot.associated_config_messages_for_folder(INBOX_FOLDER_ID);
+    sort_associated_config_messages_for_debug(&mut rows, sort_orders);
+    let first_class = rows
+        .get(position)
+        .map(|message| message.message_class.as_str())
+        .unwrap_or("none");
+    let classes = rows
+        .iter()
+        .map(|message| message.message_class.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "first_class={};account_prefs_first={};available_classes={}",
+        first_class,
+        first_class == "IPM.Configuration.AccountPrefs",
+        classes
+    )
+}
+
+fn format_common_views_inbox_shortcut_context(
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    account_id: uuid::Uuid,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<String> {
+    let Some(MapiObject::ContentsTable {
+        folder_id,
+        associated,
+        columns,
+        position,
+        sort_orders,
+        ..
+    }) = object
+    else {
+        return None;
+    };
+    if !*associated || *folder_id != COMMON_VIEWS_FOLDER_ID {
+        return None;
+    }
+    let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
+    let requested_row_count = request.query_row_count().unwrap_or(0);
+    let mut rows = snapshot.common_views_table_messages().collect::<Vec<_>>();
+    sort_common_views_messages(&mut rows, sort_orders);
+    let selected = select_query_window(
+        rows.len(),
+        *position,
+        request.query_forward_read(),
+        requested_row_count,
+    );
+    let selected_inbox_indexes = selected
+        .iter()
+        .filter_map(|index| match &rows[*index] {
+            crate::mapi_store::MapiCommonViewsMessage::NavigationShortcut(shortcut)
+                if shortcut.target_folder_id == Some(INBOX_FOLDER_ID) =>
+            {
+                Some(index.to_string())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!(
+        "input_index={};position={};requested_rows={};columns={};sort={};selected_inbox_indexes={};wlink_decoding={}",
+        request.input_handle_index().unwrap_or(0),
+        position,
+        requested_row_count,
+        format_debug_property_tags(&selected_columns),
+        format_debug_sort_orders(sort_orders),
+        if selected_inbox_indexes.is_empty() {
+            "none".to_string()
+        } else {
+            selected_inbox_indexes
+        },
+        format_common_views_wlink_target_decoding(account_id, snapshot)
+    ))
+}
+
+fn format_inbox_related_release_context(
+    object: Option<&MapiObject>,
+    handle: Option<u32>,
+    state: &PostHierarchyActionState,
+) -> Option<String> {
+    match object {
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            columns,
+            position,
+            sort_orders,
+            ..
+        }) if *folder_id == INBOX_FOLDER_ID || *folder_id == COMMON_VIEWS_FOLDER_ID => Some(
+            format!(
+                "handle={};kind=contents_table;folder=0x{folder_id:016x};associated={};position={};columns={};sort={};after_inbox_associated_query={};normal_contents_table_observed={}",
+                format_optional_debug_handle(handle),
+                associated,
+                position,
+                format_debug_property_tags(columns),
+                format_debug_sort_orders(sort_orders),
+                state.inbox_associated_contents_table_observed,
+                state.inbox_normal_contents_table_observed
+            ),
+        ),
+        Some(MapiObject::Folder { folder_id, .. }) if *folder_id == INBOX_FOLDER_ID => {
+            Some(format!(
+                "handle={};kind=folder;folder=0x{folder_id:016x};after_inbox_associated_query={};normal_contents_table_observed={}",
+                format_optional_debug_handle(handle),
+                state.inbox_associated_contents_table_observed,
+                state.inbox_normal_contents_table_observed
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn debug_context_or_none(context: &str) -> &str {
@@ -6965,6 +7099,11 @@ where
                 let released_object = input_object(session, &handle_slots, &request);
                 let released_object_kind = mapi_object_debug_kind(released_object);
                 let released_folder_id = mapi_object_debug_folder_id(released_object);
+                let inbox_related_release_context = format_inbox_related_release_context(
+                    released_object,
+                    released_handle,
+                    &session.post_hierarchy_actions,
+                );
                 if session.hierarchy_sync_completed() {
                     let remaining_before = session.handles.len();
                     post_hierarchy_release_events.push(PostHierarchyReleaseDebugEvent {
@@ -6991,6 +7130,9 @@ where
                 release_handle_slot(session, &mut handle_slots, &request);
                 if let Some(handle) = released_handle {
                     same_execute_released_handles.insert(handle);
+                }
+                if let Some(context) = inbox_related_release_context {
+                    session.record_last_inbox_related_release_context(context);
                 }
                 if let Some(event) = post_hierarchy_release_events.last_mut() {
                     event.remaining_after = session.handles.len();
@@ -9641,10 +9783,20 @@ where
                     emails,
                     snapshot,
                 );
-                if let Some(context) =
-                    format_inbox_associated_query_context(query_object, &request, snapshot)
-                {
+                let inbox_associated_query_context =
+                    format_inbox_associated_query_context(query_object, &request, snapshot);
+                let common_views_inbox_shortcut_context =
+                    format_common_views_inbox_shortcut_context(
+                        query_object,
+                        &request,
+                        principal.account_id,
+                        snapshot,
+                    );
+                if let Some(context) = inbox_associated_query_context {
                     session.record_last_inbox_associated_query_context(context);
+                }
+                if let Some(context) = common_views_inbox_shortcut_context {
+                    session.record_last_common_views_inbox_shortcut_context(context);
                 }
                 responses.extend_from_slice(&rop_query_rows_response(
                     &request,
@@ -16884,7 +17036,14 @@ mod tests {
         assert!(summary.contains("open_folder_count=2"));
         assert!(summary.contains("folder_type_getprops_count=2"));
         assert!(summary.contains("normal_contents_table_observed=false"));
+        assert!(summary.contains("next_debug_focus=inbox_open_folder_loop"));
+        assert!(summary.contains("last_common_views_inbox_shortcut=none"));
+        assert!(summary.contains("last_inbox_related_release=none"));
         assert!(summary.contains("recent_actions=Release("));
+
+        state.inbox_associated_contents_table_observed = true;
+        let summary = format_inbox_open_loop_summary(&state).unwrap();
+        assert!(summary.contains("next_debug_focus=common_views_or_inbox_fai_handoff"));
 
         state.inbox_normal_contents_table_observed = true;
         assert_eq!(format_inbox_open_loop_summary(&state), None);
