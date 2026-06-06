@@ -4708,7 +4708,10 @@ fn outlook_bootstrap_query_rows_phase(
 ) -> Option<(&'static str, u64, bool)> {
     match object {
         Some(MapiObject::HierarchyTable { folder_id, .. })
-            if matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) =>
+            if matches!(
+                *folder_id,
+                ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
+            ) =>
         {
             Some(("hierarchy_table_query_rows_completed", *folder_id, false))
         }

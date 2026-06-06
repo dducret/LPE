@@ -21,7 +21,9 @@ pub(in crate::mapi) fn hierarchy_row_count(
     mailboxes: &[JmapMailbox],
     snapshot: &MapiMailStoreSnapshot,
 ) -> u32 {
-    if is_root_hierarchy_folder(folder_id) || snapshot.public_folder_for_id(folder_id).is_some() {
+    if is_queryable_hierarchy_folder(folder_id)
+        || snapshot.public_folder_for_id(folder_id).is_some()
+    {
         hierarchy_rows(folder_id, mailboxes, snapshot, None, &[], Uuid::nil())
             .len()
             .min(u32::MAX as usize) as u32
@@ -840,6 +842,79 @@ fn special_hierarchy_row_matches(
     })
 }
 
+fn log_sync_issues_hierarchy_query_rows(
+    request: &RopRequest,
+    folder_id: u64,
+    columns: &[u32],
+    restriction: Option<&MapiRestriction>,
+    sort_orders: &[MapiSortOrder],
+    position: usize,
+    rows: &[HierarchyRow<'_>],
+    mailbox_guid: Uuid,
+) {
+    if folder_id != SYNC_ISSUES_FOLDER_ID {
+        return;
+    }
+    let requested_row_count = request.query_row_count().unwrap_or(rows.len());
+    let selected_indexes = selected_row_indexes(
+        rows.len(),
+        position,
+        request.query_forward_read(),
+        requested_row_count,
+    );
+    let selected_row_summary = selected_indexes
+        .iter()
+        .map(|index| {
+            let row = &rows[*index];
+            let row_id = hierarchy_row_id(row);
+            format!(
+                "index={index}:folder_id=0x{row_id:016x}:display_name={}:parent=0x{:016x}",
+                hierarchy_row_display_name(row),
+                hierarchy_row_parent_id(row, &[])
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    let child_candidate_summary = SYNC_ISSUES_HIERARCHY_FOLDER_IDS
+        .iter()
+        .map(|child_id| {
+            format!(
+                "folder_id=0x{child_id:016x}:display_name={}:restriction_match={}",
+                special_folder_metadata(*child_id).0,
+                special_hierarchy_row_matches(*child_id, restriction, mailbox_guid)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    tracing::info!(
+        rca_debug = true,
+        adapter = "mapi",
+        endpoint = "emsmdb",
+        request_type = "Execute",
+        request_rop_id = "0x15",
+        folder_id = %format!("0x{folder_id:016x}"),
+        folder_role = "sync_issues",
+        current_position = position,
+        requested_forward_read = request.query_forward_read(),
+        requested_row_count,
+        requested_no_advance = request.query_no_advance(),
+        table_total_row_count = rows.len(),
+        selected_row_count = selected_indexes.len(),
+        selected_row_summary = %selected_row_summary,
+        child_candidate_summary = %child_candidate_summary,
+        table_has_restriction = restriction.is_some(),
+        table_sort_order_count = sort_orders.len(),
+        selected_property_tag_count = columns.len(),
+        selected_property_tags = %columns
+            .iter()
+            .map(|tag| format!("0x{tag:08x}"))
+            .collect::<Vec<_>>()
+            .join(","),
+        "rca debug mapi sync issues hierarchy query rows"
+    );
+}
+
 pub(in crate::mapi) fn special_folder_property_value(
     folder_id: u64,
     property_tag: u32,
@@ -1158,7 +1233,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
             restriction,
             position: table_position,
             ..
-        }) if is_root_hierarchy_folder(*folder_id)
+        }) if is_queryable_hierarchy_folder(*folder_id)
             || snapshot.public_folder_for_id(*folder_id).is_some() =>
         {
             start_position = *table_position;
@@ -1167,17 +1242,27 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            hierarchy_rows(
+            let rows = hierarchy_rows(
                 *folder_id,
                 mailboxes,
                 snapshot,
                 restriction.as_ref(),
                 sort_orders,
                 mailbox_guid,
-            )
-            .into_iter()
-            .map(|row| serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid))
-            .collect::<Vec<_>>()
+            );
+            log_sync_issues_hierarchy_query_rows(
+                request,
+                *folder_id,
+                &columns,
+                restriction.as_ref(),
+                sort_orders,
+                *table_position,
+                &rows,
+                mailbox_guid,
+            );
+            rows.into_iter()
+                .map(|row| serialize_hierarchy_row(row, mailboxes, &columns, mailbox_guid))
+                .collect::<Vec<_>>()
         }
         Some(MapiObject::ContentsTable {
             folder_id,
@@ -1579,7 +1664,11 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             restriction,
             position,
             ..
-        }) if matches!(*folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) => {
+        }) if matches!(
+            *folder_id,
+            ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
+        ) =>
+        {
             let rows = hierarchy_rows(
                 *folder_id,
                 mailboxes,
@@ -3206,7 +3295,7 @@ pub(in crate::mapi) fn rop_find_row_response(
             restriction: table_restriction,
             position,
             ..
-        } if is_root_hierarchy_folder(*folder_id) => {
+        } if is_queryable_hierarchy_folder(*folder_id) => {
             let columns = if columns.is_empty() {
                 default_hierarchy_columns()
             } else {
@@ -3466,7 +3555,7 @@ pub(in crate::mapi) fn table_position_and_count(
             restriction,
             sort_orders,
             ..
-        }) if is_root_hierarchy_folder(*folder_id) => {
+        }) if is_queryable_hierarchy_folder(*folder_id) => {
             let total = hierarchy_rows(
                 *folder_id,
                 mailboxes,
@@ -3659,7 +3748,7 @@ pub(in crate::mapi) fn table_row_keys(
             sort_orders,
             restriction,
             ..
-        } if is_root_hierarchy_folder(*folder_id) => hierarchy_rows(
+        } if is_queryable_hierarchy_folder(*folder_id) => hierarchy_rows(
             *folder_id,
             mailboxes,
             snapshot,
@@ -3778,6 +3867,10 @@ pub(in crate::mapi) fn is_root_hierarchy_folder(folder_id: u64) -> bool {
         folder_id,
         ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | PUBLIC_FOLDERS_ROOT_FOLDER_ID
     )
+}
+
+fn is_queryable_hierarchy_folder(folder_id: u64) -> bool {
+    is_root_hierarchy_folder(folder_id) || folder_id == SYNC_ISSUES_FOLDER_ID
 }
 
 pub(in crate::mapi) fn is_advertised_special_folder(folder_id: u64) -> bool {
@@ -4614,6 +4707,39 @@ mod tests {
         for row in rows {
             assert_eq!(hierarchy_row_parent_id(&row, &[]), SYNC_ISSUES_FOLDER_ID);
         }
+    }
+
+    #[test]
+    fn sync_issues_query_rows_projects_special_child_folders() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut table = MapiObject::HierarchyTable {
+            folder_id: SYNC_ISSUES_FOLDER_ID,
+            columns: vec![PID_TAG_DISPLAY_NAME_W, PID_TAG_FOLDER_ID],
+            sort_orders: Vec::new(),
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 10, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes(response[7..9].try_into().unwrap()), 3);
+        assert_response_contains_utf16(&response, "Conflicts");
+        assert_response_contains_utf16(&response, "Local Failures");
+        assert_response_contains_utf16(&response, "Server Failures");
+        assert_eq!(table_position(&table), Some(3));
     }
 
     #[test]
