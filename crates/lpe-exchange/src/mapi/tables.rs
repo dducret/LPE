@@ -5369,8 +5369,11 @@ mod tests {
         let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
         let eas = utf16_position(&response, "IPM.Configuration.EAS").unwrap();
         let elc = utf16_position(&response, "IPM.Configuration.ELC").unwrap();
+        let message_list =
+            utf16_position(&response, "IPM.Configuration.MessageListSettings").unwrap();
         assert!(account_prefs < eas);
         assert!(eas < elc);
+        assert!(elc < message_list);
     }
 
     #[test]
