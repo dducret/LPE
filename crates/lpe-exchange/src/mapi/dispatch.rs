@@ -2135,7 +2135,7 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         return None;
     }
     Some(format!(
-        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};next_debug_focus={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
+        "folder=0x{INBOX_FOLDER_ID:016x};open_folder_count={};folder_type_getprops_count={};normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};next_debug_focus={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={}",
         state.inbox_open_folder_probe_count,
         state.inbox_folder_type_getprops_probe_count,
         state.inbox_normal_contents_table_observed,
@@ -2149,6 +2149,8 @@ fn format_inbox_open_loop_summary(state: &PostHierarchyActionState) -> Option<St
         debug_context_or_none(&state.last_inbox_associated_query_context),
         debug_context_or_none(&state.last_inbox_associated_find_context),
         debug_context_or_none(&state.last_common_views_inbox_shortcut_context),
+        debug_context_or_none(&state.last_inbox_hierarchy_table_context),
+        debug_context_or_none(&state.last_inbox_hierarchy_query_context),
         debug_context_or_none(&state.last_inbox_related_release_context),
         debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
         state.recent_probe_actions.join(">")
@@ -2159,11 +2161,54 @@ fn inbox_open_loop_next_debug_focus(state: &PostHierarchyActionState) -> &'stati
     if state.inbox_associated_contents_table_observed
         && !state.inbox_associated_config_open_observed
         && !state.inbox_normal_contents_table_observed
+        && !state.last_inbox_hierarchy_query_context.is_empty()
+    {
+        "inbox_hierarchy_handoff"
+    } else if state.inbox_associated_contents_table_observed
+        && !state.inbox_associated_config_open_observed
+        && !state.inbox_normal_contents_table_observed
     {
         "common_views_or_inbox_fai_handoff"
     } else {
         "inbox_open_folder_loop"
     }
+}
+
+fn format_inbox_hierarchy_query_context(
+    object: Option<&MapiObject>,
+    request: &RopRequest,
+    mailboxes: &[JmapMailbox],
+    snapshot: &MapiMailStoreSnapshot,
+) -> Option<String> {
+    let Some(MapiObject::HierarchyTable {
+        folder_id,
+        columns,
+        position,
+        sort_orders,
+        restriction,
+        ..
+    }) = object
+    else {
+        return None;
+    };
+    if *folder_id != INBOX_FOLDER_ID {
+        return None;
+    }
+    let row_count = hierarchy_row_count(*folder_id, mailboxes, snapshot);
+    Some(format!(
+        "input_index={};position={};forward={};requested_rows={};columns={};sort={};restriction={};row_count={};expected_subfolders=false",
+        request.input_handle_index().unwrap_or(0),
+        position,
+        request.query_forward_read(),
+        request.query_row_count().unwrap_or(0),
+        format_debug_property_tags(columns),
+        format_debug_sort_orders(sort_orders),
+        restriction
+            .as_ref()
+            .map(format_debug_parsed_restriction)
+            .unwrap_or_default(),
+        row_count
+    ))
 }
 
 fn format_inbox_associated_query_context(
@@ -7774,6 +7819,38 @@ where
                     hierarchy_row_count(folder_id, mailboxes, snapshot)
                 };
                 responses.extend_from_slice(&rop_get_hierarchy_table_response(&request, row_count));
+                if folder_id == INBOX_FOLDER_ID {
+                    session.record_last_inbox_hierarchy_table_context(format!(
+                        "input_index={};output_index={};output_handle={};row_count={row_count};expected_subfolders=false",
+                        request.input_handle_index().unwrap_or(0),
+                        request.output_handle_index.unwrap_or(0),
+                        handle
+                    ));
+                    session.record_recent_probe_action(format!(
+                        "GetHierarchyTable(in={},out={},row_count={row_count})",
+                        request.input_handle_index().unwrap_or(0),
+                        handle
+                    ));
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x04",
+                        folder_id = %format!("0x{folder_id:016x}"),
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        output_handle_index = request.output_handle_index.unwrap_or(0),
+                        output_handle_value = handle,
+                        hierarchy_row_count = row_count,
+                        expected_subfolders = false,
+                        normal_contents_table_observed =
+                            session.post_hierarchy_actions.inbox_normal_contents_table_observed,
+                        associated_contents_table_observed =
+                            session.post_hierarchy_actions.inbox_associated_contents_table_observed,
+                        message = "rca debug mapi inbox hierarchy table opened"
+                    );
+                }
                 if matches!(folder_id, ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID) {
                     log_outlook_bootstrap_phase(
                         principal,
@@ -9624,8 +9701,42 @@ where
                 responses.extend_from_slice(&rop_set_message_read_flag_response(&request, changed));
             }
             Some(RopId::SetColumns) => match input_object_mut(session, &handle_slots, &request) {
-                Some(MapiObject::HierarchyTable { columns, .. })
-                | Some(MapiObject::AttachmentTable { columns, .. }) => {
+                Some(MapiObject::HierarchyTable {
+                    folder_id, columns, ..
+                }) => {
+                    if !property_tags_have_known_wire_types(&request.property_tags()) {
+                        responses.extend_from_slice(&rop_error_response(
+                            0x12,
+                            request.response_handle_index(),
+                            0x8004_0102,
+                        ));
+                        break;
+                    }
+                    let folder_id_value = *folder_id;
+                    *columns = request.property_tags();
+                    let selected_columns = columns.clone();
+                    if folder_id_value == INBOX_FOLDER_ID {
+                        session.record_last_inbox_hierarchy_table_context(format!(
+                            "set_columns_input_index={};set_columns={}",
+                            request.input_handle_index().unwrap_or(0),
+                            format_debug_property_tags(&selected_columns)
+                        ));
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x12",
+                            folder_id = %format!("0x{folder_id_value:016x}"),
+                            input_handle_index = request.input_handle_index().unwrap_or(0),
+                            requested_columns = %format_debug_property_tags(&selected_columns),
+                            message = "rca debug mapi inbox hierarchy set columns"
+                        );
+                    }
+                    responses.extend_from_slice(&rop_set_columns_response(&request));
+                }
+                Some(MapiObject::AttachmentTable { columns, .. }) => {
                     if !property_tags_have_known_wire_types(&request.property_tags()) {
                         responses.extend_from_slice(&rop_error_response(
                             0x12,
@@ -9809,11 +9920,31 @@ where
                         principal.account_id,
                         snapshot,
                     );
+                let inbox_hierarchy_query_context = format_inbox_hierarchy_query_context(
+                    query_object,
+                    &request,
+                    mailboxes,
+                    snapshot,
+                );
                 if let Some(context) = inbox_associated_query_context {
                     session.record_last_inbox_associated_query_context(context);
                 }
                 if let Some(context) = common_views_inbox_shortcut_context {
                     session.record_last_common_views_inbox_shortcut_context(context);
+                }
+                if let Some(context) = inbox_hierarchy_query_context {
+                    session.record_last_inbox_hierarchy_query_context(context.clone());
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x15",
+                        folder_id = %format!("0x{INBOX_FOLDER_ID:016x}"),
+                        query_context = %context,
+                        message = "rca debug mapi inbox hierarchy query rows"
+                    );
                 }
                 responses.extend_from_slice(&rop_query_rows_response(
                     &request,
@@ -17061,12 +17192,18 @@ mod tests {
         assert!(summary.contains("normal_contents_table_observed=false"));
         assert!(summary.contains("next_debug_focus=inbox_open_folder_loop"));
         assert!(summary.contains("last_common_views_inbox_shortcut=none"));
+        assert!(summary.contains("last_inbox_hierarchy_table=none"));
+        assert!(summary.contains("last_inbox_hierarchy_query=none"));
         assert!(summary.contains("last_inbox_related_release=none"));
         assert!(summary.contains("recent_actions=Release("));
 
         state.inbox_associated_contents_table_observed = true;
         let summary = format_inbox_open_loop_summary(&state).unwrap();
         assert!(summary.contains("next_debug_focus=common_views_or_inbox_fai_handoff"));
+        state.last_inbox_hierarchy_query_context =
+            "input_index=0;row_count=0;expected_subfolders=false".to_string();
+        let summary = format_inbox_open_loop_summary(&state).unwrap();
+        assert!(summary.contains("next_debug_focus=inbox_hierarchy_handoff"));
 
         state.inbox_normal_contents_table_observed = true;
         assert_eq!(format_inbox_open_loop_summary(&state), None);

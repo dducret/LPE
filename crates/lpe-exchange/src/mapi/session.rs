@@ -85,6 +85,8 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_associated_query_context: String,
     pub(in crate::mapi) last_inbox_associated_find_context: String,
     pub(in crate::mapi) last_common_views_inbox_shortcut_context: String,
+    pub(in crate::mapi) last_inbox_hierarchy_table_context: String,
+    pub(in crate::mapi) last_inbox_hierarchy_query_context: String,
     pub(in crate::mapi) last_inbox_related_release_context: String,
     pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
     pub(in crate::mapi) recent_probe_actions: Vec<String>,
@@ -835,6 +837,16 @@ impl MapiSession {
     ) {
         self.post_hierarchy_actions
             .last_common_views_inbox_shortcut_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_inbox_hierarchy_table_context(&mut self, context: String) {
+        self.post_hierarchy_actions
+            .last_inbox_hierarchy_table_context = context;
+    }
+
+    pub(in crate::mapi) fn record_last_inbox_hierarchy_query_context(&mut self, context: String) {
+        self.post_hierarchy_actions
+            .last_inbox_hierarchy_query_context = context;
     }
 
     pub(in crate::mapi) fn record_last_inbox_related_release_context(&mut self, context: String) {
