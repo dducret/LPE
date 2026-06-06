@@ -2255,7 +2255,7 @@ fn format_inbox_associated_query_context(
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
     let requested_row_count = request.query_row_count().unwrap_or(0);
     Some(format!(
-        "input_index={};position={};forward={};requested_rows={};columns={};sort={};window={}",
+        "input_index={};position={};forward={};requested_rows={};columns={};sort={};window={};values={};wire={}",
         request.input_handle_index().unwrap_or(0),
         position,
         request.query_forward_read(),
@@ -2267,6 +2267,27 @@ fn format_inbox_associated_query_context(
             request.query_forward_read(),
             requested_row_count,
             sort_orders,
+            snapshot
+        ),
+        format_outlook_query_row_values(
+            Uuid::nil(),
+            *folder_id,
+            *associated,
+            *position,
+            request.query_forward_read(),
+            requested_row_count,
+            sort_orders,
+            &selected_columns,
+            snapshot
+        ),
+        format_inbox_associated_wire_row_summary(
+            *folder_id,
+            *associated,
+            *position,
+            request.query_forward_read(),
+            requested_row_count,
+            sort_orders,
+            &selected_columns,
             snapshot
         )
     ))
@@ -2294,7 +2315,7 @@ fn format_inbox_associated_find_context(
     }
     let selected_columns = effective_contents_table_columns(*folder_id, *associated, columns);
     Some(format!(
-        "input_index={};origin={};backward={};found={};position={};columns={};sort={};restriction={};row={};prefix_find_summary={}",
+        "input_index={};origin={};backward={};found={};position={};columns={};sort={};restriction={};row={};values={};wire={};prefix_find_summary={}",
         request.input_handle_index().unwrap_or(0),
         request.find_origin().unwrap_or(0),
         request.find_backward(),
@@ -2304,6 +2325,27 @@ fn format_inbox_associated_find_context(
         format_debug_sort_orders(sort_orders),
         format_debug_restriction(request_restriction_bytes(request)),
         format_inbox_associated_query_row_window(*position, true, 1, sort_orders, snapshot),
+        format_outlook_query_row_values(
+            Uuid::nil(),
+            *folder_id,
+            *associated,
+            *position,
+            true,
+            1,
+            sort_orders,
+            &selected_columns,
+            snapshot
+        ),
+        format_inbox_associated_wire_row_summary(
+            *folder_id,
+            *associated,
+            *position,
+            true,
+            1,
+            sort_orders,
+            &selected_columns,
+            snapshot
+        ),
         format_inbox_associated_prefix_find_summary(*position, sort_orders, snapshot)
     ))
 }
