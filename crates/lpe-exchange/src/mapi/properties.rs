@@ -414,6 +414,9 @@ pub(in crate::mapi) const PSETID_COMMON_GUID: [u8; 16] = [
 pub(in crate::mapi) const PS_PUBLIC_STRINGS_GUID: [u8; 16] = [
     0x29, 0x03, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
+pub(in crate::mapi) const PSETID_SHARING_GUID: [u8; 16] = [
+    0x40, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+];
 pub(in crate::mapi) const PSETID_LOG_GUID: [u8; 16] = [
     0x0A, 0x20, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
 ];
@@ -437,6 +440,8 @@ pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID: u32 = 0x0000_0003;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID: u32 = 0x0000_0023;
 pub(in crate::mapi) const PID_LID_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8001;
 pub(in crate::mapi) const PID_LID_CLEAN_GLOBAL_OBJECT_ID_NAMED_ID: u16 = 0x8002;
+pub(in crate::mapi) const PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG:
+    u32 = 0x8010_0102;
 pub(in crate::mapi) const PID_LID_COMMON_START: u32 = 0x0000_8516;
 pub(in crate::mapi) const PID_LID_COMMON_END: u32 = 0x0000_8517;
 pub(in crate::mapi) const PID_LID_REMINDER_TIME: u32 = 0x0000_8502;
@@ -676,6 +681,16 @@ fn well_known_named_properties() -> Vec<(u16, MapiNamedProperty)> {
     })
     .collect::<Vec<_>>()
     .into_iter()
+    .chain(std::iter::once((
+        MapiPropertyTag::new(PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG)
+            .property_id(),
+        MapiNamedProperty {
+            guid: PSETID_SHARING_GUID,
+            kind: MapiNamedPropertyKind::Name(
+                "SharingCalendarGroupEntryAssociatedLocalFolderId".to_string(),
+            ),
+        },
+    )))
     .chain(std::iter::once((
         0x9000,
         MapiNamedProperty {
@@ -1619,6 +1634,16 @@ pub(in crate::mapi) fn navigation_shortcut_property_value(
                 crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
             })
             .map(MapiValue::Binary),
+        PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG
+            if message.shortcut_type != 4 =>
+        {
+            message
+                .target_folder_id
+                .and_then(|folder_id| {
+                    crate::mapi::identity::folder_entry_id_from_object_id(account_id, folder_id)
+                })
+                .map(MapiValue::Binary)
+        }
         PID_TAG_WLINK_RECORD_KEY if message.shortcut_type != 4 => message
             .target_folder_id
             .map(mapi_mailstore::source_key_for_store_id)
@@ -8529,6 +8554,49 @@ mod tests {
             Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 shortcut.id
             )))
+        );
+    }
+
+    #[test]
+    fn sharing_local_folder_id_named_property_maps_to_outlook_id() {
+        assert_eq!(
+            well_known_named_property_id(&MapiNamedProperty {
+                guid: PSETID_SHARING_GUID,
+                kind: MapiNamedPropertyKind::Name(
+                    "SharingCalendarGroupEntryAssociatedLocalFolderId".to_string(),
+                ),
+            }),
+            Some(0x8010)
+        );
+    }
+
+    #[test]
+    fn navigation_shortcut_projects_sharing_local_folder_id() {
+        let account_id = Uuid::from_u128(0xea33944627b94a9cb0de873f03a35376);
+        let shortcut = MapiNavigationShortcutMessage {
+            id: crate::mapi::identity::mapi_store_id(901),
+            folder_id: COMMON_VIEWS_FOLDER_ID,
+            canonical_id: Uuid::from_u128(0x2222),
+            subject: "Project Inbox".to_string(),
+            target_folder_id: Some(INBOX_FOLDER_ID),
+            shortcut_type: 0,
+            flags: 0,
+            section: 3,
+            ordinal: 0x81,
+            group_header_id: None,
+            group_name: "Projects".to_string(),
+        };
+        let expected =
+            crate::mapi::identity::folder_entry_id_from_object_id(account_id, INBOX_FOLDER_ID)
+                .unwrap();
+
+        assert_eq!(
+            navigation_shortcut_property_value(
+                &shortcut,
+                account_id,
+                PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+            ),
+            Some(MapiValue::Binary(expected))
         );
     }
 

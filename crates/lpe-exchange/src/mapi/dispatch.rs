@@ -6043,8 +6043,19 @@ fn format_common_views_wlink_target_decoding(
                     .unwrap_or_default();
                 let source_key_decoded =
                     crate::mapi::identity::object_id_from_source_key(&source_key);
+                let sharing_local_folder_id = navigation_shortcut_property_value(
+                    &shortcut,
+                    account_id,
+                    PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
+                );
+                let sharing_local_folder_id_decoded = match &sharing_local_folder_id {
+                    Some(MapiValue::Binary(bytes)) => {
+                        crate::mapi::identity::object_id_from_folder_entry_id(bytes)
+                    }
+                    _ => None,
+                };
                 Some(format!(
-                    "id=0x{:016x};subject={};target_folder={};entry_id_bytes={};entry_id_decoded={};entry_id_matches_inbox={};source_key_bytes={};source_key_decoded={};source_key_matches_inbox={};expected_inbox=0x{INBOX_FOLDER_ID:016x}",
+                    "id=0x{:016x};subject={};target_folder={};entry_id_bytes={};entry_id_decoded={};entry_id_matches_inbox={};source_key_bytes={};source_key_decoded={};source_key_matches_inbox={};sharing_local_folder_id={};sharing_local_folder_id_decoded={};sharing_local_folder_id_matches_inbox={};expected_inbox=0x{INBOX_FOLDER_ID:016x}",
                     shortcut.id,
                     shortcut.subject,
                     shortcut
@@ -6056,7 +6067,13 @@ fn format_common_views_wlink_target_decoding(
                     entry_id_decoded == Some(INBOX_FOLDER_ID),
                     source_key.len(),
                     format_optional_folder_id(source_key_decoded),
-                    source_key_decoded == Some(INBOX_FOLDER_ID)
+                    source_key_decoded == Some(INBOX_FOLDER_ID),
+                    sharing_local_folder_id
+                        .as_ref()
+                        .map(mapi_value_debug_shape)
+                        .unwrap_or_else(|| "missing".to_string()),
+                    format_optional_folder_id(sharing_local_folder_id_decoded),
+                    sharing_local_folder_id_decoded == Some(INBOX_FOLDER_ID)
                 ))
             }
         })
@@ -16974,6 +16991,7 @@ mod tests {
                 PID_TAG_INSTANCE_NUM,
                 PID_TAG_SUBJECT_W,
                 PID_TAG_WLINK_ENTRY_ID,
+                PID_NAME_SHARING_CALENDAR_GROUP_ENTRY_ASSOCIATED_LOCAL_FOLDER_ID_TAG,
             ],
             &snapshot,
         );
@@ -16984,6 +17002,7 @@ mod tests {
         assert!(summary.contains("0x674e0003=0"));
         assert!(summary.contains("0x0037001f=Inbox"));
         assert!(summary.contains("0x684c0102=binary:"));
+        assert!(summary.contains("0x80100102=binary:"));
     }
 
     #[test]
@@ -17019,6 +17038,10 @@ mod tests {
         assert!(summary.contains("entry_id_matches_inbox=true"));
         assert!(summary.contains(&format!("source_key_decoded=0x{INBOX_FOLDER_ID:016x}")));
         assert!(summary.contains("source_key_matches_inbox=true"));
+        assert!(summary.contains(&format!(
+            "sharing_local_folder_id_decoded=0x{INBOX_FOLDER_ID:016x}"
+        )));
+        assert!(summary.contains("sharing_local_folder_id_matches_inbox=true"));
     }
 
     #[test]
