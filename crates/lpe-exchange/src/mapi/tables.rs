@@ -583,6 +583,14 @@ fn hierarchy_rows<'a>(
                 rows.push(HierarchyRow::Special(*special_folder_id));
             }
         }
+    } else if folder_id == SYNC_ISSUES_FOLDER_ID {
+        for special_folder_id in SYNC_ISSUES_HIERARCHY_FOLDER_IDS {
+            if folder_ids.insert(*special_folder_id)
+                && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
+            {
+                rows.push(HierarchyRow::Special(*special_folder_id));
+            }
+        }
     } else if snapshot.public_folder_for_id(folder_id).is_some() {
         rows =
             snapshot
@@ -642,6 +650,12 @@ const IPM_SUBTREE_HIERARCHY_FOLDER_IDS: &[u64] = &[
     QUICK_STEP_SETTINGS_FOLDER_ID,
     ARCHIVE_FOLDER_ID,
     CONVERSATION_HISTORY_FOLDER_ID,
+];
+
+const SYNC_ISSUES_HIERARCHY_FOLDER_IDS: &[u64] = &[
+    CONFLICTS_FOLDER_ID,
+    LOCAL_FAILURES_FOLDER_ID,
+    SERVER_FAILURES_FOLDER_ID,
 ];
 
 fn sort_hierarchy_rows(rows: &mut [HierarchyRow<'_>], sort_orders: &[MapiSortOrder]) {
@@ -4575,6 +4589,32 @@ mod tests {
             None,
         );
         assert_eq!(row, vec![0]);
+    }
+
+    #[test]
+    fn sync_issues_hierarchy_table_projects_special_child_folders() {
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let rows = hierarchy_rows(
+            SYNC_ISSUES_FOLDER_ID,
+            &[],
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+        );
+        let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
+
+        assert_eq!(
+            row_ids,
+            vec![
+                CONFLICTS_FOLDER_ID,
+                LOCAL_FAILURES_FOLDER_ID,
+                SERVER_FAILURES_FOLDER_ID
+            ]
+        );
+        for row in rows {
+            assert_eq!(hierarchy_row_parent_id(&row, &[]), SYNC_ISSUES_FOLDER_ID);
+        }
     }
 
     #[test]
