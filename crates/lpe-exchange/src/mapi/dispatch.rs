@@ -2087,6 +2087,31 @@ fn mapi_object_debug_folder_id(object: Option<&MapiObject>) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
+fn format_live_handle_debug_summary(session: &MapiSession) -> String {
+    session
+        .handles
+        .iter()
+        .map(|(handle, object)| {
+            let folder = object
+                .folder_id()
+                .map(|folder_id| {
+                    format!(
+                        "folder=0x{folder_id:016x};role={};container={}",
+                        debug_role_for_folder_id(folder_id),
+                        debug_container_class_for_folder_id(folder_id)
+                    )
+                })
+                .unwrap_or_else(|| "folder=;role=;container=".to_string());
+            format!(
+                "handle={handle};kind={};{}",
+                mapi_object_debug_kind(Some(object)),
+                folder
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
 fn mapi_value_debug_string(properties: &HashMap<u32, MapiValue>, tag: u32) -> String {
     match properties.get(&tag) {
         Some(MapiValue::String(value)) => value.clone(),
@@ -2476,6 +2501,28 @@ fn debug_context_or_none(context: &str) -> &str {
     } else {
         context
     }
+}
+
+fn format_inbox_post_fai_handoff_context(state: &PostHierarchyActionState) -> String {
+    format!(
+        "normal_contents_table_observed={};associated_contents_table_observed={};associated_config_open_observed={};associated_config_stream_open_observed={};associated_config_stream_read_observed={};first_loop_transition={};last_open={};last_contents_table={};last_associated_query={};last_associated_find={};last_common_views_inbox_shortcut={};last_inbox_hierarchy_table={};last_inbox_hierarchy_query={};last_inbox_related_release={};last_folder_type_getprops={};recent_actions={};next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure",
+        state.inbox_normal_contents_table_observed,
+        state.inbox_associated_contents_table_observed,
+        state.inbox_associated_config_open_observed,
+        state.inbox_associated_config_stream_open_observed,
+        state.inbox_associated_config_stream_read_observed,
+        debug_context_or_none(&state.first_inbox_loop_transition_context),
+        debug_context_or_none(&state.last_inbox_open_folder_context),
+        debug_context_or_none(&state.last_inbox_contents_table_context),
+        debug_context_or_none(&state.last_inbox_associated_query_context),
+        debug_context_or_none(&state.last_inbox_associated_find_context),
+        debug_context_or_none(&state.last_common_views_inbox_shortcut_context),
+        debug_context_or_none(&state.last_inbox_hierarchy_table_context),
+        debug_context_or_none(&state.last_inbox_hierarchy_query_context),
+        debug_context_or_none(&state.last_inbox_related_release_context),
+        debug_context_or_none(&state.last_inbox_folder_type_getprops_context),
+        state.recent_probe_actions.join(">")
+    )
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -7234,6 +7281,41 @@ where
                     released_handle,
                     &session.post_hierarchy_actions,
                 );
+                let post_inbox_fai_handoff_context = match released_object {
+                    Some(MapiObject::ContentsTable {
+                        folder_id,
+                        associated,
+                        columns,
+                        position,
+                        sort_orders,
+                        ..
+                    }) if *folder_id == INBOX_FOLDER_ID
+                        && *associated
+                        && session
+                            .post_hierarchy_actions
+                            .inbox_associated_contents_table_observed
+                        && !session
+                            .post_hierarchy_actions
+                            .inbox_normal_contents_table_observed
+                        && !session
+                            .post_hierarchy_actions
+                            .post_inbox_fai_handoff_logged =>
+                    {
+                        Some((
+                            format!(
+                                "handle={};folder=0x{folder_id:016x};position={position};columns={};sort={}",
+                                format_optional_debug_handle(released_handle),
+                                format_debug_property_tags(columns),
+                                format_debug_sort_orders(sort_orders)
+                            ),
+                            format_inbox_post_fai_handoff_context(
+                                &session.post_hierarchy_actions,
+                            ),
+                            format_live_handle_debug_summary(session),
+                        ))
+                    }
+                    _ => None,
+                };
                 if session.hierarchy_sync_completed() {
                     let remaining_before = session.handles.len();
                     post_hierarchy_release_events.push(PostHierarchyReleaseDebugEvent {
@@ -7263,6 +7345,26 @@ where
                 }
                 if let Some(context) = inbox_related_release_context {
                     session.record_last_inbox_related_release_context(context);
+                }
+                if let Some((released_table_context, handoff_context, live_handle_summary)) =
+                    post_inbox_fai_handoff_context
+                {
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x01",
+                        input_handle_index = request.input_handle_index().unwrap_or(0),
+                        input_handle_value = %format_optional_debug_handle(released_handle),
+                        released_table_context = %released_table_context,
+                        handoff_context = %handoff_context,
+                        live_handle_summaries_before_release = %live_handle_summary,
+                        remaining_handle_count_after_release = session.handles.len(),
+                        "rca debug mapi inbox associated handoff without contents"
+                    );
+                    session.mark_post_inbox_fai_handoff_logged();
                 }
                 if let Some(event) = post_hierarchy_release_events.last_mut() {
                     event.remaining_after = session.handles.len();
@@ -17327,6 +17429,27 @@ mod tests {
 
         state.inbox_normal_contents_table_observed = true;
         assert_eq!(format_inbox_open_loop_summary(&state), None);
+    }
+
+    #[test]
+    fn inbox_post_fai_handoff_context_points_to_missing_contents_step() {
+        let mut state = PostHierarchyActionState::default();
+        state.inbox_associated_contents_table_observed = true;
+        state.last_inbox_associated_query_context = "values=row0".to_string();
+        state.last_common_views_inbox_shortcut_context = "entry_id_matches_inbox=true".to_string();
+        state
+            .recent_probe_actions
+            .push("Release(in=0,handle=17,kind=contents_table,folder=0x5)".to_string());
+
+        let context = format_inbox_post_fai_handoff_context(&state);
+
+        assert!(context.contains("associated_contents_table_observed=true"));
+        assert!(context.contains("normal_contents_table_observed=false"));
+        assert!(context.contains("last_associated_query=values=row0"));
+        assert!(context.contains("last_common_views_inbox_shortcut=entry_id_matches_inbox=true"));
+        assert!(context.contains(
+            "next_expected_client_step=open_inbox_normal_contents_table_or_sync_configure"
+        ));
     }
 
     #[test]

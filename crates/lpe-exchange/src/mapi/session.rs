@@ -91,6 +91,7 @@ pub(in crate::mapi) struct PostHierarchyActionState {
     pub(in crate::mapi) last_inbox_folder_type_getprops_context: String,
     pub(in crate::mapi) first_inbox_loop_transition_context: String,
     pub(in crate::mapi) inbox_loop_transition_logged: bool,
+    pub(in crate::mapi) post_inbox_fai_handoff_logged: bool,
     pub(in crate::mapi) recent_probe_actions: Vec<String>,
 }
 
@@ -877,6 +878,10 @@ impl MapiSession {
 
     pub(in crate::mapi) fn mark_inbox_loop_transition_logged(&mut self) {
         self.post_hierarchy_actions.inbox_loop_transition_logged = true;
+    }
+
+    pub(in crate::mapi) fn mark_post_inbox_fai_handoff_logged(&mut self) {
+        self.post_hierarchy_actions.post_inbox_fai_handoff_logged = true;
     }
 
     pub(in crate::mapi) fn record_recent_probe_action(&mut self, action: String) {
