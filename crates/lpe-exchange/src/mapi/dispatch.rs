@@ -2638,6 +2638,7 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_SUBFOLDERS,
         PID_TAG_ACCESS,
         PID_TAG_CONTAINER_CLASS_W,
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W,
         PID_TAG_MESSAGE_CLASS_W,
         PID_TAG_LAST_MODIFICATION_TIME,
         PID_TAG_LOCAL_COMMIT_TIME,
@@ -2921,6 +2922,7 @@ fn additional_ren_entry_ids_ex_expected_folder_id(persist_id: u16) -> u64 {
         0x8009 => CONTACTS_SEARCH_FOLDER_ID,
         0x800A => IM_CONTACT_LIST_FOLDER_ID,
         0x800B => QUICK_CONTACTS_FOLDER_ID,
+        0x800F => ARCHIVE_FOLDER_ID,
         _ => 0,
     }
 }
@@ -2935,6 +2937,7 @@ fn additional_ren_entry_ids_ex_persist_name(persist_id: u16) -> &'static str {
         0x8009 => "contact_search",
         0x800A => "buddylist_pdls",
         0x800B => "buddylist_contacts",
+        0x800F => "archive",
         _ => "unknown",
     }
 }
@@ -10695,31 +10698,23 @@ where
                 if let Some(folder_id) =
                     advertised_special_folder_id_for_create(parent_folder_id, display_name)
                 {
-                    if !request.create_folder_open_existing() {
-                        tracing::warn!(
-                            rca_debug = true,
-                            adapter = "mapi",
-                            endpoint = "emsmdb",
-                            tenant_id = %principal.tenant_id,
-                            account_id = %principal.account_id,
-                            mailbox = %principal.email,
-                            request_type = "Execute",
-                            request_rop_id = "0x1c",
-                            parent_folder_id = %format!("{parent_folder_id:#018x}"),
-                            folder_type = request.create_folder_type(),
-                            open_existing = request.create_folder_open_existing(),
-                            display_name = display_name,
-                            matched_advertised_folder_id = %format!("0x{folder_id:016x}"),
-                            response_error = "0x80040604",
-                            message = "rca debug mapi create folder advertised duplicate name",
-                        );
-                        responses.extend_from_slice(&rop_error_response(
-                            0x1C,
-                            request.output_handle_index.unwrap_or(0),
-                            0x8004_0604,
-                        ));
-                        continue;
-                    }
+                    tracing::info!(
+                        rca_debug = true,
+                        adapter = "mapi",
+                        endpoint = "emsmdb",
+                        tenant_id = %principal.tenant_id,
+                        account_id = %principal.account_id,
+                        mailbox = %principal.email,
+                        request_type = "Execute",
+                        request_rop_id = "0x1c",
+                        parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                        folder_type = request.create_folder_type(),
+                        open_existing = request.create_folder_open_existing(),
+                        display_name = display_name,
+                        matched_advertised_folder_id = %format!("0x{folder_id:016x}"),
+                        response_existing_folder = true,
+                        message = "rca debug mapi create folder opened advertised special folder",
+                    );
                     let properties = folder_properties_for_open(
                         store, principal, session, folder_id, mailboxes, snapshot,
                     )
@@ -17462,6 +17457,10 @@ mod tests {
             properties.get(&PID_TAG_CONTAINER_CLASS_W),
             Some(&MapiValue::String("IPF.Note".to_string()))
         );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W),
+            Some(&MapiValue::String("IPM.Note".to_string()))
+        );
         let expected_entry_id = crate::mapi::identity::folder_entry_id_from_object_id(
             principal.account_id,
             INBOX_FOLDER_ID,
@@ -18225,10 +18224,14 @@ mod tests {
         )]);
 
         assert!(debug.contains("PidTagAdditionalRenEntryIdsEx:bytes="));
-        assert!(debug.contains("entry_count=8"));
+        assert!(debug.contains("bytes=490"));
+        assert!(debug.contains("entry_count=9"));
         assert!(debug.contains("persist_id=0x8006"));
         assert!(debug.contains("persist_name=conversation_actions"));
         assert!(debug.contains("decoded_name=conversation_action_settings"));
+        assert!(debug.contains("persist_id=0x800f"));
+        assert!(debug.contains("persist_name=archive"));
+        assert!(debug.contains("decoded_name=archive"));
         assert!(debug.contains("matches_expected=true"));
     }
 

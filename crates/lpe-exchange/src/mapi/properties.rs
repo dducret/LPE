@@ -284,6 +284,13 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_STRING8: u32 = 0x001A_001E;
 pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8: u32 = 0x36E5_001E;
 pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
+pub(in crate::mapi) const PID_TAG_EXTENDED_FOLDER_FLAGS: u32 = 0x36DA_0102;
+pub(in crate::mapi) const PID_TAG_ARCHIVE_TAG: u32 = 0x3018_0102;
+pub(in crate::mapi) const PID_TAG_POLICY_TAG: u32 = 0x3019_0102;
+pub(in crate::mapi) const PID_TAG_RETENTION_PERIOD: u32 = 0x301A_0003;
+pub(in crate::mapi) const PID_TAG_RETENTION_FLAGS: u32 = 0x301D_0003;
+pub(in crate::mapi) const PID_TAG_ARCHIVE_PERIOD: u32 = 0x301E_0003;
+pub(in crate::mapi) const PID_TAG_RIGHTS: u32 = 0x6639_0003;
 pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
@@ -895,21 +902,17 @@ fn additional_ren_entry_ids_ex(mailbox_guid: Uuid) -> Vec<u8> {
         (0x8009, CONTACTS_SEARCH_FOLDER_ID),
         (0x800A, IM_CONTACT_LIST_FOLDER_ID),
         (0x800B, QUICK_CONTACTS_FOLDER_ID),
+        (0x800F, ARCHIVE_FOLDER_ID),
     ];
     let mut value = Vec::new();
     for (persist_id, folder_id) in entries {
         let entry_id = special_folder_entry_id(mailbox_guid, folder_id);
-        let data_size = 16usize.saturating_add(entry_id.len());
+        let data_size = 4usize.saturating_add(entry_id.len());
         value.extend_from_slice(&persist_id.to_le_bytes());
         value.extend_from_slice(&(data_size.min(u16::MAX as usize) as u16).to_le_bytes());
-        value.extend_from_slice(&0x0002u16.to_le_bytes());
-        value.extend_from_slice(&4u16.to_le_bytes());
-        value.extend_from_slice(&0u32.to_le_bytes());
         value.extend_from_slice(&0x0001u16.to_le_bytes());
         value.extend_from_slice(&(entry_id.len().min(u16::MAX as usize) as u16).to_le_bytes());
         value.extend_from_slice(&entry_id);
-        value.extend_from_slice(&0u16.to_le_bytes());
-        value.extend_from_slice(&0u16.to_le_bytes());
     }
     value.extend_from_slice(&0u16.to_le_bytes());
     value.extend_from_slice(&0u16.to_le_bytes());
@@ -1242,10 +1245,9 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         })),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_FOLDER_ACCESS)),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
-        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W
-            if folder_message_class(mailbox) == "IPF.Appointment" =>
-        {
-            Some(MapiValue::String("IPM.Appointment".to_string()))
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            default_post_message_class_for_container_class(folder_message_class(mailbox))
+                .map(|message_class| MapiValue::String(message_class.to_string()))
         }
         PID_TAG_FOLDER_ID => Some(MapiValue::U64(mapi_folder_id(mailbox))),
         PID_TAG_ENTRY_ID => crate::mapi::identity::folder_entry_id_from_object_id(
@@ -1298,6 +1300,20 @@ pub(in crate::mapi) fn mapi_mailbox_display_name(mailbox: &JmapMailbox) -> Strin
         "Inbox".to_string()
     } else {
         mailbox.name.clone()
+    }
+}
+
+pub(in crate::mapi) fn default_post_message_class_for_container_class(
+    container_class: &str,
+) -> Option<&'static str> {
+    match container_class {
+        "IPF.Note" => Some("IPM.Note"),
+        "IPF.Appointment" => Some("IPM.Appointment"),
+        "IPF.Contact" | "IPF.Contact.MOC.QuickContacts" => Some("IPM.Contact"),
+        "IPF.Task" => Some("IPM.Task"),
+        "IPF.StickyNote" => Some("IPM.StickyNote"),
+        "IPF.Journal" => Some("IPM.Activity"),
+        _ => None,
     }
 }
 
@@ -6717,8 +6733,10 @@ mod tests {
                 (0x8009, Some(CONTACTS_SEARCH_FOLDER_ID)),
                 (0x800A, Some(IM_CONTACT_LIST_FOLDER_ID)),
                 (0x800B, Some(QUICK_CONTACTS_FOLDER_ID)),
+                (0x800F, Some(ARCHIVE_FOLDER_ID)),
             ]
         );
+        assert_eq!(value.len(), 490);
     }
 
     #[test]

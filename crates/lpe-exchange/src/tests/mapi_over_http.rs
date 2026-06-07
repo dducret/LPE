@@ -6522,7 +6522,7 @@ async fn mapi_over_http_create_folder_creates_canonical_mailbox() {
 }
 
 #[tokio::test]
-async fn mapi_over_http_create_folder_advertised_special_folder_requires_open_existing() {
+async fn mapi_over_http_create_folder_advertised_special_folder_opens_existing_even_without_flag() {
     let created_mailboxes = Arc::new(Mutex::new(Vec::new()));
     let store = FakeStore {
         session: Some(FakeStore::account()),
@@ -6573,7 +6573,11 @@ async fn mapi_over_http_create_folder_advertised_special_folder_requires_open_ex
 
     assert_eq!(response.status(), StatusCode::OK);
     let response_rops = response_rops_from_execute_response(response).await;
-    let expected = vec![0x1C, 0x02, 0x04, 0x06, 0x04, 0x80];
+    let mut expected = vec![0x1C, 0x02, 0, 0, 0, 0];
+    expected.extend_from_slice(&mapi_wire_id_bytes(
+        crate::mapi::identity::SYNC_ISSUES_FOLDER_ID,
+    ));
+    expected.extend_from_slice(&[1, 0]);
     assert!(contains_bytes(&response_rops, &expected));
     assert!(created_mailboxes.lock().unwrap().is_empty());
 }
@@ -20213,6 +20217,12 @@ async fn mapi_over_http_logon_advertises_openable_additional_ren_entryids_ex() {
             crate::mapi::identity::QUICK_CONTACTS_FOLDER_ID,
             "Quick Contacts",
             "IPF.Contact.MOC.QuickContacts",
+        ),
+        (
+            0x800F,
+            crate::mapi::identity::ARCHIVE_FOLDER_ID,
+            "Archive",
+            "IPF.Note",
         ),
     ];
     assert_eq!(

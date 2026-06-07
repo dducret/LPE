@@ -953,6 +953,10 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(message_class.to_string()))
         }
+        PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
+            default_post_message_class_for_container_class(message_class)
+                .map(|default_class| MapiValue::String(default_class.to_string()))
+        }
         PID_TAG_LAST_MODIFICATION_TIME
         | PID_TAG_LOCAL_COMMIT_TIME
         | PID_TAG_LOCAL_COMMIT_TIME_MAX
