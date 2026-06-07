@@ -1989,6 +1989,11 @@ fn modeled_zero_or_default_property(object: Option<&MapiObject>, tag: u32) -> bo
                 | PID_TAG_RETENTION_PERIOD
                 | PID_TAG_RETENTION_FLAGS
                 | PID_TAG_ARCHIVE_PERIOD
+                | PID_TAG_DEFAULT_VIEW_ENTRY_ID
+                | PID_TAG_FOLDER_WEBVIEWINFO
+                | PID_TAG_FOLDER_XVIEWINFO_E
+                | PID_TAG_FOLDER_VIEWS_ONLY
+                | PID_TAG_DEFAULT_FORM_NAME_W
         ),
         _ => false,
     }
@@ -2414,6 +2419,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
         PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
         PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
+        PID_TAG_REM_OFFLINE_ENTRY_ID => "PidTagRemOfflineEntryId",
         PID_TAG_IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
@@ -2434,6 +2440,11 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PID_TAG_DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => "PidTagDefaultPostMessageClass",
+        PID_TAG_DEFAULT_FORM_NAME_W => "PidTagDefaultFormName",
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID => "PidTagDefaultViewEntryId",
+        PID_TAG_FOLDER_WEBVIEWINFO => "PidTagFolderWebViewInfo",
+        PID_TAG_FOLDER_XVIEWINFO_E => "PidTagFolderXViewInfoE",
+        PID_TAG_FOLDER_VIEWS_ONLY => "PidTagFolderViewsOnly",
         PID_TAG_EXTENDED_FOLDER_FLAGS => "PidTagExtendedFolderFlags",
         PID_TAG_ARCHIVE_TAG => "PidTagArchiveTag",
         PID_TAG_POLICY_TAG => "PidTagPolicyTag",
@@ -2490,6 +2501,7 @@ fn default_folder_property_mapping_for_debug(tag: u32) -> Option<String> {
         PID_TAG_IPM_NOTE_ENTRY_ID => ("Notes", NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => ("Tasks", TASKS_FOLDER_ID),
         PID_TAG_REM_ONLINE_ENTRY_ID => ("Reminders", REMINDERS_FOLDER_ID),
+        PID_TAG_REM_OFFLINE_ENTRY_ID => ("Reminders", REMINDERS_FOLDER_ID),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => ("Drafts", DRAFTS_FOLDER_ID),
         _ => return None,
     };
@@ -6694,6 +6706,27 @@ mod tests {
             PID_TAG_RETENTION_PERIOD,
             PID_TAG_RETENTION_FLAGS,
             PID_TAG_ARCHIVE_PERIOD,
+        ] {
+            assert!(modeled_zero_or_default_property(
+                Some(&folder),
+                property_tag
+            ));
+        }
+    }
+
+    #[test]
+    fn folder_view_empty_defaults_are_modeled_not_fallback() {
+        let folder = MapiObject::Folder {
+            folder_id: INBOX_FOLDER_ID,
+            properties: HashMap::new(),
+        };
+
+        for property_tag in [
+            PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+            PID_TAG_FOLDER_WEBVIEWINFO,
+            PID_TAG_FOLDER_XVIEWINFO_E,
+            PID_TAG_FOLDER_VIEWS_ONLY,
+            PID_TAG_DEFAULT_FORM_NAME_W,
         ] {
             assert!(modeled_zero_or_default_property(
                 Some(&folder),

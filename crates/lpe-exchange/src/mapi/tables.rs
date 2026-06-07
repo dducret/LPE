@@ -442,6 +442,7 @@ pub(in crate::mapi) fn default_store_property_tags() -> Vec<u32> {
         PID_TAG_IPM_NOTE_ENTRY_ID,
         PID_TAG_IPM_TASK_ENTRY_ID,
         PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_REM_OFFLINE_ENTRY_ID,
         PID_TAG_IPM_DRAFTS_ENTRY_ID,
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
@@ -473,6 +474,7 @@ pub(in crate::mapi) fn default_folder_identity_property_tags() -> Vec<u32> {
         PID_TAG_IPM_NOTE_ENTRY_ID,
         PID_TAG_IPM_TASK_ENTRY_ID,
         PID_TAG_REM_ONLINE_ENTRY_ID,
+        PID_TAG_REM_OFFLINE_ENTRY_ID,
         PID_TAG_IPM_DRAFTS_ENTRY_ID,
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS,
         PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
@@ -951,6 +953,11 @@ pub(in crate::mapi) fn special_folder_property_value(
         PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
             Some(MapiValue::U32(0))
         }
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID | PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
+            Some(MapiValue::Binary(Vec::new()))
+        }
+        PID_TAG_FOLDER_VIEWS_ONLY => Some(MapiValue::U32(0)),
+        PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
         PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(
             folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
@@ -4554,6 +4561,12 @@ mod tests {
     }
 
     #[test]
+    fn default_store_identity_columns_include_offline_reminders_entry_id() {
+        assert!(default_store_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
+        assert!(default_folder_identity_property_tags().contains(&PID_TAG_REM_OFFLINE_ENTRY_ID));
+    }
+
+    #[test]
     fn outlook_bootstrap_row_invariant_classifier_reports_consistency() {
         let folder_id = INBOX_FOLDER_ID;
         let parent_id = IPM_SUBTREE_FOLDER_ID;
@@ -6253,6 +6266,38 @@ mod tests {
         assert_eq!(
             special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_ARCHIVE_PERIOD, Uuid::nil()),
             Some(MapiValue::U32(0))
+        );
+    }
+
+    #[test]
+    fn special_folder_property_projects_empty_view_defaults() {
+        assert_eq!(
+            special_folder_property_value(
+                INBOX_FOLDER_ID,
+                PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+                Uuid::nil()
+            ),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_WEBVIEWINFO, Uuid::nil()),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_XVIEWINFO_E, Uuid::nil()),
+            Some(MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            special_folder_property_value(INBOX_FOLDER_ID, PID_TAG_FOLDER_VIEWS_ONLY, Uuid::nil()),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            special_folder_property_value(
+                INBOX_FOLDER_ID,
+                PID_TAG_DEFAULT_FORM_NAME_W,
+                Uuid::nil()
+            ),
+            Some(MapiValue::String(String::new()))
         );
     }
 

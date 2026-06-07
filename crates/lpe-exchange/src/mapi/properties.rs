@@ -257,6 +257,7 @@ pub(in crate::mapi) const PID_TAG_CONTENT_UNREAD_COUNT: u32 = 0x3603_0003;
 pub(in crate::mapi) const PID_TAG_SUBFOLDERS: u32 = 0x360A_000B;
 pub(in crate::mapi) const PID_TAG_FOLDER_TYPE: u32 = 0x3601_0003;
 pub(in crate::mapi) const PID_TAG_CONTAINER_CLASS_W: u32 = 0x3613_001F;
+pub(in crate::mapi) const PID_TAG_DEFAULT_VIEW_ENTRY_ID: u32 = 0x3616_0102;
 pub(in crate::mapi) const PID_TAG_ASSOCIATED_CONTENT_COUNT: u32 = 0x3617_0003;
 pub(in crate::mapi) const PID_TAG_VALID_FOLDER_MASK: u32 = 0x35DF_0003;
 pub(in crate::mapi) const PID_TAG_IPM_SUBTREE_ENTRY_ID: u32 = 0x35E0_0102;
@@ -273,6 +274,7 @@ pub(in crate::mapi) const PID_TAG_IPM_JOURNAL_ENTRY_ID: u32 = 0x36D2_0102;
 pub(in crate::mapi) const PID_TAG_IPM_NOTE_ENTRY_ID: u32 = 0x36D3_0102;
 pub(in crate::mapi) const PID_TAG_IPM_TASK_ENTRY_ID: u32 = 0x36D4_0102;
 pub(in crate::mapi) const PID_TAG_REM_ONLINE_ENTRY_ID: u32 = 0x36D5_0102;
+pub(in crate::mapi) const PID_TAG_REM_OFFLINE_ENTRY_ID: u32 = 0x36D6_0102;
 pub(in crate::mapi) const PID_TAG_IPM_DRAFTS_ENTRY_ID: u32 = 0x36D7_0102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS: u32 = 0x36D8_1102;
 pub(in crate::mapi) const PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX: u32 = 0x36D9_0102;
@@ -284,7 +286,11 @@ pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_STRING8: u32 = 0x001A_001E;
 pub(in crate::mapi) const PID_TAG_MESSAGE_CLASS_W: u32 = 0x001A_001F;
 pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_STRING8: u32 = 0x36E5_001E;
 pub(in crate::mapi) const PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W: u32 = 0x36E5_001F;
+pub(in crate::mapi) const PID_TAG_DEFAULT_FORM_NAME_W: u32 = 0x36E6_001F;
 pub(in crate::mapi) const PID_TAG_EXTENDED_FOLDER_FLAGS: u32 = 0x36DA_0102;
+pub(in crate::mapi) const PID_TAG_FOLDER_WEBVIEWINFO: u32 = 0x36DF_0102;
+pub(in crate::mapi) const PID_TAG_FOLDER_XVIEWINFO_E: u32 = 0x36E0_0102;
+pub(in crate::mapi) const PID_TAG_FOLDER_VIEWS_ONLY: u32 = 0x36E1_0003;
 pub(in crate::mapi) const PID_TAG_ARCHIVE_TAG: u32 = 0x3018_0102;
 pub(in crate::mapi) const PID_TAG_POLICY_TAG: u32 = 0x3019_0102;
 pub(in crate::mapi) const PID_TAG_RETENTION_PERIOD: u32 = 0x301A_0003;
@@ -809,6 +815,10 @@ pub(in crate::mapi) fn special_folder_identification_property_value(
             mailbox_guid,
             REMINDERS_FOLDER_ID,
         )),
+        PID_TAG_REM_OFFLINE_ENTRY_ID => Some(special_folder_entry_id_value(
+            mailbox_guid,
+            REMINDERS_FOLDER_ID,
+        )),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(special_folder_entry_id_value(
             mailbox_guid,
             DRAFTS_FOLDER_ID,
@@ -853,6 +863,7 @@ pub(in crate::mapi) fn is_scalar_default_folder_entry_id_property_tag(property_t
             | PID_TAG_IPM_NOTE_ENTRY_ID
             | PID_TAG_IPM_TASK_ENTRY_ID
             | PID_TAG_REM_ONLINE_ENTRY_ID
+            | PID_TAG_REM_OFFLINE_ENTRY_ID
             | PID_TAG_IPM_DRAFTS_ENTRY_ID
     )
 }
@@ -1249,6 +1260,11 @@ pub(in crate::mapi) fn mailbox_property_value_with_context_for_account(
         PID_TAG_RETENTION_PERIOD | PID_TAG_RETENTION_FLAGS | PID_TAG_ARCHIVE_PERIOD => {
             Some(MapiValue::U32(0))
         }
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID | PID_TAG_FOLDER_WEBVIEWINFO | PID_TAG_FOLDER_XVIEWINFO_E => {
+            Some(MapiValue::Binary(Vec::new()))
+        }
+        PID_TAG_FOLDER_VIEWS_ONLY => Some(MapiValue::U32(0)),
+        PID_TAG_DEFAULT_FORM_NAME_W => Some(MapiValue::String(String::new())),
         PID_TAG_CONTAINER_CLASS_W => Some(MapiValue::String(folder_message_class(mailbox).into())),
         PID_TAG_DEFAULT_POST_MESSAGE_CLASS_W => {
             default_post_message_class_for_container_class(folder_message_class(mailbox))
@@ -6639,6 +6655,7 @@ mod tests {
         assert_eq!(PID_TAG_IPM_NOTE_ENTRY_ID, 0x36D3_0102);
         assert_eq!(PID_TAG_IPM_TASK_ENTRY_ID, 0x36D4_0102);
         assert_eq!(PID_TAG_REM_ONLINE_ENTRY_ID, 0x36D5_0102);
+        assert_eq!(PID_TAG_REM_OFFLINE_ENTRY_ID, 0x36D6_0102);
         assert_eq!(PID_TAG_IPM_DRAFTS_ENTRY_ID, 0x36D7_0102);
         assert_eq!(PID_TAG_FREE_BUSY_ENTRY_IDS, 0x36E4_1102);
 
@@ -6683,6 +6700,13 @@ mod tests {
         .unwrap();
         assert_eq!(
             special_folder_identification_property_value(mailbox_guid, PID_TAG_REM_ONLINE_ENTRY_ID),
+            Some(MapiValue::Binary(reminders_entry_id.clone()))
+        );
+        assert_eq!(
+            special_folder_identification_property_value(
+                mailbox_guid,
+                PID_TAG_REM_OFFLINE_ENTRY_ID
+            ),
             Some(MapiValue::Binary(reminders_entry_id.clone()))
         );
         assert_eq!(

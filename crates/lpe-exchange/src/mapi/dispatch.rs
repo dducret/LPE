@@ -2639,6 +2639,11 @@ fn folder_properties_for_open_from_mailboxes(
         PID_TAG_ACCESS,
         PID_TAG_RIGHTS,
         PID_TAG_EXTENDED_FOLDER_FLAGS,
+        PID_TAG_DEFAULT_VIEW_ENTRY_ID,
+        PID_TAG_FOLDER_WEBVIEWINFO,
+        PID_TAG_FOLDER_XVIEWINFO_E,
+        PID_TAG_FOLDER_VIEWS_ONLY,
+        PID_TAG_DEFAULT_FORM_NAME_W,
         PID_TAG_ARCHIVE_TAG,
         PID_TAG_POLICY_TAG,
         PID_TAG_RETENTION_PERIOD,
@@ -3043,6 +3048,7 @@ fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
         PID_TAG_IPM_NOTE_ENTRY_ID => Some(NOTES_FOLDER_ID),
         PID_TAG_IPM_TASK_ENTRY_ID => Some(TASKS_FOLDER_ID),
         PID_TAG_REM_ONLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
+        PID_TAG_REM_OFFLINE_ENTRY_ID => Some(REMINDERS_FOLDER_ID),
         PID_TAG_IPM_DRAFTS_ENTRY_ID => Some(DRAFTS_FOLDER_ID),
         tag if is_scalar_default_folder_entry_id_property_tag(tag) => None,
         _ => None,
@@ -3323,6 +3329,7 @@ fn default_folder_entry_id_property_name(tag: u32) -> &'static str {
         PID_TAG_IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
         PID_TAG_IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
         PID_TAG_REM_ONLINE_ENTRY_ID => "PidTagRemOnlineEntryId",
+        PID_TAG_REM_OFFLINE_ENTRY_ID => "PidTagRemOfflineEntryId",
         PID_TAG_IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
         _ => "unknown",
     }
@@ -17475,6 +17482,26 @@ mod tests {
         assert_eq!(
             properties.get(&PID_TAG_EXTENDED_FOLDER_FLAGS),
             Some(&MapiValue::Binary(vec![0x01, 0x04, 0x00, 0x00, 0x10, 0x00]))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_VIEW_ENTRY_ID),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_WEBVIEWINFO),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_XVIEWINFO_E),
+            Some(&MapiValue::Binary(Vec::new()))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_FOLDER_VIEWS_ONLY),
+            Some(&MapiValue::U32(0))
+        );
+        assert_eq!(
+            properties.get(&PID_TAG_DEFAULT_FORM_NAME_W),
+            Some(&MapiValue::String(String::new()))
         );
         assert_eq!(
             properties.get(&PID_TAG_ARCHIVE_TAG),
