@@ -170,6 +170,13 @@ pub(in crate::mapi) fn default_contents_columns() -> Vec<u32> {
     ]
 }
 
+pub(in crate::mapi) fn default_associated_config_columns() -> Vec<u32> {
+    let mut columns = default_contents_columns();
+    columns.push(PID_TAG_FOLDER_ID);
+    columns.push(PID_TAG_ROAMING_DATATYPES);
+    columns
+}
+
 const COLLAPSE_STATE_MAGIC: &[u8; 6] = b"LPECS1";
 
 #[derive(Clone)]
@@ -1377,6 +1384,12 @@ pub(in crate::mapi) fn rop_query_rows_response(
                             }))
                 {
                     default_calendar_configuration_property_tags()
+                } else if *associated
+                    && !snapshot
+                        .associated_config_messages_for_folder(*folder_id)
+                        .is_empty()
+                {
+                    default_associated_config_columns()
                 } else {
                     default_contents_columns()
                 }
@@ -1788,6 +1801,12 @@ fn query_rows_response_columns(
                         .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar))
             {
                 default_calendar_configuration_property_tags()
+            } else if *associated
+                && !snapshot
+                    .associated_config_messages_for_folder(*folder_id)
+                    .is_empty()
+            {
+                default_associated_config_columns()
             } else {
                 default_contents_columns()
             }
@@ -2226,6 +2245,12 @@ pub(in crate::mapi) fn rop_query_columns_all_response(
                     .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar)
             {
                 default_calendar_configuration_property_tags()
+            } else if *associated
+                && !snapshot
+                    .associated_config_messages_for_folder(*folder_id)
+                    .is_empty()
+            {
+                default_associated_config_columns()
             } else {
                 match snapshot
                     .collaboration_folder_for_id(*folder_id)
@@ -3520,6 +3545,12 @@ pub(in crate::mapi) fn rop_find_row_response(
                     default_navigation_shortcut_property_tags()
                 } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
                     default_conversation_action_property_tags()
+                } else if *associated
+                    && !snapshot
+                        .associated_config_messages_for_folder(*folder_id)
+                        .is_empty()
+                {
+                    default_associated_config_columns()
                 } else {
                     default_contents_columns()
                 }
@@ -4775,6 +4806,19 @@ mod tests {
             PID_TAG_MESSAGE_CLASS_W,
             PID_TAG_MESSAGE_SIZE,
             PID_TAG_HAS_ATTACHMENTS,
+        ] {
+            assert!(columns.contains(&property_tag));
+        }
+    }
+
+    #[test]
+    fn default_associated_config_columns_cover_required_configuration_contract() {
+        let columns = default_associated_config_columns();
+        for property_tag in [
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_MESSAGE_CLASS_W,
+            PID_TAG_ROAMING_DATATYPES,
         ] {
             assert!(columns.contains(&property_tag));
         }
@@ -6231,6 +6275,52 @@ mod tests {
     }
 
     #[test]
+    fn inbox_associated_query_rows_default_columns_cover_required_configuration_contract() {
+        let snapshot = inbox_associated_sort_snapshot();
+        let columns = default_associated_config_columns();
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: Vec::new(),
+            sort_orders: vec![
+                MapiSortOrder {
+                    property_tag: PID_TAG_MESSAGE_CLASS_W,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                    order: 0,
+                },
+            ],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 1, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        let mut cursor = Cursor::new(&response[9..]);
+        assert_eq!(cursor.read_u8().unwrap(), 0);
+        for column in columns {
+            parse_mapi_property_value(&mut cursor, column).unwrap();
+        }
+        assert!(cursor.remaining_is_zero_padding());
+    }
+
+    #[test]
     fn inbox_associated_rows_project_folder_id_and_last_modification_time() {
         let message = MapiAssociatedConfigMessage {
             id: crate::mapi::identity::mapi_store_id(
@@ -6289,6 +6379,20 @@ mod tests {
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_RECORD_KEY),
             Some(MapiValue::Binary(source_key))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_CONVERSATION_TOPIC_W),
+            Some(MapiValue::String("Message list settings".to_string()))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_MESSAGE_STATUS),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            associated_config_property_value(&message, PID_TAG_SEARCH_KEY),
+            Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id
+            )))
         );
         assert_eq!(
             associated_config_property_value(&message, PID_TAG_LAST_MODIFICATION_TIME),
@@ -6910,7 +7014,9 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
             PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
                 write_utf16z(&mut row, &email.subject)
             }
-            PID_TAG_MESSAGE_CLASS_W => write_utf16z(&mut row, "IPM.Note"),
+            PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => {
+                write_utf16z(&mut row, message_class_for_email(email))
+            }
             PID_TAG_MESSAGE_DELIVERY_TIME
             | PID_TAG_LAST_MODIFICATION_TIME
             | PID_TAG_LOCAL_COMMIT_TIME => write_u64(
@@ -6926,6 +7032,7 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                     .unwrap_or_default(),
             ),
             PID_TAG_ACCESS => write_u32(&mut row, MAPI_MESSAGE_ACCESS),
+            PID_TAG_ACCESS_LEVEL => write_u32(&mut row, 1),
             PID_TAG_MESSAGE_FLAGS => write_u32(&mut row, message_flags(email)),
             PID_TAG_READ => row.push((!email.unread) as u8),
             PID_TAG_MESSAGE_SIZE => {
@@ -6935,11 +7042,18 @@ pub(in crate::mapi) fn serialize_message_row(email: &JmapEmail, columns: &[u32])
                 &mut row,
                 email.from_display.as_deref().unwrap_or(&email.from_address),
             ),
+            PID_TAG_SENDER_ADDRESS_TYPE_W => write_utf16z(&mut row, "SMTP"),
             PID_TAG_SENDER_EMAIL_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
+            PID_TAG_SENDER_SMTP_ADDRESS_W => write_utf16z(&mut row, &email.from_address),
             PID_TAG_DISPLAY_TO_W => write_utf16z(&mut row, &display_to(email)),
             PID_TAG_DISPLAY_CC_W => write_utf16z(&mut row, &display_cc(email)),
+            PID_TAG_DISPLAY_BCC_W => write_utf16z(&mut row, &display_bcc(email)),
             PID_TAG_HAS_ATTACHMENTS => row.push(email.has_attachments as u8),
+            PID_TAG_RTF_IN_SYNC => row.push(0),
             PID_TAG_BODY_W => write_utf16z(&mut row, &email.body_text),
+            PID_TAG_NATIVE_BODY => write_u32(&mut row, native_body_format(email)),
+            PID_TAG_INTERNET_CODEPAGE => write_u32(&mut row, 65001),
+            PID_TAG_MESSAGE_LOCALE_ID => write_u32(&mut row, 0x0409),
             PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => write_u16_prefixed_bytes(
                 &mut row,
                 &crate::mapi::identity::instance_key_for_object_id(mapi_message_id(email)),
@@ -7200,11 +7314,12 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
             PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
                 crate::mapi::identity::instance_key_for_object_id(message.id),
             )),
-            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+            PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
                 Some(MapiValue::String(message.subject.clone()))
             }
             PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(message.message_class.clone())),
             PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(0x0000_0040)),
+            PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
             PID_TAG_ASSOCIATED => Some(MapiValue::Bool(true)),
             PID_TAG_MESSAGE_SIZE => Some(MapiValue::I64(
                 message
@@ -7220,6 +7335,9 @@ pub(in crate::mapi) fn associated_config_property_value_with_mailbox_guid(
                 message.id,
             ))),
             PID_TAG_RECORD_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
+                message.id,
+            ))),
+            PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_store_id(
                 message.id,
             ))),
             PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
@@ -7869,6 +7987,21 @@ pub(in crate::mapi) fn display_to(email: &JmapEmail) -> String {
 pub(in crate::mapi) fn display_cc(email: &JmapEmail) -> String {
     email
         .cc
+        .iter()
+        .map(|address| {
+            address
+                .display_name
+                .as_deref()
+                .unwrap_or(&address.address)
+                .to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+pub(in crate::mapi) fn display_bcc(email: &JmapEmail) -> String {
+    email
+        .bcc
         .iter()
         .map(|address| {
             address

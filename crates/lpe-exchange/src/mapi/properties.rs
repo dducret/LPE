@@ -308,28 +308,38 @@ pub(in crate::mapi) fn is_acl_member_name_property_tag(property_tag: u32) -> boo
 }
 pub(in crate::mapi) const PID_TAG_SUBJECT_W: u32 = 0x0037_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_NAME_W: u32 = 0x0C1A_001F;
+pub(in crate::mapi) const PID_TAG_SENDER_ADDRESS_TYPE_W: u32 = 0x0C1E_001F;
 pub(in crate::mapi) const PID_TAG_SENDER_EMAIL_ADDRESS_W: u32 = 0x0C1F_001F;
 pub(in crate::mapi) const PID_TAG_RECIPIENT_TYPE: u32 = 0x0C15_0003;
 pub(in crate::mapi) const PID_TAG_CLIENT_SUBMIT_TIME: u32 = 0x0039_0040;
+pub(in crate::mapi) const PID_TAG_ORIGINAL_MESSAGE_CLASS_W: u32 = 0x004B_001F;
+pub(in crate::mapi) const PID_TAG_DISPLAY_BCC_W: u32 = 0x0E02_001F;
 pub(in crate::mapi) const PID_TAG_DISPLAY_CC_W: u32 = 0x0E03_001F;
 pub(in crate::mapi) const PID_TAG_DISPLAY_TO_W: u32 = 0x0E04_001F;
 pub(in crate::mapi) const PID_TAG_MESSAGE_DELIVERY_TIME: u32 = 0x0E06_0040;
 pub(in crate::mapi) const PID_TAG_MESSAGE_FLAGS: u32 = 0x0E07_0003;
 pub(in crate::mapi) const PID_TAG_MESSAGE_SIZE: u32 = 0x0E08_0003;
 pub(in crate::mapi) const PID_TAG_PARENT_ENTRY_ID: u32 = 0x0E09_0102;
+pub(in crate::mapi) const PID_TAG_MESSAGE_STATUS: u32 = 0x0E17_0003;
 pub(in crate::mapi) const PID_TAG_HAS_ATTACHMENTS: u32 = 0x0E1B_000B;
 pub(in crate::mapi) const PID_TAG_NORMALIZED_SUBJECT_W: u32 = 0x0E1D_001F;
+pub(in crate::mapi) const PID_TAG_RTF_IN_SYNC: u32 = 0x0E1F_000B;
 pub(in crate::mapi) const PID_TAG_ASSOCIATED_SHARING_PROVIDER: u32 = 0x0EA0_0048;
 pub(in crate::mapi) const PID_TAG_READ: u32 = 0x0E69_000B;
+pub(in crate::mapi) const PID_TAG_CONVERSATION_TOPIC_W: u32 = 0x0070_001F;
 pub(in crate::mapi) const PID_TAG_CONVERSATION_INDEX: u32 = 0x0071_0102;
+pub(in crate::mapi) const PID_TAG_TRANSPORT_MESSAGE_HEADERS_W: u32 = 0x007D_001F;
 pub(in crate::mapi) const PID_TAG_ACCESS: u32 = 0x0FF4_0003;
+pub(in crate::mapi) const PID_TAG_ACCESS_LEVEL: u32 = 0x0FF7_0003;
 pub(in crate::mapi) const PID_TAG_ROW_TYPE: u32 = 0x0FF5_0003;
 pub(in crate::mapi) const PID_TAG_INSTANCE_KEY: u32 = 0x0FF6_0102;
 pub(in crate::mapi) const PID_TAG_RECORD_KEY: u32 = 0x0FF9_0102;
 pub(in crate::mapi) const PID_TAG_ENTRY_ID: u32 = 0x0FFF_0102;
+pub(in crate::mapi) const PID_TAG_SEARCH_KEY: u32 = 0x300B_0102;
 pub(in crate::mapi) const PID_TAG_BODY_STRING8: u32 = 0x1000_001E;
 pub(in crate::mapi) const PID_TAG_BODY_W: u32 = 0x1000_001F;
 pub(in crate::mapi) const PID_TAG_BODY_HTML_W: u32 = 0x1013_001F;
+pub(in crate::mapi) const PID_TAG_NATIVE_BODY: u32 = 0x1016_0003;
 pub(in crate::mapi) const PID_TAG_ATTRIBUTE_HIDDEN: u32 = 0x10F4_000B;
 
 pub(in crate::mapi) const FOLDER_ROOT: u32 = 0;
@@ -361,6 +371,9 @@ pub(in crate::mapi) const PID_TAG_FOLLOWUP_ICON: u32 = 0x1095_0003;
 pub(in crate::mapi) const PID_TAG_TODO_ITEM_FLAGS: u32 = 0x0E2B_0003;
 pub(in crate::mapi) const PID_TAG_SWAPPED_TODO_STORE: u32 = 0x0E2C_0102;
 pub(in crate::mapi) const PID_TAG_SWAPPED_TODO_DATA: u32 = 0x0E2D_0102;
+pub(in crate::mapi) const PID_TAG_SENDER_SMTP_ADDRESS_W: u32 = 0x5D01_001F;
+pub(in crate::mapi) const PID_TAG_INTERNET_CODEPAGE: u32 = 0x3FDE_0003;
+pub(in crate::mapi) const PID_TAG_MESSAGE_LOCALE_ID: u32 = 0x3FF1_0003;
 pub(in crate::mapi) const PID_TAG_LAST_MODIFICATION_TIME: u32 = 0x3008_0040;
 pub(in crate::mapi) const PID_TAG_HIERARCHY_CHANGE_NUMBER: u32 = 0x663E_0003;
 pub(in crate::mapi) const PID_TAG_SOURCE_KEY: u32 = 0x65E0_0102;
@@ -1533,16 +1546,11 @@ pub(in crate::mapi) fn email_property_value(
     }
     match property_tag {
         PID_TAG_MID => Some(MapiValue::U64(mapi_message_id(email))),
-        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
             Some(MapiValue::String(email.subject.clone()))
         }
-        PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String(
-            if email.mailbox_role == "rss_feeds" {
-                "IPM.Post.RSS"
-            } else {
-                "IPM.Note"
-            }
-            .to_string(),
+        PID_TAG_MESSAGE_CLASS_W | PID_TAG_ORIGINAL_MESSAGE_CLASS_W => Some(MapiValue::String(
+            message_class_for_email(email).to_string(),
         )),
         PID_TAG_MESSAGE_DELIVERY_TIME
         | PID_TAG_LAST_MODIFICATION_TIME
@@ -1554,6 +1562,8 @@ pub(in crate::mapi) fn email_property_value(
             .as_deref()
             .map(|value| MapiValue::U64(mapi_mailstore::filetime_from_rfc3339_utc(value))),
         PID_TAG_ACCESS => Some(MapiValue::U32(MAPI_MESSAGE_ACCESS)),
+        PID_TAG_ACCESS_LEVEL => Some(MapiValue::U32(1)),
+        PID_TAG_MESSAGE_STATUS => Some(MapiValue::U32(0)),
         PID_TAG_MESSAGE_FLAGS => Some(MapiValue::U32(message_flags(email))),
         PID_TAG_READ => Some(MapiValue::Bool(!email.unread)),
         PID_TAG_FLAG_STATUS => Some(MapiValue::U32(mapi_mailstore::canonical_flag_status(email))),
@@ -1592,11 +1602,26 @@ pub(in crate::mapi) fn email_property_value(
                 .clone()
                 .unwrap_or_else(|| email.from_address.clone()),
         )),
+        PID_TAG_SENDER_ADDRESS_TYPE_W => Some(MapiValue::String("SMTP".to_string())),
         PID_TAG_SENDER_EMAIL_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
+        PID_TAG_SENDER_SMTP_ADDRESS_W => Some(MapiValue::String(email.from_address.clone())),
         PID_TAG_DISPLAY_TO_W => Some(MapiValue::String(display_to(email))),
         PID_TAG_DISPLAY_CC_W => Some(MapiValue::String(display_cc(email))),
+        PID_TAG_DISPLAY_BCC_W => Some(MapiValue::String(display_bcc(email))),
         PID_TAG_HAS_ATTACHMENTS => Some(MapiValue::Bool(email.has_attachments)),
+        PID_TAG_RTF_IN_SYNC => Some(MapiValue::Bool(false)),
         PID_TAG_BODY_W => Some(MapiValue::String(email.body_text.clone())),
+        PID_TAG_BODY_HTML_W => email.body_html_sanitized.clone().map(MapiValue::String),
+        PID_TAG_HTML_BINARY => email
+            .body_html_sanitized
+            .as_ref()
+            .map(|value| MapiValue::Binary(value.clone().into_bytes())),
+        PID_TAG_NATIVE_BODY => Some(MapiValue::U32(native_body_format(email))),
+        PID_TAG_INTERNET_CODEPAGE => Some(MapiValue::U32(65001)),
+        PID_TAG_MESSAGE_LOCALE_ID => Some(MapiValue::U32(0x0409)),
+        PID_TAG_CONVERSATION_INDEX => Some(MapiValue::Binary(conversation_index_for_uuid(
+            email.thread_id,
+        ))),
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => {
             let object_id = mapi_message_id(email);
             Some(MapiValue::Binary(
@@ -1606,6 +1631,7 @@ pub(in crate::mapi) fn email_property_value(
         PID_TAG_SOURCE_KEY => Some(MapiValue::Binary(mapi_mailstore::source_key_for_uuid(
             &email.id,
         ))),
+        PID_TAG_SEARCH_KEY => Some(MapiValue::Binary(message_search_key(email.id))),
         PID_TAG_PARENT_SOURCE_KEY => Some(MapiValue::Binary(
             mapi_mailstore::source_key_for_mailbox_role(&email.mailbox_id, &email.mailbox_role),
         )),
@@ -1623,6 +1649,7 @@ pub(in crate::mapi) fn email_property_value(
             mapi_mailstore::canonical_message_change_number(email),
         )),
         PID_TAG_INTERNET_MESSAGE_ID_W => email.internet_message_id.clone().map(MapiValue::String),
+        PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => Some(MapiValue::String(transport_headers(email))),
         _ => None,
     }
 }
@@ -1842,7 +1869,7 @@ pub(in crate::mapi) fn conversation_action_property_value(
         PID_TAG_ENTRY_ID | PID_TAG_INSTANCE_KEY => Some(MapiValue::Binary(
             crate::mapi::identity::instance_key_for_object_id(message.id),
         )),
-        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W => {
+        PID_TAG_SUBJECT_W | PID_TAG_NORMALIZED_SUBJECT_W | PID_TAG_CONVERSATION_TOPIC_W => {
             Some(MapiValue::String(conversation_action_subject(action)))
         }
         PID_TAG_MESSAGE_CLASS_W => Some(MapiValue::String("IPM.ConversationAction".to_string())),
@@ -1902,6 +1929,57 @@ pub(in crate::mapi) fn conversation_index_for_uuid(conversation_id: Uuid) -> Vec
     value.extend_from_slice(&[0x01, 0, 0, 0, 0, 0]);
     value.extend_from_slice(conversation_id.as_bytes());
     value
+}
+
+fn message_search_key(message_id: Uuid) -> Vec<u8> {
+    let mut value = Vec::with_capacity(23);
+    value.extend_from_slice(b"LPEMSG:");
+    value.extend_from_slice(message_id.as_bytes());
+    value
+}
+
+pub(in crate::mapi) fn message_class_for_email(email: &JmapEmail) -> &'static str {
+    if email.mailbox_role == "rss_feeds" {
+        "IPM.Post.RSS"
+    } else {
+        "IPM.Note"
+    }
+}
+
+pub(in crate::mapi) fn native_body_format(email: &JmapEmail) -> u32 {
+    if email
+        .body_html_sanitized
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty())
+    {
+        3
+    } else if email.body_text.trim().is_empty() {
+        0
+    } else {
+        1
+    }
+}
+
+fn transport_headers(email: &JmapEmail) -> String {
+    let mut headers = Vec::new();
+    if let Some(message_id) = email.internet_message_id.as_deref() {
+        headers.push(format!("Message-ID: {message_id}"));
+    }
+    headers.push(format!(
+        "From: {}",
+        email.from_display.as_deref().unwrap_or(&email.from_address)
+    ));
+    let to = display_to(email);
+    if !to.is_empty() {
+        headers.push(format!("To: {to}"));
+    }
+    let cc = display_cc(email);
+    if !cc.is_empty() {
+        headers.push(format!("Cc: {cc}"));
+    }
+    headers.push(format!("Subject: {}", email.subject));
+    headers.join("\r\n")
 }
 
 pub(in crate::mapi) fn conversation_id_from_index(value: &[u8]) -> Option<Uuid> {
@@ -7167,11 +7245,14 @@ mod tests {
             submitted_by_account_id: Uuid::nil(),
             to: Vec::new(),
             cc: Vec::new(),
-            bcc: Vec::new(),
+            bcc: vec![lpe_storage::JmapEmailAddress {
+                address: "hidden@example.test".to_string(),
+                display_name: Some("Hidden".to_string()),
+            }],
             subject: "RSS item".to_string(),
             preview: "Preview".to_string(),
             body_text: "<item>RSS item</item>".to_string(),
-            body_html_sanitized: None,
+            body_html_sanitized: Some("<p>RSS item</p>".to_string()),
             unread: false,
             flagged: false,
             followup_flag_status: "none".to_string(),
@@ -7199,6 +7280,22 @@ mod tests {
             Some(MapiValue::String("IPM.Post.RSS".to_string()))
         );
         assert_eq!(
+            email_property_value(&email, PID_TAG_ORIGINAL_MESSAGE_CLASS_W),
+            Some(MapiValue::String("IPM.Post.RSS".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_ACCESS_LEVEL),
+            Some(MapiValue::U32(1))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SENDER_ADDRESS_TYPE_W),
+            Some(MapiValue::String("SMTP".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SENDER_SMTP_ADDRESS_W),
+            Some(MapiValue::String("feed@example.test".to_string()))
+        );
+        assert_eq!(
             email_property_value(&email, PID_LID_POST_RSS_ITEM_GUID_W_TAG),
             Some(MapiValue::String("rss-guid".to_string()))
         );
@@ -7209,6 +7306,61 @@ mod tests {
         assert_eq!(
             email_property_value(&email, PID_LID_POST_RSS_ITEM_XML_W_TAG),
             Some(MapiValue::String("<item>RSS item</item>".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_CONVERSATION_TOPIC_W),
+            Some(MapiValue::String("RSS item".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_CONVERSATION_INDEX),
+            Some(MapiValue::Binary(conversation_index_for_uuid(
+                email.thread_id
+            )))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_MESSAGE_STATUS),
+            Some(MapiValue::U32(0))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_SEARCH_KEY),
+            Some(MapiValue::Binary(message_search_key(email.id)))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_DISPLAY_BCC_W),
+            Some(MapiValue::String("Hidden".to_string()))
+        );
+
+        let headers = match email_property_value(&email, PID_TAG_TRANSPORT_MESSAGE_HEADERS_W) {
+            Some(MapiValue::String(headers)) => headers,
+            other => panic!("unexpected transport headers value: {other:?}"),
+        };
+        assert!(headers.contains("Message-ID: rss-guid"));
+        assert!(headers.contains("From: Feed"));
+        assert!(headers.contains("Subject: RSS item"));
+        assert!(!headers.contains("Bcc:"));
+        assert_eq!(
+            email_property_value(&email, PID_TAG_BODY_HTML_W),
+            Some(MapiValue::String("<p>RSS item</p>".to_string()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_HTML_BINARY),
+            Some(MapiValue::Binary(b"<p>RSS item</p>".to_vec()))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_RTF_IN_SYNC),
+            Some(MapiValue::Bool(false))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_NATIVE_BODY),
+            Some(MapiValue::U32(3))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_INTERNET_CODEPAGE),
+            Some(MapiValue::U32(65001))
+        );
+        assert_eq!(
+            email_property_value(&email, PID_TAG_MESSAGE_LOCALE_ID),
+            Some(MapiValue::U32(0x0409))
         );
     }
 

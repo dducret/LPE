@@ -5000,6 +5000,14 @@ fn execute_response_framing_context(request_rop_ids: &[u8]) -> Option<&'static s
     }
     if request_rop_ids
         .iter()
+        .all(|rop_id| matches!(*rop_id, 0x01 | 0x05 | 0x12 | 0x13 | 0x18 | 0x4F | 0x56))
+        && request_rop_ids.contains(&0x05)
+        && request_rop_ids.contains(&0x4F)
+    {
+        return Some("contents_table_probe");
+    }
+    if request_rop_ids
+        .iter()
         .all(|rop_id| matches!(*rop_id, 0x01 | 0x07))
         && request_rop_ids.contains(&0x07)
     {
@@ -5061,6 +5069,9 @@ fn response_rop_frame_end(
     let rop_id = responses.get(start).copied().unwrap_or_default();
     let fixed_end = match (rop_id, error_code) {
         (0x02, Some(0)) => Some(start.saturating_add(8)),
+        (0x04 | 0x05 | 0x21, Some(0)) => Some(start.saturating_add(10)),
+        (0x12 | 0x13, Some(0)) => Some(start.saturating_add(7)),
+        (0x18, Some(0)) => Some(start.saturating_add(11)),
         (0x49, Some(0)) => responses.get(start + 8..start + 10).and_then(|bytes| {
             let byte_count = u16::from_le_bytes(bytes.try_into().ok()?) as usize;
             Some(start.saturating_add(10).saturating_add(byte_count))
@@ -6184,6 +6195,8 @@ fn effective_contents_table_columns(folder_id: u64, associated: bool, columns: &
         default_navigation_shortcut_property_tags()
     } else if associated && folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
         default_conversation_action_property_tags()
+    } else if associated && folder_id == INBOX_FOLDER_ID {
+        default_associated_config_columns()
     } else {
         default_contents_columns()
     }
@@ -12646,6 +12659,12 @@ where
                     cc_count = input.cc.len(),
                     bcc_count = input.bcc.len(),
                     attachment_count = input.attachments.len(),
+                    body_text_bytes = input.body_text.len(),
+                    body_html_bytes = input
+                        .body_html_sanitized
+                        .as_deref()
+                        .map(str::len)
+                        .unwrap_or(0),
                     draft_message_id = %input.draft_message_id.map(|id| id.to_string()).unwrap_or_default(),
                     source = %input.source,
                     "rca debug mapi submit message"
@@ -18596,6 +18615,61 @@ mod tests {
     }
 
     #[test]
+    fn execute_rop_response_summary_keeps_contents_table_frame_boundary() {
+        let table_request = RopRequest {
+            rop_id: 0x05,
+            input_handle_index: Some(0),
+            output_handle_index: Some(1),
+            payload: vec![0x02],
+        };
+        let set_columns_request = RopRequest {
+            rop_id: 0x12,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let sort_table_request = RopRequest {
+            rop_id: 0x13,
+            input_handle_index: Some(1),
+            output_handle_index: None,
+            payload: Vec::new(),
+        };
+        let seek_row_response = vec![0x18, 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        let mut responses = rop_get_contents_table_response(&table_request, 0x12);
+        responses.extend_from_slice(&rop_set_columns_response(&set_columns_request));
+        responses.extend_from_slice(&rop_sort_table_response(&sort_table_request));
+        responses.extend_from_slice(&seek_row_response);
+        responses.extend_from_slice(&rop_get_contents_table_response(&table_request, 13));
+
+        let response_buffer =
+            rpc_header_ext_rop_buffer(rop_buffer_with_response_spec(responses, &[42, 43]));
+        let response_summary =
+            summarize_response_rop_buffer(&response_buffer, &[0x05, 0x12, 0x13, 0x18, 0x05]);
+
+        assert_eq!(response_summary.ids_csv, "0x05,0x12,0x13,0x18,0x05");
+        assert_eq!(
+            response_summary.results_csv,
+            "0x05:0x00000000,0x12:0x00000000,0x13:0x00000000,0x18:0x00000000,0x05:0x00000000"
+        );
+        assert!(response_summary
+            .frames
+            .contains("0x05@0..10:len=10:out=1:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x12@10..17:len=7:out=1:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x13@17..24:len=7:out=1:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x18@24..35:len=11:out=1:rv=0x00000000"));
+        assert!(response_summary
+            .frames
+            .contains("0x05@35..45:len=10:out=1:rv=0x00000000"));
+        assert!(response_summary.parse_error.is_empty());
+    }
+
+    #[test]
     fn execute_rop_response_framing_summary_marks_multi_rop_boundaries() {
         let mut responses = Vec::new();
         responses.push(0x02);
@@ -18667,6 +18741,16 @@ mod tests {
         assert_eq!(
             execute_response_framing_context(&[0x56, 0x02, 0x07]),
             Some("named_props_openfolder_getprops")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[0x05, 0x12, 0x13, 0x18, 0x4F]),
+            Some("contents_table_probe")
+        );
+        assert_eq!(
+            execute_response_framing_context(&[
+                0x05, 0x12, 0x13, 0x18, 0x4F, 0x56, 0x05, 0x12, 0x13, 0x4F,
+            ]),
+            Some("contents_table_probe")
         );
         assert_eq!(
             execute_response_framing_context(&[0x01, 0x02, 0x07]),

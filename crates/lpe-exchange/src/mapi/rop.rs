@@ -1602,6 +1602,7 @@ fn expected_folder_type_for_debug(
         return ("root", Some(FOLDER_ROOT));
     }
     if search_folder_found
+        || advertised_special_search_folder_for_debug(folder_id)
         || mailbox
             .map(|mailbox| mailbox.role == "__mapi_search")
             .unwrap_or(false)
@@ -1612,6 +1613,16 @@ fn expected_folder_type_for_debug(
         return ("generic", Some(FOLDER_GENERIC));
     }
     ("unknown", None)
+}
+
+fn advertised_special_search_folder_for_debug(folder_id: u64) -> bool {
+    matches!(
+        folder_id,
+        CONTACTS_SEARCH_FOLDER_ID
+            | REMINDERS_FOLDER_ID
+            | TRACKED_MAIL_PROCESSING_FOLDER_ID
+            | TODO_SEARCH_FOLDER_ID
+    )
 }
 
 fn folder_type_kind_for_debug(value: u32) -> &'static str {
@@ -2423,6 +2434,7 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_DISPLAY_NAME_W => "PidTagDisplayName",
         PID_TAG_ENTRY_ID => "PidTagEntryId",
         PID_TAG_RECORD_KEY => "PidTagRecordKey",
+        PID_TAG_SEARCH_KEY => "PidTagSearchKey",
         PID_TAG_SOURCE_KEY => "PidTagSourceKey",
         PID_TAG_PARENT_SOURCE_KEY => "PidTagParentSourceKey",
         PID_TAG_PARENT_ENTRY_ID => "PidTagParentEntryId",
@@ -2430,6 +2442,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_PARENT_FOLDER_ID => "PidTagParentFolderId",
         PID_TAG_INSTANCE_KEY => "PidTagInstanceKey",
         PID_TAG_FOLDER_TYPE => "PidTagFolderType",
+        PID_TAG_MESSAGE_CLASS_W | PID_TAG_MESSAGE_CLASS_STRING8 => "PidTagMessageClass",
+        PID_TAG_ORIGINAL_MESSAGE_CLASS_W => "PidTagOriginalMessageClass",
+        PID_TAG_MESSAGE_STATUS => "PidTagMessageStatus",
         PID_TAG_CONTENT_COUNT => "PidTagContentCount",
         PID_TAG_ASSOCIATED_CONTENT_COUNT => "PidTagAssociatedContentCount",
         PID_TAG_CONTAINER_CLASS_W => "PidTagContainerClass",
@@ -2456,6 +2471,14 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         PID_TAG_FREE_BUSY_ENTRY_IDS => "PidTagFreeBusyEntryIds",
         PID_TAG_EMAIL_ADDRESS_W => "PidTagEmailAddress",
         PID_TAG_SMTP_ADDRESS_W => "PidTagSmtpAddress",
+        PID_TAG_SENDER_ADDRESS_TYPE_W => "PidTagSenderAddressType",
+        PID_TAG_SENDER_SMTP_ADDRESS_W => "PidTagSenderSmtpAddress",
+        PID_TAG_DISPLAY_BCC_W => "PidTagDisplayBcc",
+        PID_TAG_TRANSPORT_MESSAGE_HEADERS_W => "PidTagTransportMessageHeaders",
+        PID_TAG_RTF_IN_SYNC => "PidTagRtfInSync",
+        PID_TAG_NATIVE_BODY => "PidTagNativeBody",
+        PID_TAG_INTERNET_CODEPAGE => "PidTagInternetCodepage",
+        PID_TAG_MESSAGE_LOCALE_ID => "PidTagMessageLocaleId",
         PID_TAG_SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
         PID_TAG_RESOURCE_FLAGS => "PidTagResourceFlags",
         PID_TAG_USER_ENTRY_ID => "PidTagUserEntryId",
@@ -2508,6 +2531,9 @@ fn property_tag_debug_name(tag: u32) -> &'static str {
         }
         PID_TAG_CHANGE_KEY => "PidTagChangeKey",
         PID_TAG_ACCESS => "PidTagAccess",
+        PID_TAG_ACCESS_LEVEL => "PidTagAccessLevel",
+        PID_TAG_CONVERSATION_TOPIC_W => "PidTagConversationTopic",
+        PID_TAG_CONVERSATION_INDEX => "PidTagConversationIndex",
         PID_TAG_ROAMING_DATATYPES => "PidTagRoamingDatatypes",
         PID_TAG_ROAMING_DICTIONARY => "PidTagRoamingDictionary",
         PID_TAG_ROAMING_XML_STREAM => "PidTagRoamingXmlStream",
@@ -6725,6 +6751,66 @@ mod tests {
         );
         assert_eq!(property_tag_debug_name(PID_TAG_ACCESS), "PidTagAccess");
         assert_eq!(
+            property_tag_debug_name(PID_TAG_CONVERSATION_TOPIC_W),
+            "PidTagConversationTopic"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_CONVERSATION_INDEX),
+            "PidTagConversationIndex"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_MESSAGE_CLASS_W),
+            "PidTagMessageClass"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ORIGINAL_MESSAGE_CLASS_W),
+            "PidTagOriginalMessageClass"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_ACCESS_LEVEL),
+            "PidTagAccessLevel"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SENDER_ADDRESS_TYPE_W),
+            "PidTagSenderAddressType"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SENDER_SMTP_ADDRESS_W),
+            "PidTagSenderSmtpAddress"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_MESSAGE_STATUS),
+            "PidTagMessageStatus"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_SEARCH_KEY),
+            "PidTagSearchKey"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_DISPLAY_BCC_W),
+            "PidTagDisplayBcc"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_TRANSPORT_MESSAGE_HEADERS_W),
+            "PidTagTransportMessageHeaders"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_RTF_IN_SYNC),
+            "PidTagRtfInSync"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_NATIVE_BODY),
+            "PidTagNativeBody"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_INTERNET_CODEPAGE),
+            "PidTagInternetCodepage"
+        );
+        assert_eq!(
+            property_tag_debug_name(PID_TAG_MESSAGE_LOCALE_ID),
+            "PidTagMessageLocaleId"
+        );
+        assert_eq!(
             property_tag_debug_name(PID_TAG_ROAMING_DATATYPES),
             "PidTagRoamingDatatypes"
         );
@@ -6918,6 +7004,35 @@ mod tests {
         assert!(contract.contains("returned_value=1"));
         assert!(contract
             .contains("issues=inbox_without_loaded_mailbox|inbox_answered_from_special_fallback"));
+    }
+
+    #[test]
+    fn folder_type_getprops_contract_accepts_advertised_search_folder() {
+        let principal = AccountPrincipal {
+            tenant_id: Uuid::nil(),
+            account_id: Uuid::from_u128(0xbbbbbbbb_bbbb_bbbb_bbbb_bbbbbbbbbbbb),
+            email: "alice@example.test".to_string(),
+            display_name: "Alice".to_string(),
+        };
+        let object = MapiObject::Folder {
+            folder_id: CONTACTS_SEARCH_FOLDER_ID,
+            properties: HashMap::from([(PID_TAG_FOLDER_TYPE, MapiValue::U32(FOLDER_SEARCH))]),
+        };
+
+        let contract = format_folder_type_getprops_contract(
+            Some(&object),
+            &principal,
+            &[PID_TAG_FOLDER_TYPE],
+            &[],
+            &MapiMailStoreSnapshot::empty(),
+        );
+
+        assert!(contract.contains("advertised_special_folder=true"));
+        assert!(contract.contains("property_source=opened_handle"));
+        assert!(contract.contains("returned_value=2"));
+        assert!(contract.contains("returned_kind=search"));
+        assert!(contract.contains("expected_kind=search"));
+        assert!(contract.ends_with("issues="));
     }
 
     #[test]
