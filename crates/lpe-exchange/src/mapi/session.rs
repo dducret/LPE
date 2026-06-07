@@ -27,6 +27,7 @@ pub(in crate::mapi) struct MapiSession {
     pub(in crate::mapi) handles: HashMap<u32, MapiObject>,
     pub(in crate::mapi) message_statuses: HashMap<(u64, u64), u32>,
     pub(in crate::mapi) special_folder_aliases: HashMap<u64, u64>,
+    pub(in crate::mapi) deleted_advertised_special_folders: HashSet<u64>,
     pub(in crate::mapi) named_properties: HashMap<MapiNamedProperty, u16>,
     pub(in crate::mapi) named_property_ids: HashMap<u16, MapiNamedProperty>,
     pub(in crate::mapi) next_named_property_id: u16,
@@ -237,6 +238,7 @@ pub(in crate::mapi) enum MapiObject {
         category_count: u16,
         expanded_count: u16,
         collapsed_categories: HashSet<u64>,
+        deleted_advertised_special_folders: HashSet<u64>,
         restriction: Option<MapiRestriction>,
         bookmarks: HashMap<Vec<u8>, TableBookmark>,
         next_bookmark: u32,
@@ -453,6 +455,7 @@ pub(in crate::mapi) fn create_session(
         handles: HashMap::new(),
         message_statuses: HashMap::new(),
         special_folder_aliases: HashMap::new(),
+        deleted_advertised_special_folders: HashSet::new(),
         named_properties: HashMap::new(),
         named_property_ids: HashMap::new(),
         next_named_property_id: FIRST_NAMED_PROPERTY_ID,
@@ -905,6 +908,14 @@ impl MapiSession {
             .get(&folder_id)
             .copied()
             .unwrap_or(folder_id)
+    }
+
+    pub(in crate::mapi) fn record_deleted_advertised_special_folder(&mut self, folder_id: u64) {
+        self.deleted_advertised_special_folders.insert(folder_id);
+    }
+
+    pub(in crate::mapi) fn advertised_special_folder_was_deleted(&self, folder_id: u64) -> bool {
+        self.deleted_advertised_special_folders.contains(&folder_id)
     }
 
     pub(in crate::mapi) fn allocate_output_handle(
@@ -1463,6 +1474,19 @@ mod tests {
         assert_eq!(session.last_request_id, "test:3");
         assert_eq!(session.request_count, 3);
         assert_eq!(session.execute_request_count, 1);
+    }
+
+    #[test]
+    fn session_remembers_deleted_advertised_special_folder() {
+        let principal = principal();
+        let session_id = create_session(MapiEndpoint::Emsmdb, &principal, "Connect", "test:1");
+        let mut session = remove_session(&session_id).unwrap();
+
+        assert!(!session.advertised_special_folder_was_deleted(QUICK_STEP_SETTINGS_FOLDER_ID));
+
+        session.record_deleted_advertised_special_folder(QUICK_STEP_SETTINGS_FOLDER_ID);
+
+        assert!(session.advertised_special_folder_was_deleted(QUICK_STEP_SETTINGS_FOLDER_ID));
     }
 
     #[test]

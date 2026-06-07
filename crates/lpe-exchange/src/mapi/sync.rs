@@ -214,10 +214,20 @@ pub(in crate::mapi) fn emails_for_folder<'a>(
         .collect()
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn sync_mailboxes_for(
     folder_id: u64,
     sync_type: u8,
     mailboxes: &[JmapMailbox],
+) -> Vec<JmapMailbox> {
+    sync_mailboxes_for_excluding_deleted(folder_id, sync_type, mailboxes, &HashSet::new())
+}
+
+pub(in crate::mapi) fn sync_mailboxes_for_excluding_deleted(
+    folder_id: u64,
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+    deleted_advertised_special_folders: &HashSet<u64>,
 ) -> Vec<JmapMailbox> {
     if sync_type == 0x02 {
         let mut folder_ids = HashSet::new();
@@ -227,13 +237,21 @@ pub(in crate::mapi) fn sync_mailboxes_for(
                 mapi_folder_id(mailbox) == folder_id
                     || mailbox_is_hierarchy_descendant(mailbox, folder_id, mailboxes)
             })
-            .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
+            .filter(|mailbox| {
+                !mailbox_shadowed_by_active_outlook_special_folder(
+                    mailbox,
+                    deleted_advertised_special_folders,
+                )
+            })
             .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
             .filter(|mailbox| folder_ids.insert(mapi_folder_id(mailbox)))
             .cloned()
             .collect::<Vec<_>>();
         for special_folder_id in hierarchy_virtual_folder_ids(folder_id) {
             if !special_folder_is_in_sync_scope(special_folder_id, folder_id) {
+                continue;
+            }
+            if deleted_advertised_special_folders.contains(&special_folder_id) {
                 continue;
             }
             if folder_ids.insert(special_folder_id) {
@@ -251,12 +269,27 @@ pub(in crate::mapi) fn sync_mailboxes_for(
         .collect()
 }
 
+#[cfg(test)]
 pub(in crate::mapi) fn sync_state_mailboxes_for(
     folder_id: u64,
     sync_type: u8,
     mailboxes: &[JmapMailbox],
 ) -> Vec<JmapMailbox> {
     sync_mailboxes_for(folder_id, sync_type, mailboxes)
+}
+
+pub(in crate::mapi) fn sync_state_mailboxes_for_excluding_deleted(
+    folder_id: u64,
+    sync_type: u8,
+    mailboxes: &[JmapMailbox],
+    deleted_advertised_special_folders: &HashSet<u64>,
+) -> Vec<JmapMailbox> {
+    sync_mailboxes_for_excluding_deleted(
+        folder_id,
+        sync_type,
+        mailboxes,
+        deleted_advertised_special_folders,
+    )
 }
 
 fn hierarchy_virtual_folder_ids(sync_root_folder_id: u64) -> Vec<u64> {

@@ -16,17 +16,26 @@ use crate::mapi_store::{
     MapiPublicFolder, MapiPublicFolderItem, MapiRule, MapiTask,
 };
 
-pub(in crate::mapi) fn hierarchy_row_count(
+pub(in crate::mapi) fn hierarchy_row_count_excluding_deleted(
     folder_id: u64,
     mailboxes: &[JmapMailbox],
     snapshot: &MapiMailStoreSnapshot,
+    deleted_advertised_special_folders: &HashSet<u64>,
 ) -> u32 {
     if is_queryable_hierarchy_folder(folder_id)
         || snapshot.public_folder_for_id(folder_id).is_some()
     {
-        hierarchy_rows(folder_id, mailboxes, snapshot, None, &[], Uuid::nil())
-            .len()
-            .min(u32::MAX as usize) as u32
+        hierarchy_rows_excluding_deleted(
+            folder_id,
+            mailboxes,
+            snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+            deleted_advertised_special_folders,
+        )
+        .len()
+        .min(u32::MAX as usize) as u32
     } else {
         0
     }
@@ -529,6 +538,7 @@ enum SearchContentRow<'a> {
     Task(&'a MapiTask),
 }
 
+#[cfg(test)]
 fn hierarchy_rows<'a>(
     folder_id: u64,
     mailboxes: &'a [JmapMailbox],
@@ -536,6 +546,26 @@ fn hierarchy_rows<'a>(
     restriction: Option<&MapiRestriction>,
     sort_orders: &[MapiSortOrder],
     mailbox_guid: Uuid,
+) -> Vec<HierarchyRow<'a>> {
+    hierarchy_rows_excluding_deleted(
+        folder_id,
+        mailboxes,
+        snapshot,
+        restriction,
+        sort_orders,
+        mailbox_guid,
+        &HashSet::new(),
+    )
+}
+
+fn hierarchy_rows_excluding_deleted<'a>(
+    folder_id: u64,
+    mailboxes: &'a [JmapMailbox],
+    snapshot: &'a MapiMailStoreSnapshot,
+    restriction: Option<&MapiRestriction>,
+    sort_orders: &[MapiSortOrder],
+    mailbox_guid: Uuid,
+    deleted_advertised_special_folders: &HashSet<u64>,
 ) -> Vec<HierarchyRow<'a>> {
     if folder_id == PUBLIC_FOLDERS_ROOT_FOLDER_ID {
         let mut rows = snapshot
@@ -553,7 +583,12 @@ fn hierarchy_rows<'a>(
     } else {
         mailboxes
             .iter()
-            .filter(|mailbox| !mailbox_shadows_outlook_special_folder(mailbox))
+            .filter(|mailbox| {
+                !mailbox_shadowed_by_active_outlook_special_folder(
+                    mailbox,
+                    deleted_advertised_special_folders,
+                )
+            })
             .filter(|mailbox| mapi_folder_id(mailbox) != REMINDERS_FOLDER_ID)
             .filter(|mailbox| mapi_parent_folder_id(mailbox) == folder_id)
             .filter(|mailbox| {
@@ -578,7 +613,8 @@ fn hierarchy_rows<'a>(
     let mut folder_ids = rows.iter().map(hierarchy_row_id).collect::<HashSet<_>>();
     if folder_id == ROOT_FOLDER_ID {
         for special_folder_id in ROOT_HIERARCHY_FOLDER_IDS {
-            if folder_ids.insert(*special_folder_id)
+            if !deleted_advertised_special_folders.contains(special_folder_id)
+                && folder_ids.insert(*special_folder_id)
                 && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
             {
                 rows.push(HierarchyRow::Special(*special_folder_id));
@@ -586,7 +622,8 @@ fn hierarchy_rows<'a>(
         }
     } else if folder_id == IPM_SUBTREE_FOLDER_ID {
         for special_folder_id in IPM_SUBTREE_HIERARCHY_FOLDER_IDS {
-            if folder_ids.insert(*special_folder_id)
+            if !deleted_advertised_special_folders.contains(special_folder_id)
+                && folder_ids.insert(*special_folder_id)
                 && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
             {
                 rows.push(HierarchyRow::Special(*special_folder_id));
@@ -594,7 +631,8 @@ fn hierarchy_rows<'a>(
         }
     } else if folder_id == SYNC_ISSUES_FOLDER_ID {
         for special_folder_id in SYNC_ISSUES_HIERARCHY_FOLDER_IDS {
-            if folder_ids.insert(*special_folder_id)
+            if !deleted_advertised_special_folders.contains(special_folder_id)
+                && folder_ids.insert(*special_folder_id)
                 && special_hierarchy_row_matches(*special_folder_id, restriction, mailbox_guid)
             {
                 rows.push(HierarchyRow::Special(*special_folder_id));
@@ -704,12 +742,15 @@ fn hierarchy_row_display_name<'a>(row: &'a HierarchyRow<'a>) -> &'a str {
     }
 }
 
-pub(in crate::mapi) fn mailbox_shadows_outlook_special_folder(mailbox: &JmapMailbox) -> bool {
+pub(in crate::mapi) fn mailbox_shadowed_by_active_outlook_special_folder(
+    mailbox: &JmapMailbox,
+    deleted_advertised_special_folders: &HashSet<u64>,
+) -> bool {
     if mapi_parent_folder_id(mailbox) != IPM_SUBTREE_FOLDER_ID {
         return false;
     }
 
-    matches!(
+    let shadows = matches!(
         mailbox.name.trim().to_ascii_lowercase().as_str(),
         "archive"
             | "calendar"
@@ -731,7 +772,13 @@ pub(in crate::mapi) fn mailbox_shadows_outlook_special_folder(mailbox: &JmapMail
             | "suggested contacts"
             | "sync issues"
             | "tasks"
-    )
+    );
+    if !shadows {
+        return false;
+    }
+    advertised_special_folder_id_for_create(IPM_SUBTREE_FOLDER_ID, mailbox.name.trim())
+        .map(|folder_id| !deleted_advertised_special_folders.contains(&folder_id))
+        .unwrap_or(true)
 }
 
 fn collaboration_folder_shadows_outlook_special_folder(folder: &MapiCollaborationFolder) -> bool {
@@ -963,9 +1010,10 @@ pub(in crate::mapi) fn special_folder_property_value(
         tag if is_acl_member_name_property_tag(tag) => Some(MapiValue::String(String::new())),
         PID_TAG_FOLDER_FORM_STORAGE => Some(MapiValue::Binary(Vec::new())),
         PID_TAG_SUBFOLDERS => Some(MapiValue::Bool(has_subfolders)),
-        PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(
-            folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
-        )),
+        PID_TAG_ATTRIBUTE_HIDDEN => Some(MapiValue::Bool(matches!(
+            folder_id,
+            CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
+        ))),
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W if message_class.is_empty() => None,
         PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W => {
             Some(MapiValue::String(message_class.to_string()))
@@ -1265,6 +1313,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
             columns,
             sort_orders,
             restriction,
+            deleted_advertised_special_folders,
             position: table_position,
             ..
         }) if is_queryable_hierarchy_folder(*folder_id)
@@ -1276,13 +1325,14 @@ pub(in crate::mapi) fn rop_query_rows_response(
             } else {
                 columns.clone()
             };
-            let rows = hierarchy_rows(
+            let rows = hierarchy_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
                 restriction.as_ref(),
                 sort_orders,
                 mailbox_guid,
+                deleted_advertised_special_folders,
             );
             log_sync_issues_hierarchy_query_rows(
                 request,
@@ -1782,19 +1832,21 @@ pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
             sort_orders,
             restriction,
             position,
+            deleted_advertised_special_folders,
             ..
         }) if matches!(
             *folder_id,
             ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
         ) =>
         {
-            let rows = hierarchy_rows(
+            let rows = hierarchy_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
                 restriction.as_ref(),
                 sort_orders,
                 mailbox_guid,
+                deleted_advertised_special_folders,
             );
             selected_row_indexes(rows.len(), *position, forward_read, requested_row_count)
                 .into_iter()
@@ -3418,6 +3470,7 @@ pub(in crate::mapi) fn rop_find_row_response(
             columns,
             sort_orders,
             restriction: table_restriction,
+            deleted_advertised_special_folders,
             position,
             ..
         } if is_queryable_hierarchy_folder(*folder_id) => {
@@ -3426,13 +3479,14 @@ pub(in crate::mapi) fn rop_find_row_response(
             } else {
                 columns.clone()
             };
-            let rows = hierarchy_rows(
+            let rows = hierarchy_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
                 table_restriction.as_ref(),
                 sort_orders,
                 mailbox_guid,
+                deleted_advertised_special_folders,
             );
             if let Some((index, row)) = find_hierarchy_row(
                 rows.as_slice(),
@@ -3683,15 +3737,17 @@ pub(in crate::mapi) fn table_position_and_count(
             position,
             restriction,
             sort_orders,
+            deleted_advertised_special_folders,
             ..
         }) if is_queryable_hierarchy_folder(*folder_id) => {
-            let total = hierarchy_rows(
+            let total = hierarchy_rows_excluding_deleted(
                 *folder_id,
                 mailboxes,
                 snapshot,
                 restriction.as_ref(),
                 sort_orders,
                 mailbox_guid,
+                deleted_advertised_special_folders,
             )
             .len();
             (*position, total)
@@ -3876,14 +3932,16 @@ pub(in crate::mapi) fn table_row_keys(
             folder_id,
             sort_orders,
             restriction,
+            deleted_advertised_special_folders,
             ..
-        } if is_queryable_hierarchy_folder(*folder_id) => hierarchy_rows(
+        } if is_queryable_hierarchy_folder(*folder_id) => hierarchy_rows_excluding_deleted(
             *folder_id,
             mailboxes,
             snapshot,
             restriction.as_ref(),
             sort_orders,
             mailbox_guid,
+            deleted_advertised_special_folders,
         )
         .into_iter()
         .map(|row| hierarchy_row_id(&row))
@@ -4158,9 +4216,10 @@ fn serialize_advertised_special_folder_row_with_mailbox_guid(
                 write_u32(&mut row, 0)
             }
             PID_TAG_SUBFOLDERS => row.push(has_subfolders as u8),
-            PID_TAG_ATTRIBUTE_HIDDEN => {
-                row.push((folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID) as u8)
-            }
+            PID_TAG_ATTRIBUTE_HIDDEN => row.push(matches!(
+                folder_id,
+                CONVERSATION_ACTION_SETTINGS_FOLDER_ID | QUICK_STEP_SETTINGS_FOLDER_ID
+            ) as u8),
             PID_TAG_CONTAINER_CLASS_W | PID_TAG_MESSAGE_CLASS_W if message_class.is_empty() => {
                 write_property_default(&mut row, *column)
             }
@@ -4869,7 +4928,7 @@ mod tests {
     }
 
     #[test]
-    fn conversation_action_settings_projects_hidden_attribute() {
+    fn configuration_folders_project_hidden_attribute() {
         assert_eq!(
             special_folder_property_value(
                 CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
@@ -4884,11 +4943,19 @@ mod tests {
                 PID_TAG_ATTRIBUTE_HIDDEN,
                 Uuid::nil()
             ),
-            Some(MapiValue::Bool(false))
+            Some(MapiValue::Bool(true))
         );
 
         let row = serialize_special_folder_row(
             CONVERSATION_ACTION_SETTINGS_FOLDER_ID,
+            &[],
+            &[PID_TAG_ATTRIBUTE_HIDDEN],
+            None,
+        );
+        assert_eq!(row, vec![1]);
+
+        let row = serialize_special_folder_row(
+            QUICK_STEP_SETTINGS_FOLDER_ID,
             &[],
             &[PID_TAG_ATTRIBUTE_HIDDEN],
             None,
@@ -4956,6 +5023,7 @@ mod tests {
             category_count: 0,
             expanded_count: 0,
             collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
             restriction: None,
             bookmarks: HashMap::new(),
             next_bookmark: 1,
@@ -5008,6 +5076,7 @@ mod tests {
             category_count: 0,
             expanded_count: 0,
             collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
             restriction: None,
             bookmarks: HashMap::new(),
             next_bookmark: 1,
@@ -5513,6 +5582,72 @@ mod tests {
             ),
             "IPF.Contact.MOC.QuickContacts"
         );
+    }
+
+    #[test]
+    fn deleted_advertised_quick_step_folder_unshadows_real_folder_in_hierarchy() {
+        let quick_step_id = Uuid::parse_str("99999999-9999-4999-9999-999999999999").unwrap();
+        let quick_step_folder_id = crate::mapi::identity::mapi_store_id(0x99);
+        crate::mapi::identity::remember_mapi_identity(quick_step_id, quick_step_folder_id);
+        let quick_step = JmapMailbox {
+            id: quick_step_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Quick Step Settings".to_string(),
+            sort_order: 40,
+            modseq: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let mailboxes = [quick_step];
+        let snapshot = MapiMailStoreSnapshot::empty();
+        let mut deleted = HashSet::new();
+        deleted.insert(QUICK_STEP_SETTINGS_FOLDER_ID);
+
+        let rows = hierarchy_rows_excluding_deleted(
+            IPM_SUBTREE_FOLDER_ID,
+            &mailboxes,
+            &snapshot,
+            None,
+            &[],
+            Uuid::nil(),
+            &deleted,
+        );
+        let row_ids = rows.iter().map(hierarchy_row_id).collect::<Vec<_>>();
+
+        assert!(!row_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
+        assert!(row_ids.contains(&quick_step_folder_id));
+    }
+
+    #[test]
+    fn deleted_advertised_quick_step_folder_is_excluded_from_hierarchy_sync() {
+        let quick_step_id = Uuid::parse_str("88888888-8888-4888-8888-888888888888").unwrap();
+        let quick_step_folder_id = crate::mapi::identity::mapi_store_id(0x98);
+        crate::mapi::identity::remember_mapi_identity(quick_step_id, quick_step_folder_id);
+        let quick_step = JmapMailbox {
+            id: quick_step_id,
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Quick Step Settings".to_string(),
+            sort_order: 40,
+            modseq: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let mailboxes = [quick_step];
+        let mut deleted = HashSet::new();
+        deleted.insert(QUICK_STEP_SETTINGS_FOLDER_ID);
+
+        let sync_ids =
+            sync_mailboxes_for_excluding_deleted(IPM_SUBTREE_FOLDER_ID, 0x02, &mailboxes, &deleted)
+                .iter()
+                .map(mapi_folder_id)
+                .collect::<Vec<_>>();
+
+        assert!(!sync_ids.contains(&QUICK_STEP_SETTINGS_FOLDER_ID));
+        assert!(sync_ids.contains(&quick_step_folder_id));
     }
 
     #[test]

@@ -2263,6 +2263,7 @@ fn format_inbox_hierarchy_query_context(
         position,
         sort_orders,
         restriction,
+        deleted_advertised_special_folders,
         ..
     }) = object
     else {
@@ -2271,7 +2272,12 @@ fn format_inbox_hierarchy_query_context(
     if *folder_id != INBOX_FOLDER_ID {
         return None;
     }
-    let row_count = hierarchy_row_count(*folder_id, mailboxes, snapshot);
+    let row_count = hierarchy_row_count_excluding_deleted(
+        *folder_id,
+        mailboxes,
+        snapshot,
+        deleted_advertised_special_folders,
+    );
     Some(format!(
         "input_index={};position={};forward={};requested_rows={};columns={};sort={};restriction={};row_count={};expected_subfolders=false",
         request.input_handle_index().unwrap_or(0),
@@ -5316,13 +5322,20 @@ fn outlook_bootstrap_query_rows_total_count(
         return None;
     };
     match object {
-        Some(MapiObject::HierarchyTable { .. })
-            if matches!(
-                *folder_id,
-                ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
-            ) =>
+        Some(MapiObject::HierarchyTable {
+            deleted_advertised_special_folders,
+            ..
+        }) if matches!(
+            *folder_id,
+            ROOT_FOLDER_ID | IPM_SUBTREE_FOLDER_ID | SYNC_ISSUES_FOLDER_ID
+        ) =>
         {
-            Some(hierarchy_row_count(*folder_id, mailboxes, snapshot))
+            Some(hierarchy_row_count_excluding_deleted(
+                *folder_id,
+                mailboxes,
+                snapshot,
+                deleted_advertised_special_folders,
+            ))
         }
         Some(MapiObject::ContentsTable { associated, .. }) if *associated => {
             Some(associated_folder_message_count(*folder_id, snapshot))
@@ -8348,6 +8361,9 @@ where
                         category_count: 0,
                         expanded_count: 0,
                         collapsed_categories: HashSet::new(),
+                        deleted_advertised_special_folders: session
+                            .deleted_advertised_special_folders
+                            .clone(),
                         restriction: None,
                         bookmarks: HashMap::new(),
                         next_bookmark: 1,
@@ -8370,7 +8386,12 @@ where
                         })
                         .unwrap_or(0)
                 } else {
-                    hierarchy_row_count(folder_id, mailboxes, snapshot)
+                    hierarchy_row_count_excluding_deleted(
+                        folder_id,
+                        mailboxes,
+                        snapshot,
+                        &session.deleted_advertised_special_folders,
+                    )
                 };
                 responses.extend_from_slice(&rop_get_hierarchy_table_response(&request, row_count));
                 if folder_id == INBOX_FOLDER_ID {
@@ -10720,50 +10741,69 @@ where
                 if let Some(folder_id) =
                     advertised_special_folder_id_for_create(parent_folder_id, display_name)
                 {
-                    let requested_open_existing = request.create_folder_open_existing();
-                    let response_existing = private_create_folder_is_existing_response_flag();
-                    tracing::info!(
-                        rca_debug = true,
-                        adapter = "mapi",
-                        endpoint = "emsmdb",
-                        tenant_id = %principal.tenant_id,
-                        account_id = %principal.account_id,
-                        mailbox = %principal.email,
-                        request_type = "Execute",
-                        request_rop_id = "0x1c",
-                        parent_folder_id = %format!("{parent_folder_id:#018x}"),
-                        folder_type = request.create_folder_type(),
-                        open_existing = requested_open_existing,
-                        display_name = display_name,
-                        matched_advertised_folder_id = %format!("0x{folder_id:016x}"),
-                        response_existing_folder = response_existing,
-                        message = "rca debug mapi create folder opened advertised special folder",
-                    );
-                    let properties = folder_properties_for_open(
-                        store, principal, session, folder_id, mailboxes, snapshot,
-                    )
-                    .await;
-                    let handle = session.allocate_output_handle(
-                        request.output_handle_index,
-                        MapiObject::Folder {
+                    if session.advertised_special_folder_was_deleted(folder_id) {
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            tenant_id = %principal.tenant_id,
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x1c",
+                            parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                            folder_type = request.create_folder_type(),
+                            open_existing = request.create_folder_open_existing(),
+                            display_name = display_name,
+                            deleted_advertised_folder_id = %format!("0x{folder_id:016x}"),
+                            message = "rca debug mapi create folder skipped deleted advertised special folder",
+                        );
+                    } else {
+                        let requested_open_existing = request.create_folder_open_existing();
+                        let response_existing = private_create_folder_is_existing_response_flag();
+                        tracing::info!(
+                            rca_debug = true,
+                            adapter = "mapi",
+                            endpoint = "emsmdb",
+                            tenant_id = %principal.tenant_id,
+                            account_id = %principal.account_id,
+                            mailbox = %principal.email,
+                            request_type = "Execute",
+                            request_rop_id = "0x1c",
+                            parent_folder_id = %format!("{parent_folder_id:#018x}"),
+                            folder_type = request.create_folder_type(),
+                            open_existing = requested_open_existing,
+                            display_name = display_name,
+                            matched_advertised_folder_id = %format!("0x{folder_id:016x}"),
+                            response_existing_folder = response_existing,
+                            message = "rca debug mapi create folder opened advertised special folder",
+                        );
+                        let properties = folder_properties_for_open(
+                            store, principal, session, folder_id, mailboxes, snapshot,
+                        )
+                        .await;
+                        let handle = session.allocate_output_handle(
+                            request.output_handle_index,
+                            MapiObject::Folder {
+                                folder_id,
+                                properties,
+                            },
+                        );
+                        set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
+                        responses.extend_from_slice(&rop_create_folder_response(
+                            &request,
                             folder_id,
-                            properties,
-                        },
-                    );
-                    set_handle_slot(&mut handle_slots, request.output_handle_index, handle);
-                    responses.extend_from_slice(&rop_create_folder_response(
-                        &request,
-                        folder_id,
-                        response_existing,
-                    ));
-                    if !requested_open_existing {
-                        session.record_notification(MapiNotificationEvent::hierarchy(
-                            parent_folder_id,
-                            Some(folder_id),
+                            response_existing,
                         ));
+                        if !requested_open_existing {
+                            session.record_notification(MapiNotificationEvent::hierarchy(
+                                parent_folder_id,
+                                Some(folder_id),
+                            ));
+                        }
+                        output_handles.push(handle);
+                        continue;
                     }
-                    output_handles.push(handle);
-                    continue;
                 }
 
                 if request.create_folder_open_existing() {
@@ -10902,6 +10942,7 @@ where
                     continue;
                 };
                 if is_advertised_special_folder(folder_id) {
+                    session.record_deleted_advertised_special_folder(folder_id);
                     tracing::info!(
                         rca_debug = true,
                         adapter = "mapi",
@@ -13216,13 +13257,23 @@ where
                     }
                 };
                 let all_sync_mailboxes = sync_mailboxes_with_collaboration_counts(
-                    sync_mailboxes_for(folder_id, sync_type, mailboxes),
+                    sync_mailboxes_for_excluding_deleted(
+                        folder_id,
+                        sync_type,
+                        mailboxes,
+                        &session.deleted_advertised_special_folders,
+                    ),
                     snapshot,
                     folder_id,
                     sync_type,
                 );
                 let state_sync_mailboxes = sync_mailboxes_with_collaboration_counts(
-                    sync_state_mailboxes_for(folder_id, sync_type, mailboxes),
+                    sync_state_mailboxes_for_excluding_deleted(
+                        folder_id,
+                        sync_type,
+                        mailboxes,
+                        &session.deleted_advertised_special_folders,
+                    ),
                     snapshot,
                     folder_id,
                     sync_type,
@@ -14486,7 +14537,12 @@ where
                     continue;
                 };
                 let transfer_buffer = if state.is_empty() && matches!(sync_type, 0x01 | 0x02) {
-                    let sync_mailboxes = sync_mailboxes_for(folder_id, sync_type, mailboxes);
+                    let sync_mailboxes = sync_mailboxes_for_excluding_deleted(
+                        folder_id,
+                        sync_type,
+                        mailboxes,
+                        &session.deleted_advertised_special_folders,
+                    );
                     let sync_emails = sync_emails_for(folder_id, sync_type, mailboxes, emails);
                     let sync_attachment_facts =
                         sync_attachment_facts_for(folder_id, &sync_emails, snapshot);
@@ -18409,6 +18465,7 @@ mod tests {
             category_count: 0,
             expanded_count: 0,
             collapsed_categories: HashSet::new(),
+            deleted_advertised_special_folders: HashSet::new(),
             restriction: None,
             bookmarks: HashMap::new(),
             next_bookmark: 1,
@@ -18831,6 +18888,7 @@ mod tests {
             handles: HashMap::new(),
             message_statuses: HashMap::new(),
             special_folder_aliases: HashMap::new(),
+            deleted_advertised_special_folders: HashSet::new(),
             named_properties: HashMap::new(),
             named_property_ids: HashMap::new(),
             next_named_property_id: FIRST_NAMED_PROPERTY_ID,
