@@ -6177,16 +6177,19 @@ fn format_inbox_associated_wire_row_summary(
             let message = &rows[*index];
             let values = serialize_associated_config_row(message, columns);
             let standard_row = standard_property_row_bytes(&values);
+            let query_rows_row = query_rows_property_row_bytes(columns, &values);
             format!(
-                "index={};id=0x{:016x};class={};status=0x{:02x};value_len={};standard_len={};value_preview={};standard_preview={}",
+                "index={};id=0x{:016x};class={};status=0x{:02x};value_len={};standard_len={};query_rows_len={};value_preview={};standard_preview={};query_rows_preview={}",
                 index,
                 message.id,
                 message.message_class,
                 standard_row.first().copied().unwrap_or(0xff),
                 values.len(),
                 standard_row.len(),
+                query_rows_row.len(),
                 hex_preview(&values, 160),
-                hex_preview(&standard_row, 160)
+                hex_preview(&standard_row, 160),
+                hex_preview(&query_rows_row, 160)
             )
         })
         .collect::<Vec<_>>()

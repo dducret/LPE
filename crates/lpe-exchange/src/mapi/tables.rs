@@ -1225,6 +1225,7 @@ pub(in crate::mapi) fn rop_query_rows_response(
         return rop_error_response(0x15, request.response_handle_index(), 0x8004_0102);
     }
 
+    let response_columns = query_rows_response_columns(object.as_deref(), snapshot);
     let mut response = vec![0x15, request.response_handle_index()];
     write_u32(&mut response, 0);
     response.push(0x02);
@@ -1648,9 +1649,76 @@ pub(in crate::mapi) fn rop_query_rows_response(
     }
     response.extend_from_slice(&(selected.len() as u16).to_le_bytes());
     for row in selected {
-        write_standard_property_row(&mut response, &row);
+        write_query_rows_property_row(&mut response, &response_columns, &row);
     }
     response
+}
+
+fn query_rows_response_columns(
+    object: Option<&MapiObject>,
+    snapshot: &MapiMailStoreSnapshot,
+) -> Vec<u32> {
+    match object {
+        Some(MapiObject::HierarchyTable {
+            folder_id, columns, ..
+        }) if is_queryable_hierarchy_folder(*folder_id)
+            || snapshot.public_folder_for_id(*folder_id).is_some() =>
+        {
+            if columns.is_empty() {
+                default_hierarchy_columns()
+            } else {
+                columns.clone()
+            }
+        }
+        Some(MapiObject::ContentsTable {
+            folder_id,
+            associated,
+            columns,
+            ..
+        }) => {
+            if !columns.is_empty() {
+                return columns.clone();
+            }
+            if *associated && *folder_id == COMMON_VIEWS_FOLDER_ID {
+                default_navigation_shortcut_property_tags()
+            } else if *associated && *folder_id == CONVERSATION_ACTION_SETTINGS_FOLDER_ID {
+                default_conversation_action_property_tags()
+            } else if *associated && *folder_id == FREEBUSY_DATA_FOLDER_ID {
+                default_message_property_tags()
+            } else if *associated
+                && (*folder_id == CALENDAR_FOLDER_ID
+                    || snapshot
+                        .collaboration_folder_for_id(*folder_id)
+                        .is_some_and(|folder| folder.kind == MapiCollaborationFolderKind::Calendar))
+            {
+                default_calendar_configuration_property_tags()
+            } else {
+                default_contents_columns()
+            }
+        }
+        Some(MapiObject::AttachmentTable { columns, .. }) => {
+            if columns.is_empty() {
+                default_attachment_columns()
+            } else {
+                columns.clone()
+            }
+        }
+        Some(MapiObject::PermissionTable { columns, .. }) => {
+            if columns.is_empty() {
+                default_permission_columns()
+            } else {
+                columns.clone()
+            }
+        }
+        Some(MapiObject::RuleTable { columns, .. }) => {
+            if columns.is_empty() {
+                default_rule_columns()
+            } else {
+                columns.clone()
+            }
+        }
+        _ => Vec::new(),
+    }
 }
 
 pub(in crate::mapi) fn outlook_bootstrap_row_invariant_summaries(
@@ -4373,6 +4441,33 @@ pub(in crate::mapi) fn write_standard_property_row(response: &mut Vec<u8>, value
     response.extend_from_slice(values);
 }
 
+fn write_query_rows_property_row(response: &mut Vec<u8>, columns: &[u32], values: &[u8]) {
+    response.extend_from_slice(&query_rows_property_row_bytes(columns, values));
+}
+
+pub(in crate::mapi) fn query_rows_property_row_bytes(columns: &[u32], values: &[u8]) -> Vec<u8> {
+    if columns.is_empty() {
+        return standard_property_row_bytes(values);
+    }
+
+    let mut cursor = Cursor::new(values);
+    let mut row = Vec::with_capacity(values.len().saturating_add(columns.len() + 1));
+    row.push(1);
+    for column in columns {
+        let value_start = cursor.position();
+        if parse_mapi_property_value(&mut cursor, *column).is_err() {
+            return standard_property_row_bytes(values);
+        }
+        let value_end = cursor.position();
+        row.push(0);
+        row.extend_from_slice(&values[value_start..value_end]);
+    }
+    if !cursor.remaining_is_zero_padding() {
+        return standard_property_row_bytes(values);
+    }
+    row
+}
+
 pub(in crate::mapi) fn standard_property_row_bytes(values: &[u8]) -> Vec<u8> {
     let mut row = Vec::with_capacity(values.len().saturating_add(1));
     write_standard_property_row(&mut row, values);
@@ -5621,6 +5716,7 @@ mod tests {
 
         assert_eq!(response[0], RopId::FindRow.as_u8());
         assert_eq!(response[7], 1);
+        assert_eq!(response[8], 0);
         assert_response_contains_utf16(&response, "IPM.Configuration.AccountPrefs");
     }
 
@@ -5654,6 +5750,8 @@ mod tests {
             rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
 
         assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(response[9], 1);
+        assert_eq!(response[10], 0);
         let account_prefs = utf16_position(&response, "IPM.Configuration.AccountPrefs").unwrap();
         let eas = utf16_position(&response, "IPM.Configuration.EAS").unwrap();
         let elc = utf16_position(&response, "IPM.Configuration.ELC").unwrap();
@@ -5662,6 +5760,62 @@ mod tests {
         assert!(account_prefs < eas);
         assert!(eas < elc);
         assert!(elc < message_list);
+    }
+
+    #[test]
+    fn inbox_associated_query_rows_uses_flagged_property_rows() {
+        let snapshot = inbox_associated_sort_snapshot();
+        let columns = vec![
+            PID_TAG_FOLDER_ID,
+            PID_TAG_MID,
+            PID_TAG_INST_ID,
+            PID_TAG_INSTANCE_NUM,
+            PID_TAG_ROAMING_DATATYPES,
+            PID_TAG_MESSAGE_CLASS_W,
+            0x685D_0003,
+            PID_TAG_LAST_MODIFICATION_TIME,
+        ];
+        let mut table = MapiObject::ContentsTable {
+            folder_id: INBOX_FOLDER_ID,
+            associated: true,
+            columns: columns.clone(),
+            sort_orders: vec![
+                MapiSortOrder {
+                    property_tag: PID_TAG_MESSAGE_CLASS_W,
+                    order: 0,
+                },
+                MapiSortOrder {
+                    property_tag: PID_TAG_LAST_MODIFICATION_TIME,
+                    order: 0,
+                },
+            ],
+            category_count: 0,
+            expanded_count: 0,
+            collapsed_categories: HashSet::new(),
+            restriction: None,
+            bookmarks: HashMap::new(),
+            next_bookmark: 1,
+            position: 0,
+        };
+        let request = RopRequest {
+            rop_id: RopId::QueryRows.as_u8(),
+            input_handle_index: Some(0),
+            output_handle_index: None,
+            payload: vec![0, 1, 1, 0],
+        };
+
+        let response =
+            rop_query_rows_response(&request, Some(&mut table), &[], &[], &snapshot, Uuid::nil());
+
+        assert_eq!(response[0], RopId::QueryRows.as_u8());
+        assert_eq!(u16::from_le_bytes([response[7], response[8]]), 1);
+        let mut cursor = Cursor::new(&response[9..]);
+        assert_eq!(cursor.read_u8().unwrap(), 1);
+        for column in columns {
+            assert_eq!(cursor.read_u8().unwrap(), 0);
+            parse_mapi_property_value(&mut cursor, column).unwrap();
+        }
+        assert!(cursor.remaining_is_zero_padding());
     }
 
     #[test]
