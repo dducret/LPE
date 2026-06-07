@@ -3098,6 +3098,7 @@ fn default_folder_entry_id_expected_folder_id(tag: u32) -> Option<u64> {
 
 fn folder_set_property_problems(
     object: Option<&MapiObject>,
+    mailboxes: &[JmapMailbox],
     values: &[(u32, MapiValue)],
 ) -> Vec<(usize, u32, u32)> {
     let Some(MapiObject::Folder { folder_id, .. }) = object else {
@@ -3143,6 +3144,28 @@ fn folder_set_property_problems(
                     crate::mapi::identity::object_id_from_folder_identifier_bytes(bytes)
                 }) {
                     Some(folder_id) if folder_id == FREEBUSY_DATA_FOLDER_ID => None,
+                    _ => Some((index, *tag, 0x8004_0102)),
+                };
+            }
+            if storage_tag == PID_TAG_ATTRIBUTE_HIDDEN
+                && mailboxes
+                    .iter()
+                    .find(|mailbox| {
+                        try_mapi_folder_id(mailbox) == Some(*folder_id)
+                            || mailbox.role == role_for_folder_id(*folder_id).unwrap_or_default()
+                    })
+                    .map(mailbox_projects_hidden_attribute)
+                    .unwrap_or_else(|| {
+                        is_advertised_special_folder(*folder_id)
+                            && matches!(
+                                *folder_id,
+                                CONVERSATION_ACTION_SETTINGS_FOLDER_ID
+                                    | QUICK_STEP_SETTINGS_FOLDER_ID
+                            )
+                    })
+            {
+                return match value {
+                    MapiValue::Bool(_) => None,
                     _ => Some((index, *tag, 0x8004_0102)),
                 };
             }
@@ -8893,7 +8916,8 @@ where
                         .await
                     }
                     object @ Some(MapiObject::Folder { .. }) => {
-                        let problems = folder_set_property_problems(object.as_ref(), &values);
+                        let problems =
+                            folder_set_property_problems(object.as_ref(), mailboxes, &values);
                         if !problems.is_empty() {
                             responses.extend_from_slice(&rop_set_properties_problem_response(
                                 &request, &problems,
@@ -18439,12 +18463,14 @@ mod tests {
 
         assert!(folder_set_property_problems(
             Some(&ipm_subtree),
+            &[],
             &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
         )
         .is_empty());
         assert_eq!(
             folder_set_property_problems(
                 Some(&ipm_subtree),
+                &[],
                 &[(PID_TAG_OST_OSTID, MapiValue::Binary(Vec::new()))],
             ),
             vec![(0, PID_TAG_OST_OSTID, 0x8004_0102)]
@@ -18452,6 +18478,7 @@ mod tests {
         assert_eq!(
             folder_set_property_problems(
                 Some(&ipm_subtree),
+                &[],
                 &[(PID_TAG_DISPLAY_NAME_W, MapiValue::String("IPM".to_string()))],
             ),
             vec![(0, PID_TAG_DISPLAY_NAME_W, 0x8004_0102)]
@@ -18459,6 +18486,7 @@ mod tests {
         assert_eq!(
             folder_set_property_problems(
                 Some(&inbox),
+                &[],
                 &[(PID_TAG_OST_OSTID, MapiValue::Binary(vec![1; 40]))],
             ),
             vec![(0, PID_TAG_OST_OSTID, 0x8004_0102)]
@@ -18483,17 +18511,20 @@ mod tests {
 
         assert!(folder_set_property_problems(
             Some(&root),
+            &[],
             &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
         )
         .is_empty());
         assert!(folder_set_property_problems(
             Some(&inbox),
+            &[],
             &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
         )
         .is_empty());
         assert_eq!(
             folder_set_property_problems(
                 Some(&ipm_subtree),
+                &[],
                 &[(PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, value.clone())],
             ),
             vec![(0, PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, 0x8004_0102)]
@@ -18501,12 +18532,62 @@ mod tests {
         assert_eq!(
             folder_set_property_problems(
                 Some(&root),
+                &[],
                 &[(
                     PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX,
                     MapiValue::Binary(Vec::new())
                 )],
             ),
             vec![(0, PID_TAG_ADDITIONAL_REN_ENTRY_IDS_EX, 0x8004_0102)]
+        );
+    }
+
+    #[test]
+    fn folder_set_property_problems_accepts_hidden_write_on_quick_step_folder() {
+        let quick_step = JmapMailbox {
+            id: Uuid::parse_str("f54d192a-3149-4ff1-bde7-a8dac219c73b").unwrap(),
+            parent_id: None,
+            role: "custom".to_string(),
+            name: "Quick Step Settings".to_string(),
+            sort_order: 40,
+            modseq: 40,
+            total_emails: 0,
+            unread_emails: 0,
+            is_subscribed: true,
+        };
+        let quick_step_folder = MapiObject::Folder {
+            folder_id: QUICK_STEP_SETTINGS_FOLDER_ID,
+            properties: std::collections::HashMap::new(),
+        };
+        let regular_folder = MapiObject::Folder {
+            folder_id: 0x0000_0000_1234_0001,
+            properties: std::collections::HashMap::new(),
+        };
+
+        assert!(folder_set_property_problems(
+            Some(&quick_step_folder),
+            std::slice::from_ref(&quick_step),
+            &[(PID_TAG_ATTRIBUTE_HIDDEN, MapiValue::Bool(true))],
+        )
+        .is_empty());
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&quick_step_folder),
+                std::slice::from_ref(&quick_step),
+                &[(
+                    PID_TAG_ATTRIBUTE_HIDDEN,
+                    MapiValue::String("true".to_string())
+                )],
+            ),
+            vec![(0, PID_TAG_ATTRIBUTE_HIDDEN, 0x8004_0102)]
+        );
+        assert_eq!(
+            folder_set_property_problems(
+                Some(&regular_folder),
+                std::slice::from_ref(&quick_step),
+                &[(PID_TAG_ATTRIBUTE_HIDDEN, MapiValue::Bool(true))],
+            ),
+            vec![(0, PID_TAG_ATTRIBUTE_HIDDEN, 0x8004_0102)]
         );
     }
 
